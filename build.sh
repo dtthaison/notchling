@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds Notchling.app into ./build. Pass --install to copy it to /Applications.
+# Builds Notchling.app into ./build. Pass --install to copy it to /Applications,
+# or --dmg to also make build/Notchling-<version>.dmg for other Macs.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -31,6 +32,19 @@ cp Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"
 
 echo "Built $APP"
+
+if [[ "${1:-}" == "--dmg" ]]; then
+    # Drag-to-install disk image: the app next to a link to /Applications.
+    VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+    DMG=build/Notchling-$VERSION.dmg
+    STAGE=build/dmg
+    rm -rf "$STAGE" "$DMG" && mkdir -p "$STAGE"
+    cp -R "$APP" "$STAGE/"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname Notchling -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+    rm -rf "$STAGE"
+    echo "Built $DMG"
+fi
 
 if [[ "${1:-}" == "--install" ]]; then
     pkill -x Notchling 2>/dev/null && sleep 1 || true
