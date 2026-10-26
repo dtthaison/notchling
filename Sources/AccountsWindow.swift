@@ -166,12 +166,23 @@ struct AccountsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $tab.page) {
-                ForEach(AccountsTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            ZStack {
+                Picker("", selection: $tab.page) {
+                    ForEach(AccountsTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 330)
+                HStack {
+                    Spacer()
+                    Button(action: refresh) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh accounts, limits and cost")
+                    .padding(.trailing, 16)
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 330)
             .padding(.vertical, 12)
             Divider()
             switch tab.page {
@@ -192,6 +203,14 @@ struct AccountsView: View {
             }
         }
         .frame(width: 460, height: 540)
+    }
+
+    /// Re-reads both logins and rescans cost, for when something changed outside Notchling.
+    private func refresh() {
+        accounts.sync(force: true)
+        antigravity.sync()
+        cost.refresh()
+        settings.reload?()
     }
 }
 
@@ -587,7 +606,8 @@ private struct AntigravityPage: View {
                             .padding(.top, 40)
                     }
                     ForEach(store.accounts) { account in
-                        AntigravityCard(account: account, isActive: account.id == store.activeID,
+                        AntigravityCard(account: account, usage: store.usage[account.id],
+                                        isActive: account.id == store.activeID,
                                         busy: store.busy || store.adding,
                                         onSwitch: { ask(.switchTo(account)) }, onRemove: { removing = account })
                     }
@@ -655,41 +675,61 @@ private struct AntigravityPage: View {
 
 private struct AntigravityCard: View {
     let account: AntigravityAccount
+    let usage: AntigravityUsage?
     let isActive: Bool
     let busy: Bool
     let onSwitch: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
-                Text(account.email.prefix(1).uppercased())
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(isActive ? .white : .primary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
+                    Text(account.email.prefix(1).uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(isActive ? .white : .primary)
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    Text(account.plan ?? "Google Account").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if isActive {
+                    Text("In Use")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                } else {
+                    Button("Switch", action: onSwitch).disabled(busy)
+                }
+                Menu {
+                    Button("Remove…", action: onRemove)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                Text("Google Account").font(.caption).foregroundColor(.secondary)
+            if let usage {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(usage.groups.indices, id: \.self) { i in
+                        let group = usage.groups[i]
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.name).font(.caption.weight(.medium)).foregroundColor(.secondary)
+                            ForEach(group.bars.indices, id: \.self) { j in
+                                let short = group.bars[j].label == "5h"
+                                LimitRow(label: short ? "5 hours" : group.bars[j].label,
+                                         window: group.bars[j].window, short: short)
+                            }
+                        }
+                    }
+                }
+            } else if isActive {
+                Text("Open Antigravity to read its limits.").font(.caption).foregroundColor(.secondary)
             }
-            Spacer()
-            if isActive {
-                Text("In Use")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.accentColor)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-            } else {
-                Button("Switch", action: onSwitch).disabled(busy)
-            }
-            Menu {
-                Button("Remove…", action: onRemove)
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))

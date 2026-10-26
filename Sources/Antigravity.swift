@@ -5,6 +5,24 @@ struct AntigravityAccount: Codable, Equatable, Identifiable {
     /// The Google account's `sub`, which never changes.
     var id: String
     var email: String
+    /// Antigravity's plan name ("Pro", "Free"…), read from its local server while it runs.
+    var plan: String?
+}
+
+/// Antigravity's usage limits, as its own View Usage panel shows them: a few model groups, each with
+/// a weekly and a five-hour bar. Percent is how much is used, so it reads like the Claude bars.
+struct AntigravityUsage: Equatable {
+    struct Group: Equatable {
+        var name: String
+        var bars: [(label: String, window: UsageWindow)]
+        static func == (a: Group, b: Group) -> Bool {
+            a.name == b.name && a.bars.map(\.label) == b.bars.map(\.label) && a.bars.map(\.window) == b.bars.map(\.window)
+        }
+    }
+    var groups: [Group]
+    var fetched = Date()
+
+    static func == (a: AntigravityUsage, b: AntigravityUsage) -> Bool { a.groups == b.groups }
 }
 
 /// Keeps a copy of every Antigravity login it has seen and swaps them in on request.
@@ -16,6 +34,9 @@ struct AntigravityAccount: Codable, Equatable, Identifiable {
 final class AntigravityStore: ObservableObject {
     @Published private(set) var accounts: [AntigravityAccount] = []
     @Published private(set) var activeID: String?
+    /// Limits for the account in use, read from Antigravity's local server while it runs. Kept per
+    /// account so closing Antigravity doesn't blank the last numbers.
+    @Published private(set) var usage: [String: AntigravityUsage] = [:]
     /// Switching or adding is under way; buttons wait for it.
     @Published private(set) var busy = false
     /// Antigravity was restarted at its sign-in screen; the next login it saves gets added.
@@ -50,11 +71,22 @@ final class AntigravityStore: ObservableObject {
             || NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleIDs[0]) != nil
     }
 
-    /// Reads the current login and saves it.
+    /// Reads the current login and saves it, then reads the active account's limits if Antigravity
+    /// is running.
     func sync() {
         queue.async {
+            // Show the account list at once; the limits need the local server and can be slow.
             let state = self.capture()
             DispatchQueue.main.async { self.apply(state) }
+            guard let id = state.activeID, let snapshot = AntigravityQuota.fetch() else { return }
+            DispatchQueue.main.async {
+                if let usage = snapshot.usage { self.usage[id] = usage }
+                if let plan = snapshot.plan, let i = self.accounts.firstIndex(where: { $0.id == id }) {
+                    self.accounts[i].plan = plan
+                    self.save()
+                }
+                self.changed?()
+            }
         }
     }
 
@@ -154,11 +186,12 @@ final class AntigravityStore: ObservableObject {
     private struct State {
         var accounts: [AntigravityAccount]
         var activeID: String?
+        var usage: [String: AntigravityUsage]
     }
 
     /// Runs on the queue: saves the login in the file, if any, and says whose it is.
     private func capture() -> State {
-        var state = DispatchQueue.main.sync { State(accounts: accounts, activeID: activeID) }
+        var state = DispatchQueue.main.sync { State(accounts: accounts, activeID: activeID, usage: usage) }
         guard let login = Self.readLogin() else {
             state.activeID = nil
             return state
@@ -182,6 +215,7 @@ final class AntigravityStore: ObservableObject {
             save()
         }
         if activeID != state.activeID { activeID = state.activeID }
+        if usage != state.usage { usage = state.usage }
         changed?()
     }
 
@@ -256,5 +290,140 @@ private extension Result where Failure == Error {
     var failure: Error? {
         if case .failure(let error) = self { return error }
         return nil
+    }
+}
+
+/// Reads the signed-in account's limits from Antigravity's local language server, the same source as
+/// its own View Usage panel. The server runs only while Antigravity is open, listens on a random
+/// local port behind a CSRF token, and speaks Connect (JSON over HTTPS with a self-signed cert), so
+/// this finds the process, its token and ports, then calls each until one answers.
+enum AntigravityQuota {
+    private static let service = "/exa.language_server_pb.LanguageServerService/"
+
+    /// The account's plan and limits, read together from the local server.
+    struct Snapshot {
+        var plan: String?
+        var usage: AntigravityUsage?
+    }
+
+    static func fetch() -> Snapshot? {
+        guard let pid = pid(), let csrf = csrfToken(pid: pid) else { return nil }
+        for port in ports(pid: pid) {
+            guard let quota = post("RetrieveUserQuotaSummary", port: port, csrf: csrf) else { continue }
+            let usage = parse(quota)
+            let plan = post("GetUserStatus", port: port, csrf: csrf).flatMap(planName)
+            return Snapshot(plan: plan, usage: usage)
+        }
+        return nil
+    }
+
+    // MARK: Finding the server
+
+    private static func pid() -> String? {
+        shell("/usr/bin/pgrep", ["-f", "bin/language_server --standalone"])?
+            .split(whereSeparator: \.isNewline).first.map(String.init)
+    }
+
+    /// From the server's own command line (`--csrf_token <uuid>`).
+    private static func csrfToken(pid: String) -> String? {
+        guard let args = shell("/bin/ps", ["-o", "command=", "-p", pid]),
+              let range = args.range(of: #"--csrf_token\s+(\S+)"#, options: .regularExpression) else { return nil }
+        return args[range].split(whereSeparator: \.isWhitespace).last.map(String.init)
+    }
+
+    /// The server picks a random port, so read the ones it's listening on. Highest first: its port is
+    /// an ephemeral (high) one, while the low ports are other services that can hang the TLS probe.
+    private static func ports(pid: String) -> [Int] {
+        guard let out = shell("/usr/sbin/lsof", ["-nP", "-p", pid, "-iTCP", "-sTCP:LISTEN"]) else { return [] }
+        var seen: [Int] = []
+        for match in out.matches(of: #/:(\d+) \(LISTEN\)/#) {
+            if let port = Int(match.1), !seen.contains(port) { seen.append(port) }
+        }
+        return seen.sorted(by: >)
+    }
+
+    // MARK: The call
+
+    /// One Connect unary call; returns the body only on a 200.
+    private static func post(_ method: String, port: Int, csrf: String) -> Data? {
+        guard let url = URL(string: "https://127.0.0.1:\(port)\(service)\(method)") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 2)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        request.setValue(csrf, forHTTPHeaderField: "x-codeium-csrf-token")
+        request.httpBody = Data("{}".utf8)
+
+        let delegate = LocalTrust()
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        var result: Data?
+        var status = 0
+        let done = DispatchSemaphore(value: 0)
+        session.dataTask(with: request) { data, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            result = data
+            done.signal()
+        }.resume()
+        guard done.wait(timeout: .now() + 3) == .success, status == 200 else { return nil }
+        return result
+    }
+
+    private static func planName(_ data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = root["userStatus"] as? [String: Any],
+              let plan = status["planStatus"] as? [String: Any],
+              let info = plan["planInfo"] as? [String: Any],
+              let name = info["planName"] as? String, !name.isEmpty else { return nil }
+        return name
+    }
+
+    private static func parse(_ data: Data) -> AntigravityUsage? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response = root["response"] as? [String: Any],
+              let groups = response["groups"] as? [[String: Any]] else { return nil }
+        let out = groups.compactMap { group -> AntigravityUsage.Group? in
+            guard let name = group["displayName"] as? String,
+                  let buckets = group["buckets"] as? [[String: Any]] else { return nil }
+            let bars: [(String, UsageWindow)] = buckets.map { bucket in
+                let remaining = bucket["remainingFraction"] as? Double ?? 1
+                let percent = min(max((1 - remaining) * 100, 0), 100)
+                let label = (bucket["window"] as? String) == "weekly" ? "Week" : "5h"
+                return (label, UsageWindow(percent: percent, resetsAt: date(bucket["resetTime"] as? String)))
+            }
+            return AntigravityUsage.Group(name: name, bars: bars)
+        }
+        return out.isEmpty ? nil : AntigravityUsage(groups: out)
+    }
+
+    private static func date(_ string: String?) -> Date? {
+        guard let string else { return nil }
+        return ISO8601DateFormatter().date(from: string)
+    }
+
+    private static func shell(_ path: String, _ args: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = Pipe()
+        do { try process.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Trusts the server's self-signed certificate, but only on the loopback address.
+    private final class LocalTrust: NSObject, URLSessionDelegate {
+        func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  challenge.protectionSpace.host == "127.0.0.1", let trust = challenge.protectionSpace.serverTrust else {
+                completionHandler(.performDefaultHandling, nil)
+                return
+            }
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        }
     }
 }

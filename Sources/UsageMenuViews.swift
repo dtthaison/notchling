@@ -132,6 +132,116 @@ final class AccountRowView: NSView {
     }
 }
 
+/// Antigravity's account in the menu, drawn like the Claude row: email and plan, then each model
+/// group's name followed by its weekly and five-hour bars.
+final class AntigravityRowView: NSView {
+    var account: AntigravityAccount { didSet { needsDisplay = true } }
+    var usage: AntigravityUsage? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    var onClick: (() -> Void)?
+
+    static let width: CGFloat = 330
+
+    init(account: AntigravityAccount, usage: AntigravityUsage?) {
+        self.account = account
+        self.usage = usage
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 0))
+        setFrameSize(NSSize(width: Self.width, height: height))
+        autoresizingMask = .width
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    /// Each row is a group header or a bar, so they stack like the Claude limits.
+    private enum Line { case header(String); case bar(String, UsageWindow) }
+
+    private var lines: [Line] {
+        guard let usage else { return [] }
+        return usage.groups.flatMap { group -> [Line] in
+            [.header(group.name)] + group.bars.map { .bar($0.label, $0.window) }
+        }
+    }
+
+    private var height: CGFloat { 26 + CGFloat(max(lines.count, 1)) * 17 + 6 }
+
+    func relayout() { setFrameSize(NSSize(width: frame.width, height: height)) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let lit = enclosingMenuItem?.isHighlighted == true
+        if lit {
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 5, dy: 1), xRadius: 5, yRadius: 5)
+            NSColor.selectedContentBackgroundColor.setFill()
+            path.fill()
+        }
+        let primary: NSColor = lit ? .white : .labelColor
+        let secondary: NSColor = lit ? NSColor.white.withAlphaComponent(0.8) : .secondaryLabelColor
+        let right = bounds.width - 14
+
+        text("✓", x: 10, y: 5, font: .systemFont(ofSize: 13, weight: .semibold), color: primary)
+        let plan = attributed(account.plan ?? "Google", font: .systemFont(ofSize: 11), color: secondary)
+        plan.draw(at: NSPoint(x: right - plan.size().width, y: 7))
+        let email = attributed(account.email, font: .systemFont(ofSize: 13, weight: .medium), color: primary)
+        email.draw(with: NSRect(x: 26, y: 5, width: right - plan.size().width - 34, height: 18),
+                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+
+        var y: CGFloat = 26
+        guard !lines.isEmpty else {
+            text("Open Antigravity to read its limits.", x: 26, y: y, font: .systemFont(ofSize: 11), color: secondary)
+            return
+        }
+        let small = NSFont.systemFont(ofSize: 11)
+        let digits = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        for line in lines {
+            switch line {
+            case .header(let name):
+                text(name, x: 26, y: y, font: .systemFont(ofSize: 11, weight: .semibold), color: secondary)
+            case .bar(let label, let window):
+                text(label, x: 38, y: y, font: small, color: secondary)
+                let bar = NSRect(x: 84, y: y + 5, width: 98, height: 6)
+                (lit ? NSColor.white.withAlphaComponent(0.3) : NSColor.quaternaryLabelColor).setFill()
+                NSBezierPath(roundedRect: bar, xRadius: 3, yRadius: 3).fill()
+                let fraction = min(max(window.percent / 100, 0), 1)
+                if fraction > 0 {
+                    var fill = bar
+                    fill.size.width = max(bar.height, bar.width * fraction)
+                    (lit ? NSColor.white : AccountRowView.color(window.percent)).setFill()
+                    NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
+                }
+                text("\(Int(window.percent.rounded()))%", x: 190, y: y, font: digits, color: primary)
+                if let reset = window.resetsAt {
+                    let r = attributed(AccountRowView.resetText(reset, short: label == "5h"), font: small, color: secondary)
+                    r.draw(at: NSPoint(x: right - r.size().width, y: y))
+                }
+            }
+            y += 17
+        }
+    }
+
+    private func attributed(_ s: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
+    }
+
+    private func text(_ s: String, x: CGFloat, y: CGFloat, font: NSFont, color: NSColor) {
+        attributed(s, font: font, color: color).draw(at: NSPoint(x: x, y: y))
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { needsDisplay = true }
+
+    override func mouseUp(with event: NSEvent) {
+        enclosingMenuItem?.menu?.cancelTracking()
+        onClick?()
+    }
+}
+
 /// Fourteen days of cost as bars, with today, 7-day and 30-day totals above.
 final class CostChartView: NSView {
     var summary: CostTracker.Summary { didSet { needsDisplay = true } }

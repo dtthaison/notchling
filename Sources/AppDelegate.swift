@@ -253,7 +253,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
         switchItem.submenu = switchMenu()
         menu.addItem(switchItem)
-        menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
         let costItem = NSMenuItem(title: costTitle, action: nil, keyEquivalent: "")
         costItem.submenu = costMenu()
         menu.addItem(costItem)
@@ -261,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addAntigravityItems(to: menu)
 
         menu.addItem(.separator())
+        menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
         let settingsItem = action("Settings…", #selector(showSettings))
         settingsItem.keyEquivalent = ","
         menu.addItem(settingsItem)
@@ -275,8 +275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if antigravity.adding {
             menu.addItem(disabled("Waiting for you to sign in…"))
         } else if let account = antigravity.active {
+            let row = AntigravityRowView(account: account, usage: antigravity.usage[account.id])
+            row.onClick = { [weak self] in self?.manageAntigravity() }
             let item = action(account.email, #selector(manageAntigravity))
-            item.state = .on
+            item.view = row
             menu.addItem(item)
         } else {
             menu.addItem(disabled("Not signed in to Antigravity"))
@@ -287,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let item = action(account.email, #selector(switchAntigravityItem(_:)))
             item.representedObject = account.id
             item.state = account.id == antigravity.activeID ? .on : .off
+            if let plan = account.plan { item.attributedTitle = accountTitle(account.email, detail: [plan]) }
             submenu.addItem(item)
         }
         if !antigravity.accounts.isEmpty { submenu.addItem(.separator()) }
@@ -309,16 +312,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let s = usage.session { detail.append("5h \(Int(s.percent.rounded()))%") }
                 if let w = usage.week { detail.append("week \(Int(w.percent.rounded()))%") }
             }
-            let title = NSMutableAttributedString(string: account.email, attributes: [.font: NSFont.menuFont(ofSize: 0)])
-            title.append(NSAttributedString(string: "   " + detail.joined(separator: " · "), attributes: [
-                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor,
-            ]))
-            item.attributedTitle = title
+            item.attributedTitle = accountTitle(account.email, detail: detail)
             menu.addItem(item)
         }
         if !accounts.accounts.isEmpty { menu.addItem(.separator()) }
         menu.addItem(action("Add Account…", #selector(addAccount)))
         return menu
+    }
+
+    /// An account's email in menu font, then its plan and limits in small secondary text.
+    private func accountTitle(_ email: String, detail: [String]) -> NSAttributedString {
+        let title = NSMutableAttributedString(string: email, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        title.append(NSAttributedString(string: "   " + detail.joined(separator: " · "), attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        return title
     }
 
     private var costTitle: String {
