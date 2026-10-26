@@ -150,69 +150,108 @@ struct NotchView: View {
     }
 }
 
-/// A little green candy monster that swings its way along a row of ropes hanging under the camera,
-/// like a level of Cut the Rope. On each rope it swings like a real pendulum, slow at the top of
-/// the arc and fastest at the bottom, pumping its legs. Near the top of a forward swing it lets
-/// go, flies on the speed it had, and catches the next rope, carrying that speed into the next
-/// swing. At the last rope it turns round. It goes faster while sessions need you. When the tabs
-/// open it moves into the middle and fades.
+/// A little green candy monster that web-swings its way along under the camera. It hangs from a
+/// strand of silk stuck to the bottom edge and swings on it like a real pendulum, pumping its legs.
+/// Near the top of a forward swing it lets go, flies on the speed it had, shoots a new strand up to
+/// the edge ahead, and swings on that. The silk is a chain of points with its own inertia: taut it
+/// runs straight, slack it sags, and a strand it lets go of hangs loose, sways and fades. At the
+/// end of the edge it turns round. It goes faster while sessions need you. When the tabs open it
+/// moves into the middle and fades.
 struct PetView: View {
     @ObservedObject var model: NotchModel
-    /// Size of the black shape this frame; the ropes hang along its bottom edge.
+    /// Size of the black shape this frame; the silk sticks to its bottom edge.
     let shape: CGSize
 
-    /// Height of a pose frame, from the hands on the rope down to the feet.
+    /// Height of a pose frame, from the hands down to the feet.
     static let bodyHeight: CGFloat = 30
-    static let rope: CGFloat = 18
-    /// From the anchor to the body's centre of mass, which sets how fast it swings.
-    static let pendulum = Double(rope + bodyHeight * 0.6)
-    static let gravity = 500.0
-    /// How far forward of straight down it lets go, and where it catches the next rope (behind it).
-    static let release = 0.6, catchAngle = -0.5
+    static let gravity = 450.0
+    /// The strand length it aims for when it shoots, and the range it will reel to.
+    static let reach = 22.0, shortest = 14.0, longest = 30.0
+    /// How fast a shot strand flies, and how long after letting go it shoots.
+    static let shotSpeed = 420.0, shotDelay = 0.07
+    static let release = 0.55
+    static let silk = Color(white: 0.93)
 
     /// Legs kicked forward, hanging straight, legs tucked back, all facing right. Each frame is
-    /// pre-rotated so its centre of mass sits straight under the hands, as it would on a taut rope.
+    /// pre-rotated so its centre of mass sits straight under the hands, as it would on a taut line.
     /// The probe build has no bundle, so it falls back to ✻.
     static let poses: [NSImage] = (0..<3).compactMap { index in
         Bundle.main.url(forResource: "swing\(index)", withExtension: "png").flatMap(NSImage.init(contentsOf:))
     }
 
-    /// A jump between ropes: a parabola that leaves with the swing's own velocity and lands on the
-    /// next rope's catching point, so its gravity comes out close to the real one.
-    fileprivate struct Flight {
-        let from: CGPoint
-        let velocity: CGVector
-        let gravity: Double
-        let duration: Double
-        let target: Int
-        let startAngle: Double
-        var elapsed = 0.0
+    /// A strand of silk as a chain of points. `previous` holds last frame's points, which is what
+    /// gives every point its inertia. The first point is stuck to the edge; while held, the last
+    /// point is pinned to the hands, and once let go it hangs free and the strand fades.
+    fileprivate struct Strand {
+        static let segments = 10
+        var points: [CGPoint]
+        var previous: [CGPoint]
+        var rest: Double
+        var held = true
+        var fade = 1.0
 
-        func point(_ t: Double) -> CGPoint {
-            CGPoint(x: from.x + velocity.dx * t, y: from.y + velocity.dy * t + gravity * t * t / 2)
+        init(from anchor: CGPoint, to hands: CGPoint, length: Double) {
+            points = (0...Self.segments).map { index in
+                let t = Double(index) / Double(Self.segments)
+                return CGPoint(x: anchor.x + (hands.x - anchor.x) * t, y: anchor.y + (hands.y - anchor.y) * t)
+            }
+            previous = points
+            rest = length / Double(Self.segments)
+        }
+
+        mutating func simulate(_ dt: Double, hands: CGPoint) {
+            let pull = PetView.gravity * dt * dt
+            for i in 1..<points.count {
+                let p = points[i], q = previous[i]
+                previous[i] = p
+                points[i] = CGPoint(x: p.x + (p.x - q.x) * 0.97, y: p.y + (p.y - q.y) * 0.97 + pull)
+            }
+            if held { points[points.count - 1] = hands }
+            let last = held ? points.count - 2 : points.count - 1
+            for _ in 0..<12 {
+                for i in 0..<(points.count - 1) {
+                    let a = points[i], b = points[i + 1]
+                    let dx = b.x - a.x, dy = b.y - a.y
+                    let length = max((dx * dx + dy * dy).squareRoot(), 0.0001)
+                    // Silk only pulls: a short gap is slack, never pushed apart.
+                    guard length > rest else { continue }
+                    let fix = (length - rest) / length
+                    let aFree = i > 0, bFree = i + 1 <= last
+                    let share = aFree && bFree ? 0.5 : 1
+                    if aFree { points[i] = CGPoint(x: a.x + dx * fix * share, y: a.y + dy * fix * share) }
+                    if bFree { points[i + 1] = CGPoint(x: b.x - dx * fix * share, y: b.y - dy * fix * share) }
+                }
+            }
         }
     }
 
-    /// Everything that carries over between frames: which rope it holds, which way it's heading,
-    /// the swing, any jump in progress, and the loose ropes still swaying after it let go.
+    /// A strand on its way from the hands to the spot ahead on the edge.
+    fileprivate struct Shot {
+        let target: CGPoint
+        var travelled = 0.0
+    }
+
+    /// Everything that carries over between frames.
     fileprivate final class Swing: ObservableObject {
-        var index = 0
+        var hands: CGPoint?
+        var velocity = CGVector.zero
         var heading = 1.0
-        var angle = 0.0
-        var spin = 0.0
-        var flight: Flight?
-        var ropeAngles: [Double] = []
-        var ropeSpins: [Double] = []
+        var anchor: CGPoint?
+        var length = PetView.reach
+        var strands: [Strand] = []
+        var shot: Shot?
+        var airborne = 0.0
+        var bodyAngle = 0.0
         var last: Double?
     }
 
-    /// What one frame draws: where the hands are, how the body is turned, and every rope's angle.
-    fileprivate struct Pose {
+    /// What one frame draws.
+    fileprivate struct Frame {
         let hands: CGPoint
         let angle: Double
         let heading: Double
-        let ropes: [Double]
-        let held: Int?
+        let strands: [(points: [CGPoint], opacity: Double)]
+        let shot: (from: CGPoint, to: CGPoint)?
     }
 
     @StateObject private var swing = Swing()
@@ -222,26 +261,18 @@ struct PetView: View {
         let resting = model.state == .collapsed
         let moving = model.petWalking && resting
         let needs = model.needsCount
-        let anchors = Self.anchors(for: shape)
         TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !moving)) { context in
-            let pose = step(to: context.date.timeIntervalSinceReferenceDate, moving: moving, anchors)
-            let hands = gathered ? middle : pose.hands
+            let frame = step(to: context.date.timeIntervalSinceReferenceDate, moving: moving)
+            let hands = gathered ? middle : frame.hands
             let width = Self.bodyWidth
             let box = width + 34
 
             ZStack(alignment: .topLeading) {
-                ForEach(anchors.indices, id: \.self) { index in
-                    // The held rope runs to the hands; loose ones hang their full length.
-                    let length = pose.held == index && !gathered ? Self.rope + 2 : Self.rope
-                    Rectangle()
-                        .fill(Color(red: 0.86, green: 0.78, blue: 0.62))
-                        .frame(width: 1.4, height: length)
-                        .rotationEffect(.radians(-(index < pose.ropes.count ? pose.ropes[index] : 0)), anchor: .top)
-                        .offset(x: anchors[index].x - 0.7, y: anchors[index].y)
-                }
+                silk(frame)
+                    .opacity(gathered ? 0 : 1)
                 ZStack(alignment: .top) {
-                    creature(angle: gathered ? 0 : pose.angle * pose.heading)
-                        .scaleEffect(x: pose.heading, y: 1)
+                    creature(angle: gathered ? 0 : frame.angle * frame.heading)
+                        .scaleEffect(x: frame.heading, y: 1)
                         .frame(width: width, height: Self.bodyHeight)
                     if needs > 0 && !gathered {
                         Text("\(needs)")
@@ -256,7 +287,7 @@ struct PetView: View {
                     }
                 }
                 .frame(width: box, height: Self.bodyHeight, alignment: .top)
-                .rotationEffect(.radians(gathered ? 0 : -pose.angle), anchor: .top)
+                .rotationEffect(.radians(gathered ? 0 : -frame.angle), anchor: .top)
                 .offset(x: hands.x - box / 2, y: hands.y)
             }
         }
@@ -267,18 +298,41 @@ struct PetView: View {
                    value: resting)
     }
 
+    /// Every strand as a smooth line through its points, a dab where it sticks to the edge, and a
+    /// straight streak for a strand still flying.
+    private func silk(_ frame: Frame) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(frame.strands.indices, id: \.self) { index in
+                let strand = frame.strands[index]
+                Path { path in
+                    guard let first = strand.points.first else { return }
+                    path.move(to: first)
+                    for i in 1..<strand.points.count {
+                        let mid = CGPoint(x: (strand.points[i - 1].x + strand.points[i].x) / 2,
+                                          y: (strand.points[i - 1].y + strand.points[i].y) / 2)
+                        path.addQuadCurve(to: mid, control: strand.points[i - 1])
+                    }
+                    path.addLine(to: strand.points[strand.points.count - 1])
+                }
+                .stroke(Self.silk.opacity(0.9 * strand.opacity), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                if let first = strand.points.first {
+                    Circle().fill(Self.silk.opacity(strand.opacity))
+                        .frame(width: 3, height: 3)
+                        .offset(x: first.x - 1.5, y: first.y - 1.5)
+                }
+            }
+            if let shot = frame.shot {
+                Path { path in path.move(to: shot.from); path.addLine(to: shot.to) }
+                    .stroke(Self.silk.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+            }
+        }
+        .frame(width: shape.width, height: shape.height + 120, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+
     static var bodyWidth: CGFloat {
         guard let first = poses.first, first.size.height > 0 else { return bodyHeight * 0.6 }
         return bodyHeight * first.size.width / first.size.height
-    }
-
-    /// Evenly spaced along the flat part of the bottom edge, about a jump's length apart.
-    static func anchors(for shape: CGSize) -> [CGPoint] {
-        let lo = Double(NotchModel.flare) + 14, hi = Double(shape.width - NotchModel.flare) - 14
-        let span = max(0, hi - lo)
-        let count = max(2, Int(span / 48) + 1)
-        let gap = span / Double(count - 1)
-        return (0..<count).map { CGPoint(x: lo + gap * Double($0), y: Double(shape.height)) }
     }
 
     /// Fades between poses by how far out the swing is, measured in the direction it's heading:
@@ -310,108 +364,146 @@ struct PetView: View {
         CGPoint(x: shape.width / 2, y: model.notchSize.height + TabBar.height / 2 - Self.bodyHeight / 2)
     }
 
-    /// Hands on a rope at `angle` (positive swings right; screen y points down).
-    private static func hands(on anchor: CGPoint, at angle: Double) -> CGPoint {
-        CGPoint(x: anchor.x + Double(rope) * sin(angle), y: anchor.y + Double(rope) * cos(angle))
+    /// Where silk can stick: the flat part of the bottom edge.
+    private var edge: (lo: Double, hi: Double, y: Double) {
+        (Double(NotchModel.flare) + 12, Double(shape.width - NotchModel.flare) - 12, Double(shape.height))
     }
 
-    /// Advances the swing, a jump, and the loose ropes. On a rope it's a damped pendulum that only
-    /// gains energy from a push near the bottom in the direction it's going, the way a kid pumps a
-    /// swing; so every arc follows gravity.
-    private func step(to t: Double, moving: Bool, _ anchors: [CGPoint]) -> Pose {
+    private func step(to t: Double, moving: Bool) -> Frame {
         let s = swing
-        if s.ropeAngles.count != anchors.count {
-            s.ropeAngles = Array(repeating: 0, count: anchors.count)
-            s.ropeSpins = Array(repeating: 0, count: anchors.count)
-            s.index = anchors.count / 2
-            s.flight = nil
+        let edge = self.edge
+        if s.hands == nil || s.anchor.map({ $0.x < edge.lo - 1 || $0.x > edge.hi + 1 }) == true {
+            hang(s, at: CGPoint(x: (edge.lo + edge.hi) / 2, y: edge.y), angle: 0)
         }
-        s.index = min(max(s.index, 0), anchors.count - 1)
 
         if moving, let last = s.last {
             // A long gap (a stalled frame) moves it one frame's worth, never a leap.
             let dt = min(max(t - last, 0), 0.05)
             let substeps = 8
-            for _ in 0..<substeps { advance(s, by: dt / Double(substeps), anchors) }
-        } else if !moving {
-            // Hangs still with Animate Pet off; otherwise waits held up behind itself, ready to let go.
-            s.flight = nil
-            s.angle = model.petWalking ? -0.6 * s.heading : 0
-            s.spin = 0
-            for i in s.ropeAngles.indices { s.ropeAngles[i] = 0; s.ropeSpins[i] = 0 }
+            for _ in 0..<substeps { advance(s, by: dt / Double(substeps), edge) }
+            let hands = s.hands ?? .zero
+            for i in s.strands.indices {
+                if s.strands[i].held { s.strands[i].rest = s.length / Double(Strand.segments) }
+                s.strands[i].simulate(dt, hands: hands)
+                if !s.strands[i].held { s.strands[i].fade -= dt / 1.4 }
+            }
+            s.strands.removeAll { $0.fade <= 0 }
+        } else if !moving, let anchor = s.anchor ?? s.strands.last?.points.first {
+            // Still with Animate Pet off; otherwise ready on its strand, held up behind itself.
+            hang(s, at: anchor, angle: model.petWalking ? -0.6 * s.heading : 0)
         }
         s.last = moving ? t : nil
 
-        var ropes = s.ropeAngles
-        if let flight = s.flight {
-            // Turn the body from its letting-go angle to its catching angle over the jump.
-            let progress = min(flight.elapsed / flight.duration, 1)
-            let angle = flight.startAngle + (Self.catchAngle * s.heading - flight.startAngle) * progress
-            return Pose(hands: flight.point(flight.elapsed), angle: angle, heading: s.heading, ropes: ropes, held: nil)
+        let hands = s.hands ?? .zero
+        let shot = s.shot.map { shot -> (CGPoint, CGPoint) in
+            let dx = shot.target.x - hands.x, dy = shot.target.y - hands.y
+            let distance = max((dx * dx + dy * dy).squareRoot(), 0.0001)
+            let reach = min(shot.travelled / distance, 1)
+            return (hands, CGPoint(x: hands.x + dx * reach, y: hands.y + dy * reach))
         }
-        ropes[s.index] = s.angle
-        return Pose(hands: Self.hands(on: anchors[s.index], at: s.angle), angle: s.angle,
-                    heading: s.heading, ropes: ropes, held: s.index)
+        return Frame(hands: hands, angle: s.bodyAngle, heading: s.heading,
+                     strands: s.strands.map { ($0.points, max(0, min(1, $0.fade))) }, shot: shot)
     }
 
-    private func advance(_ s: Swing, by h: Double, _ anchors: [CGPoint]) {
-        let length = Self.pendulum, g = Self.gravity, k = g / length
-        let urgent = model.needsCount > 0
-        let height = urgent ? 1.25 : 1.1, pump = urgent ? 6.0 : 4.0, air = 0.22
+    /// Puts it on a fresh, taut strand from `anchor`, `angle` out from straight down.
+    private func hang(_ s: Swing, at anchor: CGPoint, angle: Double) {
+        s.anchor = anchor
+        s.length = Self.reach
+        s.hands = CGPoint(x: anchor.x + s.length * sin(angle), y: anchor.y + s.length * cos(angle))
+        s.velocity = .zero
+        s.shot = nil
+        s.bodyAngle = angle
+        s.strands = [Strand(from: anchor, to: s.hands!, length: s.length)]
+    }
 
-        // Loose ropes sway on their own and settle.
-        let ropeK = g / Double(Self.rope)
-        for i in s.ropeAngles.indices where s.flight != nil || i != s.index {
-            s.ropeSpins[i] += (-ropeK * sin(s.ropeAngles[i]) - 4 * s.ropeSpins[i]) * h
-            s.ropeAngles[i] += s.ropeSpins[i] * h
+    /// One small step of the body as a weight on inextensible silk: gravity and air always, a pump
+    /// near the bottom of the arc like a kid on a swing, and when the strand is taut it can't get
+    /// any further from the anchor, so only the swinging part of its speed survives.
+    private func advance(_ s: Swing, by h: Double, _ edge: (lo: Double, hi: Double, y: Double)) {
+        guard var hands = s.hands else { return }
+        let urgent = model.needsCount > 0
+        let height = urgent ? 1.3 : 1.15, pump = urgent ? 150.0 : 100.0
+        var v = s.velocity
+        v.dy += Self.gravity * h
+        v.dx -= 0.25 * v.dx * h
+        v.dy -= 0.25 * v.dy * h
+
+        var ropeAngle: Double?
+        if let anchor = s.anchor {
+            let dx = Double(hands.x - anchor.x), dy = Double(hands.y - anchor.y)
+            let angle = atan2(dx, dy)
+            ropeAngle = angle
+            let tangent = CGVector(dx: cos(angle), dy: -sin(angle))
+            let along = v.dx * tangent.dx + v.dy * tangent.dy
+            let energy = 0.5 * (v.dx * v.dx + v.dy * v.dy) + Self.gravity * s.length * (1 - cos(angle))
+            if abs(angle) < 0.35 && energy < Self.gravity * s.length * (1 - cos(height)) {
+                let push = (along >= 0 ? 1 : -1) * pump * h
+                v.dx += tangent.dx * push
+                v.dy += tangent.dy * push
+            }
+            // Reel towards the length it likes, the way a strand settles after a long catch.
+            s.length += (Self.reach - s.length) * min(1, 1.5 * h)
         }
 
-        if var flight = s.flight {
-            flight.elapsed += h
-            if flight.elapsed >= flight.duration {
-                // Caught: what's left of its speed along the rope's swing becomes the new spin.
-                let a = Self.catchAngle * s.heading
-                let vx = flight.velocity.dx, vy = flight.velocity.dy + flight.gravity * flight.duration
-                s.index = flight.target
-                s.angle = a
-                s.spin = (vx * cos(a) - vy * sin(a)) / length
-                s.ropeSpins[s.index] = 0
-                s.flight = nil
-            } else {
-                s.flight = flight
+        hands = CGPoint(x: hands.x + v.dx * h, y: hands.y + v.dy * h)
+
+        if let anchor = s.anchor {
+            let dx = Double(hands.x - anchor.x), dy = Double(hands.y - anchor.y)
+            let distance = max((dx * dx + dy * dy).squareRoot(), 0.0001)
+            if distance > s.length {
+                let nx = dx / distance, ny = dy / distance
+                hands = CGPoint(x: anchor.x + nx * s.length, y: anchor.y + ny * s.length)
+                let outward = v.dx * nx + v.dy * ny
+                if outward > 0 { v.dx -= nx * outward; v.dy -= ny * outward }
+            }
+        }
+        // Never up into the black.
+        if Double(hands.y) < edge.y + 4 { hands.y = edge.y + 4; v.dy = max(v.dy, 0) }
+        s.hands = hands
+        s.velocity = v
+
+        // The body hangs along the silk; in the air it straightens up.
+        let lean = ropeAngle ?? 0.15 * s.heading
+        s.bodyAngle += (lean - s.bodyAngle) * min(1, 14 * h)
+
+        if let anchor = s.anchor, let angle = ropeAngle {
+            let forward = angle * s.heading
+            let goingForward = v.dx * s.heading > 0
+            let room = s.heading > 0 ? edge.hi - Double(anchor.x) : Double(anchor.x) - edge.lo
+            if room < 16 {
+                // End of the edge: turn round at the top of the forward swing.
+                if forward > 0.3 && !goingForward { s.heading = -s.heading }
+            } else if forward >= Self.release && goingForward {
+                // Let go: the strand stays stuck to the edge and drops loose.
+                if let held = s.strands.lastIndex(where: { $0.held }) { s.strands[held].held = false }
+                s.anchor = nil
+                s.airborne = 0
             }
             return
         }
 
-        var accel = -k * sin(s.angle) - air * s.spin
-        let energy = 0.5 * s.spin * s.spin + k * (1 - cos(s.angle))
-        if abs(s.angle) < 0.35 && energy < k * (1 - cos(height)) {
-            accel += (s.spin >= 0 ? 1 : -1) * pump
+        s.airborne += h
+        if s.shot == nil, s.airborne >= Self.shotDelay {
+            // Aim a strand's length ahead and up to the edge, as far as the edge allows.
+            let drop = max(0, Double(hands.y) - edge.y)
+            let ahead = (max(0, Self.reach * Self.reach - drop * drop)).squareRoot() + 6
+            let x = min(max(Double(hands.x) + s.heading * ahead, edge.lo), edge.hi)
+            s.shot = Shot(target: CGPoint(x: x, y: edge.y))
         }
-        s.spin += accel * h
-        s.angle += s.spin * h
-
-        let forward = s.angle * s.heading, goingForward = s.spin * s.heading > 0
-        let next = s.index + Int(s.heading)
-        guard anchors.indices.contains(next) else {
-            // Last rope: turn round at the top of the forward swing.
-            if forward > 0.3 && !goingForward { s.heading = -s.heading }
-            return
+        if var shot = s.shot {
+            shot.travelled += Self.shotSpeed * h
+            let dx = Double(shot.target.x - hands.x), dy = Double(shot.target.y - hands.y)
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if shot.travelled >= distance || s.airborne > 1.2 {
+                // Stuck: swing from here on a strand as long as the gap, then reel it in.
+                s.anchor = shot.target
+                s.length = min(max(distance, Self.shortest), Self.longest)
+                s.strands.append(Strand(from: shot.target, to: hands, length: s.length))
+                s.shot = nil
+            } else {
+                s.shot = shot
+            }
         }
-        guard forward >= Self.release && goingForward else { return }
-
-        // Let go: leave with the swing's velocity and aim for the next rope's catching point,
-        // bending gravity just enough to land on it.
-        let from = Self.hands(on: anchors[s.index], at: s.angle)
-        let to = Self.hands(on: anchors[next], at: Self.catchAngle * s.heading)
-        let speed = s.spin * length
-        let vx = speed * cos(s.angle), vy = -speed * sin(s.angle)
-        let duration = min(max(Double(to.x - from.x) / vx, 0.15), 0.6)
-        let fall = 2 * (Double(to.y - from.y) - vy * duration) / (duration * duration)
-        let velocity = CGVector(dx: Double(to.x - from.x) / duration, dy: vy)
-        s.ropeAngles[s.index] = s.angle
-        s.ropeSpins[s.index] = s.spin * length / Double(Self.rope) * 0.3
-        s.flight = Flight(from: from, velocity: velocity, gravity: fall, duration: duration, target: next, startAngle: s.angle)
     }
 }
 
