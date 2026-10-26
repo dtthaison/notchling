@@ -6,9 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let monitor = AgentMonitor()
     private let notch = NotchController()
     private let accounts = AccountStore()
+    private let antigravity = AntigravityStore()
     private let cost = CostTracker()
     private let settings = SettingsModel()
-    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, cost: cost, settings: settings)
+    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, cost: cost, settings: settings)
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
     private var lastGroups: [String: AgentGroup]?
@@ -54,11 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.apply = { [weak self] in self?.applySetting($0) }
         settings.reload = { [weak self] in self?.reloadSettings() }
         accounts.changed = { [weak self] in self?.updateUsageViews() }
+        antigravity.changed = { [weak self] in self?.updateButton() }
+        antigravity.sync()
         cost.changed = { [weak self] in self?.updateUsageViews() }
         accounts.sync()
         cost.refresh()
         usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.accounts.sync()
+            self?.antigravity.sync()
             self?.cost.refresh()
         }
     }
@@ -90,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount"] {
+        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -250,13 +254,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switchItem.submenu = switchMenu()
         menu.addItem(switchItem)
         menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
-        let settingsItem = action("Settings…", #selector(showSettings))
-        settingsItem.keyEquivalent = ","
-        menu.addItem(settingsItem)
-
         let costItem = NSMenuItem(title: costTitle, action: nil, keyEquivalent: "")
         costItem.submenu = costMenu()
         menu.addItem(costItem)
+
+        addAntigravityItems(to: menu)
+
+        menu.addItem(.separator())
+        let settingsItem = action("Settings…", #selector(showSettings))
+        settingsItem.keyEquivalent = ","
+        menu.addItem(settingsItem)
+    }
+
+    /// The Google account Antigravity is on, and the others to switch to.
+    private func addAntigravityItems(to menu: NSMenu) {
+        guard antigravity.isAvailable else { return }
+        antigravity.sync()
+        menu.addItem(.separator())
+        menu.addItem(header("Antigravity"))
+        if antigravity.adding {
+            menu.addItem(disabled("Waiting for you to sign in…"))
+        } else if let account = antigravity.active {
+            let item = action(account.email, #selector(manageAntigravity))
+            item.state = .on
+            menu.addItem(item)
+        } else {
+            menu.addItem(disabled("Not signed in to Antigravity"))
+        }
+        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        for account in antigravity.accounts {
+            let item = action(account.email, #selector(switchAntigravityItem(_:)))
+            item.representedObject = account.id
+            item.state = account.id == antigravity.activeID ? .on : .off
+            submenu.addItem(item)
+        }
+        if !antigravity.accounts.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(action("Add Account…", #selector(manageAntigravity)))
+        switchItem.submenu = submenu
+        menu.addItem(switchItem)
     }
 
     /// Every saved account with its plan and limits, then Add Account.
@@ -361,13 +397,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func switchAntigravityItem(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, id != antigravity.activeID else { return }
+        if AntigravityStore.isRunning {
+            let alert = NSAlert()
+            alert.messageText = "Restart Antigravity?"
+            alert.informativeText = "Antigravity quits and opens again on the other account. Agents running in it stop."
+            alert.addButton(withTitle: "Restart")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        antigravity.switchTo(id) { error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Couldn't switch Antigravity accounts"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    @objc private func manageAntigravity() {
+        accountsWindow.show(.accounts, provider: .antigravity)
+    }
+
     /// Signs in from the Claude Accounts window; Claude Code stays on the account it's using.
     @objc private func addAccount() {
-        accountsWindow.show(.accounts, signIn: true)
+        accountsWindow.show(.accounts, provider: .claude, signIn: true)
     }
 
     @objc private func manageAccounts() {
-        accountsWindow.show(.accounts)
+        accountsWindow.show(.accounts, provider: .claude)
     }
 
     @objc private func showCost() {
