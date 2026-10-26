@@ -12,6 +12,7 @@ A small macOS menu bar app for people who run several [Claude Code](https://clau
 - **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
 - **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
 - **Switches Claude accounts.** Every account you sign in to is saved, and one click in the menu points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
+- **Switches Antigravity accounts.** Each Google account you sign in to Antigravity with is saved too. Switching restarts Antigravity on the other account, with no new sign-in.
 - **Shows token cost.** What your Claude Code use would cost at API prices: today, 7 and 30 days, a 14-day chart, and totals by model and by project.
 - **Has a pet.** A little green monster web-swings along the whole menu bar while agents work: at the top of each swing it lets go, tumbles through the air, shoots a strand of silk to the edge ahead and swings on that. It picks a spot along the bar, heads there with long hops and short ones, rests to wave or doze when it arrives, then picks another. Each strand gets its own length, swing and poses. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. Turn the movement off with **Animate Pet**.
 
@@ -45,6 +46,7 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 | Claude Accounts | One row per saved account with its limits; click one to switch Claude Code to it |
 | Add Account… | Opens the Claude Accounts window and signs in to another account in the browser |
 | Manage Accounts… | The Claude Accounts window: every account with its limits, Switch, Remove, and a Token Cost tab |
+| Antigravity | The Google account Antigravity is on, and Switch Account with every saved one plus Add Account… |
 | Token Cost | Cost at API prices by day, model and project |
 | Keep Mac Awake → Off / Always On / While Agents Are Working | Holds a power assertion so the Mac doesn't idle-sleep |
 | Keep Display On | Keeps the screen awake as well |
@@ -74,6 +76,8 @@ The hook writes the request to `~/Library/Application Support/Notchling/requests
 
 **Accounts.** Claude Code keeps its login in the Keychain item `Claude Code-credentials` and the account's profile under `oauthAccount` in `~/.claude.json`. **Add Account** runs the same OAuth sign-in as `claude auth login` (PKCE, with the browser sending the code back to a listener on 127.0.0.1), but saves the result without touching Claude Code's current login. Notchling also copies each login it sees into its own Keychain items (`Notchling Accounts`, one per account). Switching writes the saved login back into Claude Code's item (MCP logins in it are kept) and replaces `oauthAccount` (the previous file is kept as `~/.claude.json.notchling-backup`). The login Claude Code is using is never renewed by Notchling, since that would sign Claude Code out.
 
+**Antigravity.** Antigravity and Antigravity IDE share one Google login in `~/.gemini/jetski-standalone-oauth-token` and read it at launch. Notchling copies each login it sees into its own Keychain items (`Notchling Antigravity`, one per Google account). Switching quits Antigravity, writes the saved login back to that file and opens Antigravity again. **Add Account** saves the current login, removes the file and opens Antigravity at its sign-in screen; the next login is saved as soon as it appears. Notchling makes no network calls for Antigravity.
+
 **Cost** is estimated from the `usage` of every assistant message in the transcripts of the last 30 days, each message counted once, with cache writes and reads priced separately. Totals and read positions are cached in `cost-cache.json`, so only new lines are read after the first scan.
 
 ## Project layout
@@ -90,6 +94,7 @@ Sources/
   AgentActions.swift      opens or focuses a session's terminal or editor window
   SlashCommands.swift     built-in, user, project and plugin commands for completion
   Accounts.swift          saved logins, switching, limits from the usage endpoint
+  Antigravity.swift       saved Antigravity logins and switching
   CostTracker.swift       token cost at API prices from transcripts
   UsageMenuViews.swift    the account rows and cost chart in the menu
   AccountLogin.swift      in-app OAuth sign-in for adding an account
@@ -105,4 +110,4 @@ Icon/make-icon.swift      draws the app icon
 1. Turn off **Answer Prompts from the Notch** so the hook entries are removed from `~/.claude/settings.json`.
 2. Turn off **Launch at Login**, then quit Notchling.
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
-4. To drop saved logins, delete the `Notchling Accounts` items in Keychain Access.
+4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access.

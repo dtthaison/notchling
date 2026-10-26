@@ -6,23 +6,27 @@ import SwiftUI
 /// needed for.
 final class AccountsWindowController: NSObject, NSWindowDelegate {
     private let accounts: AccountStore
+    private let antigravity: AntigravityStore
     private let cost: CostTracker
     private let settings: SettingsModel
     private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, cost: CostTracker, settings: SettingsModel) {
+    init(accounts: AccountStore, antigravity: AntigravityStore, cost: CostTracker, settings: SettingsModel) {
         self.accounts = accounts
+        self.antigravity = antigravity
         self.cost = cost
         self.settings = settings
         signIn = SignInModel(store: accounts)
     }
 
-    func show(_ page: AccountsTab = .accounts, signIn startSignIn: Bool = false) {
+    func show(_ page: AccountsTab = .accounts, provider: Provider? = nil, signIn startSignIn: Bool = false) {
         tab.page = page
+        if let provider { tab.provider = provider }
         if window == nil {
-            let view = AccountsView(accounts: accounts, cost: cost, settings: settings, signIn: signIn, tab: tab)
+            let view = AccountsView(accounts: accounts, antigravity: antigravity, cost: cost, settings: settings,
+                                    signIn: signIn, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Notchling"
             window.styleMask = [.titled, .closable, .miniaturizable]
@@ -32,6 +36,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
             self.window = window
         }
         accounts.sync()
+        antigravity.sync()
         cost.refresh()
         settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
@@ -85,8 +90,13 @@ final class SettingsModel: ObservableObject {
     }
 }
 
+enum Provider: String, CaseIterable {
+    case claude = "Claude", antigravity = "Antigravity"
+}
+
 final class TabModel: ObservableObject {
     @Published var page = AccountsTab.accounts
+    @Published var provider = Provider.claude
 }
 
 /// One sign-in at a time, from the browser back to a saved account.
@@ -148,6 +158,7 @@ final class SignInModel: ObservableObject {
 
 struct AccountsView: View {
     @ObservedObject var accounts: AccountStore
+    @ObservedObject var antigravity: AntigravityStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
     @ObservedObject var signIn: SignInModel
@@ -164,7 +175,18 @@ struct AccountsView: View {
             .padding(.vertical, 12)
             Divider()
             switch tab.page {
-            case .accounts: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
+            case .accounts:
+                Picker("", selection: $tab.provider) {
+                    ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .padding(.top, 12)
+                switch tab.provider {
+                case .claude: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
+                case .antigravity: AntigravityPage(store: antigravity)
+                }
             case .cost: CostPage(cost: cost, accounts: accounts)
             case .settings: SettingsPage(settings: settings)
             }
@@ -534,5 +556,144 @@ private struct SettingsPage: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Antigravity
+
+/// Antigravity's saved Google accounts. Switching and adding restart Antigravity, so both ask first
+/// while it's open.
+private struct AntigravityPage: View {
+    @ObservedObject var store: AntigravityStore
+    @State private var removing: AntigravityAccount?
+    @State private var confirming: Pending?
+    @State private var error: String?
+
+    enum Pending: Identifiable {
+        case switchTo(AntigravityAccount), add
+        var id: String {
+            if case .switchTo(let account) = self { return account.id }
+            return "add"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    if store.accounts.isEmpty {
+                        Text("Sign in to Antigravity and Notchling saves the account here.")
+                            .foregroundColor(.secondary)
+                            .padding(.top, 40)
+                    }
+                    ForEach(store.accounts) { account in
+                        AntigravityCard(account: account, isActive: account.id == store.activeID,
+                                        busy: store.busy || store.adding,
+                                        onSwitch: { ask(.switchTo(account)) }, onRemove: { removing = account })
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(16)
+            }
+            Divider()
+            addPanel.padding(16)
+        }
+        .alert(item: $confirming) { pending in
+            Alert(title: Text("Restart Antigravity?"),
+                  message: Text("Antigravity quits and opens again on the other account. Agents running in it stop."),
+                  primaryButton: .default(Text("Restart")) { run(pending) },
+                  secondaryButton: .cancel())
+        }
+        .background(EmptyView().alert(item: $removing) { account in
+            Alert(title: Text("Remove \(account.email)?"),
+                  message: Text(account.id == store.activeID
+                                ? "Notchling forgets its saved login. Antigravity stays signed in to it."
+                                : "Notchling forgets its saved login. Sign in to it in Antigravity to add it again."),
+                  primaryButton: .destructive(Text("Remove")) { store.remove(account.id) },
+                  secondaryButton: .cancel())
+        })
+    }
+
+    @ViewBuilder private var addPanel: some View {
+        if store.adding {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign in to the other account in Antigravity…").font(.callout.weight(.medium))
+                    Text("Notchling saves it as soon as you're signed in.").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { store.cancelAdd() }
+            }
+        } else {
+            HStack {
+                Text("Antigravity opens signed out so you can sign in to another Google account.")
+                    .font(.callout).foregroundColor(.secondary)
+                Spacer()
+                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(store.busy)
+            }
+        }
+    }
+
+    private func ask(_ pending: Pending) {
+        if AntigravityStore.isRunning { confirming = pending } else { run(pending) }
+    }
+
+    private func run(_ pending: Pending) {
+        error = nil
+        let done: (Error?) -> Void = { error = $0?.localizedDescription }
+        switch pending {
+        case .switchTo(let account): store.switchTo(account.id, done: done)
+        case .add: store.beginAdd(done: done)
+        }
+    }
+}
+
+private struct AntigravityCard: View {
+    let account: AntigravityAccount
+    let isActive: Bool
+    let busy: Bool
+    let onSwitch: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
+                Text(account.email.prefix(1).uppercased())
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(isActive ? .white : .primary)
+            }
+            .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Text("Google Account").font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            if isActive {
+                Text("In Use")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.accentColor)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+            } else {
+                Button("Switch", action: onSwitch).disabled(busy)
+            }
+            Menu {
+                Button("Remove…", action: onRemove)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
