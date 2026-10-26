@@ -161,7 +161,12 @@ struct NotchView: View {
 /// gets its own roll of length, swing height, release angle and poses (kicking, tucked in a ball,
 /// running, cheering). It goes faster while sessions need you. When the tabs open it moves into the
 /// middle and fades. Positions are kept relative to the camera, so the black shape growing for a
-/// peek doesn't move it along the bar.
+/// peek doesn't move it along the bar. It is drawn from frame sequences: the swing frame follows
+/// the swing angle, running, waving and dozing loop on a clock, and the web shot is paced over the
+/// time the strand takes to stick. Neighbouring drawings blend into each other by how far along the
+/// motion is, and a different sequence fades in over the last one.
+/// It is drawn by Core Animation layers (see `PetLayer.swift`) on a 60 Hz display link that runs only
+/// while it moves, so a tick moves layers instead of laying out and redrawing views.
 struct PetView: View {
     @ObservedObject var model: NotchModel
     /// Size of the black shape this frame; the silk sticks to the bottom of the menu bar, which is
@@ -179,11 +184,15 @@ struct PetView: View {
     static let fadeTime = 0.12
     static let silk = Color(white: 0.93)
 
-    static let swingPoses = ["swing-forward", "swing-down", "swing-back"]
     static let flightPoses = ["fly-superhero", "fly-flip", "fly-star"]
-    static let poseNames = swingPoses + flightPoses + [
-        "fly-shoot", "fly-reach", "hang-wave", "hang-ball", "hang-cheer", "hang-run", "hang-sleepy",
-    ]
+    /// Frames per drawn sequence: the swing from legs tucked back to kicked forward, a wave and a
+    /// doze to rest in, running in the air, and the web shot ending with both hands up to catch.
+    static let sequences = ["swing": 12, "wave": 5, "sleepy": 4, "run": 8, "shoot": 11]
+    /// Where each swing frame sits along the arc, in key-frame units (0 = legs tucked back, 7 = kicked
+    /// forward). Keys are whole numbers, inbetweens halves; a missing inbetween just leaves a gap.
+    static let swingPositions: [Double] = [0, 0.5, 1, 2, 3, 4, 4.5, 5, 5.5, 6, 6.5, 7]
+    static let poseNames = flightPoses + ["hang-ball", "hang-cheer"]
+        + sequences.flatMap { name, count in (1...count).map { "\(name)-\($0)" } }
 
     /// Every pose frame by name. Each is pre-rotated so its centre of mass sits under the hands,
     /// which are at the top centre, and all face right. The probe build has no bundle, so a missing
@@ -248,6 +257,20 @@ struct PetView: View {
                     if aFree { points[i] = CGPoint(x: a.x + dx * fix * share, y: a.y + dy * fix * share) }
                     if bFree { points[i + 1] = CGPoint(x: b.x - dx * fix * share, y: b.y - dy * fix * share) }
                 }
+                // A little stiffness: points two apart never come closer than most of two segments,
+                // so slack silk sags in a soft curve instead of folding into a hook.
+                for i in 0..<(points.count - 2) {
+                    let a = points[i], c = points[i + 2]
+                    let dx = c.x - a.x, dy = c.y - a.y
+                    let length = max((dx * dx + dy * dy).squareRoot(), 0.0001)
+                    let least = rest * 1.6
+                    guard length < least else { continue }
+                    let fix = (least - length) / length
+                    let aFree = i > 0, cFree = i + 2 <= last
+                    let share = aFree && cFree ? 0.25 : 0.5
+                    if aFree { points[i] = CGPoint(x: a.x - dx * fix * share, y: a.y - dy * fix * share) }
+                    if cFree { points[i + 2] = CGPoint(x: c.x + dx * fix * share, y: c.y + dy * fix * share) }
+                }
             }
         }
     }
@@ -279,7 +302,7 @@ struct PetView: View {
         var release = 0.55
         /// Seconds left of a rest on this strand: no pumping, drag up, waving or dozing.
         var restLeft = 0.0
-        var restPose = "hang-wave"
+        var restPose = "wave"
         /// Seconds after a catch spent reaching, before the strand counts as taut.
         var reaching = 0.0
         /// Whether the strand was rolled for a long way to go.
@@ -295,19 +318,32 @@ struct PetView: View {
         var spin = 0.0
         var spinRate = 0.0
 
-        /// How much of each pose is showing, so poses fade into each other.
-        var weights: [String: Double] = [:]
+        /// The sequence playing, when it started, and the frame showing, so loops start at frame 1.
+        var sequence = ""
+        var sequenceStart = 0.0
+        /// The layers of the sequence playing now, and of the one fading out under it.
+        var layers: [Layer] = []
+        var outgoing: [Layer] = []
+        var fadeIn = 1.0
+        /// How long the shot in flight is expected to take, which paces the shoot frames.
+        var shotTime = 0.3
 
         func random(_ range: ClosedRange<Double>) -> Double { Double.random(in: range, using: &rng) }
         func chance(_ probability: Double) -> Bool { random(0...1) < probability }
     }
 
+    /// One pose drawn at some opacity, in drawing order.
+    struct Layer {
+        let name: String
+        let opacity: Double
+    }
+
     /// What one frame draws.
-    fileprivate struct Frame {
+    struct Frame {
         let hands: CGPoint
         let angle: Double
         let heading: Double
-        let weights: [String: Double]
+        let layers: [Layer]
         let spin: Double
         let strands: [(points: [CGPoint], opacity: Double)]
         let shot: (from: CGPoint, to: CGPoint)?
@@ -319,101 +355,33 @@ struct PetView: View {
         let gathered = model.state == .list
         let resting = model.state == .collapsed
         let moving = model.petWalking && resting
-        let needs = model.needsCount
-        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !moving)) { context in
-            let frame = step(to: context.date.timeIntervalSinceReferenceDate, moving: moving)
-            let hands = gathered ? middle : frame.hands
-            let width = Self.bodyWidth
-            let box = width + 34
-
-            ZStack(alignment: .topLeading) {
-                silk(frame)
-                    .opacity(gathered ? 0 : 1)
-                ZStack(alignment: .top) {
-                    creature(weights: gathered ? ["swing-down": 1] : frame.weights, spin: frame.spin)
-                        .scaleEffect(x: frame.heading, y: 1)
-                        .frame(width: width, height: Self.bodyHeight)
-                    if needs > 0 && !gathered {
-                        Text("\(needs)")
-                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 3.5)
-                            .frame(minWidth: 14, minHeight: 14)
-                            .background(Capsule().fill(Color.orange))
-                            .shadow(color: .black.opacity(0.35), radius: 1.5)
-                            .fixedSize()
-                            .offset(x: width / 2 + 3, y: Self.bodyHeight * 0.5)
-                    }
-                }
-                .frame(width: box, height: Self.bodyHeight, alignment: .top)
-                .rotationEffect(.radians(gathered ? 0 : -frame.angle), anchor: .top)
-                .offset(x: hands.x - box / 2, y: hands.y)
-            }
-        }
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: gathered)
-        // Only out on its own while the notch rests; it fades once it reaches the tabs.
-        .opacity(resting ? 1 : 0)
-        .animation(resting ? .easeIn(duration: 0.15).delay(0.15) : .easeOut(duration: 0.12).delay(gathered ? 0.24 : 0),
-                   value: resting)
+        // The layers cover the whole bar from its left edge, and are drawn by Core Animation, so a
+        // tick moves layers instead of laying out and redrawing views.
+        let left = shape.width / 2 - model.screenSpan.left
+        // When the tabs open it slides to the middle; only that change animates, not every tick.
+        let slide = gathered ? CGSize(width: middle.x - gatheredHands.x, height: middle.y - gatheredHands.y) : .zero
+        PetLayerHost(moving: moving, gathered: gathered, needs: model.needsCount, origin: left,
+                     frameAt: { time, moving in step(to: time, moving: moving) })
+            .frame(width: model.screenSpan.left + model.screenSpan.right, height: shape.height + 200)
+            .offset(x: left + slide.width, y: slide.height)
+            .allowsHitTesting(false)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: gathered)
+            // Only out on its own while the notch rests; it fades once it reaches the tabs.
+            .opacity(resting ? 1 : 0)
+            .animation(resting ? .easeIn(duration: 0.15).delay(0.15) : .easeOut(duration: 0.12).delay(gathered ? 0.24 : 0),
+                       value: resting)
     }
 
-    /// Every strand as a smooth line through its points, a dab where it sticks to the edge, and a
-    /// straight streak for a strand still flying.
-    private func silk(_ frame: Frame) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(frame.strands.indices, id: \.self) { index in
-                let strand = frame.strands[index]
-                Path { path in
-                    guard let first = strand.points.first else { return }
-                    path.move(to: first)
-                    for i in 1..<strand.points.count {
-                        let mid = CGPoint(x: (strand.points[i - 1].x + strand.points[i].x) / 2,
-                                          y: (strand.points[i - 1].y + strand.points[i].y) / 2)
-                        path.addQuadCurve(to: mid, control: strand.points[i - 1])
-                    }
-                    path.addLine(to: strand.points[strand.points.count - 1])
-                }
-                .stroke(Self.silk.opacity(0.9 * strand.opacity), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-                if let first = strand.points.first {
-                    Circle().fill(Self.silk.opacity(strand.opacity))
-                        .frame(width: 3, height: 3)
-                        .offset(x: first.x - 1.5, y: first.y - 1.5)
-                }
-            }
-            if let shot = frame.shot {
-                Path { path in path.move(to: shot.from); path.addLine(to: shot.to) }
-                    .stroke(Self.silk.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-            }
-        }
-        // Wide enough to reach every spot along the bar; the origin stays at the shape's corner.
-        .frame(width: shape.width + model.screenSpan.left + model.screenSpan.right,
-               height: shape.height + 160, alignment: .topLeading)
-        .allowsHitTesting(false)
+    /// Where its hands will be once the tabs open and it hangs straight from its strand.
+    private var gatheredHands: CGPoint {
+        let s = swing
+        guard let anchor = s.anchor ?? s.shot?.target ?? s.strands.last?.points.first else { return middle }
+        return overlay(CGPoint(x: anchor.x, y: anchor.y + s.reach))
     }
 
     static var bodyWidth: CGFloat {
-        guard let first = poses["swing-down"], first.size.height > 0 else { return bodyHeight * 0.6 }
+        guard let first = poses["swing-4"], first.size.height > 0 else { return bodyHeight * 0.6 }
         return bodyHeight * first.size.width / first.size.height
-    }
-
-    /// All poses stacked, each as visible as its weight. Only the flip pose turns, once round.
-    @ViewBuilder private func creature(weights: [String: Double], spin: Double) -> some View {
-        if Self.poses.count == Self.poseNames.count {
-            ZStack {
-                ForEach(Self.poseNames.filter { (weights[$0] ?? 0) > 0.001 }, id: \.self) { name in
-                    if let image = Self.poses[name] {
-                        Image(nsImage: image)
-                            .resizable()
-                            .interpolation(.high)
-                            .rotationEffect(.radians(name == "fly-flip" ? spin : 0))
-                            .opacity(weights[name] ?? 0)
-                    }
-                }
-            }
-            .shadow(color: .black.opacity(0.45), radius: 1.5)
-        } else {
-            Text("✻").font(.system(size: 15, weight: .bold)).foregroundColor(.claude)
-        }
     }
 
     private func smoothstep(_ low: Double, _ high: Double, _ value: Double) -> Double {
@@ -421,11 +389,39 @@ struct PetView: View {
         return t * t * (3 - 2 * t)
     }
 
-    /// Fades between the swing poses by how far out the swing is, measured in the direction it's
-    /// heading: legs out at the front of the arc, tucked at the back, straight through the bottom.
-    private func swingBlend(_ angle: Double) -> [String: Double] {
-        let forward = smoothstep(0.12, 0.45, angle), back = smoothstep(0.12, 0.45, -angle)
-        return ["swing-forward": forward, "swing-down": 1 - forward - back, "swing-back": back]
+    /// The swing drawings for how far out it is, measured in the direction it's heading: -0.8 (legs
+    /// tucked back) to +0.6 (kicked forward) maps onto the arc, and the two drawings either side of
+    /// that spot in `swingPositions` blend by how close it is to each. It lets go at 0.45–0.8
+    /// forward, so the front end is short of that, or the full kick would never show. The pendulum
+    /// already lingers at the ends and rushes through the bottom, so the drawings bunch where they
+    /// should.
+    private func swingFrame(_ angle: Double) -> (sequence: String, layers: [Layer]) {
+        let low = -0.8, high = 0.6
+        let position = (min(max(angle, low), high) - low) / (high - low) * 7
+        let spots = Self.swingPositions
+        let upper = spots.firstIndex { $0 >= position } ?? spots.count - 1
+        let lower = max(upper - 1, 0)
+        let span = spots[upper] - spots[lower]
+        let mix = span > 0 ? (position - spots[lower]) / span : 0
+        return ("swing", Self.between("swing-\(lower + 1)", "swing-\(upper + 1)", mix))
+    }
+
+    /// One drawing turning into the next, `mix` of the way there. The new one comes up over the
+    /// first half and the old one goes over the second, so one of them is always fully opaque (the
+    /// body never turns see-through) and the parts of the old drawing that stick out fade away
+    /// instead of vanishing at the next pair.
+    static func between(_ from: String, _ to: String, _ mix: Double) -> [Layer] {
+        let mix = min(max(mix, 0), 1)
+        if from == to || mix < 0.01 { return [Layer(name: from, opacity: 1)] }
+        if mix > 0.99 { return [Layer(name: to, opacity: 1)] }
+        return [Layer(name: from, opacity: min(1, 2 * (1 - mix))), Layer(name: to, opacity: min(1, 2 * mix))]
+    }
+
+    /// A looping sequence at `rate` drawings a second, blending each into the next.
+    static func loop(_ frames: [String], rate: Double, time: Double) -> [Layer] {
+        let place = time * rate
+        let index = Int(place) % frames.count
+        return between(frames[index], frames[(index + 1) % frames.count], place - place.rounded(.down))
     }
 
     /// The spot the tabs gather it to, under the camera.
@@ -441,30 +437,54 @@ struct PetView: View {
         return (lo, max(hi, lo + 1), Double(model.notchSize.height))
     }
 
-    /// Which poses it wants right now: the airborne ones by phase of the flight, then a rest, then
-    /// the strand's style while swinging.
-    private func wantedPoses(_ s: Swing, moving: Bool) -> [String: Double] {
+    /// The frame it wants right now, and the sequence it belongs to: the airborne poses by phase of
+    /// the flight, then a rest, then the strand's style while swinging. `time` is how long the
+    /// sequence has been playing, so loops start from their first frame.
+    private func wantedFrame(_ s: Swing, moving: Bool, time: Double) -> (sequence: String, layers: [Layer]) {
         let angle = s.bodyAngle * s.heading
-        guard moving else { return swingBlend(angle) }
-        guard s.anchor != nil else { return [s.shot != nil ? "fly-shoot" : s.flightPose: 1] }
-        if s.reaching > 0 { return ["fly-reach": 1] }
-        if s.restLeft > 0 { return [s.restPose: 1] }
+        guard moving else { return swingFrame(angle) }
+        guard s.anchor != nil else {
+            if s.shot != nil {
+                let place = min(time / s.shotTime, 1) * 9
+                let index = min(Int(place), 8)
+                return ("shoot", Self.between("shoot-\(index + 1)", "shoot-\(index + 2)", place - Double(index)))
+            }
+            return ("flight", [Layer(name: s.flightPose, opacity: 1)])
+        }
+        if s.reaching > 0 { return ("reach", [Layer(name: "shoot-11", opacity: 1)]) }
+        if s.restLeft > 0 {
+            if s.restPose == "sleepy" { return ("sleepy", Self.loop((1...4).map { "sleepy-\($0)" }, rate: 3, time: time)) }
+            // A loop that plays forwards then back.
+            return ("wave", Self.loop([1, 2, 3, 4, 5, 4, 3, 2].map { "wave-\($0)" }, rate: 8, time: time))
+        }
         switch s.style {
-        case .kick: return swingBlend(angle)
-        case .tuck: return abs(angle) < 0.3 ? ["hang-ball": 1] : swingBlend(angle)
-        case .run: return s.velocity.dx * s.heading > 60 ? ["hang-run": 1] : swingBlend(angle)
-        case .cheer: return angle > 0.35 ? ["hang-cheer": 1] : swingBlend(angle)
+        case .kick: return swingFrame(angle)
+        case .tuck: return abs(angle) < 0.3 ? ("ball", [Layer(name: "hang-ball", opacity: 1)]) : swingFrame(angle)
+        case .run:
+            // Runs for the whole forward half of the swing, long enough for the loop to come round.
+            return s.velocity.dx * s.heading > 15
+                ? ("run", Self.loop((1...8).map { "run-\($0)" }, rate: 12, time: time)) : swingFrame(angle)
+        case .cheer: return angle > 0.35 ? ("cheer", [Layer(name: "hang-cheer", opacity: 1)]) : swingFrame(angle)
         }
     }
 
-    /// Moves each pose's weight towards what's wanted, all at the same rate so they sum to one.
-    private func fade(_ s: Swing, toward wanted: [String: Double], by dt: Double) {
-        let amount = dt / Self.fadeTime
-        for name in Set(s.weights.keys).union(wanted.keys) {
-            let current = s.weights[name] ?? 0, goal = wanted[name] ?? 0
-            let next = current + min(max(goal - current, -amount), amount)
-            s.weights[name] = next > 0.001 ? next : nil
+    /// Within a sequence the drawings blend straight into each other; when a different sequence
+    /// starts, it fades in over the last look of the old one.
+    private func show(_ s: Swing, _ wanted: (sequence: String, layers: [Layer]), at t: Double, by dt: Double) {
+        if wanted.sequence != s.sequence {
+            s.outgoing = s.layers
+            s.fadeIn = s.layers.isEmpty ? 1 : 0
+            s.sequence = wanted.sequence
+            s.sequenceStart = t
         }
+        s.fadeIn = min(1, s.fadeIn + dt / Self.fadeTime)
+        s.layers = wanted.layers
+    }
+
+    /// What to draw: the incoming sequence over the outgoing one while it fades in.
+    private func shownLayers(_ s: Swing) -> [Layer] {
+        guard s.fadeIn < 1 else { return s.layers }
+        return s.outgoing + s.layers.map { Layer(name: $0.name, opacity: $0.opacity * s.fadeIn) }
     }
 
     /// Rolls the look of the next strand. Far from where it's heading it takes long, high swings
@@ -489,7 +509,7 @@ struct PetView: View {
 
     private func startRest(_ s: Swing) {
         s.restLeft = s.random(1.5...4)
-        s.restPose = model.needsCount == 0 && s.restLeft >= 3 ? "hang-sleepy" : "hang-wave"
+        s.restPose = model.needsCount == 0 && s.restLeft >= 3 ? "sleepy" : "wave"
     }
 
     /// Somewhere else along the bar, at least 250 pt from where it is (or the farther end if the
@@ -545,7 +565,9 @@ struct PetView: View {
             hang(s, at: anchor, angle: model.petWalking ? -0.6 * s.heading : 0)
         }
         s.last = moving ? t : nil
-        fade(s, toward: wantedPoses(s, moving: moving), by: fadeDt)
+        var wanted = wantedFrame(s, moving: moving, time: t - s.sequenceStart)
+        if wanted.sequence != s.sequence { wanted = wantedFrame(s, moving: moving, time: 0) }
+        show(s, wanted, at: t, by: fadeDt)
 
         let hands = s.hands ?? .zero
         let shot = s.shot.map { shot -> (CGPoint, CGPoint) in
@@ -554,7 +576,7 @@ struct PetView: View {
             let reach = min(shot.travelled / distance, 1)
             return (overlay(hands), overlay(CGPoint(x: hands.x + dx * reach, y: hands.y + dy * reach)))
         }
-        return Frame(hands: overlay(hands), angle: s.bodyAngle, heading: s.heading, weights: s.weights, spin: s.spin,
+        return Frame(hands: overlay(hands), angle: s.bodyAngle, heading: s.heading, layers: shownLayers(s), spin: s.spin,
                      strands: s.strands.map { ($0.points.map(overlay), max(0, min(1, $0.fade))) }, shot: shot)
     }
 
@@ -683,6 +705,7 @@ struct PetView: View {
             let dx = Double(target.x - hands.x), dy = Double(target.y - hands.y)
             let flight = max((dx * dx + dy * dy).squareRoot() / Self.shotSpeed, 0.1)
             s.spinRate = (2 * Double.pi - s.spin) / flight
+            s.shotTime = flight
         }
         if var shot = s.shot {
             shot.travelled += Self.shotSpeed * h
