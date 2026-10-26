@@ -1,27 +1,30 @@
 import AppKit
 import SwiftUI
 
-/// The Claude Accounts window: every saved account with its limits, switching, signing in to another
-/// account, and token cost. Everything `claude auth login`, /status and /usage would be needed for.
+/// Notchling's window: every saved account with its limits, switching, signing in to another account,
+/// token cost, and every setting from the menu. Everything `claude auth login`, /status and /usage were
+/// needed for.
 final class AccountsWindowController: NSObject, NSWindowDelegate {
     private let accounts: AccountStore
     private let cost: CostTracker
+    private let settings: SettingsModel
     private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, cost: CostTracker) {
+    init(accounts: AccountStore, cost: CostTracker, settings: SettingsModel) {
         self.accounts = accounts
         self.cost = cost
+        self.settings = settings
         signIn = SignInModel(store: accounts)
     }
 
     func show(_ page: AccountsTab = .accounts, signIn startSignIn: Bool = false) {
         tab.page = page
         if window == nil {
-            let view = AccountsView(accounts: accounts, cost: cost, signIn: signIn, tab: tab)
+            let view = AccountsView(accounts: accounts, cost: cost, settings: settings, signIn: signIn, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-            window.title = "Claude Accounts"
+            window.title = "Notchling"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
             window.delegate = self
@@ -30,10 +33,13 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
         accounts.sync()
         cost.refresh()
+        settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         if startSignIn { signIn.start() }
     }
+
+    var isVisible: Bool { window?.isVisible == true }
 
     func windowWillClose(_ notification: Notification) {
         signIn.cancel()
@@ -41,7 +47,42 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
 }
 
 enum AccountsTab: String, CaseIterable {
-    case accounts = "Accounts", cost = "Token Cost"
+    case accounts = "Accounts", cost = "Token Cost", settings = "Settings"
+}
+
+/// The menu's settings for the Settings tab. AppDelegate owns the real values: it fills these in
+/// through `reload` and carries out each change through `apply`.
+final class SettingsModel: ObservableObject {
+    enum Change {
+        case awakeMode(AwakeMode), keepDisplayOn(Bool), showNotch(Bool), notchWidth(NotchWidth)
+        case animatePet(Bool), answerFromNotch(Bool), launchAtLogin(Bool)
+    }
+
+    @Published var awakeMode = AwakeMode.off { didSet { push(.awakeMode(awakeMode)) } }
+    @Published var keepDisplayOn = false { didSet { push(.keepDisplayOn(keepDisplayOn)) } }
+    @Published var showNotch = true { didSet { push(.showNotch(showNotch)) } }
+    @Published var notchWidth = NotchWidth.medium { didSet { push(.notchWidth(notchWidth)) } }
+    @Published var animatePet = true { didSet { push(.animatePet(animatePet)) } }
+    @Published var answerFromNotch = true { didSet { push(.answerFromNotch(answerFromNotch)) } }
+    @Published var launchAtLogin = false { didSet { push(.launchAtLogin(launchAtLogin)) } }
+
+    var apply: ((Change) -> Void)?
+    var reload: (() -> Void)?
+    private var loading = false
+
+    /// Sets values without sending them back as changes.
+    func load(_ fill: (SettingsModel) -> Void) {
+        loading = true
+        fill(self)
+        loading = false
+    }
+
+    private func push(_ change: Change) {
+        guard !loading else { return }
+        apply?(change)
+        // A change can fail (Launch at Login outside /Applications); show what really happened.
+        DispatchQueue.main.async { self.reload?() }
+    }
 }
 
 final class TabModel: ObservableObject {
@@ -108,6 +149,7 @@ final class SignInModel: ObservableObject {
 struct AccountsView: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var cost: CostTracker
+    @ObservedObject var settings: SettingsModel
     @ObservedObject var signIn: SignInModel
     @ObservedObject var tab: TabModel
 
@@ -118,12 +160,13 @@ struct AccountsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 240)
+            .frame(width: 330)
             .padding(.vertical, 12)
             Divider()
             switch tab.page {
-            case .accounts: AccountsPage(accounts: accounts, signIn: signIn)
-            case .cost: CostPage(cost: cost)
+            case .accounts: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
+            case .cost: CostPage(cost: cost, accounts: accounts)
+            case .settings: SettingsPage(settings: settings)
             }
         }
         .frame(width: 460, height: 540)
@@ -132,6 +175,7 @@ struct AccountsView: View {
 
 private struct AccountsPage: View {
     @ObservedObject var accounts: AccountStore
+    @ObservedObject var cost: CostTracker
     @ObservedObject var signIn: SignInModel
     @State private var removing: ClaudeAccount?
 
@@ -145,7 +189,7 @@ private struct AccountsPage: View {
                             .padding(.top, 40)
                     }
                     ForEach(accounts.accounts, id: \.id) { account in
-                        AccountCard(account: account, usage: accounts.usage[account.id],
+                        AccountCard(account: account, usage: accounts.usage[account.id], cost: cost.byAccount[account.id],
                                     isActive: account.id == accounts.activeID, busy: accounts.busy,
                                     onSwitch: { signIn.switchTo(account.id) },
                                     onRemove: { removing = account })
@@ -178,6 +222,7 @@ extension ClaudeAccount: Identifiable {}
 private struct AccountCard: View {
     let account: ClaudeAccount
     let usage: AccountUsage?
+    let cost: CostTracker.Summary?
     let isActive: Bool
     let busy: Bool
     let onSwitch: () -> Void
@@ -227,6 +272,15 @@ private struct AccountCard: View {
             } else {
                 Text(isActive ? "Checking limits…" : "Limits show once the saved login is checked.")
                     .font(.caption).foregroundColor(.secondary)
+            }
+            if let cost, cost.month > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "dollarsign.circle").foregroundColor(.secondary)
+                    Text("Today \(CostChartView.dollars(cost.today)) · 7 days \(CostChartView.dollars(cost.week)) · "
+                         + "30 days \(CostChartView.dollars(cost.month))")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
         }
         .padding(12)
@@ -318,11 +372,41 @@ private struct SignInPanel: View {
 
 private struct CostPage: View {
     @ObservedObject var cost: CostTracker
+    @ObservedObject var accounts: AccountStore
+    /// "" is All Accounts; otherwise an account id, or "-" for cost from before accounts were tracked.
+    @State private var filter = ""
+
+    private func name(_ id: String) -> String {
+        id.isEmpty ? "Before Tracking" : accounts.accounts.first { $0.id == id }?.email ?? "Removed Account"
+    }
+
+    /// Lets cost from before tracking count toward one account, or stay on its own.
+    @ViewBuilder private var untrackedChoice: some View {
+        if cost.summary.accounts.contains(where: { $0.id.isEmpty }) || cost.untrackedOwner != nil {
+            HStack {
+                Text("Cost from before tracking counts toward").font(.caption).foregroundColor(.secondary)
+                Picker("", selection: Binding(get: { cost.untrackedOwner ?? "" },
+                                              set: { cost.untrackedOwner = $0.isEmpty ? nil : $0 })) {
+                    Text("No Account").tag("")
+                    ForEach(accounts.accounts) { Text($0.email).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
+    }
 
     var body: some View {
-        let s = cost.summary
+        let s = filter.isEmpty ? cost.summary : cost.byAccount[filter == "-" ? "" : filter] ?? CostTracker.Summary()
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                Picker("Account", selection: $filter) {
+                    Text("All Accounts").tag("")
+                    ForEach(cost.summary.accounts, id: \.id) { row in
+                        Text(name(row.id)).tag(row.id.isEmpty ? "-" : row.id)
+                    }
+                }
+                .frame(maxWidth: 320)
                 HStack {
                     Stat(title: "Today", value: s.today)
                     Stat(title: "7 Days", value: s.week)
@@ -335,9 +419,15 @@ private struct CostPage: View {
                     }
                 }
                 DayBars(days: s.days)
+                if filter.isEmpty {
+                    Breakdown(title: "By Account, 30 Days", rows: s.accounts.map { (name($0.id), $0.cost) })
+                    untrackedChoice
+                }
                 Breakdown(title: "By Model, 30 Days", rows: Array(s.models.prefix(6)))
                 Breakdown(title: "By Project, 30 Days", rows: Array(s.projects.prefix(8)))
-                Text("What Claude Code's tokens would cost at API prices, from its transcripts. Your plan isn't billed this way.")
+                Text("What Claude Code's tokens would cost at API prices, from its transcripts. Your plan isn't billed "
+                     + "this way. Each message counts toward the account in use at the time; Before Tracking is cost from "
+                     + "before Notchling followed which account was in use.")
                     .font(.caption).foregroundColor(.secondary)
             }
             .padding(20)
@@ -409,5 +499,40 @@ private struct Breakdown: View {
                 }
             }
         }
+    }
+}
+
+private struct SettingsPage: View {
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        Form {
+            Section("Keep Mac Awake") {
+                Picker("Keep awake", selection: $settings.awakeMode) {
+                    ForEach(AwakeMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Toggle("Keep display on", isOn: $settings.keepDisplayOn)
+            }
+            Section("Notch") {
+                Toggle("Show agents in the notch", isOn: $settings.showNotch)
+                Picker("Width", selection: $settings.notchWidth) {
+                    ForEach(NotchWidth.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Toggle("Animate pet", isOn: $settings.animatePet)
+            }
+            Section {
+                Toggle("Answer prompts from the notch", isOn: $settings.answerFromNotch)
+            } header: {
+                Text("Claude Code")
+            } footer: {
+                Text("Adds a hook to ~/.claude/settings.json so questions and permission prompts can be answered here.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            Section("General") {
+                Toggle("Launch at login", isOn: $settings.launchAtLogin)
+            }
+        }
+        .formStyle(.grouped)
     }
 }

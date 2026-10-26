@@ -13,13 +13,18 @@ final class CostTracker: ObservableObject {
         /// The last 30 days, most expensive first.
         var models: [(name: String, cost: Double)] = []
         var projects: [(name: String, cost: Double)] = []
+        /// The last 30 days by account id; "" is cost from before Notchling tracked accounts.
+        var accounts: [(id: String, cost: Double)] = []
 
         static func == (a: Summary, b: Summary) -> Bool {
             a.month == b.month && a.today == b.today && a.days.map(\.cost) == b.days.map(\.cost)
+                && a.accounts.map(\.cost) == b.accounts.map(\.cost)
         }
     }
 
     @Published private(set) var summary = Summary()
+    /// The same summary for each account alone, by account id ("" before accounts were tracked).
+    @Published private(set) var byAccount: [String: Summary] = [:]
     @Published private(set) var scanned: Date?
     /// Called on the main thread when the summary changes.
     var changed: (() -> Void)?
@@ -42,12 +47,15 @@ final class CostTracker: ObservableObject {
             let dirty = self.scan()
             self.prune()
             if dirty { self.persist() }
-            let summary = self.summarize()
+            let summary = self.summarize(account: nil)
+            let ids = Set(self.cache?.models.values.flatMap { $0.keys.map(self.owner) } ?? [])
+            let byAccount = Dictionary(uniqueKeysWithValues: ids.map { ($0, self.summarize(account: $0)) })
             DispatchQueue.main.async {
                 self.scanning = false
                 self.scanned = Date()
-                if summary != self.summary {
+                if summary != self.summary || byAccount != self.byAccount {
                     self.summary = summary
+                    self.byAccount = byAccount
                     self.changed?()
                 }
             }
@@ -59,20 +67,40 @@ final class CostTracker: ObservableObject {
     private struct Mark: Codable { var size: UInt64; var offset: UInt64 }
 
     private struct Cache: Codable {
-        var version = 1
+        var version = Cache.current
         var files: [String: Mark] = [:]
-        /// Day ("2026-10-26", local time) → model id → dollars.
+        /// Day ("2026-10-26", local time) → "account id, tab, model id" → dollars. Projects likewise.
         var models: [String: [String: Double]] = [:]
         var projects: [String: [String: Double]] = [:]
         /// Day → hashes of the message ids counted on that day, as packed UInt64s.
         var seen: [String: Data] = [:]
+
+        /// Version 2 added the account to every key; older caches are read again from scratch.
+        static let current = 2
+    }
+
+    private var log: [AccountLog.Entry] = []
+
+    /// The account cost from before tracking is counted toward, picked on the Token Cost tab.
+    var untrackedOwner: String? {
+        get { UserDefaults.standard.string(forKey: "untrackedCostAccount") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "untrackedCostAccount")
+            refresh()
+        }
+    }
+
+    private static func key(_ account: String, _ name: String) -> String { "\(account)\t\(name)" }
+    private static func account(of key: String) -> String { String(key.prefix { $0 != "\t" }) }
+    private static func name(of key: String) -> String {
+        key.firstIndex(of: "\t").map { String(key[key.index(after: $0)...]) } ?? key
     }
 
     private var seenToday: [String: [UInt64]] = [:]
 
     private func load() {
         if let data = try? Data(contentsOf: Self.cacheURL), let saved = try? JSONDecoder().decode(Cache.self, from: data),
-           saved.version == 1 {
+           saved.version == Cache.current {
             cache = saved
             for (day, packed) in saved.seen {
                 let hashes = packed.withUnsafeBytes { Array($0.bindMemory(to: UInt64.self)) }
@@ -106,6 +134,7 @@ final class CostTracker: ObservableObject {
     /// True when anything new was counted or a read offset moved.
     private func scan() -> Bool {
         guard cache != nil else { return false }
+        log = AccountLog.load()
         let since = Date().addingTimeInterval(-31 * 86400)
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
         guard let walk = FileManager.default.enumerator(at: Self.projectsDir, includingPropertiesForKeys: keys) else { return false }
@@ -180,8 +209,9 @@ final class CostTracker: ObservableObject {
         let cost = Self.cost(model: model, usage: usage)
         guard cost > 0 else { return }
         let name = (object["cwd"] as? String).map { ($0 as NSString).lastPathComponent } ?? project
-        cache?.models[day, default: [:]][Self.modelKey(model), default: 0] += cost
-        cache?.projects[day, default: [:]][name, default: 0] += cost
+        let account = AccountLog.account(at: date, in: log)
+        cache?.models[day, default: [:]][Self.key(account, Self.modelKey(model)), default: 0] += cost
+        cache?.projects[day, default: [:]][Self.key(account, name), default: 0] += cost
     }
 
     // MARK: Prices
@@ -234,28 +264,41 @@ final class CostTracker: ObservableObject {
 
     // MARK: Summary
 
-    private func summarize() -> Summary {
+    /// Totals for one account, or for all of them when `account` is nil.
+    private func summarize(account: String?) -> Summary {
         guard let cache else { return Summary() }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        func total(_ day: Date) -> Double { cache.models[Self.dayKey(day)]?.values.reduce(0, +) ?? 0 }
         func back(_ n: Int) -> Date { calendar.date(byAdding: .day, value: -n, to: today) ?? today.addingTimeInterval(-Double(n) * 86400) }
+        func included(_ key: String) -> Bool { account == nil || owner(key) == account }
+        func total(_ day: String) -> Double {
+            (cache.models[day] ?? [:]).reduce(0) { included($1.key) ? $0 + $1.value : $0 }
+        }
 
         var s = Summary()
-        s.days = (0..<14).reversed().map { (back($0), total(back($0))) }
-        s.today = total(today)
-        s.week = (0..<7).map { total(back($0)) }.reduce(0, +)
+        s.days = (0..<14).reversed().map { (back($0), total(Self.dayKey(back($0)))) }
+        s.today = total(Self.dayKey(today))
+        s.week = (0..<7).map { total(Self.dayKey(back($0))) }.reduce(0, +)
         let month = Set((0..<30).map { Self.dayKey(back($0)) })
-        s.month = month.map { cache.models[$0]?.values.reduce(0, +) ?? 0 }.reduce(0, +)
+        s.month = month.map(total).reduce(0, +)
 
         func ranked(_ table: [String: [String: Double]], name: (String) -> String) -> [(String, Double)] {
             var sums: [String: Double] = [:]
-            for day in month { for (k, v) in table[day] ?? [:] { sums[name(k), default: 0] += v } }
+            for day in month {
+                for (k, v) in table[day] ?? [:] where included(k) { sums[name(k), default: 0] += v }
+            }
             return sums.filter { $0.value >= 0.01 }.sorted { $0.value > $1.value }
         }
-        s.models = ranked(cache.models, name: Self.displayName)
-        s.projects = ranked(cache.projects, name: { $0 })
+        s.models = ranked(cache.models) { Self.displayName(Self.name(of: $0)) }
+        s.projects = ranked(cache.projects) { Self.name(of: $0) }
+        s.accounts = ranked(cache.models, name: owner)
         return s
+    }
+
+    /// The account a cost key counts toward, with untracked cost moved to the chosen account.
+    private func owner(_ key: String) -> String {
+        let account = Self.account(of: key)
+        return account.isEmpty ? untrackedOwner ?? "" : account
     }
 
     // MARK: Helpers

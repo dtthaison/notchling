@@ -71,6 +71,7 @@ final class AccountStore: ObservableObject {
         queue.async {
             var state = self.snapshot()
             Self.capture(&state, known: &self.known)
+            AccountLog.seedIfMissing(state.accounts.map(\.id))
             Self.fetchUsage(&state, force: force)
             DispatchQueue.main.async {
                 self.syncing = false
@@ -169,6 +170,7 @@ final class AccountStore: ObservableObject {
         activeID = state.activeID
         usage = state.usage
         lastSync = Date()
+        if let id = activeID { AccountLog.record(id) }
         save()
         if before.0 != accounts || before.1 != activeID || before.2 != usage { changed?() }
     }
@@ -431,6 +433,55 @@ final class AccountStore: ObservableObject {
     }
 }
 
+/// When each account became the one Claude Code uses. Transcripts don't say which account a message
+/// went to, so cost is split by the account that was active at the message's time.
+enum AccountLog {
+    private static let url = HookBridge.dir.appendingPathComponent("account-log.json")
+    private static let lock = NSLock()
+
+    struct Entry: Codable {
+        var at: Date
+        var id: String
+    }
+
+    static func load() -> [Entry] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
+    }
+
+    /// Before the log existed, each account became active when Notchling first saved it, which is when
+    /// its Keychain item was created. Starts the log from those times.
+    static func seedIfMissing(_ ids: [String]) {
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        let entries = ids.compactMap { id in
+            Keychain.created(service: "Notchling Accounts", account: id).map { Entry(at: $0, id: id) }
+        }.sorted { $0.at < $1.at }
+        write(entries)
+    }
+
+    private static func write(_ entries: [Entry]) {
+        lock.lock()
+        defer { lock.unlock() }
+        try? FileManager.default.createDirectory(at: HookBridge.dir, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(entries) { try? data.write(to: url, options: .atomic) }
+    }
+
+    /// Adds an entry when the active account differs from the last one logged.
+    static func record(_ id: String) {
+        var entries = load()
+        guard entries.last?.id != id else { return }
+        entries.append(Entry(at: Date(), id: id))
+        write(entries)
+    }
+
+    /// The account active at `date`; empty before the log starts.
+    static func account(at date: Date, in entries: [Entry]) -> String {
+        entries.last { $0.at <= date }?.id ?? ""
+    }
+}
+
 struct AccountError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
@@ -458,6 +509,17 @@ enum Keychain {
             return run(["-i"], input: command).0 == 0
         }
         return run(["add-generic-password", "-U", "-a", account, "-s", service, "-X", hex], input: nil).0 == 0
+    }
+
+    /// When the item was first added, from the "cdat" attribute.
+    static func created(service: String, account: String) -> Date? {
+        let (status, out) = run(["find-generic-password", "-s", service, "-a", account], input: nil)
+        guard status == 0, let range = out.range(of: #""(\d{14})Z"#, options: .regularExpression) else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyyMMddHHmmss"
+        return f.date(from: String(out[range].dropFirst().prefix(14)))
     }
 
     static func delete(service: String, account: String) {
