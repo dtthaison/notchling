@@ -101,16 +101,18 @@ final class AntigravityStore: ObservableObject {
         busy = true
         queue.async {
             var state = self.capture()
+            var reopen: [String] = []
             let result = Result(catching: {
                 guard let login = Keychain.read(service: Self.service, account: id) else {
                     throw AccountError("Notchling has no saved login for this account. Add it again.")
                 }
-                let reopen = try Self.quitApps()
+                reopen = try Self.quitApps()
                 try Self.writeLogin(login)
                 self.lastSaved = login
                 state.activeID = id
-                Self.open(reopen)
             })
+            // Always end with Antigravity open on the switched-to account, even if it wasn't running.
+            Self.open(reopen.isEmpty ? [Self.bundleIDs[0]] : reopen)
             DispatchQueue.main.async {
                 self.busy = false
                 self.apply(state)
