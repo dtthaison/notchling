@@ -5,11 +5,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let awake = AwakeController()
     private let monitor = AgentMonitor()
     private let notch = NotchController()
+    private let accounts = AccountStore()
+    private let cost = CostTracker()
+    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, cost: cost)
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
     private var lastGroups: [String: AgentGroup]?
     private var timer: Timer?
     private var seenRequests = Set<String>()
+    private var usageTimer: Timer?
+    /// Rows in the open menu, updated in place when limits arrive.
+    private var accountRows: [String: AccountRowView] = [:]
+    private var costChart: CostChartView?
 
     /// Completed agents the user cleared, keyed by id, with the time they were cleared at.
     private var dismissed: [String: Double] {
@@ -42,6 +49,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh()
         if showNotch { notch.show() }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
+
+        accounts.changed = { [weak self] in self?.updateUsageViews() }
+        cost.changed = { [weak self] in self?.updateUsageViews() }
+        accounts.sync()
+        cost.refresh()
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.accounts.sync()
+            self?.cost.refresh()
+        }
     }
 
     private var answerFromNotch: Bool {
@@ -71,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents"] {
+        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents", "accounts"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -128,7 +144,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.image = image
 
         button.title = ""
-        button.toolTip = "Keep awake: \(awake.mode.title)\(on ? " (on now)" : "")"
+        var tip = "Keep awake: \(awake.mode.title)\(on ? " (on now)" : "")"
+        if let account = accounts.active, let usage = accounts.usage[account.id] {
+            let parts = [usage.session.map { "5h \(Int($0.percent.rounded()))%" }, usage.week.map { "week \(Int($0.percent.rounded()))%" }]
+            tip += "\n\(account.email): " + parts.compactMap { $0 }.joined(separator: ", ")
+        }
+        button.toolTip = tip
     }
 
     /// Peeks out of the notch when an agent replies (starts needing input or finishes) or asks a question.
@@ -157,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         refresh()
         menu.removeAllItems()
+        addUsageItems(to: menu)
+        menu.addItem(.separator())
 
         menu.addItem(header("Keep Mac Awake"))
         for mode in AwakeMode.allCases {
@@ -198,6 +221,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = action("Quit Notchling", #selector(quit))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
+    }
+
+    // MARK: - Accounts and cost
+
+    private func addUsageItems(to menu: NSMenu) {
+        if accounts.lastSync.map({ Date().timeIntervalSince($0) > 30 }) ?? true { accounts.sync() }
+        if cost.scanned.map({ Date().timeIntervalSince($0) > 30 }) ?? true { cost.refresh() }
+
+        menu.addItem(header("Claude Accounts"))
+        accountRows = [:]
+        if accounts.accounts.isEmpty {
+            menu.addItem(disabled("Not signed in to Claude Code"))
+        }
+        for account in accounts.accounts {
+            let row = AccountRowView(account: account, usage: accounts.usage[account.id], isActive: account.id == accounts.activeID)
+            row.onClick = { [weak self] in self?.switchAccount(account.id) }
+            let item = action(account.email, #selector(switchAccountItem(_:)))
+            item.representedObject = account.id
+            item.view = row
+            accountRows[account.id] = row
+            menu.addItem(item)
+        }
+        menu.addItem(action("Add Account…", #selector(addAccount)))
+        menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
+
+        let costItem = NSMenuItem(title: costTitle, action: nil, keyEquivalent: "")
+        costItem.submenu = costMenu()
+        menu.addItem(costItem)
+    }
+
+    private var costTitle: String {
+        cost.scanned == nil ? "Token Cost" : "Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
+    }
+
+    private func costMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let summary = cost.summary
+        let chart = CostChartView(summary: summary)
+        costChart = chart
+        let chartItem = NSMenuItem()
+        chartItem.view = chart
+        menu.addItem(chartItem)
+        if cost.scanned == nil { menu.addItem(disabled("Reading transcripts…")) }
+        if !summary.models.isEmpty {
+            menu.addItem(header("By Model, 30 Days"))
+            summary.models.prefix(6).forEach { menu.addItem(valueItem($0.name, $0.cost)) }
+        }
+        if !summary.projects.isEmpty {
+            menu.addItem(header("By Project, 30 Days"))
+            summary.projects.prefix(8).forEach { menu.addItem(valueItem($0.name, $0.cost)) }
+        }
+        menu.addItem(.separator())
+        let details = action("Show Details…", #selector(showCost))
+        menu.addItem(details)
+        menu.addItem(disabled("At API prices, from Claude Code transcripts"))
+        return menu
+    }
+
+    /// "Opus 5.5 ……… $512.30" with the amount right-aligned.
+    private func valueItem(_ name: String, _ value: Double) -> NSMenuItem {
+        let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+        let style = NSMutableParagraphStyle()
+        style.tabStops = [NSTextTab(textAlignment: .right, location: 260)]
+        item.attributedTitle = NSAttributedString(string: "\(name)\t\(CostChartView.dollars(value))", attributes: [
+            .paragraphStyle: style, .font: NSFont.menuFont(ofSize: 0),
+        ])
+        return item
+    }
+
+    /// Limits or cost arrived while the menu may be open: redraw what's on screen.
+    private func updateUsageViews() {
+        for (id, row) in accountRows {
+            guard let account = accounts.accounts.first(where: { $0.id == id }) else { continue }
+            row.account = account
+            row.isActive = id == accounts.activeID
+            row.usage = accounts.usage[id]
+            row.relayout()
+        }
+        costChart?.summary = cost.summary
+        updateButton()
+    }
+
+    @objc private func switchAccountItem(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { switchAccount(id) }
+    }
+
+    private func switchAccount(_ id: String) {
+        guard id != accounts.activeID else { return }
+        accounts.switchTo(id) { error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Couldn't switch accounts"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    /// Signs in from the Claude Accounts window; Claude Code stays on the account it's using.
+    @objc private func addAccount() {
+        accountsWindow.show(.accounts, signIn: true)
+    }
+
+    @objc private func manageAccounts() {
+        accountsWindow.show(.accounts)
+    }
+
+    @objc private func showCost() {
+        accountsWindow.show(.cost)
     }
 
     private func header(_ title: String) -> NSMenuItem {
