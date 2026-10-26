@@ -1091,10 +1091,16 @@ struct DetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             conversation(showNeeds: question == nil && permission == nil)
+            // Cards keep their full height and the conversation above gives way; squeezed, the
+            // wrapped option text spills out of its buttons and overlaps.
             if let permission {
                 PermissionCard(model: model, agent: agent, request: permission)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
             } else if let question {
                 QuestionCard(model: model, agent: agent, question: question)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
             } else if agent.canReply {
                 replyBox
             } else {
