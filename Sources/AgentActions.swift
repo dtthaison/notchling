@@ -18,6 +18,19 @@ enum AgentActions {
     private static func jump(to pid: pid_t, cwd: String) -> Bool {
         guard let app = hostApp(of: pid) else { return false }
 
+        // The Claude app hosts many Code sessions in one window; activating it shows whatever was
+        // last open (often Chat), so ask it for this session by its own id.
+        if app.bundleIdentifier == "com.anthropic.claudefordesktop",
+           let id = desktopSessionID(of: pid),
+           let url = URL(string: "claude://code/continue?session=\(id)") {
+            // We're a background app, so macOS won't bring Claude forward for the link on its own.
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open(url, configuration: configuration)
+            if #available(macOS 14, *) { app.activate() } else { app.activate(options: []) }
+            return true
+        }
+
         switch (app.bundleIdentifier, ttyPath(of: pid)) {
         case ("com.apple.Terminal", let tty?):
             runAppleScript("""
@@ -57,6 +70,19 @@ enum AgentActions {
         }
         if #available(macOS 14, *) { app.activate() } else { app.activate(options: []) }
         return true
+    }
+
+    /// The Claude app's own id for a session it hosts ("local_…"), from Claude Code's per-process
+    /// file. Only ids the app's deep link accepts come back.
+    private static func desktopSessionID(of pid: pid_t) -> String? {
+        let file = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/sessions/\(pid).json")
+        guard let data = try? Data(contentsOf: file),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let id = json["hostSessionId"] as? String,
+              id.range(of: #"^local_[A-Za-z0-9-]{1,64}$"#, options: .regularExpression) != nil
+        else { return nil }
+        return id
     }
 
     private static func runAppleScript(_ source: String) {
