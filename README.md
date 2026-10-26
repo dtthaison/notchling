@@ -11,7 +11,8 @@ A small macOS menu bar app for people who run several [Claude Code](https://clau
 - **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`.
 - **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
 - **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
-- **Switches Claude accounts.** Every account you sign in to is saved, and one click in the menu points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
+- **Switches Claude Code accounts.** Every account you sign in to is saved, and one click in the menu points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
+- **Switches Claude Desktop accounts.** The Claude desktop app's account is swapped too (by restoring its saved session and restarting it). Accounts are shared with the Claude Code list; an account can be switched to once it has been signed in to in Desktop at least once.
 - **Switches Antigravity accounts.** Each Google account you sign in to Antigravity with is saved too. Switching restarts Antigravity on the other account, with no new sign-in. The account in use shows its Gemini, Claude/GPT and Gemini 4 Argon limits while Antigravity is open.
 - **Shows token cost.** What your Claude Code use would cost at API prices: today, 7 and 30 days, a 14-day chart, and totals by model and by project.
 - **Has a pet.** A little green monster web-swings along the whole menu bar while agents work: at the top of each swing it lets go, tumbles through the air, shoots a strand of silk to the edge ahead and swings on that. It picks a spot along the bar, heads there with long hops and short ones, rests to wave or doze when it arrives, then picks another. Each strand gets its own length, swing and poses. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. Turn the movement off with **Animate Pet**.
@@ -43,10 +44,10 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 
 | Item | What it does |
 |---|---|
-| Claude Accounts | One row per saved account with its limits; click one to switch Claude Code to it |
-| Add Account… | Opens the Claude Accounts window and signs in to another account in the browser |
-| Manage Accounts… | The Claude Accounts window: every account with its limits, Switch, Remove, and a Token Cost tab |
+| Claude Code | The account in use with its limits, and Switch Account with every saved one plus Add Account… |
+| Claude Desktop | The account the desktop app is on, and Switch Account with the ones Notchling has captured plus Add Account… |
 | Antigravity | The Google account Antigravity is on, and Switch Account with every saved one plus Add Account… |
+| Manage Accounts… | The accounts window: a tab per provider (Claude Code, Claude Desktop, Antigravity), plus Token Cost and Settings |
 | Token Cost | Cost at API prices by day, model and project |
 | Keep Mac Awake → Off / Always On / While Agents Are Working | Holds a power assertion so the Mac doesn't idle-sleep |
 | Keep Display On | Keeps the screen awake as well |
@@ -85,6 +86,8 @@ The hook writes the request to `~/Library/Application Support/Notchling/requests
 
 Unlike Claude Code, switching here **restarts** Antigravity rather than being seamless, limits and plan show only while it is open, and an account appears only after it has been signed in while Notchling was running.
 
+**Claude Desktop.** The desktop app (`com.anthropic.claudefordesktop`) is a separate login from Claude Code, though the OAuth tokens are the same system. What decides its account is the claude.ai **web session cookies** in `~/Library/Application Support/Claude/Cookies`, not the token — so, like Antigravity, Notchling captures the whole Cookies file while an account is active and restores it to switch, setting `lastKnownAccountUuid` and restarting the app. Accounts are matched to the Claude Code list by account UUID. **Add Account** reopens Desktop signed out (the Cookies file is removed, backed up as `Cookies.notchling-backup`) so you can sign in to another account, which is then captured; cancelling puts the previous account back. An account can only be switched to after it has been signed in to in Desktop once, since that is the only way its cookies exist. Captured sessions live in `~/Library/Application Support/Notchling/desktop/<uuid>.cookies`.
+
 **Cost** is estimated from the `usage` of every assistant message in the transcripts of the last 30 days, each message counted once, with cache writes and reads priced separately. Totals and read positions are cached in `cost-cache.json`, so only new lines are read after the first scan.
 
 ## Project layout
@@ -102,6 +105,7 @@ Sources/
   SlashCommands.swift     built-in, user, project and plugin commands for completion
   Accounts.swift          saved logins, switching, limits from the usage endpoint
   Antigravity.swift       saved Antigravity logins and switching
+  ClaudeDesktop.swift     Claude Desktop cookie-session capture and switching
   CostTracker.swift       token cost at API prices from transcripts
   UsageMenuViews.swift    the account rows and cost chart in the menu
   AccountLogin.swift      in-app OAuth sign-in for adding an account
@@ -117,4 +121,4 @@ Icon/make-icon.swift      draws the app icon
 1. Turn off **Answer Prompts from the Notch** so the hook entries are removed from `~/.claude/settings.json`.
 2. Turn off **Launch at Login**, then quit Notchling.
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
-4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access.
+4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access, and remove `~/Library/Application Support/Notchling/` (captured Claude Desktop sessions).

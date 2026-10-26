@@ -183,6 +183,7 @@ struct AccountsView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
+                    .pointerCursor()
                     .help("Refresh accounts, limits and cost")
                     .padding(.trailing, 16)
                 }
@@ -265,6 +266,73 @@ private struct AccountsPage: View {
 
 extension ClaudeAccount: Identifiable {}
 
+extension View {
+    /// The pointing-hand cursor while hovering, so clickable things read as clickable.
+    func pointerCursor() -> some View {
+        onHover { inside in
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+}
+
+/// One account row, shared by Claude Code, Claude Desktop and Antigravity: avatar, email and a
+/// subtitle, an In Use badge or a Switch button, a ⋯ menu, and whatever limits/cost the provider
+/// passes as `content`.
+struct AccountRow<Content: View>: View {
+    let email: String
+    let subtitle: String
+    let isActive: Bool
+    var busy = false
+    var onSwitch: (() -> Void)?
+    var menuItems: [(title: String, action: () -> Void)] = []
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
+                    Text(email.prefix(1).uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(isActive ? .white : .primary)
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    Text(subtitle).font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if isActive {
+                    Text("In Use")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                } else if let onSwitch {
+                    Button("Switch", action: onSwitch).disabled(busy).pointerCursor()
+                }
+                if !menuItems.isEmpty {
+                    Menu {
+                        ForEach(menuItems.indices, id: \.self) { i in
+                            Button(menuItems[i].title, action: menuItems[i].action)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .pointerCursor()
+                }
+            }
+            content()
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
+    }
+}
+
 private struct AccountCard: View {
     let account: ClaudeAccount
     let usage: AccountUsage?
@@ -275,37 +343,9 @@ private struct AccountCard: View {
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
-                    Text(account.email.prefix(1).uppercased())
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(isActive ? .white : .primary)
-                }
-                .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                    Text(account.plan).font(.caption).foregroundColor(.secondary)
-                }
-                Spacer()
-                if isActive {
-                    Text("In Use")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                } else {
-                    Button("Switch", action: onSwitch).disabled(busy)
-                }
-                Menu {
-                    Button("Remove…", action: onRemove)
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
+        AccountRow(email: account.email, subtitle: account.plan, isActive: isActive, busy: busy,
+                   onSwitch: account.needsLogin ? nil : onSwitch,
+                   menuItems: [("Remove…", onRemove)]) {
             if account.needsLogin {
                 Label("Signed out. Add this account again to sign in.", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundColor(.orange)
@@ -329,10 +369,6 @@ private struct AccountCard: View {
                 .foregroundColor(.secondary)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
 
@@ -408,14 +444,14 @@ private struct DesktopPage: View {
                     Text("Notchling saves it as soon as you're signed in.").font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
-                Button("Cancel") { desktop.cancelAdd() }
+                Button("Cancel") { desktop.cancelAdd() }.pointerCursor()
             }
         } else {
             HStack {
                 Text("Claude Desktop opens signed out so you can sign in to another account.")
                     .font(.callout).foregroundColor(.secondary)
                 Spacer()
-                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(desktop.busy)
+                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(desktop.busy).pointerCursor()
             }
         }
     }
@@ -448,37 +484,9 @@ private struct DesktopCard: View {
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle().fill(active ? Color.accentColor : Color.secondary.opacity(0.25))
-                Text(account.email.prefix(1).uppercased())
-                    .font(.system(size: 14, weight: .semibold)).foregroundColor(active ? .white : .primary)
-            }
-            .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                Text(account.plan).font(.caption).foregroundColor(.secondary)
-            }
-            Spacer()
-            if active {
-                Text("In Use").font(.caption.weight(.semibold)).foregroundColor(.accentColor)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-            } else if switchable {
-                Button("Switch", action: onSwitch).disabled(busy)
-            }
-            Menu {
-                Button("Remove from List…", action: onRemove)
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(active ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
+        AccountRow(email: account.email, subtitle: account.plan, isActive: active, busy: busy,
+                   onSwitch: switchable ? onSwitch : nil,
+                   menuItems: [("Remove from List…", onRemove)]) { EmptyView() }
     }
 }
 
@@ -518,7 +526,7 @@ private struct SignInPanel: View {
                 Text("Sign in to another Claude account to switch to it from here.")
                     .font(.callout).foregroundColor(.secondary)
                 Spacer()
-                Button("Add Account") { signIn.start() }.keyboardShortcut(.defaultAction)
+                Button("Add Account") { signIn.start() }.keyboardShortcut(.defaultAction).pointerCursor()
             }
         case .waiting(let url):
             VStack(alignment: .leading, spacing: 8) {
@@ -529,13 +537,14 @@ private struct SignInPanel: View {
                 Text("Browser already signed in to a different account? Copy the link into a private window.")
                     .font(.caption).foregroundColor(.secondary)
                 HStack {
-                    Button("Open Again") { NSWorkspace.shared.open(url) }
+                    Button("Open Again") { NSWorkspace.shared.open(url) }.pointerCursor()
                     Button("Copy Link") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url.absoluteString, forType: .string)
                     }
+                    .pointerCursor()
                     Spacer()
-                    Button("Cancel") { signIn.cancel() }
+                    Button("Cancel") { signIn.cancel() }.pointerCursor()
                 }
             }
         case .saving:
@@ -548,15 +557,15 @@ private struct SignInPanel: View {
             HStack {
                 Label("Added \(email).", systemImage: "checkmark.circle.fill").foregroundColor(.green).font(.callout)
                 Spacer()
-                Button("Add Another") { signIn.start() }
-                Button("Done") { signIn.phase = .idle }
+                Button("Add Another") { signIn.start() }.pointerCursor()
+                Button("Done") { signIn.phase = .idle }.pointerCursor()
             }
         case .failed(let message):
             HStack {
                 Label(message, systemImage: "exclamationmark.triangle.fill").foregroundColor(.orange).font(.callout)
                 Spacer()
-                Button("Try Again") { signIn.start() }
-                Button("Cancel") { signIn.phase = .idle }
+                Button("Try Again") { signIn.start() }.pointerCursor()
+                Button("Cancel") { signIn.phase = .idle }.pointerCursor()
             }
         }
     }
@@ -798,14 +807,14 @@ private struct AntigravityPage: View {
                     Text("Notchling saves it as soon as you're signed in.").font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
-                Button("Cancel") { store.cancelAdd() }
+                Button("Cancel") { store.cancelAdd() }.pointerCursor()
             }
         } else {
             HStack {
                 Text("Antigravity opens signed out so you can sign in to another Google account.")
                     .font(.callout).foregroundColor(.secondary)
                 Spacer()
-                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(store.busy)
+                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(store.busy).pointerCursor()
             }
         }
     }
@@ -833,37 +842,8 @@ private struct AntigravityCard: View {
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
-                    Text(account.email.prefix(1).uppercased())
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(isActive ? .white : .primary)
-                }
-                .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                    Text(account.plan ?? "Google Account").font(.caption).foregroundColor(.secondary)
-                }
-                Spacer()
-                if isActive {
-                    Text("In Use")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                } else {
-                    Button("Switch", action: onSwitch).disabled(busy)
-                }
-                Menu {
-                    Button("Remove…", action: onRemove)
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
+        AccountRow(email: account.email, subtitle: account.plan ?? "Google Account", isActive: isActive,
+                   busy: busy, onSwitch: onSwitch, menuItems: [("Remove…", onRemove)]) {
             if let usage {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(usage.groups.indices, id: \.self) { i in
@@ -882,9 +862,5 @@ private struct AntigravityCard: View {
                 Text("Open Antigravity to read its limits.").font(.caption).foregroundColor(.secondary)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }

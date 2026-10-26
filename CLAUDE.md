@@ -17,6 +17,7 @@ This environment can't take screenshots, and screenshots the user pastes from th
 - Question and permission cards report their real height through `CardHeightKey` → `model.cardHeight`; don't go back to estimating heights.
 - `PetView` keeps its position in a `Walk` object between frames; its path is computed from the shape, not from the clock.
 - The hook (`Notchling --hook`) is a separate short-lived process. It talks to the app only through files in `~/Library/Application Support/Notchling/` and must always exit with a valid answer or a pass, never hang Claude Code beyond its 300 s timeout.
+- Accounts are three providers off one window (a tab each: Claude Code, Claude Desktop, Antigravity) and three menu sections. Every account card is the shared `AccountRow` view in `AccountsWindow.swift` (avatar, email, subtitle, In Use/Switch, ⋯ menu, and a `content` closure for limits/cost) — reuse it, don't hand-roll another card. Clickable SwiftUI controls get `.pointerCursor()`; clickable NSViews (the menu rows) get `resetCursorRects` with `.pointingHand`.
 
 ## Things that bit before
 

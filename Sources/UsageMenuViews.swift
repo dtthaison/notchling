@@ -123,6 +123,8 @@ final class AccountRowView: NSView {
                                        owner: self))
     }
 
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
     override func mouseEntered(with event: NSEvent) { needsDisplay = true }
     override func mouseExited(with event: NSEvent) { needsDisplay = true }
 
@@ -232,6 +234,8 @@ final class AntigravityRowView: NSView {
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self))
     }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func mouseEntered(with event: NSEvent) { needsDisplay = true }
     override func mouseExited(with event: NSEvent) { needsDisplay = true }

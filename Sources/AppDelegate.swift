@@ -279,7 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(header("Claude Desktop"))
         if claudeDesktop.adding {
             menu.addItem(disabled("Waiting for you to sign in…"))
-        } else if let uuid = claudeDesktop.activeUuid {
+            menu.addItem(action("Cancel Add Account", #selector(cancelDesktopAdd)))
+            return
+        }
+        if let uuid = claudeDesktop.activeUuid {
             let email = accounts.accounts.first { $0.id.hasPrefix(uuid) }?.email ?? "Signed in"
             let item = action(email, #selector(manageAccounts))
             item.state = .on
@@ -292,6 +295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(switchItem)
     }
 
+    @objc private func cancelDesktopAdd() { claudeDesktop.cancelAdd() }
+
     /// The Google account Antigravity is on, and the others to switch to.
     private func addAntigravityItems(to menu: NSMenu) {
         guard antigravity.isAvailable else { return }
@@ -300,7 +305,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(header("Antigravity"))
         if antigravity.adding {
             menu.addItem(disabled("Waiting for you to sign in…"))
-        } else if let account = antigravity.active {
+            menu.addItem(action("Cancel Add Account", #selector(cancelAntigravityAdd)))
+            return
+        }
+        if let account = antigravity.active {
             let row = AntigravityRowView(account: account, usage: antigravity.usage[account.id])
             row.onClick = { [weak self] in self?.manageAntigravity() }
             let item = action(account.email, #selector(manageAntigravity))
@@ -498,6 +506,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alert.runModal()
         }
     }
+
+    @objc private func cancelAntigravityAdd() { antigravity.cancelAdd() }
 
     @objc private func switchAntigravityItem(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, id != antigravity.activeID else { return }
