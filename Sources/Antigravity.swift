@@ -55,6 +55,11 @@ final class AntigravityStore: ObservableObject {
     static let tokenURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".gemini/jetski-standalone-oauth-token")
     private static let bundleIDs = ["com.google.antigravity", "com.google.antigravity-ide"]
+    /// Antigravity's own login, where it restores from at launch (go-keyring in the login Keychain).
+    /// The token file is only a mirror the standalone language server reads, so a switch must set both.
+    private static let liveService = "gemini"
+    private static let liveAccount = "antigravity"
+    private static let keyringPrefix = "go-keyring-base64:"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: "antigravityAccounts"),
@@ -78,7 +83,8 @@ final class AntigravityStore: ObservableObject {
             // Show the account list at once; the limits need the local server and can be slow.
             let state = self.capture()
             DispatchQueue.main.async { self.apply(state) }
-            guard let id = state.activeID, let snapshot = AntigravityQuota.fetch() else { return }
+            let email = state.accounts.first { $0.id == state.activeID }?.email
+            guard let id = state.activeID, let snapshot = AntigravityQuota.fetch(expectedEmail: email) else { return }
             DispatchQueue.main.async {
                 if let usage = snapshot.usage { self.usage[id] = usage }
                 if let plan = snapshot.plan, let i = self.accounts.firstIndex(where: { $0.id == id }) {
@@ -127,9 +133,7 @@ final class AntigravityStore: ObservableObject {
                     }
                 }
                 let reopen = try Self.quitApps()
-                if FileManager.default.fileExists(atPath: Self.tokenURL.path) {
-                    try FileManager.default.removeItem(at: Self.tokenURL)
-                }
+                Self.signOut()
                 self.lastSaved = nil
                 Self.open(reopen.isEmpty ? [Self.bundleIDs[0]] : reopen)
             })
@@ -150,7 +154,7 @@ final class AntigravityStore: ObservableObject {
     /// Stops waiting and, if nobody signed in yet, puts the previous login back.
     func cancelAdd() {
         stopWatching()
-        guard let previous = beforeAdd, !FileManager.default.fileExists(atPath: Self.tokenURL.path) else { return }
+        guard let previous = beforeAdd, Self.readLogin() == nil else { return }
         switchTo(previous) { _ in }
     }
 
@@ -225,19 +229,42 @@ final class AntigravityStore: ObservableObject {
         }
     }
 
-    // MARK: The login file
+    // MARK: The login
 
+    /// The login Antigravity would restore from: its Keychain item, else the file mirror.
     private static func readLogin() -> String? {
+        if let stored = Keychain.read(service: liveService, account: liveAccount), let json = decodeKeyring(stored) {
+            return json
+        }
         guard let data = try? Data(contentsOf: tokenURL), !data.isEmpty else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    /// Written whole and owner-only, like Antigravity writes it.
+    /// Sets both places Antigravity reads: its go-keyring Keychain item and the file the language
+    /// server reads. The Keychain item already exists (Antigravity made it), so an in-place update
+    /// keeps its access, which is why Antigravity can still read it.
     private static func writeLogin(_ login: String) throws {
+        let encoded = keyringPrefix + Data(login.utf8).base64EncodedString()
+        guard Keychain.write(service: liveService, account: liveAccount, value: encoded) else {
+            throw AccountError("Couldn't update Antigravity's saved login.")
+        }
         let dir = tokenURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data(login.utf8).write(to: tokenURL, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+    }
+
+    /// Clears Antigravity's login so it starts at the sign-in screen.
+    private static func signOut() {
+        Keychain.delete(service: liveService, account: liveAccount)
+        try? FileManager.default.removeItem(at: tokenURL)
+    }
+
+    /// go-keyring stores the JSON as "go-keyring-base64:<base64>".
+    private static func decodeKeyring(_ value: String) -> String? {
+        guard value.hasPrefix(keyringPrefix),
+              let data = Data(base64Encoded: String(value.dropFirst(keyringPrefix.count))) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// The account named by the id token's `sub` and `email`.
@@ -306,13 +333,16 @@ enum AntigravityQuota {
         var usage: AntigravityUsage?
     }
 
-    static func fetch() -> Snapshot? {
+    /// `expectedEmail` guards against reading while Antigravity is still loading another account:
+    /// if the server reports a different email, it hasn't caught up, so skip this round.
+    static func fetch(expectedEmail: String?) -> Snapshot? {
         guard let pid = pid(), let csrf = csrfToken(pid: pid) else { return nil }
         for port in ports(pid: pid) {
-            guard let quota = post("RetrieveUserQuotaSummary", port: port, csrf: csrf) else { continue }
-            let usage = parse(quota)
-            let plan = post("GetUserStatus", port: port, csrf: csrf).flatMap(planName)
-            return Snapshot(plan: plan, usage: usage)
+            guard let statusData = post("GetUserStatus", port: port, csrf: csrf) else { continue }
+            let status = parseStatus(statusData)
+            if let expectedEmail, let email = status.email, email != expectedEmail { return nil }
+            let usage = post("RetrieveUserQuotaSummary", port: port, csrf: csrf).flatMap(parse)
+            return Snapshot(plan: status.plan, usage: usage)
         }
         return nil
     }
@@ -369,13 +399,18 @@ enum AntigravityQuota {
         return result
     }
 
-    private static func planName(_ data: Data) -> String? {
+    /// The signed-in account's email and plan from GetUserStatus. The plan is `userTier.name` (the
+    /// real Antigravity tier, e.g. "Antigravity Starter Quota"), not `planInfo.planName` (which is the
+    /// underlying Codeium plan and always reads "Pro"). Shortened to just the tier word.
+    private static func parseStatus(_ data: Data) -> (email: String?, plan: String?) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let status = root["userStatus"] as? [String: Any],
-              let plan = status["planStatus"] as? [String: Any],
-              let info = plan["planInfo"] as? [String: Any],
-              let name = info["planName"] as? String, !name.isEmpty else { return nil }
-        return name
+              let status = root["userStatus"] as? [String: Any] else { return (nil, nil) }
+        let email = status["email"] as? String
+        let name = (status["userTier"] as? [String: Any]).flatMap { $0["name"] as? String }
+        let plan = name.map {
+            $0.replacingOccurrences(of: "Antigravity ", with: "").replacingOccurrences(of: " Quota", with: "")
+        }.flatMap { $0.isEmpty ? nil : $0 }
+        return (email, plan)
     }
 
     private static func parse(_ data: Data) -> AntigravityUsage? {
