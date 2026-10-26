@@ -37,6 +37,8 @@ final class NotchModel: ObservableObject {
 
     /// Size of the camera housing; zero width on screens without one.
     var notchSize = CGSize(width: 185, height: 32)
+    /// Distance from the camera's centre to the screen's left and right edges; the pet roams that far.
+    var screenSpan = (left: CGFloat(280), right: CGFloat(280))
     /// Called after anything that changes the panel's size.
     var layoutChanged: (() -> Void)?
     /// Asks the panel to take keyboard focus (for ⌘1…⌘9 and typing).

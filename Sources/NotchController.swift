@@ -32,9 +32,10 @@ final class NotchPanel: NSPanel {
     }
 }
 
-/// Owns the borderless panel that hangs from the camera notch. The panel is a fixed, transparent
-/// canvas that never resizes; only the black shape inside animates, so it always grows out of the
-/// top edge. Clicks outside the shape pass straight through to whatever is underneath.
+/// Owns the borderless panel that hangs from the camera notch. The panel is a transparent canvas, as
+/// wide as the screen, that only changes size with the display; only the black shape inside
+/// animates, so it always grows out of the top edge. Clicks outside the shape pass straight
+/// through to whatever is underneath.
 final class NotchController: NSObject, NSWindowDelegate {
     let model = NotchModel()
     private let panel: NotchPanel
@@ -44,7 +45,7 @@ final class NotchController: NSObject, NSWindowDelegate {
     private var monitors: [Any] = []
     private var mouseInside = false
 
-    /// Big enough for the largest state; anything outside the black shape is see-through.
+    /// The least the canvas covers, enough for the largest state; anything outside the black shape is see-through.
     static let canvas = CGSize(width: 560, height: 640)
 
     override init() {
@@ -117,7 +118,10 @@ final class NotchController: NSObject, NSWindowDelegate {
             model.notchSize = CGSize(width: 0, height: max(24, frame.maxY - (screen?.visibleFrame.maxY ?? frame.maxY)))
             centerX = frame.midX
         }
-        let size = Self.canvas
+        // As wide as the screen on both sides of the camera, so the pet can roam the whole bar.
+        let span = (left: centerX - frame.minX, right: frame.maxX - centerX)
+        model.screenSpan = span
+        let size = CGSize(width: max(Self.canvas.width, 2 * max(span.left, span.right)), height: Self.canvas.height)
         panel.setFrame(NSRect(x: centerX - size.width / 2, y: frame.maxY - size.height,
                               width: size.width, height: size.height), display: true)
     }

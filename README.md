@@ -11,7 +11,7 @@ A small macOS menu bar app for people who run several [Claude Code](https://clau
 - **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`.
 - **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
 - **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
-- **Has a pet.** A little green monster web-swings along the bottom of the notch while agents work: at the top of each swing it lets go, shoots a strand of silk to the edge ahead and swings on that. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. Turn the movement off with **Animate Pet**.
+- **Has a pet.** A little green monster web-swings along the whole menu bar while agents work: at the top of each swing it lets go, tumbles through the air, shoots a strand of silk to the edge ahead and swings on that. It picks a spot along the bar, heads there with long hops and short ones, rests to wave or doze when it arrives, then picks another. Each strand gets its own length, swing and poses. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. Turn the movement off with **Animate Pet**.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 | Keep Display On | Keeps the screen awake as well |
 | Show Agents in Notch | Shows or hides the notch panel |
 | Notch Width → Small / Medium / Large | How wide the list, peeks and chat open |
-| Animate Pet | Lets the monster web-swing along under the notch |
+| Animate Pet | Lets the monster web-swing along the menu bar |
 | Answer Prompts from the Notch | Installs or removes the Claude Code hook (see below) |
 | Launch at Login | Registers the app as a login item |
 

@@ -13,7 +13,7 @@ This environment can't take screenshots, and screenshots the user pastes from th
 
 ## Architecture in one pass
 
-- `NotchModel.size(for:)` is the single source of truth for the black shape's size per state. `NotchController` keeps a fixed transparent canvas (never resized) centred on the camera and toggles `ignoresMouseEvents` by testing the mouse against that shape, so clicks outside fall through.
+- `NotchModel.size(for:)` is the single source of truth for the black shape's size per state. `NotchController` keeps a transparent canvas (screen-wide, resized only when the display changes) centred on the camera and toggles `ignoresMouseEvents` by testing the mouse against that shape, so clicks outside fall through.
 - Question and permission cards report their real height through `CardHeightKey` → `model.cardHeight`; don't go back to estimating heights.
 - `PetView` keeps its position in a `Walk` object between frames; its path is computed from the shape, not from the clock.
 - The hook (`Notchling --hook`) is a separate short-lived process. It talks to the app only through files in `~/Library/Application Support/Notchling/` and must always exit with a valid answer or a pass, never hang Claude Code beyond its 300 s timeout.
