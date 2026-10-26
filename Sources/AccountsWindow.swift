@@ -7,17 +7,15 @@ import SwiftUI
 final class AccountsWindowController: NSObject, NSWindowDelegate {
     private let accounts: AccountStore
     private let antigravity: AntigravityStore
-    private let desktop: ClaudeDesktopStore
     private let cost: CostTracker
     private let settings: SettingsModel
     private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, antigravity: AntigravityStore, desktop: ClaudeDesktopStore, cost: CostTracker, settings: SettingsModel) {
+    init(accounts: AccountStore, antigravity: AntigravityStore, cost: CostTracker, settings: SettingsModel) {
         self.accounts = accounts
         self.antigravity = antigravity
-        self.desktop = desktop
         self.cost = cost
         self.settings = settings
         signIn = SignInModel(store: accounts)
@@ -27,8 +25,8 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         tab.page = page
         if let provider { tab.provider = provider }
         if window == nil {
-            let view = AccountsView(accounts: accounts, antigravity: antigravity, desktop: desktop, cost: cost,
-                                    settings: settings, signIn: signIn, tab: tab)
+            let view = AccountsView(accounts: accounts, antigravity: antigravity, cost: cost, settings: settings,
+                                    signIn: signIn, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Notchling"
             window.styleMask = [.titled, .closable, .miniaturizable]
@@ -39,7 +37,6 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
         accounts.sync()
         antigravity.sync()
-        desktop.sync()
         cost.refresh()
         settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
@@ -162,7 +159,6 @@ final class SignInModel: ObservableObject {
 struct AccountsView: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var antigravity: AntigravityStore
-    @ObservedObject var desktop: ClaudeDesktopStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
     @ObservedObject var signIn: SignInModel
@@ -199,7 +195,7 @@ struct AccountsView: View {
                 .frame(width: 220)
                 .padding(.top, 12)
                 switch tab.provider {
-                case .claude: AccountsPage(accounts: accounts, desktop: desktop, cost: cost, signIn: signIn)
+                case .claude: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
                 case .antigravity: AntigravityPage(store: antigravity)
                 }
             case .cost: CostPage(cost: cost, accounts: accounts)
@@ -220,14 +216,9 @@ struct AccountsView: View {
 
 private struct AccountsPage: View {
     @ObservedObject var accounts: AccountStore
-    @ObservedObject var desktop: ClaudeDesktopStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var signIn: SignInModel
     @State private var removing: ClaudeAccount?
-    @State private var desktopError: String?
-
-    /// The account UUID (the part of the id before the org), which Claude Desktop keys on.
-    private func uuid(_ account: ClaudeAccount) -> String { String(account.id.prefix { $0 != ":" }) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -241,15 +232,10 @@ private struct AccountsPage: View {
                     ForEach(accounts.accounts, id: \.id) { account in
                         AccountCard(account: account, usage: accounts.usage[account.id], cost: cost.byAccount[account.id],
                                     isActive: account.id == accounts.activeID, busy: accounts.busy,
-                                    desktopAvailable: desktop.isAvailable,
-                                    desktopActive: desktop.activeUuid == uuid(account),
-                                    desktopSwitchable: desktop.saved.contains(uuid(account)),
-                                    desktopBusy: desktop.busy,
                                     onSwitch: { signIn.switchTo(account.id) },
-                                    onDesktopSwitch: { desktop.switchTo(uuid(account)) { desktopError = $0?.localizedDescription } },
                                     onRemove: { removing = account })
                     }
-                    if let error = signIn.switchError ?? desktopError {
+                    if let error = signIn.switchError {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.callout)
                             .foregroundColor(.orange)
@@ -280,22 +266,17 @@ private struct AccountCard: View {
     let cost: CostTracker.Summary?
     let isActive: Bool
     let busy: Bool
-    let desktopAvailable: Bool
-    let desktopActive: Bool
-    let desktopSwitchable: Bool
-    let desktopBusy: Bool
     let onSwitch: () -> Void
-    let onDesktopSwitch: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 ZStack {
-                    Circle().fill(isActive || desktopActive ? Color.accentColor : Color.secondary.opacity(0.25))
+                    Circle().fill(isActive ? Color.accentColor : Color.secondary.opacity(0.25))
                     Text(account.email.prefix(1).uppercased())
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(isActive || desktopActive ? .white : .primary)
+                        .foregroundColor(isActive ? .white : .primary)
                 }
                 .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 1) {
@@ -303,6 +284,15 @@ private struct AccountCard: View {
                     Text(account.plan).font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
+                if isActive {
+                    Text("In Use")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                } else {
+                    Button("Switch", action: onSwitch).disabled(busy)
+                }
                 Menu {
                     Button("Remove…", action: onRemove)
                 } label: {
@@ -310,15 +300,6 @@ private struct AccountCard: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-            }
-            // One switch per app, off the same account.
-            HStack(spacing: 8) {
-                AppSwitch(label: "Claude Code", active: isActive, switchable: !account.needsLogin,
-                          busy: busy, action: onSwitch)
-                if desktopAvailable {
-                    AppSwitch(label: "Desktop", active: desktopActive, switchable: desktopSwitchable,
-                              busy: desktopBusy, action: onDesktopSwitch)
-                }
             }
             if account.needsLogin {
                 Label("Signed out. Add this account again to sign in.", systemImage: "exclamationmark.circle")
@@ -346,34 +327,7 @@ private struct AccountCard: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(isActive || desktopActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
-    }
-}
-
-/// One app's switch state for an account: In Use, a Switch button, or a hint when Notchling hasn't
-/// captured that app's login for this account yet.
-private struct AppSwitch: View {
-    let label: String
-    let active: Bool
-    let switchable: Bool
-    let busy: Bool
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(label).font(.caption.weight(.medium))
-            if active {
-                Text("In Use").font(.caption2.weight(.semibold)).foregroundColor(.accentColor)
-            } else if switchable {
-                Button("Switch", action: action).controlSize(.small).disabled(busy)
-            } else {
-                Text("—").font(.caption).foregroundColor(.secondary)
-                    .help("Sign in to this account in the app once so Notchling can switch to it.")
-            }
-        }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 7)
-            .fill(active ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08)))
+            .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
 
