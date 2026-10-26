@@ -55,7 +55,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
 }
 
 enum AccountsTab: String, CaseIterable {
-    case accounts = "Accounts", cost = "Token Cost", settings = "Settings"
+    case accounts = "Accounts", cost = "Claude Token Cost", settings = "Settings"
 }
 
 /// The menu's settings for the Settings tab. AppDelegate owns the real values: it fills these in
@@ -576,29 +576,19 @@ private struct CostPage: View {
     @ObservedObject var accounts: AccountStore
     /// "" is All Accounts; otherwise an account id, or "-" for cost from before accounts were tracked.
     @State private var filter = ""
+    /// The selected range: 7, 30, or Int.max (all time).
+    @State private var range = 30
 
     private func name(_ id: String) -> String {
         id.isEmpty ? "Before Tracking" : accounts.accounts.first { $0.id == id }?.email ?? "Removed Account"
     }
 
-    /// Lets cost from before tracking count toward one account, or stay on its own.
-    @ViewBuilder private var untrackedChoice: some View {
-        if cost.summary.accounts.contains(where: { $0.id.isEmpty }) || cost.untrackedOwner != nil {
-            HStack {
-                Text("Cost from before tracking counts toward").font(.caption).foregroundColor(.secondary)
-                Picker("", selection: Binding(get: { cost.untrackedOwner ?? "" },
-                                              set: { cost.untrackedOwner = $0.isEmpty ? nil : $0 })) {
-                    Text("No Account").tag("")
-                    ForEach(accounts.accounts) { Text($0.email).tag($0.id) }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-        }
-    }
+
+    private var rangeLabel: String { range == 7 ? "Last 7 Days" : range == 30 ? "Last 30 Days" : "All Time" }
 
     var body: some View {
-        let s = filter.isEmpty ? cost.summary : cost.byAccount[filter == "-" ? "" : filter] ?? CostTracker.Summary()
+        let account = filter == "-" ? "" : filter
+        let s = (filter.isEmpty ? cost.ranged[range] : cost.rangedByAccount[range]?[account]) ?? CostTracker.Summary()
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Picker("Account", selection: $filter) {
@@ -611,8 +601,14 @@ private struct CostPage: View {
                 HStack {
                     Stat(title: "Today", value: s.today)
                     Stat(title: "7 Days", value: s.week)
-                    Stat(title: "30 Days", value: s.month)
+                    Stat(title: rangeLabel, value: s.month)
                 }
+                Picker("", selection: $range) {
+                    Text("Last 7 Days").tag(7)
+                    Text("Last 30 Days").tag(30)
+                    Text("All Time").tag(Int.max)
+                }
+                .pickerStyle(.segmented).labelsHidden()
                 if cost.scanned == nil {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -621,14 +617,18 @@ private struct CostPage: View {
                 }
                 DayBars(days: s.days)
                 if filter.isEmpty {
-                    Breakdown(title: "By Account, 30 Days", rows: s.accounts.map { (name($0.id), $0.cost) })
-                    untrackedChoice
+                    Breakdown(title: "By Account, \(rangeLabel)", rows: s.accounts.map { (name($0.id), $0.cost) })
                 }
-                Breakdown(title: "By Model, 30 Days", rows: Array(s.models.prefix(6)))
-                Breakdown(title: "By Project, 30 Days", rows: Array(s.projects.prefix(8)))
-                Text("What Claude Code's tokens would cost at API prices, from its transcripts. Your plan isn't billed "
-                     + "this way. Each message counts toward the account in use at the time; Before Tracking is cost from "
-                     + "before Notchling followed which account was in use.")
+                if s.channels.count > 1 {
+                    Breakdown(title: "By Channel, \(rangeLabel)", rows: s.channels.map { ($0.name, $0.cost) })
+                }
+                ModelBreakdown(models: Array(s.modelDetail.prefix(8)), range: rangeLabel)
+                Breakdown(title: "By Project, \(rangeLabel)", rows: Array(s.projects.prefix(8)))
+                Text("What your tokens would cost at API prices, from Claude Code and Claude Desktop transcripts. "
+                     + "Your plan isn't billed this way. Each message is counted once, so totals are lower than Claude "
+                     + "Code's /stats, which counts a message again every time a conversation is compacted or resumed. "
+                     + "Desktop only appears when you run Claude Code agents in it (normal Desktop chat has no local "
+                     + "token record). Before Tracking is cost from before Notchling followed which account was in use.")
                     .font(.caption).foregroundColor(.secondary)
             }
             .padding(20)
@@ -700,6 +700,47 @@ private struct Breakdown: View {
                 }
             }
         }
+    }
+}
+
+/// By Model with each model's cost share and its input/output/cache token totals, two to a row.
+private struct ModelBreakdown: View {
+    let models: [CostTracker.ModelStat]
+    var range = "30 Days"
+    private static let colors: [Color] = [.blue, .purple, .green, .orange, .pink, .teal, .indigo, .red]
+
+    var body: some View {
+        if !models.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("By Model, \(range)").font(.caption.weight(.semibold)).foregroundColor(.secondary)
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading),
+                                    GridItem(.flexible(), alignment: .topLeading)], alignment: .leading, spacing: 10) {
+                    ForEach(models.indices, id: \.self) { i in
+                        let m = models[i]
+                        HStack(alignment: .top, spacing: 6) {
+                            Circle().fill(Self.colors[i % Self.colors.count]).frame(width: 8, height: 8).padding(.top, 4)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(m.name) (\(String(format: "%.1f", m.percent))%)").font(.caption.weight(.medium))
+                                Text("In: \(Self.abbr(m.input)) · Out: \(Self.abbr(m.output))")
+                                    .font(.caption2).foregroundColor(.secondary)
+                                Text("Cache: \(Self.abbr(m.cacheRead)) read · \(Self.abbr(m.cacheWrite)) write")
+                                    .font(.caption2).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 390700 → "390.7k", 212_400_000 → "212.4m", 54_700_000_000 → "54.7b".
+    static func abbr(_ n: Double) -> String {
+        let a = abs(n)
+        if a >= 1e9 { return String(format: "%.1fb", n / 1e9) }
+        if a >= 1e6 { return String(format: "%.1fm", n / 1e6) }
+        if a >= 1e3 { return String(format: "%.1fk", n / 1e3) }
+        return String(format: "%.0f", n)
     }
 }
 

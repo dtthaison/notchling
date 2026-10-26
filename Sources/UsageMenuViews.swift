@@ -268,7 +268,7 @@ final class CostChartView: NSView {
             draw(Self.dollars(stat.1), at: NSPoint(x: x, y: 20), font: .systemFont(ofSize: 16, weight: .semibold), color: .labelColor)
         }
 
-        let days = summary.days
+        let days = Array(summary.days.suffix(14))
         guard !days.isEmpty else { return }
         let top: CGFloat = 54, chartHeight: CGFloat = 66
         let peak = max(days.map(\.cost).max() ?? 0, 0.01)

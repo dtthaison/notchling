@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var costTitle: String {
-        cost.scanned == nil ? "Token Cost" : "Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
+        cost.scanned == nil ? "Claude Token Cost" : "Claude Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
     }
 
     private func costMenu() -> NSMenu {
@@ -431,6 +431,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(valueItem(name, row.cost))
             }
         }
+        if summary.channels.count > 1 {
+            menu.addItem(header("By Channel, 30 Days"))
+            summary.channels.forEach { menu.addItem(valueItem($0.name, $0.cost)) }
+        }
         if !summary.models.isEmpty {
             menu.addItem(header("By Model, 30 Days"))
             summary.models.prefix(6).forEach { menu.addItem(valueItem($0.name, $0.cost)) }
@@ -442,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let details = action("Show Details…", #selector(showCost))
         menu.addItem(details)
-        menu.addItem(disabled("At API prices, from Claude Code transcripts"))
+        menu.addItem(disabled("At API prices, from Claude Code and Desktop transcripts"))
         return menu
     }
 

@@ -47,8 +47,8 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 | Claude Code | The account in use with its limits, and Switch Account with every saved one plus Add Account… |
 | Claude Desktop | The account the desktop app is on, and Switch Account with the ones Notchling has captured plus Add Account… |
 | Antigravity | The Google account Antigravity is on, and Switch Account with every saved one plus Add Account… |
-| Manage Accounts… | The accounts window: a tab per provider (Claude Code, Claude Desktop, Antigravity), plus Token Cost and Settings |
-| Token Cost | Cost at API prices by day, model and project |
+| Manage Accounts… | The accounts window: a tab per provider (Claude Code, Claude Desktop, Antigravity), plus Claude Token Cost and Settings |
+| Claude Token Cost | Cost at API prices by day, channel (Claude Code / Desktop), account, model and project |
 | Keep Mac Awake → Off / Always On / While Agents Are Working | Holds a power assertion so the Mac doesn't idle-sleep |
 | Keep Display On | Keeps the screen awake as well |
 | Show Agents in Notch | Shows or hides the notch panel |
@@ -88,7 +88,7 @@ Unlike Claude Code, switching here **restarts** Antigravity rather than being se
 
 **Claude Desktop.** The desktop app (`com.anthropic.claudefordesktop`) is a separate login from Claude Code, though the OAuth tokens are the same system. What decides its account is the claude.ai **web session cookies** in `~/Library/Application Support/Claude/Cookies`, not the token — so, like Antigravity, Notchling captures the whole Cookies file while an account is active and restores it to switch, setting `lastKnownAccountUuid` and restarting the app. Accounts are matched to the Claude Code list by account UUID. **Add Account** reopens Desktop signed out (the Cookies file is removed, backed up as `Cookies.notchling-backup`) so you can sign in to another account, which is then captured; cancelling puts the previous account back. An account can only be switched to after it has been signed in to in Desktop once, since that is the only way its cookies exist. Captured sessions live in `~/Library/Application Support/Notchling/desktop/<uuid>.cookies`.
 
-**Cost** is estimated from the `usage` of every assistant message in the transcripts of the last 30 days, each message counted once, with cache writes and reads priced separately. Totals and read positions are cached in `cost-cache.json`, so only new lines are read after the first scan.
+**Claude token cost** is estimated from the `usage` of every assistant message in the transcripts of the last 30 days, each message counted once, with cache writes and reads priced separately. It reads Claude Code's transcripts (`~/.claude/projects`) and the Claude desktop app's own Claude Code transcripts (under its Application Support folder), tagging each as the **Claude Code** or **Desktop** channel — so Desktop cost only appears when you run Claude Code agents in it; normal Desktop chat is web-based and has no local token record. The window has a Last 7 Days / Last 30 Days / All Time selector and breaks cost down by channel, account, model (with each model's input/output/cache token totals and its share of the cost) and project. Each message is counted once (deduplicated by id), so totals are lower than Claude Code's `/stats`, which counts a message again each time a conversation is compacted or resumed. Totals, token counts and read positions are cached in `cost-cache.json`, so only new lines are read after the first scan.
 
 ## Project layout
 
