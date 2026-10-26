@@ -118,8 +118,8 @@ final class CostTracker: ObservableObject {
         /// Day → hashes of the message ids counted on that day, as packed UInt64s.
         var seen: [String: Data] = [:]
 
-        /// Version 4 added per-model token totals; older caches are read again.
-        static let current = 4
+        /// Version 5 rebuilds from the whole history (no date filter) so All Time is complete.
+        static let current = 5
     }
 
     private var log: [AccountLog.Entry] = []
