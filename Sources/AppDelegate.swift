@@ -7,9 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let notch = NotchController()
     private let accounts = AccountStore()
     private let antigravity = AntigravityStore()
+    private let claudeDesktop = ClaudeDesktopStore()
     private let cost = CostTracker()
     private let settings = SettingsModel()
-    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, cost: cost, settings: settings)
+    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, cost: cost, settings: settings)
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
     private var lastGroups: [String: AgentGroup]?
@@ -57,12 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accounts.changed = { [weak self] in self?.updateUsageViews() }
         antigravity.changed = { [weak self] in self?.updateButton() }
         antigravity.sync()
+        claudeDesktop.changed = { [weak self] in self?.updateButton() }
+        claudeDesktop.sync()
         cost.changed = { [weak self] in self?.updateUsageViews() }
         accounts.sync()
         cost.refresh()
         usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.accounts.sync()
             self?.antigravity.sync()
+            self?.claudeDesktop.sync()
             self?.cost.refresh()
         }
     }
@@ -94,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts"] {
+        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -238,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if cost.scanned.map({ Date().timeIntervalSince($0) > 30 }) ?? true { cost.refresh() }
 
         // Only the account in use here; the others are under Switch Account.
-        menu.addItem(header("Claude"))
+        menu.addItem(header("Claude Code"))
         accountRows = [:]
         if let account = accounts.active {
             let row = AccountRowView(account: account, usage: accounts.usage[account.id], isActive: true)
@@ -257,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         costItem.submenu = costMenu()
         menu.addItem(costItem)
 
+        addDesktopItems(to: menu)
         addAntigravityItems(to: menu)
 
         menu.addItem(.separator())
@@ -264,6 +269,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settingsItem = action("Settings…", #selector(showSettings))
         settingsItem.keyEquivalent = ","
         menu.addItem(settingsItem)
+    }
+
+    /// The account Claude Desktop is on, and a Switch Account submenu for the rest.
+    private func addDesktopItems(to menu: NSMenu) {
+        guard claudeDesktop.isAvailable else { return }
+        claudeDesktop.sync()
+        menu.addItem(.separator())
+        menu.addItem(header("Claude Desktop"))
+        if claudeDesktop.adding {
+            menu.addItem(disabled("Waiting for you to sign in…"))
+        } else if let uuid = claudeDesktop.activeUuid {
+            let email = accounts.accounts.first { $0.id.hasPrefix(uuid) }?.email ?? "Signed in"
+            let item = action(email, #selector(manageAccounts))
+            item.state = .on
+            menu.addItem(item)
+        } else {
+            menu.addItem(disabled("Not signed in to Claude Desktop"))
+        }
+        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
+        switchItem.submenu = desktopSwitchMenu()
+        menu.addItem(switchItem)
     }
 
     /// The Google account Antigravity is on, and the others to switch to.
@@ -318,6 +344,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !accounts.accounts.isEmpty { menu.addItem(.separator()) }
         menu.addItem(action("Add Account…", #selector(addAccount)))
         return menu
+    }
+
+    /// The same accounts, switching Claude Desktop instead of Claude Code. Only accounts Notchling has
+    /// captured a desktop login for can be switched to; the rest are a hint to open them in Desktop first.
+    private func desktopSwitchMenu() -> NSMenu {
+        claudeDesktop.sync()
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if claudeDesktop.adding {
+            menu.addItem(disabled("Waiting for you to sign in…"))
+            return menu
+        }
+        // Only accounts actually in Desktop (the active one, or ones Notchling has captured).
+        for account in accounts.accounts {
+            let uuid = String(account.id.prefix { $0 != ":" })
+            let active = claudeDesktop.activeUuid == uuid
+            guard active || claudeDesktop.saved.contains(uuid) else { continue }
+            let item = action(account.email, #selector(switchDesktopItem(_:)))
+            item.representedObject = uuid
+            item.state = active ? .on : .off
+            menu.addItem(item)
+        }
+        if menu.items.contains(where: { $0.action != nil }) { menu.addItem(.separator()) }
+        menu.addItem(action("Add Account…", #selector(addDesktopAccount)))
+        return menu
+    }
+
+    /// Opens Claude Desktop signed out so the user can sign in to another account there.
+    @objc private func addDesktopAccount() {
+        if ClaudeDesktopStore.isRunning {
+            let alert = NSAlert()
+            alert.messageText = "Open Claude Desktop signed out?"
+            alert.informativeText = "Claude Desktop quits and reopens at the sign-in screen. Sign in to the account "
+                + "you want to add; Notchling saves it. Your current account is kept and you can switch back to it."
+            alert.addButton(withTitle: "Continue")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        claudeDesktop.beginAdd { error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open Claude Desktop to add an account"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     /// An account's email in menu font, then its plan and limits in small secondary text.
@@ -405,6 +478,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func switchDesktopItem(_ sender: NSMenuItem) {
+        guard let uuid = sender.representedObject as? String, uuid != claudeDesktop.activeUuid else { return }
+        if ClaudeDesktopStore.isRunning {
+            let alert = NSAlert()
+            alert.messageText = "Restart Claude Desktop?"
+            alert.informativeText = "Claude Desktop quits and opens again on the other account."
+            alert.addButton(withTitle: "Restart")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        claudeDesktop.switchTo(uuid) { error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Couldn't switch Claude Desktop"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
     @objc private func switchAntigravityItem(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, id != antigravity.activeID else { return }
         if AntigravityStore.isRunning {
@@ -432,11 +526,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Signs in from the Claude Accounts window; Claude Code stays on the account it's using.
     @objc private func addAccount() {
-        accountsWindow.show(.accounts, provider: .claude, signIn: true)
+        accountsWindow.show(.accounts, provider: .claudeCode, signIn: true)
     }
 
     @objc private func manageAccounts() {
-        accountsWindow.show(.accounts, provider: .claude)
+        accountsWindow.show(.accounts, provider: .claudeCode)
     }
 
     @objc private func showCost() {

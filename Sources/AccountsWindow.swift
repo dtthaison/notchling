@@ -7,15 +7,17 @@ import SwiftUI
 final class AccountsWindowController: NSObject, NSWindowDelegate {
     private let accounts: AccountStore
     private let antigravity: AntigravityStore
+    private let desktop: ClaudeDesktopStore
     private let cost: CostTracker
     private let settings: SettingsModel
     private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, antigravity: AntigravityStore, cost: CostTracker, settings: SettingsModel) {
+    init(accounts: AccountStore, antigravity: AntigravityStore, desktop: ClaudeDesktopStore, cost: CostTracker, settings: SettingsModel) {
         self.accounts = accounts
         self.antigravity = antigravity
+        self.desktop = desktop
         self.cost = cost
         self.settings = settings
         signIn = SignInModel(store: accounts)
@@ -25,8 +27,8 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         tab.page = page
         if let provider { tab.provider = provider }
         if window == nil {
-            let view = AccountsView(accounts: accounts, antigravity: antigravity, cost: cost, settings: settings,
-                                    signIn: signIn, tab: tab)
+            let view = AccountsView(accounts: accounts, antigravity: antigravity, desktop: desktop, cost: cost,
+                                    settings: settings, signIn: signIn, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Notchling"
             window.styleMask = [.titled, .closable, .miniaturizable]
@@ -37,6 +39,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
         accounts.sync()
         antigravity.sync()
+        desktop.sync()
         cost.refresh()
         settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
@@ -91,12 +94,12 @@ final class SettingsModel: ObservableObject {
 }
 
 enum Provider: String, CaseIterable {
-    case claude = "Claude", antigravity = "Antigravity"
+    case claudeCode = "Claude Code", claudeDesktop = "Claude Desktop", antigravity = "Antigravity"
 }
 
 final class TabModel: ObservableObject {
     @Published var page = AccountsTab.accounts
-    @Published var provider = Provider.claude
+    @Published var provider = Provider.claudeCode
 }
 
 /// One sign-in at a time, from the browser back to a saved account.
@@ -159,6 +162,7 @@ final class SignInModel: ObservableObject {
 struct AccountsView: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var antigravity: AntigravityStore
+    @ObservedObject var desktop: ClaudeDesktopStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
     @ObservedObject var signIn: SignInModel
@@ -192,10 +196,11 @@ struct AccountsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 220)
+                .frame(width: 340)
                 .padding(.top, 12)
                 switch tab.provider {
-                case .claude: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
+                case .claudeCode: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
+                case .claudeDesktop: DesktopPage(accounts: accounts, desktop: desktop)
                 case .antigravity: AntigravityPage(store: antigravity)
                 }
             case .cost: CostPage(cost: cost, accounts: accounts)
@@ -328,6 +333,152 @@ private struct AccountCard: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
+    }
+}
+
+// MARK: - Claude Desktop
+
+/// The same accounts as Claude Code, but switching the Claude desktop app. Switching and Add Account
+/// restart the app, so both ask first while it's open.
+private struct DesktopPage: View {
+    @ObservedObject var accounts: AccountStore
+    @ObservedObject var desktop: ClaudeDesktopStore
+    @State private var error: String?
+    @State private var confirming: Pending?
+    @State private var removing: ClaudeAccount?
+
+    enum Pending: Identifiable {
+        case switchTo(String), add
+        var id: String { if case .switchTo(let u) = self { return u }; return "add" }
+    }
+
+    private func uuid(_ a: ClaudeAccount) -> String { String(a.id.prefix { $0 != ":" }) }
+
+    /// Only accounts that are actually in Claude Desktop — the one it's on, plus any Notchling has
+    /// captured. Claude Code accounts not signed in to Desktop aren't listed here.
+    private var inDesktop: [ClaudeAccount] {
+        accounts.accounts.filter { desktop.activeUuid == uuid($0) || desktop.saved.contains(uuid($0)) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    if inDesktop.isEmpty {
+                        Text("No accounts in Claude Desktop yet. Use Add Account to sign in to one.")
+                            .foregroundColor(.secondary).padding(.top, 40)
+                    }
+                    ForEach(inDesktop, id: \.id) { account in
+                        DesktopCard(account: account, active: desktop.activeUuid == uuid(account),
+                                    switchable: desktop.saved.contains(uuid(account)),
+                                    busy: desktop.busy || desktop.adding,
+                                    onSwitch: { ask(.switchTo(uuid(account))) },
+                                    onRemove: { removing = account })
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundColor(.orange)
+                    }
+                }
+                .padding(16)
+            }
+            Divider()
+            addPanel.padding(16)
+        }
+        .alert(item: $confirming) { pending in
+            Alert(title: Text(title(pending)),
+                  message: Text("Claude Desktop quits and opens again. Save anything open there first."),
+                  primaryButton: .default(Text("Continue")) { run(pending) },
+                  secondaryButton: .cancel())
+        }
+        .background(EmptyView().alert(item: $removing) { account in
+            Alert(title: Text("Remove \(account.email) from Desktop list?"),
+                  message: Text("Notchling forgets its saved Desktop session. Claude Desktop stays signed in if "
+                                + "it's the account in use; add it again by signing in to it in Desktop."),
+                  primaryButton: .destructive(Text("Remove")) { desktop.forget(uuid(account)) },
+                  secondaryButton: .cancel())
+        })
+    }
+
+    @ViewBuilder private var addPanel: some View {
+        if desktop.adding {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign in to the other account in Claude Desktop…").font(.callout.weight(.medium))
+                    Text("Notchling saves it as soon as you're signed in.").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { desktop.cancelAdd() }
+            }
+        } else {
+            HStack {
+                Text("Claude Desktop opens signed out so you can sign in to another account.")
+                    .font(.callout).foregroundColor(.secondary)
+                Spacer()
+                Button("Add Account") { ask(.add) }.keyboardShortcut(.defaultAction).disabled(desktop.busy)
+            }
+        }
+    }
+
+    private func title(_ p: Pending) -> String {
+        if case .add = p { return "Open Claude Desktop signed out?" }
+        return "Restart Claude Desktop?"
+    }
+
+    private func ask(_ pending: Pending) {
+        if ClaudeDesktopStore.isRunning { confirming = pending } else { run(pending) }
+    }
+
+    private func run(_ pending: Pending) {
+        error = nil
+        let done: (Error?) -> Void = { error = $0?.localizedDescription }
+        switch pending {
+        case .switchTo(let uuid): desktop.switchTo(uuid, done: done)
+        case .add: desktop.beginAdd(done: done)
+        }
+    }
+}
+
+private struct DesktopCard: View {
+    let account: ClaudeAccount
+    let active: Bool
+    let switchable: Bool
+    let busy: Bool
+    let onSwitch: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(active ? Color.accentColor : Color.secondary.opacity(0.25))
+                Text(account.email.prefix(1).uppercased())
+                    .font(.system(size: 14, weight: .semibold)).foregroundColor(active ? .white : .primary)
+            }
+            .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.email).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Text(account.plan).font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            if active {
+                Text("In Use").font(.caption.weight(.semibold)).foregroundColor(.accentColor)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+            } else if switchable {
+                Button("Switch", action: onSwitch).disabled(busy)
+            }
+            Menu {
+                Button("Remove from List…", action: onRemove)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(active ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
 
