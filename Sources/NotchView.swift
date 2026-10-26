@@ -150,69 +150,114 @@ struct NotchView: View {
     }
 }
 
-/// Claude's ✻ as a little pet that rolls around the outside of the camera: down its left edge,
-/// along underneath, up its right edge and back, spinning like a wheel. While sessions need you it
-/// tows an orange badge with their number; at each end the badge swings round the outside of the
-/// pet to trail it the other way. When the tabs open it rolls into the middle and fades.
+/// A little green candy monster that swings its way along a row of ropes hanging under the camera,
+/// like a level of Cut the Rope. On each rope it swings like a real pendulum, slow at the top of
+/// the arc and fastest at the bottom, pumping its legs. Near the top of a forward swing it lets
+/// go, flies on the speed it had, and catches the next rope, carrying that speed into the next
+/// swing. At the last rope it turns round. It goes faster while sessions need you. When the tabs
+/// open it moves into the middle and fades.
 struct PetView: View {
     @ObservedObject var model: NotchModel
-    /// Size of the black shape this frame; the pet's path follows its outline.
+    /// Size of the black shape this frame; the ropes hang along its bottom edge.
     let shape: CGSize
 
-    static let radius: CGFloat = 8
-    /// Highest point of the path, just below the top of the screen.
-    static let top: CGFloat = 10
-    /// How far behind the pet the badge trails, measured along the path.
-    static let rope: Double = 21
+    /// Height of a pose frame, from the hands on the rope down to the feet.
+    static let bodyHeight: CGFloat = 30
+    static let rope: CGFloat = 18
+    /// From the anchor to the body's centre of mass, which sets how fast it swings.
+    static let pendulum = Double(rope + bodyHeight * 0.6)
+    static let gravity = 500.0
+    /// How far forward of straight down it lets go, and where it catches the next rope (behind it).
+    static let release = 0.6, catchAngle = -0.5
 
-    /// Where the pet is along the path, which way it's heading, and how far through turning round.
-    fileprivate struct Motion {
-        var d = rope
-        var heading = 1.0
-        var turn: (progress: Double, from: Double)? = nil
+    /// Legs kicked forward, hanging straight, legs tucked back, all facing right. Each frame is
+    /// pre-rotated so its centre of mass sits straight under the hands, as it would on a taut rope.
+    /// The probe build has no bundle, so it falls back to ✻.
+    static let poses: [NSImage] = (0..<3).compactMap { index in
+        Bundle.main.url(forResource: "swing\(index)", withExtension: "png").flatMap(NSImage.init(contentsOf:))
     }
 
-    /// Keeps the pet's place between frames, so it carries on from where it stopped rather than
-    /// jumping when it starts moving again or changes speed.
-    fileprivate final class Walk: ObservableObject {
-        var motion = Motion()
+    /// A jump between ropes: a parabola that leaves with the swing's own velocity and lands on the
+    /// next rope's catching point, so its gravity comes out close to the real one.
+    fileprivate struct Flight {
+        let from: CGPoint
+        let velocity: CGVector
+        let gravity: Double
+        let duration: Double
+        let target: Int
+        let startAngle: Double
+        var elapsed = 0.0
+
+        func point(_ t: Double) -> CGPoint {
+            CGPoint(x: from.x + velocity.dx * t, y: from.y + velocity.dy * t + gravity * t * t / 2)
+        }
+    }
+
+    /// Everything that carries over between frames: which rope it holds, which way it's heading,
+    /// the swing, any jump in progress, and the loose ropes still swaying after it let go.
+    fileprivate final class Swing: ObservableObject {
+        var index = 0
+        var heading = 1.0
+        var angle = 0.0
+        var spin = 0.0
+        var flight: Flight?
+        var ropeAngles: [Double] = []
+        var ropeSpins: [Double] = []
         var last: Double?
     }
 
-    @StateObject private var walk = Walk()
+    /// What one frame draws: where the hands are, how the body is turned, and every rope's angle.
+    fileprivate struct Pose {
+        let hands: CGPoint
+        let angle: Double
+        let heading: Double
+        let ropes: [Double]
+        let held: Int?
+    }
+
+    @StateObject private var swing = Swing()
 
     var body: some View {
         let gathered = model.state == .list
         let resting = model.state == .collapsed
-        let rolling = model.petWalking && resting
+        let moving = model.petWalking && resting
         let needs = model.needsCount
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !rolling)) { context in
-            let path = Track(shape: shape)
-            let motion = step(to: context.date.timeIntervalSinceReferenceDate, rolling: rolling, path)
-            let d = motion.d
-            let pet = gathered ? middle : path.point(d)
-            let badge = badgePoint(motion, path)
+        let anchors = Self.anchors(for: shape)
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !moving)) { context in
+            let pose = step(to: context.date.timeIntervalSinceReferenceDate, moving: moving, anchors)
+            let hands = gathered ? middle : pose.hands
+            let width = Self.bodyWidth
+            let box = width + 34
 
             ZStack(alignment: .topLeading) {
-                if needs > 0 && !gathered {
-                    Text("\(needs)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .frame(minWidth: 15, minHeight: 15)
-                        .background(Capsule().fill(Color.orange))
-                        .shadow(color: .black.opacity(0.35), radius: 1.5)
-                        .fixedSize()
-                        .frame(width: 30, height: 16)
-                        .offset(x: badge.x - 15, y: badge.y - 8)
+                ForEach(anchors.indices, id: \.self) { index in
+                    // The held rope runs to the hands; loose ones hang their full length.
+                    let length = pose.held == index && !gathered ? Self.rope + 2 : Self.rope
+                    Rectangle()
+                        .fill(Color(red: 0.86, green: 0.78, blue: 0.62))
+                        .frame(width: 1.4, height: length)
+                        .rotationEffect(.radians(-(index < pose.ropes.count ? pose.ropes[index] : 0)), anchor: .top)
+                        .offset(x: anchors[index].x - 0.7, y: anchors[index].y)
                 }
-                Text("✻")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.claude)
-                    .shadow(color: .black.opacity(0.45), radius: 1.5)
-                    .frame(width: Self.radius * 2, height: Self.radius * 2)
-                    .rotationEffect(.radians(gathered ? 0 : d / Double(Self.radius)))
-                    .offset(x: pet.x - Self.radius, y: pet.y - Self.radius)
+                ZStack(alignment: .top) {
+                    creature(angle: gathered ? 0 : pose.angle * pose.heading)
+                        .scaleEffect(x: pose.heading, y: 1)
+                        .frame(width: width, height: Self.bodyHeight)
+                    if needs > 0 && !gathered {
+                        Text("\(needs)")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 3.5)
+                            .frame(minWidth: 14, minHeight: 14)
+                            .background(Capsule().fill(Color.orange))
+                            .shadow(color: .black.opacity(0.35), radius: 1.5)
+                            .fixedSize()
+                            .offset(x: width / 2 + 3, y: Self.bodyHeight * 0.5)
+                    }
+                }
+                .frame(width: box, height: Self.bodyHeight, alignment: .top)
+                .rotationEffect(.radians(gathered ? 0 : -pose.angle), anchor: .top)
+                .offset(x: hands.x - box / 2, y: hands.y)
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: gathered)
@@ -222,107 +267,151 @@ struct PetView: View {
                    value: resting)
     }
 
-    private var middle: CGPoint {
-        CGPoint(x: shape.width / 2, y: model.notchSize.height + TabBar.height / 2)
+    static var bodyWidth: CGFloat {
+        guard let first = poses.first, first.size.height > 0 else { return bodyHeight * 0.6 }
+        return bodyHeight * first.size.width / first.size.height
     }
 
-    /// The pet ping-pongs between a rope's length from each top end, resting at each end while it
-    /// turns round, so the badge always has room behind it. When it isn't rolling it stays put.
-    private func step(to t: Double, rolling: Bool, _ path: Track) -> Motion {
-        let lo = Self.rope, hi = max(lo, path.length - Self.rope)
-        var m = walk.motion
-        m.d = min(max(m.d, lo), hi)
-        defer { walk.motion = m }
-        guard rolling, let last = walk.last else {
-            walk.last = rolling ? t : nil
-            return m
-        }
-        walk.last = t
-        // A long gap (a stalled frame) moves it one frame's worth, never a leap.
-        let dt = min(max(t - last, 0), 0.1)
-        let speed = model.needsCount > 0 ? 60.0 : 36.0, rest = 0.7
-
-        if let turn = m.turn {
-            let progress = turn.progress + dt / rest
-            m.turn = progress >= 1 ? nil : (progress, turn.from)
-            return m
-        }
-        m.d += m.heading * speed * dt
-        if m.d >= hi {
-            m.d = hi; m.heading = -1; m.turn = (0, 1)
-        } else if m.d <= lo {
-            m.d = lo; m.heading = 1; m.turn = (0, -1)
-        }
-        return m
+    /// Evenly spaced along the flat part of the bottom edge, about a jump's length apart.
+    static func anchors(for shape: CGSize) -> [CGPoint] {
+        let lo = Double(NotchModel.flare) + 14, hi = Double(shape.width - NotchModel.flare) - 14
+        let span = max(0, hi - lo)
+        let count = max(2, Int(span / 48) + 1)
+        let gap = span / Double(count - 1)
+        return (0..<count).map { CGPoint(x: lo + gap * Double($0), y: Double(shape.height)) }
     }
 
-    /// A rope's length behind the pet along the path. While turning, it swings round the outside of
-    /// the pet (away from the camera) from the old trailing side to the new one, never across it.
-    private func badgePoint(_ m: Motion, _ path: Track) -> CGPoint {
-        guard let turn = m.turn else { return path.point(m.d - m.heading * Self.rope) }
-        let pet = path.point(m.d)
-        let from = path.point(m.d - turn.from * Self.rope)
-        let to = path.point(m.d - m.heading * Self.rope)
-        let n = path.outward(at: m.d)
-        let eased = (1 - cos(turn.progress * .pi)) / 2
-
-        // Sweep round the pet at a steady distance, the way that passes outside (away from the camera).
-        let start = atan2(from.y - pet.y, from.x - pet.x), end = atan2(to.y - pet.y, to.x - pet.x)
-        var sweep = (end - start).truncatingRemainder(dividingBy: 2 * .pi)
-        if sweep < 0 { sweep += 2 * .pi }
-        let outwardAngle = atan2(n.y, n.x)
-        func offAngle(_ a: Double) -> Double { abs(atan2(sin(a - outwardAngle), cos(a - outwardAngle))) }
-        if offAngle(start + sweep / 2) > offAngle(start + (sweep - 2 * .pi) / 2) { sweep -= 2 * .pi }
-
-        let angle = start + eased * sweep
-        let radiusFrom = hypot(from.x - pet.x, from.y - pet.y), radiusTo = hypot(to.x - pet.x, to.y - pet.y)
-        let radius = radiusFrom + eased * (radiusTo - radiusFrom)
-        return CGPoint(x: pet.x + cos(angle) * radius, y: pet.y + sin(angle) * radius)
-    }
-
-    /// The outline of the camera pushed out by the pet's radius: down the left edge, round the
-    /// bottom-left corner, along underneath, round the bottom-right corner and up the right edge.
-    private struct Track {
-        let left, right, bottom, top, out: Double
-        let corner = 10.0
-        let side, arc, floor: Double
-        var length: Double { 2 * side + 2 * arc + floor }
-
-        init(shape: CGSize) {
-            left = Double(NotchModel.flare)
-            right = Double(shape.width - NotchModel.flare)
-            bottom = Double(shape.height)
-            top = Double(PetView.top)
-            out = Double(PetView.radius) + 2
-            side = max(0, bottom - corner - top)
-            arc = Double.pi / 2 * (corner + out)
-            floor = max(0, right - left - 2 * corner)
-        }
-
-        /// Unit vector pointing away from the camera at distance `d`.
-        func outward(at d: Double) -> CGPoint {
-            let a = point(d - 1), b = point(d + 1)
-            let tx = b.x - a.x, ty = b.y - a.y
-            let len = max(0.001, (tx * tx + ty * ty).squareRoot())
-            return CGPoint(x: -ty / len, y: tx / len)
-        }
-
-        func point(_ d: Double) -> CGPoint {
-            let r = corner + out
-            if d < side {
-                return CGPoint(x: left - out, y: top + d)
-            } else if d < side + arc {
-                let a = Double.pi - (d - side) / r                  // 180° → 90°; screen y points down
-                return CGPoint(x: left + corner + cos(a) * r, y: bottom - corner + sin(a) * r)
-            } else if d < side + arc + floor {
-                return CGPoint(x: left + corner + (d - side - arc), y: bottom + out)
-            } else if d < side + 2 * arc + floor {
-                let a = Double.pi / 2 - (d - side - arc - floor) / r  // 90° → 0°
-                return CGPoint(x: right - corner + cos(a) * r, y: bottom - corner + sin(a) * r)
-            } else {
-                return CGPoint(x: right + out, y: bottom - corner - (d - side - 2 * arc - floor))
+    /// Fades between poses by how far out the swing is, measured in the direction it's heading:
+    /// legs out at the front of the arc, tucked at the back, straight through the bottom.
+    @ViewBuilder private func creature(angle: Double) -> some View {
+        if Self.poses.count == 3 {
+            let forward = smoothstep(0.12, 0.45, angle), back = smoothstep(0.12, 0.45, -angle)
+            let weights = [forward, 1 - forward - back, back]
+            ZStack {
+                ForEach(0..<3, id: \.self) { index in
+                    Image(nsImage: Self.poses[index])
+                        .resizable()
+                        .interpolation(.high)
+                        .opacity(weights[index])
+                }
             }
+            .shadow(color: .black.opacity(0.45), radius: 1.5)
+        } else {
+            Text("✻").font(.system(size: 15, weight: .bold)).foregroundColor(.claude)
         }
+    }
+
+    private func smoothstep(_ low: Double, _ high: Double, _ value: Double) -> Double {
+        let t = min(max((value - low) / (high - low), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    private var middle: CGPoint {
+        CGPoint(x: shape.width / 2, y: model.notchSize.height + TabBar.height / 2 - Self.bodyHeight / 2)
+    }
+
+    /// Hands on a rope at `angle` (positive swings right; screen y points down).
+    private static func hands(on anchor: CGPoint, at angle: Double) -> CGPoint {
+        CGPoint(x: anchor.x + Double(rope) * sin(angle), y: anchor.y + Double(rope) * cos(angle))
+    }
+
+    /// Advances the swing, a jump, and the loose ropes. On a rope it's a damped pendulum that only
+    /// gains energy from a push near the bottom in the direction it's going, the way a kid pumps a
+    /// swing; so every arc follows gravity.
+    private func step(to t: Double, moving: Bool, _ anchors: [CGPoint]) -> Pose {
+        let s = swing
+        if s.ropeAngles.count != anchors.count {
+            s.ropeAngles = Array(repeating: 0, count: anchors.count)
+            s.ropeSpins = Array(repeating: 0, count: anchors.count)
+            s.index = anchors.count / 2
+            s.flight = nil
+        }
+        s.index = min(max(s.index, 0), anchors.count - 1)
+
+        if moving, let last = s.last {
+            // A long gap (a stalled frame) moves it one frame's worth, never a leap.
+            let dt = min(max(t - last, 0), 0.05)
+            let substeps = 8
+            for _ in 0..<substeps { advance(s, by: dt / Double(substeps), anchors) }
+        } else if !moving {
+            // Hangs still with Animate Pet off; otherwise waits held up behind itself, ready to let go.
+            s.flight = nil
+            s.angle = model.petWalking ? -0.6 * s.heading : 0
+            s.spin = 0
+            for i in s.ropeAngles.indices { s.ropeAngles[i] = 0; s.ropeSpins[i] = 0 }
+        }
+        s.last = moving ? t : nil
+
+        var ropes = s.ropeAngles
+        if let flight = s.flight {
+            // Turn the body from its letting-go angle to its catching angle over the jump.
+            let progress = min(flight.elapsed / flight.duration, 1)
+            let angle = flight.startAngle + (Self.catchAngle * s.heading - flight.startAngle) * progress
+            return Pose(hands: flight.point(flight.elapsed), angle: angle, heading: s.heading, ropes: ropes, held: nil)
+        }
+        ropes[s.index] = s.angle
+        return Pose(hands: Self.hands(on: anchors[s.index], at: s.angle), angle: s.angle,
+                    heading: s.heading, ropes: ropes, held: s.index)
+    }
+
+    private func advance(_ s: Swing, by h: Double, _ anchors: [CGPoint]) {
+        let length = Self.pendulum, g = Self.gravity, k = g / length
+        let urgent = model.needsCount > 0
+        let height = urgent ? 1.25 : 1.1, pump = urgent ? 6.0 : 4.0, air = 0.22
+
+        // Loose ropes sway on their own and settle.
+        let ropeK = g / Double(Self.rope)
+        for i in s.ropeAngles.indices where s.flight != nil || i != s.index {
+            s.ropeSpins[i] += (-ropeK * sin(s.ropeAngles[i]) - 4 * s.ropeSpins[i]) * h
+            s.ropeAngles[i] += s.ropeSpins[i] * h
+        }
+
+        if var flight = s.flight {
+            flight.elapsed += h
+            if flight.elapsed >= flight.duration {
+                // Caught: what's left of its speed along the rope's swing becomes the new spin.
+                let a = Self.catchAngle * s.heading
+                let vx = flight.velocity.dx, vy = flight.velocity.dy + flight.gravity * flight.duration
+                s.index = flight.target
+                s.angle = a
+                s.spin = (vx * cos(a) - vy * sin(a)) / length
+                s.ropeSpins[s.index] = 0
+                s.flight = nil
+            } else {
+                s.flight = flight
+            }
+            return
+        }
+
+        var accel = -k * sin(s.angle) - air * s.spin
+        let energy = 0.5 * s.spin * s.spin + k * (1 - cos(s.angle))
+        if abs(s.angle) < 0.35 && energy < k * (1 - cos(height)) {
+            accel += (s.spin >= 0 ? 1 : -1) * pump
+        }
+        s.spin += accel * h
+        s.angle += s.spin * h
+
+        let forward = s.angle * s.heading, goingForward = s.spin * s.heading > 0
+        let next = s.index + Int(s.heading)
+        guard anchors.indices.contains(next) else {
+            // Last rope: turn round at the top of the forward swing.
+            if forward > 0.3 && !goingForward { s.heading = -s.heading }
+            return
+        }
+        guard forward >= Self.release && goingForward else { return }
+
+        // Let go: leave with the swing's velocity and aim for the next rope's catching point,
+        // bending gravity just enough to land on it.
+        let from = Self.hands(on: anchors[s.index], at: s.angle)
+        let to = Self.hands(on: anchors[next], at: Self.catchAngle * s.heading)
+        let speed = s.spin * length
+        let vx = speed * cos(s.angle), vy = -speed * sin(s.angle)
+        let duration = min(max(Double(to.x - from.x) / vx, 0.15), 0.6)
+        let fall = 2 * (Double(to.y - from.y) - vy * duration) / (duration * duration)
+        let velocity = CGVector(dx: Double(to.x - from.x) / duration, dy: vy)
+        s.ropeAngles[s.index] = s.angle
+        s.ropeSpins[s.index] = s.spin * length / Double(Self.rope) * 0.3
+        s.flight = Flight(from: from, velocity: velocity, gravity: fall, duration: duration, target: next, startAngle: s.angle)
     }
 }
 

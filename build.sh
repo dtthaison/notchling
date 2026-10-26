@@ -28,6 +28,7 @@ fi
 
 mkdir -p "$APP/Contents/Resources"
 cp Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Pet/swing*.png "$APP/Contents/Resources/"
 cp Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"
 
