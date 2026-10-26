@@ -24,6 +24,7 @@ This environment can't take screenshots, and screenshots the user pastes from th
 - Transcripts can hold huge base64 image lines. `TranscriptReader` reads only the last 2 MB and skips lines over 100 KB.
 - `claude -p` sessions (entrypoint `sdk-cli`) are headless: the hook must ignore them, and they can't be replied to.
 - Background job text replies go through `claude attach` in a pty with bracketed paste; question answers are typed as digits, with options.count + 1 as the free-text option.
+- Account switching touches the user's real login. Replace only `claudeAiOauth` in the `Claude Code-credentials` item (it also holds MCP logins) and only `oauthAccount` in `~/.claude.json`. Never refresh the token of the active account: refresh tokens rotate, so it would sign Claude Code out. Keychain goes through `/usr/bin/security` (hex on stdin), never the Security framework: an ad hoc signed build loses access on every rebuild.
 - Editing `~/.claude/settings.json` is the user's real config. Change only our own hook entries (match on the `--hook` command), keep a backup, and keep their other hooks.
 
 ## Style
