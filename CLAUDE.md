@@ -11,6 +11,8 @@ A macOS menu bar app (Swift, AppKit + SwiftUI) that shows Claude Code agents in 
 
 This environment can't take screenshots, and screenshots the user pastes from the thumbnail live in a temp folder that is usually unreadable or already deleted. Ask for them to be saved to the Desktop instead. To see a view or menu yourself, use the `render-notch-view` skill.
 
+README GIFs come from the real views with made-up data: `Demo/make-demo.sh` (notch, `docs/demo.gif`) and `Demo/make-demo.sh accounts` (`docs/accounts.gif`). The renderer is built with `-D DEMO`, which turns on the stores' `#if DEMO` setters; the app build never includes them.
+
 ## Architecture in one pass
 
 - `NotchModel.size(for:)` is the single source of truth for the black shape's size per state. `NotchController` keeps a transparent canvas (screen-wide, resized only when the display changes) centred on the camera and toggles `ignoresMouseEvents` by testing the mouse against that shape, so clicks outside fall through.

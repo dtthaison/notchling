@@ -423,3 +423,10 @@ final class CostTracker: ObservableObject {
         return h
     }
 }
+
+#if DEMO
+/// Made-up cost for Demo/accounts.swift. Only the demo renderer is built with -D DEMO.
+extension CostTracker {
+    func demo(byAccount: [String: Summary]) { self.byAccount = byAccount }
+}
+#endif

@@ -26,6 +26,10 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 - **Shows token cost.** What your Claude Code use would cost at API prices: today, the last 7 or 30 days or all time, a 14-day chart, and totals by channel (Claude Code or Desktop), account, model and project.
 - **Has a pet.** A little green monster web-swings along the whole menu bar while agents work: at the top of each swing it lets go, tumbles through the air, shoots a strand of silk to the edge ahead and swings on that. It picks a spot along the bar, heads there with long hops and short ones, rests to wave or doze when it arrives, then picks another. Each strand gets its own length, swing and poses. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. When no agent is working it swings over to the frontmost window and sits on its title bar next to the traffic lights, looking around, yawning and dozing, then swings back out when work starts. Sitting on windows needs Accessibility access (asked for once). Turn the movement off with **Animate Pet**.
 
+![Switching Claude Code from a nearly used-up account to another in one click, then Claude Desktop the same way](docs/accounts.gif)
+
+<sub>Made-up accounts, rendered from the real Accounts window by `Demo/make-demo.sh accounts`.</sub>
+
 ## Requirements
 
 - macOS 13 or later; built for Apple Silicon and Intel. Designed around a notched MacBook screen. Without a notch it hangs under the menu bar.
