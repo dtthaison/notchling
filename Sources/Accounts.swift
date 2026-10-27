@@ -543,3 +543,15 @@ enum Keychain {
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 }
+
+#if DEMO
+/// Made-up accounts for Demo/accounts.swift. Only the demo renderer is built with -D DEMO.
+extension AccountStore {
+    func demo(accounts: [ClaudeAccount], activeID: String?, usage: [String: AccountUsage], busy: Bool = false) {
+        self.accounts = accounts
+        self.activeID = activeID
+        self.usage = usage
+        self.busy = busy
+    }
+}
+#endif

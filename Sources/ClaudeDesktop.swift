@@ -245,3 +245,14 @@ private extension Result where Failure == Error {
         return nil
     }
 }
+
+#if DEMO
+/// Made-up Desktop sessions for Demo/accounts.swift. Only the demo renderer is built with -D DEMO.
+extension ClaudeDesktopStore {
+    func demo(activeUuid: String?, saved: Set<String>, busy: Bool = false) {
+        self.activeUuid = activeUuid
+        self.saved = saved
+        self.busy = busy
+    }
+}
+#endif
