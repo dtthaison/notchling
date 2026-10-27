@@ -23,6 +23,18 @@ You need macOS 13 or later and the Xcode Command Line Tools (`xcode-select --ins
 
 There's no test suite yet, so check changes by running the app. A notched MacBook is the main target; also check that nothing breaks on a screen without a notch, where the panel hangs under the menu bar.
 
+Every pull request is built on GitHub (the Build check), and `main` only takes pull requests that pass it. The built disk image is attached to the run as an artifact.
+
+## Releasing
+
+For maintainers. With the changes for the release listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md):
+
+```sh
+./release.sh 1.2.0
+```
+
+This makes branch `release/1.2.0` from `main`, sets the version in `Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features.
+
 ## Be careful with real logins
 
 Notchling works on your actual Claude Code, Claude Desktop and Antigravity logins. While developing:
