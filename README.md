@@ -1,6 +1,11 @@
 # Notchling
 
+[![Build](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 A small macOS menu bar app for people who run several [Claude Code](https://claude.com/claude-code) agents at once. It keeps the Mac awake while agents work and turns the camera notch into a live view of every session. From the notch you can read conversations, answer Claude's questions, approve permission prompts and reply to background agents without hunting for the right terminal.
+
+Notchling is free and open source, and isn't affiliated with Anthropic or Google.
 
 ## What it does
 
@@ -122,3 +127,13 @@ Icon/make-icon.swift      draws the app icon
 2. Turn off **Launch at Login**, then quit Notchling.
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
 4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access, and remove `~/Library/Application Support/Notchling/` (captured Claude Desktop sessions).
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, the few rules around real logins, and what fits the project. Notchling is maintained in spare time, so expect a reply within about a week. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Found a security problem? Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
+
+## License
+
+[MIT](LICENSE) © 2026 Son Doan and Notchling contributors.
