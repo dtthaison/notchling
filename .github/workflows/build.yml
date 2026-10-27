@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build app and disk image
         run: ./build.sh --dmg
       - uses: actions/upload-artifact@v4
