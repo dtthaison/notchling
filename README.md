@@ -144,7 +144,8 @@ Demo/                     renders docs/demo.gif from the real views with made-up
 - [ ] **Jump to more terminals.** Go to the exact tab in Ghostty, Warp, kitty and WezTerm, not just Terminal and iTerm, and to the right window in Zed and JetBrains IDEs.
 - [ ] **Quiet when you're looking.** No peek or sound when that session's terminal or editor is already in front.
 - [ ] **More agent states.** Errors (`StopFailure`) peek in red, a Compacting state, and subagents shown under their session, pushed instantly by hooks instead of polling.
-- [ ] **Notarized releases with auto-update.** Developer ID signing, Sparkle updates and a Homebrew cask, so new users don't get Gatekeeper warnings.
+- [ ] **Auto Update.** Notchling checks GitHub for a newer release at launch and once a day. When one is out, the menu shows **Update to <version>**; one click downloads it, replaces the app and relaunches it. Turn off **Check for Updates Automatically** to only check from the menu.
+- [ ] **Notarized releases.** Developer ID signing and a Homebrew cask, so new users don't get Gatekeeper warnings.
 - [ ] **Notification Center fallback.** A system notification when the notch is hidden or you're on an external display.
 - [ ] **Permission-mode badge.** Show plan or auto-accept mode on each row.
 - [ ] **Replies to Terminal and VS Code sessions.** Today only background agents (`claude --bg`) take typed replies; the others only get the ↗ jump button.
