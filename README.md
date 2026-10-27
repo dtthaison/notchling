@@ -136,6 +136,23 @@ Demo/                     renders docs/demo.gif from the real views with made-up
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
 4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access, and remove `~/Library/Application Support/Notchling/` (captured Claude Desktop sessions).
 
+## Planned
+
+- [ ] **Codex and Gemini CLI agents in the notch.** Show their sessions next to Claude Code's, with peeks when they finish or need you, and Codex rate limits and account switching in the menu.
+- [ ] **Auto Warmup.** The 5-hour limit window starts with your first message, so starting it early means it resets sooner and you get more windows in a day. At a time you pick, before you start work, Notchling sends a one-word prompt with the smallest model to each saved account to start its window. It can also send one again as soon as a window resets.
+- [ ] **Limit warnings with a switch.** When an account passes about 90% of its 5-hour or weekly limit, peek with "Switch to <account>?". It always asks first and never switches on its own.
+- [ ] **Jump to more terminals.** Go to the exact tab in Ghostty, Warp, kitty and WezTerm, not just Terminal and iTerm, and to the right window in Zed and JetBrains IDEs.
+- [ ] **Quiet when you're looking.** No peek or sound when that session's terminal or editor is already in front.
+- [ ] **More agent states.** Errors (`StopFailure`) peek in red, a Compacting state, and subagents shown under their session, pushed instantly by hooks instead of polling.
+- [ ] **Notarized releases with auto-update.** Developer ID signing, Sparkle updates and a Homebrew cask, so new users don't get Gatekeeper warnings.
+- [ ] **Notification Center fallback.** A system notification when the notch is hidden or you're on an external display.
+- [ ] **Permission-mode badge.** Show plan or auto-accept mode on each row.
+- [ ] **Replies to Terminal and VS Code sessions.** Today only background agents (`claude --bg`) take typed replies; the others only get the ↗ jump button.
+- [ ] **Antigravity limits while it's closed.** They come from its local language server, so they show only while Antigravity is open.
+- [ ] **Seamless Antigravity and Claude Desktop switching.** Both apps read their login at launch, so switching restarts them.
+
+Have an idea? Open an issue.
+
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, the few rules around real logins, and what fits the project. Notchling is maintained in spare time, so expect a reply within about a week. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
