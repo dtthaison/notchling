@@ -1,0 +1,39 @@
+# Notchling: notes for Claude
+
+A macOS menu bar app (Swift, AppKit + SwiftUI) that shows Claude Code agents in the camera notch and keeps the Mac awake. See README.md for what it does from the user's side.
+
+## Build, install, run
+
+- `./build.sh` builds `build/Notchling.app`; `./build.sh --install` replaces `/Applications/Notchling.app` and relaunches it. Always install after a change the user should see; they test on their own screen.
+- Bundle id `local.notchling`; settings live in its UserDefaults. `AppDelegate.migrateFromAwake()` copies keys from the old `local.awake.menubar` domain (the app used to be called Awake). When adding a setting, add its key to that list.
+
+## Checking UI changes
+
+This environment can't take screenshots, and screenshots the user pastes from the thumbnail live in a temp folder that is usually unreadable or already deleted. Ask for them to be saved to the Desktop instead. To see a view or menu yourself, use the `render-notch-view` skill.
+
+## Architecture in one pass
+
+- `NotchModel.size(for:)` is the single source of truth for the black shape's size per state. `NotchController` keeps a transparent canvas (screen-wide, resized only when the display changes) centred on the camera and toggles `ignoresMouseEvents` by testing the mouse against that shape, so clicks outside fall through.
+- Question and permission cards report their real height through `CardHeightKey` → `model.cardHeight`; don't go back to estimating heights.
+- `PetView` keeps its position in a `Walk` object between frames; its path is computed from the shape, not from the clock.
+- The hook (`Notchling --hook`) is a separate short-lived process. It talks to the app only through files in `~/Library/Application Support/Notchling/` and must always exit with a valid answer or a pass, never hang Claude Code beyond its 300 s timeout.
+- Accounts are three providers off one window (a tab each: Claude Code, Claude Desktop, Antigravity) and three menu sections. Every account card is the shared `AccountRow` view in `AccountsWindow.swift` (avatar, email, subtitle, In Use/Switch, ⋯ menu, and a `content` closure for limits/cost) — reuse it, don't hand-roll another card. Clickable SwiftUI controls get `.pointerCursor()`; clickable NSViews (the menu rows) get `resetCursorRects` with `.pointingHand`.
+
+## Things that bit before
+
+- macOS 26 adds an icon to menu items with standard actions such as `terminate:`, which shifts every item in that group right. Use our own selectors.
+- Transcripts can hold huge base64 image lines. `TranscriptReader` reads only the last 2 MB and skips lines over 100 KB.
+- `CostTracker` scans several roots with a channel tag each: `~/.claude/projects` (Claude Code) and the Claude desktop app's `local-agent-mode-sessions`/`claude-code-sessions` (Desktop). Desktop transcripts carry the account in their path (`…/<accountUuid>/<orgUuid>/…`); the CLI's come from `AccountLog`. It keeps per-model token totals too, scans the whole history (no date filter) so "All Time" is real, and publishes a summary per window (7 / 30 / all) in `ranged`/`rangedByAccount`. It dedupes by `message.id|requestId`, so totals are lower than Claude Code's `/stats` (which counts messages copied into new transcripts on compaction/resume). Changing the cache's stored fields means bumping `Cache.current` (forces a full re-read).
+- `claude -p` sessions (entrypoint `sdk-cli`) are headless: the hook must ignore them, and they can't be replied to.
+- Background job text replies go through `claude attach` in a pty with bracketed paste; question answers are typed as digits, with options.count + 1 as the free-text option.
+- Account switching touches the user's real login. Replace only `claudeAiOauth` in the `Claude Code-credentials` item (it also holds MCP logins) and only `oauthAccount` in `~/.claude.json`. Never refresh the token of the active account: refresh tokens rotate, so it would sign Claude Code out. Keychain goes through `/usr/bin/security` (hex on stdin), never the Security framework: an ad hoc signed build loses access on every rebuild.
+- Antigravity's real login is the Keychain item service `gemini` account `antigravity` (go-keyring: value is `go-keyring-base64:` + base64 of the JSON). It restores from there at launch; `~/.gemini/jetski-standalone-oauth-token` is only a mirror the standalone language server reads. So switching must set BOTH, and Add Account must delete the Keychain item (not just the file) to reach the sign-in screen. Update the item in place so Antigravity keeps read access. Both apps read at launch, so quit them first.
+- Antigravity limits come from its local language server, not Google's APIs (those refuse consumer accounts). Port is random (`lsof`), CSRF token is `--csrf_token` in its args, header `x-codeium-csrf-token`, Connect JSON over self-signed HTTPS. Only works while Antigravity runs.
+- Claude Desktop (`com.anthropic.claudefordesktop`) is a separate login from Claude Code, but the OAuth tokens are the same system (same client id). What decides its active account is the claude.ai **web session cookies** in `~/Library/Application Support/Claude/Cookies`, not the token — injecting a token does nothing (Desktop reverts to the cookie's account on restart). So switching, like Antigravity, captures the whole Cookies file while an account is active and restores it to switch, also setting `lastKnownAccountUuid`/`bootSideSessions` in config.json. Accounts match the Claude Code list by account UUID (id before the org). An account can only be switched to after it has been signed in to in Desktop once (the only way its cookies exist). Cookies backup: `Cookies.notchling-backup`; captured copies in `~/Library/Application Support/Notchling/desktop/<uuid>.cookies`. Quit the app before swapping; cookie DB format could change across Desktop updates.
+- Editing `~/.claude/settings.json` is the user's real config. Change only our own hook entries (match on the `--hook` command), keep a backup, and keep their other hooks.
+
+## Style
+
+- Match the surrounding code: short doc comments that explain why, `guard` early, no force-unwraps outside probes.
+- User-facing text is short and plain. Menu titles use Title Case.
+- The user prefers short replies and "just build it"; ask only when a decision is genuinely theirs (accounts, tokens, anything outward-facing).

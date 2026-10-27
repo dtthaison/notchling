@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Notchling doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't paste tokens, cookies or the contents of `~/.claude.json`. For security problems, use [SECURITY.md](https://github.com/dtthaison/notchling/blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start two background agents with `claude --bg`
+        2. Hover over the notch
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model and display
+      placeholder: MacBook Pro 14" (notch), plus an external display
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Notch panel
+        - Answering prompts (hook)
+        - Replying to background agents
+        - Claude Code accounts
+        - Claude Desktop accounts
+        - Antigravity accounts
+        - Token cost
+        - Keep awake
+        - Pet
+        - Other
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or anything else

@@ -1,0 +1,25 @@
+name: Feature request
+description: An idea for Notchling.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Notchling tries to stay small: a notch view of Claude Code agents, keeping the Mac awake, and switching accounts. Please open this before writing code, so we can agree it fits.
+  - type: textarea
+    id: moment
+    attributes:
+      label: The moment you wished for it
+      description: What were you doing when this would have helped?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like to happen
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead

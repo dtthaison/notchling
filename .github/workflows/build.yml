@@ -1,0 +1,21 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build app and disk image
+        run: ./build.sh --dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Notchling
+          path: build/Notchling-*.dmg
