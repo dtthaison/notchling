@@ -1,0 +1,50 @@
+name: Release
+
+# Merging a release/<version> pull request (made by ./release.sh) tags v<version> on the merge
+# commit and publishes the GitHub release with the disk image and a zip.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Build app and disk image
+        run: ./build.sh --dmg
+      - name: Write release notes
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ditto -c -k --keepParent build/Notchling.app "build/Notchling-$VERSION.zip"
+          {
+            awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" { on = 1; next } on && /^(## |\[)/ { exit } on { print }' CHANGELOG.md
+            cat <<EOF
+
+          ## Install
+
+          1. Download **Notchling-$VERSION.dmg**, open it and drag **Notchling** onto **Applications**.
+          2. Open Notchling from Applications. The app isn't notarized, so macOS blocks it the first time:
+             - Open **System Settings → Privacy & Security**, scroll down to "Notchling was blocked…", click **Open Anyway** and confirm.
+             - Or, in Terminal: \`xattr -dr com.apple.quarantine /Applications/Notchling.app\`
+          3. A cup appears in the menu bar. Click it to choose **Keep Mac Awake** and turn on **Answer Prompts from the Notch** if you want to answer prompts from the notch.
+
+          The zip contains the same app for anyone who prefers it over the disk image.
+          EOF
+          } > build/notes.md
+          cat build/notes.md
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "build/Notchling-$VERSION.dmg" "build/Notchling-$VERSION.zip" \
+            --target "${{ github.event.pull_request.merge_commit_sha }}" \
+            --title "Notchling $VERSION" --notes-file build/notes.md
