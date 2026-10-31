@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import UserNotifications
 
 /// What to do when the Claude Code account in use nears a usage limit.
@@ -292,22 +293,21 @@ final class LimitWatcher {
     }
 }
 
-/// A macOS notification. Tries the system notification center and falls back to `osascript` when the
-/// app isn't allowed to post (an ad hoc signed build may not be).
+/// A notification: the system one when macOS allows it, otherwise Notchling's own banner.
 enum UserNotifier {
     static func post(_ title: String, _ body: String) {
-        guard Bundle.main.bundleIdentifier != nil else { return fallback(title, body) }
+        guard Bundle.main.bundleIdentifier != nil else { return banner(title, body) }
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
             case .authorized, .provisional:
                 add(center, title, body)
             case .notDetermined:
-                center.requestAuthorization(options: [.alert]) { granted, _ in
-                    granted ? add(center, title, body) : fallback(title, body)
-                }
+                // The answer can take as long as the user does; the message can't wait for it.
+                banner(title, body)
+                center.requestAuthorization(options: [.alert]) { _, _ in }
             default:
-                fallback(title, body)
+                banner(title, body)
             }
         }
     }
@@ -317,19 +317,75 @@ enum UserNotifier {
         content.title = title
         content.body = body
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) { error in
-            if error != nil { fallback(title, body) }
+            if error != nil { banner(title, body) }
         }
     }
 
-    private static func fallback(_ title: String, _ body: String) {
-        func quoted(_ s: String) -> String {
-            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    /// macOS can refuse an ad hoc signed app's notifications (UNErrorDomain 1). Never fall back on
+    /// osascript: its notifications carry Script Editor's name and icon.
+    private static func banner(_ title: String, _ body: String) {
+        DispatchQueue.main.async { NoticeBanner.show(title, body) }
+    }
+}
+
+/// Notchling's own notification: the app icon, a title and a message at the top right of the screen.
+/// It works without any permission, stays over full-screen apps, and never takes focus.
+enum NoticeBanner {
+    private static let width: CGFloat = 360
+    private static var panel: NSPanel?
+    private static var closing: DispatchWorkItem?
+
+    static func show(_ title: String, _ body: String) {
+        dismiss()
+        let view = NSHostingView(rootView: NoticeBannerView(title: title, message: body) { dismiss() })
+        view.setFrameSize(NSSize(width: width, height: view.fittingSize.height))
+        let panel = NSPanel(contentRect: view.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.contentView = view
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        if let screen = NSScreen.main?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: screen.maxX - view.frame.width - 16, y: screen.maxY - view.frame.height - 12))
         }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", "display notification \(quoted(body)) with title \(quoted(title))"]
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        try? p.run()
+        panel.orderFrontRegardless()
+        self.panel = panel
+        let work = DispatchWorkItem { dismiss() }
+        closing = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+    }
+
+    static func dismiss() {
+        closing?.cancel()
+        closing = nil
+        panel?.orderOut(nil)
+        panel = nil
+    }
+}
+
+struct NoticeBannerView: View {
+    let title: String
+    let message: String
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage ?? NSImage())
+                .resizable()
+                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(message).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(width: 360, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onClose)
     }
 }

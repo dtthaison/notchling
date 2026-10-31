@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = SettingsModel()
     private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
     private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, cost: cost, settings: settings)
+    private lazy var pagesWindow = PagesWindowController(accounts: accounts)
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
     private var lastGroups: [String: AgentGroup]?
@@ -48,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setAnswerFromNotch(true)
         } else if answerFromNotch, !HookBridge.isInstalled {
             setAnswerFromNotch(true)
+        }
+
+        // Same for keeping local copies of published pages; its hook is installed on its own.
+        if UserDefaults.standard.object(forKey: "keepPages") == nil || keepPages {
+            if !HookBridge.pagesInstalled || UserDefaults.standard.object(forKey: "keepPages") == nil { setKeepPages(true) }
         }
 
         refresh()
@@ -88,6 +94,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private var keepPages: Bool {
+        UserDefaults.standard.object(forKey: "keepPages") as? Bool ?? true
+    }
+
+    private func setKeepPages(_ on: Bool) {
+        do {
+            try HookBridge.setPagesInstalled(on)
+            UserDefaults.standard.set(on, forKey: "keepPages")
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't update Claude Code's settings"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
     private var showNotch: Bool {
         get { !UserDefaults.standard.bool(forKey: "hideNotch") }
         set { UserDefaults.standard.set(!newValue, forKey: "hideNotch") }
@@ -99,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "limitMode", "limitSwitchAt"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "limitMode", "limitSwitchAt"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -241,6 +263,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         answerItem.state = answerFromNotch && HookBridge.isInstalled ? .on : .off
         answerItem.toolTip = "Adds a hook to Claude Code so questions and permission prompts can be answered here."
         menu.addItem(answerItem)
+        let pagesItem = action("Keep Local Copies of Artifacts", #selector(toggleKeepPages))
+        pagesItem.state = keepPages && HookBridge.pagesInstalled ? .on : .off
+        pagesItem.toolTip = "Adds a hook to Claude Code that saves each published Artifact page on this Mac, so it stays readable after switching accounts."
+        menu.addItem(pagesItem)
+        menu.addItem(localPagesItem())
         menu.addItem(.separator())
         let login = action("Launch at Login", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -572,6 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func reloadSettings() {
         let login = SMAppService.mainApp.status == .enabled
         let answer = answerFromNotch && HookBridge.isInstalled
+        let pages = keepPages && HookBridge.pagesInstalled
         settings.load { s in
             if s.awakeMode != awake.mode { s.awakeMode = awake.mode }
             if s.keepDisplayOn != awake.keepDisplayOn { s.keepDisplayOn = awake.keepDisplayOn }
@@ -582,6 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s.showLastReply != notch.model.showLastReply { s.showLastReply = notch.model.showLastReply }
             if s.replyFromNotch != notch.model.replyFromNotch { s.replyFromNotch = notch.model.replyFromNotch }
             if s.answerFromNotch != answer { s.answerFromNotch = answer }
+            if s.keepPages != pages { s.keepPages = pages }
             if s.launchAtLogin != login { s.launchAtLogin = login }
             if s.limitMode != limits.mode { s.limitMode = limits.mode }
             if s.limitSwitchAt != limits.switchAt { s.limitSwitchAt = limits.switchAt }
@@ -609,6 +638,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notch.model.replyFromNotch = on
         case .answerFromNotch(let on):
             setAnswerFromNotch(on)
+        case .keepPages(let on):
+            setKeepPages(on)
         case .limitMode(let mode):
             limits.mode = mode
         case .limitSwitchAt(let point):
@@ -661,6 +692,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleAnswer() {
         setAnswerFromNotch(!(answerFromNotch && HookBridge.isInstalled))
+    }
+
+    @objc private func toggleKeepPages() {
+        setKeepPages(!(keepPages && HookBridge.pagesInstalled))
+    }
+
+    /// The newest saved pages, plus the window with all of them and the folder.
+    private func localPagesItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Artifacts", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        let pages = PageLibrary.entries()
+        if pages.isEmpty {
+            sub.addItem(disabled("None Saved Yet"))
+        }
+        for page in pages.prefix(12) {
+            let row = action(String(page.title.prefix(60)), #selector(openPage(_:)))
+            row.representedObject = page.folder
+            row.toolTip = page.account.isEmpty ? page.project : "\(page.account)\n\(page.project)"
+            sub.addItem(row)
+        }
+        sub.addItem(.separator())
+        sub.addItem(action("All Artifacts…", #selector(openAllPages)))
+        let show = action("Show in Finder", #selector(showPagesInFinder))
+        show.isEnabled = !pages.isEmpty
+        sub.addItem(show)
+        item.submenu = sub
+        return item
+    }
+
+    @objc private func openPage(_ sender: NSMenuItem) {
+        pagesWindow.show(select: sender.representedObject as? String)
+    }
+
+    @objc private func openAllPages() {
+        pagesWindow.show()
+    }
+
+    @objc private func showPagesInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([PageLibrary.indexURL])
     }
 
     @objc private func toggleNotch() {

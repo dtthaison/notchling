@@ -50,6 +50,12 @@ enum HookBridge {
     /// with no output (Claude Code's normal prompt) when the app isn't running, and for `claude -p` runs.
     static func runHook() -> Never {
         let input = FileHandle.standardInput.readDataToEndOfFile()
+        // Saving a published page needs no running app, and never answers Claude Code.
+        if let event = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any],
+           event["hook_event_name"] as? String == "PostToolUse", event["tool_name"] as? String == "Artifact" {
+            PageLibrary.handle(event)
+            exit(0)
+        }
         guard appIsRunning,
               let event = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any],
               let name = event["hook_event_name"] as? String,
@@ -179,8 +185,40 @@ enum HookBridge {
         "'" + Bundle.main.bundlePath + "/Contents/MacOS/Notchling' --hook"
     }
 
-    static var isInstalled: Bool {
-        (try? String(contentsOf: settingsURL, encoding: .utf8))?.contains(marker) ?? false
+    /// Whether our entry is in settings.json for these events (the prompt hooks and the page hook are separate).
+    private static func hasHook(in events: [String]) -> Bool {
+        guard let settings = readJSON(settingsURL), let hooks = settings["hooks"] as? [String: Any] else { return false }
+        return events.contains { event in
+            (hooks[event] as? [[String: Any]] ?? []).contains { group in
+                (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) ?? false }
+            }
+        }
+    }
+
+    static var isInstalled: Bool { hasHook(in: ["PreToolUse", "PermissionRequest"]) }
+
+    static var pagesInstalled: Bool { hasHook(in: ["PostToolUse"]) }
+
+    /// Adds (or removes) the PostToolUse(Artifact) hook that keeps a local copy of each published page.
+    /// Short timeout: it only copies files. Other hooks, and the settings, stay as they were.
+    static func setPagesInstalled(_ install: Bool) throws {
+        let data = (try? Data(contentsOf: settingsURL)) ?? Data("{}".utf8)
+        guard var settings = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let before = settings
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        var groups = (hooks["PostToolUse"] as? [[String: Any]] ?? []).filter { group in
+            !((group["hooks"] as? [[String: Any]]) ?? []).contains { ($0["command"] as? String)?.contains(marker) ?? false }
+        }
+        if install {
+            groups.append(["matcher": "Artifact",
+                           "hooks": [["type": "command", "command": hookCommand, "timeout": 10]]])
+        }
+        hooks["PostToolUse"] = groups.isEmpty ? nil : groups
+        settings["hooks"] = hooks.isEmpty ? nil : hooks
+        if NSDictionary(dictionary: settings).isEqual(to: before) { return }
+        try? data.write(to: settingsURL.appendingPathExtension("notchling-backup"))
+        let out = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try out.write(to: settingsURL, options: .atomic)
     }
 
     /// Adds (or removes) Notchling's PreToolUse(AskUserQuestion) and PermissionRequest hooks, leaving

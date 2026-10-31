@@ -63,7 +63,7 @@ enum AccountsTab: String, CaseIterable {
 final class SettingsModel: ObservableObject {
     enum Change {
         case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), showNotch(Bool), notchWidth(NotchWidth)
-        case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), launchAtLogin(Bool)
+        case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), keepPages(Bool), launchAtLogin(Bool)
         case limitMode(LimitMode), limitSwitchAt(Int)
     }
 
@@ -76,6 +76,7 @@ final class SettingsModel: ObservableObject {
     @Published var showLastReply = true { didSet { push(.showLastReply(showLastReply)) } }
     @Published var replyFromNotch = true { didSet { push(.replyFromNotch(replyFromNotch)) } }
     @Published var answerFromNotch = true { didSet { push(.answerFromNotch(answerFromNotch)) } }
+    @Published var keepPages = true { didSet { push(.keepPages(keepPages)) } }
     @Published var launchAtLogin = false { didSet { push(.launchAtLogin(launchAtLogin)) } }
     @Published var limitMode = LimitMode.notifyAndSwitch { didSet { push(.limitMode(limitMode)) } }
     @Published var limitSwitchAt = LimitLogic.defaultSwitchAt { didSet { push(.limitSwitchAt(limitSwitchAt)) } }
@@ -779,10 +780,11 @@ private struct SettingsPage: View {
             }
             Section {
                 Toggle("Answer prompts from the notch", isOn: $settings.answerFromNotch)
+                Toggle("Keep local copies of artifacts", isOn: $settings.keepPages)
             } header: {
                 Text("Claude Code")
             } footer: {
-                Text("Adds a hook to ~/.claude/settings.json so questions and permission prompts can be answered here.")
+                Text("Adds a hook to ~/.claude/settings.json so questions and permission prompts can be answered here. Keeping local copies saves each published Artifact on this Mac, since claude.ai shows it only to the account that published it.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section {
