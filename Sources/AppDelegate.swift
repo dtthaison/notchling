@@ -3,6 +3,7 @@ import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let awake = AwakeController()
+    private let resumer = WakeResumer()
     private let monitor = AgentMonitor()
     private let notch = NotchController()
     private let accounts = AccountStore()
@@ -10,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let claudeDesktop = ClaudeDesktopStore()
     private let cost = CostTracker()
     private let settings = SettingsModel()
+    private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
     private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, cost: cost, settings: settings)
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
@@ -97,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "hideNotch", "answerFromNotch", "showPet", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "limitMode", "limitSwitchAt"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -142,6 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         notch.model.refreshSnapshots { [weak self] old, new in self?.peekTransitions(old: old, new: new) }
         awake.apply(agentsWorking: agents.contains { $0.group == .working })
+        resumer.check(agents)
+        limits.check(agents)
         updateButton()
         if accountsWindow.isVisible { reloadSettings() }
     }
@@ -202,8 +206,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let display = action("Keep Display On", #selector(toggleDisplay))
         display.state = awake.keepDisplayOn ? .on : .off
         menu.addItem(display)
+        let resumeItem = action("Continue Agents After Sleep", #selector(toggleResume))
+        resumeItem.state = resumer.enabled ? .on : .off
+        resumeItem.toolTip = "When the Mac wakes, background agents whose reply was cut off by sleep are told to continue."
+        menu.addItem(resumeItem)
 
         menu.addItem(.separator())
+        menu.addItem(header("Notch"))
         let notchItem = action("Show Agents in Notch", #selector(toggleNotch))
         notchItem.state = showNotch ? .on : .off
         menu.addItem(notchItem)
@@ -220,10 +229,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let petItem = action("Animate Pet", #selector(togglePet))
         petItem.state = notch.model.showPet ? .on : .off
         menu.addItem(petItem)
+        let lastReplyItem = action("Show Last Reply When Peeking", #selector(toggleLastReply))
+        lastReplyItem.state = notch.model.showLastReply ? .on : .off
+        lastReplyItem.toolTip = "Off, a peek only says which agent finished or wants you."
+        menu.addItem(lastReplyItem)
+        let replyItem = action("Reply to Background Agents from the Notch", #selector(toggleReply))
+        replyItem.state = notch.model.replyFromNotch ? .on : .off
+        replyItem.toolTip = "Off, the notch opens the agent in a terminal instead of showing a reply box."
+        menu.addItem(replyItem)
         let answerItem = action("Answer Prompts from the Notch", #selector(toggleAnswer))
         answerItem.state = answerFromNotch && HookBridge.isInstalled ? .on : .off
         answerItem.toolTip = "Adds a hook to Claude Code so questions and permission prompts can be answered here."
         menu.addItem(answerItem)
+        menu.addItem(.separator())
         let login = action("Launch at Login", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
@@ -258,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(switchItem)
         // Opens the cost window; the breakdown lives there, not in a submenu.
         menu.addItem(action(costTitle, #selector(showCost)))
+        menu.addItem(limitItem())
 
         addDesktopItems(to: menu)
         addAntigravityItems(to: menu)
@@ -267,6 +286,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settingsItem = action("Settings…", #selector(showSettings))
         settingsItem.keyEquivalent = ","
         menu.addItem(settingsItem)
+    }
+
+    /// "When the Account in Use Nears Its Limit": what to do, and the percentage to switch at.
+    private func limitItem() -> NSMenuItem {
+        let sub = NSMenu()
+        for mode in LimitMode.allCases {
+            let item = action(mode.title, #selector(setLimitMode(_:)))
+            item.representedObject = mode.rawValue
+            item.state = limits.mode == mode ? .on : .off
+            sub.addItem(item)
+        }
+        sub.addItem(.separator())
+        sub.addItem(header("Switch At"))
+        var points = [90, 95, 99]
+        if !points.contains(limits.switchAt) { points.append(limits.switchAt) }
+        for point in points {
+            let custom = ![90, 95, 99].contains(point)
+            let item = action(custom ? "Custom: \(point)%" : "\(point)%", #selector(setLimitSwitchAt(_:)))
+            item.representedObject = point
+            item.state = limits.switchAt == point ? .on : .off
+            item.isEnabled = limits.mode == .notifyAndSwitch
+            sub.addItem(item)
+        }
+        let item = NSMenuItem(title: "When the Account in Use Nears Its Limit", action: nil, keyEquivalent: "")
+        item.submenu = sub
+        item.toolTip = "Notify at 90% and 100% of the 5-hour or weekly limit; or also switch to the saved account with the most room."
+        return item
+    }
+
+    @objc private func setLimitMode(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let mode = LimitMode(rawValue: raw) { limits.mode = mode }
+    }
+
+    @objc private func setLimitSwitchAt(_ sender: NSMenuItem) {
+        if let point = sender.representedObject as? Int { limits.switchAt = point }
+    }
+
+    /// A usage-limit message: sound and notch peek like an agent's reply, plus a macOS notification.
+    private func announceLimit(_ text: String) {
+        NSSound(named: "Tink")?.play()
+        if notch.isVisible, let agent = agents.first { notch.model.peekNotice(text, using: agent) }
+        UserNotifier.post("Notchling", text)
     }
 
     /// The account Claude Desktop is on, and a Switch Account submenu for the rest.
@@ -514,11 +575,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.load { s in
             if s.awakeMode != awake.mode { s.awakeMode = awake.mode }
             if s.keepDisplayOn != awake.keepDisplayOn { s.keepDisplayOn = awake.keepDisplayOn }
+            if s.continueAfterSleep != resumer.enabled { s.continueAfterSleep = resumer.enabled }
             if s.showNotch != showNotch { s.showNotch = showNotch }
             if s.notchWidth != notch.model.width { s.notchWidth = notch.model.width }
             if s.animatePet != notch.model.showPet { s.animatePet = notch.model.showPet }
+            if s.showLastReply != notch.model.showLastReply { s.showLastReply = notch.model.showLastReply }
+            if s.replyFromNotch != notch.model.replyFromNotch { s.replyFromNotch = notch.model.replyFromNotch }
             if s.answerFromNotch != answer { s.answerFromNotch = answer }
             if s.launchAtLogin != login { s.launchAtLogin = login }
+            if s.limitMode != limits.mode { s.limitMode = limits.mode }
+            if s.limitSwitchAt != limits.switchAt { s.limitSwitchAt = limits.switchAt }
         }
     }
 
@@ -529,14 +595,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refresh()
         case .keepDisplayOn(let on):
             if awake.keepDisplayOn != on { toggleDisplay() }
+        case .continueAfterSleep(let on):
+            resumer.enabled = on
         case .showNotch(let on):
             if showNotch != on { toggleNotch() }
         case .notchWidth(let width):
             notch.model.width = width
         case .animatePet(let on):
             notch.model.showPet = on
+        case .showLastReply(let on):
+            notch.model.showLastReply = on
+        case .replyFromNotch(let on):
+            notch.model.replyFromNotch = on
         case .answerFromNotch(let on):
             setAnswerFromNotch(on)
+        case .limitMode(let mode):
+            limits.mode = mode
+        case .limitSwitchAt(let point):
+            limits.switchAt = point
         case .launchAtLogin(let on):
             if (SMAppService.mainApp.status == .enabled) != on { toggleLogin() }
         }
@@ -573,6 +649,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func togglePet() {
         notch.model.showPet.toggle()
+    }
+
+    @objc private func toggleReply() {
+        notch.model.replyFromNotch.toggle()
+    }
+
+    @objc private func toggleLastReply() {
+        notch.model.showLastReply.toggle()
     }
 
     @objc private func toggleAnswer() {
@@ -652,6 +736,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleDisplay() {
         awake.keepDisplayOn.toggle()
         refresh()
+    }
+
+    @objc private func toggleResume() {
+        resumer.enabled.toggle()
     }
 
     @objc private func toggleLogin() {

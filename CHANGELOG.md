@@ -4,6 +4,16 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Added
+
+- Continue Agents After Sleep, on by default: when the Mac wakes, background agents whose reply was cut off by sleep are told to continue.
+- When the Account in Use Nears Its Limit: warns at 90% and 100%, and switches to the saved account with the most room at a point you set (80–99%, default 95%). After a switch, background agents stopped on the limit are restarted and told to continue.
+- Reads the usage endpoint's `limits` list, so per-model limits and new kinds of limit show up by themselves.
+
+### Changed
+
+- Accounts without a 5-hour window, such as Max 20x since October 2026, show and watch only their weekly limit.
+
 ## [1.1.0] - 2026-10-27
 
 First public release.

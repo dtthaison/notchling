@@ -62,17 +62,23 @@ enum AccountsTab: String, CaseIterable {
 /// through `reload` and carries out each change through `apply`.
 final class SettingsModel: ObservableObject {
     enum Change {
-        case awakeMode(AwakeMode), keepDisplayOn(Bool), showNotch(Bool), notchWidth(NotchWidth)
-        case animatePet(Bool), answerFromNotch(Bool), launchAtLogin(Bool)
+        case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), showNotch(Bool), notchWidth(NotchWidth)
+        case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), launchAtLogin(Bool)
+        case limitMode(LimitMode), limitSwitchAt(Int)
     }
 
     @Published var awakeMode = AwakeMode.off { didSet { push(.awakeMode(awakeMode)) } }
     @Published var keepDisplayOn = false { didSet { push(.keepDisplayOn(keepDisplayOn)) } }
+    @Published var continueAfterSleep = true { didSet { push(.continueAfterSleep(continueAfterSleep)) } }
     @Published var showNotch = true { didSet { push(.showNotch(showNotch)) } }
     @Published var notchWidth = NotchWidth.medium { didSet { push(.notchWidth(notchWidth)) } }
     @Published var animatePet = true { didSet { push(.animatePet(animatePet)) } }
+    @Published var showLastReply = true { didSet { push(.showLastReply(showLastReply)) } }
+    @Published var replyFromNotch = true { didSet { push(.replyFromNotch(replyFromNotch)) } }
     @Published var answerFromNotch = true { didSet { push(.answerFromNotch(answerFromNotch)) } }
     @Published var launchAtLogin = false { didSet { push(.launchAtLogin(launchAtLogin)) } }
+    @Published var limitMode = LimitMode.notifyAndSwitch { didSet { push(.limitMode(limitMode)) } }
+    @Published var limitSwitchAt = LimitLogic.defaultSwitchAt { didSet { push(.limitSwitchAt(limitSwitchAt)) } }
 
     var apply: ((Change) -> Void)?
     var reload: (() -> Void)?
@@ -353,7 +359,7 @@ private struct AccountCard: View {
                 VStack(spacing: 6) {
                     if let s = usage.session { LimitRow(label: "5 hours", window: s, short: true) }
                     if let w = usage.week { LimitRow(label: "Week", window: w, short: false) }
-                    ForEach(usage.models, id: \.name) { LimitRow(label: $0.name, window: $0.window, short: false) }
+                    ForEach(usage.other + usage.models, id: \.name) { LimitRow(label: $0.name, window: $0.window, short: false) }
                 }
             } else {
                 Text(isActive ? "Checking limits…" : "Limits show once the saved login is checked.")
@@ -749,11 +755,17 @@ private struct SettingsPage: View {
 
     var body: some View {
         Form {
-            Section("Keep Mac Awake") {
+            Section {
                 Picker("Keep awake", selection: $settings.awakeMode) {
                     ForEach(AwakeMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 Toggle("Keep display on", isOn: $settings.keepDisplayOn)
+                Toggle("Continue agents after sleep", isOn: $settings.continueAfterSleep)
+            } header: {
+                Text("Keep Mac Awake")
+            } footer: {
+                Text("Closing the lid still puts the Mac to sleep. When it wakes, background agents whose reply "
+                     + "was cut off by sleep are told to continue.")
             }
             Section("Notch") {
                 Toggle("Show agents in the notch", isOn: $settings.showNotch)
@@ -762,6 +774,8 @@ private struct SettingsPage: View {
                 }
                 .pickerStyle(.segmented)
                 Toggle("Animate pet", isOn: $settings.animatePet)
+                Toggle("Show the last reply when peeking", isOn: $settings.showLastReply)
+                Toggle("Reply to background agents from the notch", isOn: $settings.replyFromNotch)
             }
             Section {
                 Toggle("Answer prompts from the notch", isOn: $settings.answerFromNotch)
@@ -770,6 +784,22 @@ private struct SettingsPage: View {
             } footer: {
                 Text("Adds a hook to ~/.claude/settings.json so questions and permission prompts can be answered here.")
                     .font(.caption).foregroundColor(.secondary)
+            }
+            Section {
+                Picker("When the account in use nears its limit", selection: $settings.limitMode) {
+                    ForEach(LimitMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                if settings.limitMode == .notifyAndSwitch {
+                    Stepper(value: $settings.limitSwitchAt, in: LimitLogic.switchRange) {
+                        Text("Switch at \(settings.limitSwitchAt)%")
+                    }
+                }
+            } header: {
+                Text("Usage Limits")
+            } footer: {
+                Text("Notify tells you at 90% and 100% of the 5-hour or weekly limit. Notify and Switch also moves "
+                     + "Claude Code to the saved account with the most room (both limits under 80%), at most once "
+                     + "every 30 minutes, and restarts background agents that stopped on the limit.")
             }
             Section("General") {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)

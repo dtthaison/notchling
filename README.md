@@ -13,14 +13,15 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 
 ## What it does
 
-- **Keeps the Mac awake.** Off, Always On, or only While Agents Are Working. Optionally keeps the display on too.
+- **Keeps the Mac awake.** Off, Always On, or only While Agents Are Working. Optionally keeps the display on too. Closing the lid still sleeps; when the Mac wakes, background agents cut off mid-reply are told to continue.
 - **Shows agents in the notch.** Hovering over the notch opens a list in three tabs: **Input** (waiting on you), **Working** and **Done**. Each row shows the session name, where it runs (Background, VS Code, Terminal, `claude -p`), when it last changed, your last prompt and what it's doing now.
 - **Peeks when something happens.** When an agent finishes or needs you, the notch slides open briefly with a short summary and plays a sound.
 - **Shows conversations like the terminal.** Click a row to see `❯` prompts, `⏺` replies and `⎿` tool summaries ("Read 2 files, ran 1 shell command").
-- **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`.
+- **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`. Turn it off in Settings to keep replying in the terminal; the notch then just opens the agent there.
 - **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
 - **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
 - **Switches Claude Code accounts.** Every account you sign in to is saved, and one click in the menu points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
+- **Watches the usage limit.** When the account Claude Code is using reaches 90%, then 100%, of its 5-hour or weekly limit, Notchling says so once per window: a notch peek with a sound and a macOS notification. In the default **Notify and Switch** mode it also switches to the saved account with the most room as soon as a window reaches the **Switch At** point (95% by default, 80-99% in Settings; at 90% or below the separate 90% warning is skipped) or a background agent stops on "You've hit your ... limit". It only switches to an account whose limits were fetched in the last 10 minutes and are both under 80%, at most once every 30 minutes, and never back to the account it just left until that window resets; with no such account it only notifies. After a switch, background agents that stopped on the limit are restarted (`claude respawn`) and told to continue. Set it to **Notify** or **Off** instead.
 - **Switches Claude Desktop accounts.** The Claude desktop app's account is swapped too (by restoring its saved session and restarting it). Accounts are shared with the Claude Code list; an account can be switched to once it has been signed in to in Desktop at least once.
 - **Switches Antigravity accounts.** Each Google account you sign in to Antigravity with is saved too. Switching restarts Antigravity on the other account, with no new sign-in. The account in use shows its Gemini, Claude/GPT and Gemini 4 Argon limits while Antigravity is open.
 - **Shows token cost.** What your Claude Code use would cost at API prices: today, the last 7 or 30 days or all time, a 14-day chart, and totals by channel (Claude Code or Desktop), account, model and project.
@@ -62,8 +63,10 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 | Antigravity | The Google account Antigravity is on, and Switch Account with every saved one plus Add Account… |
 | Manage Accounts… | The accounts window: a tab per provider (Claude Code, Claude Desktop, Antigravity), plus Claude Token Cost and Settings |
 | Claude Token Cost | Today's cost in the title; click to open the cost window (by day, channel, account, model and project, at API prices) |
+| When the Account in Use Nears Its Limit → Off / Notify / Notify and Switch | Default Notify and Switch. Under it, Switch At → 90% / 95% / 99% (a saved custom value shows as Custom: N%); the Settings tab takes any value from 80% to 99% |
 | Keep Mac Awake → Off / Always On / While Agents Are Working | Holds a power assertion so the Mac doesn't idle-sleep |
 | Keep Display On | Keeps the screen awake as well |
+| Continue Agents After Sleep | On by default. When the Mac wakes, background agents whose reply ended with "went to sleep mid-response" get one message telling them to continue. Terminal sessions and `claude -p` runs can't be written to |
 | Show Agents in Notch | Shows or hides the notch panel |
 | Notch Width → Small / Medium / Large | How wide the list, peeks and chat open |
 | Animate Pet | Lets the monster web-swing along the menu bar |
@@ -110,12 +113,14 @@ Sources/
   main.swift              entry point: --hook, login item flags, app start
   AppDelegate.swift       menu bar item, settings menu, 3-second polling loop
   AwakeController.swift   IOKit power assertion
+  WakeResumer.swift       after a wake, tells background agents cut off by sleep to continue
   AgentMonitor.swift      reads sessions and background jobs into Agent values
   TranscriptReader.swift  parses transcripts into chat lines, activity and open questions
   HookBridge.swift        the --hook process and installing the hook into settings.json
   ReplySender.swift       types replies and answers into background agents via claude attach
   AgentActions.swift      opens or focuses a session's terminal or editor window
   SlashCommands.swift     built-in, user, project and plugin commands for completion
+  LimitWatcher.swift      usage-limit alerts, automatic account switch, restarting agents stopped on the limit
   Accounts.swift          saved logins, switching, limits from the usage endpoint
   Antigravity.swift       saved Antigravity logins and switching
   ClaudeDesktop.swift     Claude Desktop cookie-session capture and switching

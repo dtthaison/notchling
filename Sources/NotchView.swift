@@ -1202,19 +1202,78 @@ extension View {
     }
 }
 
+extension View {
+    /// Fades the cut-off edge of a scrolling card so it reads as "more below".
+    func moreBelow(_ show: Bool) -> some View {
+        overlay(alignment: .bottom) {
+            if show {
+                LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 14)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+/// Natural height of a `ScrollingBody`'s content; its own key, so it doesn't mix with `CardHeightKey`.
+struct BodyHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Content at its full height up to `limit`, scrolling beyond that, so a long question keeps its
+/// header and answer box in view. Back at the top whenever `resetKey` changes.
+struct ScrollingBody<Content: View>: View {
+    let limit: CGFloat
+    let resetKey: Int
+    @ViewBuilder var content: Content
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        let overflows = height > limit
+        ScrollView(.vertical) {
+            content.fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { Color.clear.preference(key: BodyHeightKey.self, value: $0.size.height) })
+                .padding(.bottom, overflows ? 14 : 0)
+        }
+        .onPreferenceChange(BodyHeightKey.self) { height = $0 }
+        .scrollIndicators(overflows ? .visible : .hidden)
+        .id(resetKey)
+        .frame(height: height > 0 ? min(height, limit) : nil)
+        .moreBelow(overflows)
+    }
+}
+
 struct PeekView: View {
     @ObservedObject var model: NotchModel
     let agent: Agent
 
     var body: some View {
         Group {
-            if let request = model.permission(agent.id) {
+            if let notice = model.notice, notice.agentID == agent.id {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "gauge.with.dots.needle.67percent").foregroundColor(.orange)
+                    Text(notice.text)
+                        .font(.system(size: 12.5)).foregroundColor(.white.opacity(0.9))
+                        .lineLimit(3)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .contentShape(Rectangle())
+                .onTapGesture { model.go(.collapsed) }
+            } else if let request = model.permission(agent.id) {
                 PermissionCard(model: model, agent: agent, request: request, showsAgent: true)
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             } else if let q = model.question(agent.id) {
-                QuestionCard(model: model, agent: agent, question: q, showsAgent: true)
+                QuestionCard(model: model, agent: agent, question: q, showsAgent: true, bodyLimit: QuestionCard.peekBodyLimit)
+                    .reportsCardHeight(to: model)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+            } else if model.canReplyInPeek(agent.id) {
+                ReplyPeek(model: model, agent: agent)
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
@@ -1228,7 +1287,7 @@ struct PeekView: View {
                         Text(agent.group == .needsInput ? "Reply ›" : "Open ›")
                             .font(.system(size: 11)).foregroundColor(.secondary)
                     }
-                    if let text = model.snapshot(agent.id).lastReply.map(Self.lastParagraph) ?? agent.detail {
+                    if let text = model.peekText(agent).map(Self.lastParagraph) {
                         Text(Bubble.markdown(text))
                             .font(.system(size: 12.5))
                             .foregroundColor(.white.opacity(0.85))
@@ -1242,6 +1301,7 @@ struct PeekView: View {
                 .onTapGesture { model.open(agent.id) }
             }
         }
+        .onExitCommand { model.go(.collapsed) }
     }
 
     /// The last paragraph is usually the question or the summary.
@@ -1249,6 +1309,111 @@ struct PeekView: View {
         let paragraph = text.components(separatedBy: "\n\n")
             .last { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? text
         return String(paragraph.prefix(400))
+    }
+}
+
+/// A peek for an agent waiting on a plain reply: its whole last message (scrolling when long),
+/// the reply it suggests, and a box to answer in.
+struct ReplyPeek: View {
+    @ObservedObject var model: NotchModel
+    let agent: Agent
+
+    var body: some View {
+        let text = model.peekText(agent) ?? ""
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(agent.color).frame(width: 8, height: 8)
+                Text(agent.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer()
+                Tag(text: agent.host)
+                Button("Open ›") { model.open(agent.id) }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                    .pointerCursor()
+                HideButton(model: model)
+            }
+            .frame(height: 22)
+            if !text.isEmpty {
+                ScrollingBody(limit: 260, resetKey: 0) {
+                    Text(Bubble.markdown(text))
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.9))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            if let suggested = model.suggestion(for: agent) {
+                // Spelled out in full: as a placeholder it was cut off and read like a typed answer.
+                Button { model.draft = suggested } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Suggested reply").font(.system(size: 11, weight: .semibold)).foregroundColor(.orange)
+                        Text(suggested).font(.system(size: 12.5)).foregroundColor(.white.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.15)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .help("Click, or press Tab, to put it in the box")
+            }
+            PeekReplyBox(model: model, agent: agent)
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+/// Folds a peek away; what it showed stays in the list.
+struct HideButton: View {
+    @ObservedObject var model: NotchModel
+
+    var body: some View {
+        Button { model.go(.collapsed) } label: {
+            Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+        }
+        .buttonStyle(.plain).foregroundColor(.secondary)
+        .pointerCursor()
+        .help("Hide; it stays in the list (Esc)")
+    }
+}
+
+/// The one-line reply box under a `ReplyPeek`; Tab takes the suggested reply.
+struct PeekReplyBox: View {
+    @ObservedObject var model: NotchModel
+    let agent: Agent
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                TextField("Reply…", text: $model.draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($focused)
+                    .onSubmit { model.send() }
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.09)))
+                    .disabled(model.sending)
+                Button { model.send() } label: {
+                    if model.sending {
+                        ProgressView().controlSize(.small).frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 24))
+                    }
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .foregroundColor(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .orange)
+                .disabled(model.sending)
+            }
+            if let error = model.sendError {
+                Text(error).font(.system(size: 11)).foregroundColor(.red).lineLimit(1)
+            }
+        }
+        // Takes keys only once the pointer is over the peek, which makes the panel key.
+        .onAppear { focused = true }
     }
 }
 
@@ -1260,7 +1425,12 @@ struct QuestionCard: View {
     let agent: Agent
     let question: PendingQuestion
     var showsAgent = false
+    /// The question and its options scroll past this; the header and answer box stay put.
+    var bodyLimit: CGFloat = 400
     @State private var typed = ""
+
+    /// Keeps a peek's whole card within `NotchModel.maxCard` with room for the header and answer box.
+    static let peekBodyLimit: CGFloat = 400
     @FocusState private var typing: Bool
 
     var body: some View {
@@ -1276,7 +1446,10 @@ struct QuestionCard: View {
                     Text("\(step + 1) of \(question.items.count)").font(.system(size: 11)).foregroundColor(.secondary)
                 }
                 Spacer()
-                if showsAgent { Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1) }
+                if showsAgent {
+                    Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+                    HideButton(model: model)
+                }
                 if step > 0 {
                     Button("Back") { model.undoChoice() }.buttonStyle(.plain)
                         .font(.system(size: 11)).foregroundColor(.secondary)
@@ -1284,39 +1457,43 @@ struct QuestionCard: View {
             }
             .frame(height: 22)
 
-            Text(item.question)
-                .font(.system(size: 14, weight: .medium))
-                .fixedSize(horizontal: false, vertical: true)
+            ScrollingBody(limit: bodyLimit, resetKey: step) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.question)
+                        .font(.system(size: 14, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
 
-            ForEach(Array(item.options.enumerated()), id: \.offset) { index, label in
-                Button { model.choose(.option(index + 1), for: agent.id) } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Text("⌘\(index + 1)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.55))
-                            .frame(width: 30, height: 22)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.optionBadge))
-                        // The whole label and what it means, wrapped, so the choice can be read in full.
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(label).font(.system(size: 13, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                            if index < item.details.count, !item.details[index].isEmpty {
-                                Text(item.details[index]).font(.system(size: 11.5)).foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                    ForEach(Array(item.options.enumerated()), id: \.offset) { index, label in
+                        Button { model.choose(.option(index + 1), for: agent.id) } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Text("⌘\(index + 1)")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.55))
+                                    .frame(width: 30, height: 22)
+                                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.optionBadge))
+                                // The whole label and what it means, wrapped, so the choice can be read in full.
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(label).font(.system(size: 13, weight: .medium))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if index < item.details.count, !item.details[index].isEmpty {
+                                        Text(item.details[index]).font(.system(size: 11.5)).foregroundColor(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(.top, 2)
+                                Spacer(minLength: 0)
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.optionFill))
+                            .contentShape(Rectangle())
                         }
-                        .padding(.top, 2)
-                        Spacer(minLength: 0)
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(KeyEquivalent(Character("\(min(index + 1, 9))")), modifiers: .command)
+                        .disabled(!canAnswer)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.optionFill))
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(KeyEquivalent(Character("\(min(index + 1, 9))")), modifiers: .command)
-                .disabled(!canAnswer)
             }
 
             if model.canAnswer(agent, question) {
@@ -1356,6 +1533,7 @@ struct PermissionCard: View {
     let agent: Agent
     let request: HookRequest
     var showsAgent = false
+    @State private var instead = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1363,7 +1541,10 @@ struct PermissionCard: View {
                 Image(systemName: "lock.shield.fill").foregroundColor(.orange)
                 Text("Permission needed").font(.system(size: 13, weight: .semibold)).foregroundColor(.orange)
                 Spacer()
-                if showsAgent { Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1) }
+                if showsAgent {
+                    Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+                    HideButton(model: model)
+                }
             }
             .frame(height: 22)
 
@@ -1382,7 +1563,19 @@ struct PermissionCard: View {
             if request.canAlwaysAllow {
                 option(2, "Always allow this", .green) { model.decide(.allowAlways, for: agent.id) }
             }
-            option(request.canAlwaysAllow ? 3 : 2, "Deny", .red) { model.decide(.deny, for: agent.id) }
+            option(request.canAlwaysAllow ? 3 : 2, "Deny", .red) { model.decide(.deny(nil), for: agent.id) }
+            // Like the terminal's "No, and tell Claude what to do differently".
+            TextField("Deny, and tell Claude what to do instead…", text: $instead)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .onSubmit {
+                    let text = instead.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return }
+                    model.decide(.deny(text), for: agent.id)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12)))
 
             Button("Answer in \(agent.host) ›") { model.decide(.terminal, for: agent.id) }
                 .buttonStyle(.plain).font(.system(size: 12)).foregroundColor(.asks)
@@ -1417,6 +1610,8 @@ struct DetailView: View {
     @ObservedObject var model: NotchModel
     let agent: Agent
     @FocusState private var focused: Bool
+    /// Leaves the header and a few lines of conversation above a long question.
+    static let questionBodyLimit: CGFloat = 230
 
     var body: some View {
         let question = model.question(agent.id)
@@ -1431,15 +1626,16 @@ struct DetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             } else if let question {
-                QuestionCard(model: model, agent: agent, question: question)
+                QuestionCard(model: model, agent: agent, question: question, bodyLimit: Self.questionBodyLimit)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
-            } else if agent.canReply {
+            } else if model.canReply(agent) {
                 replyBox
             } else {
                 HStack {
                     Text(agent.label == "Exited" ? "This session has exited. Open it to resume."
-                                                 : "This session runs in \(agent.host). Open it to reply there.")
+                         : agent.canReply ? "Open it in a terminal to reply there."
+                                          : "This session runs in \(agent.host). Open it to reply there.")
                         .font(.system(size: 11)).foregroundColor(.secondary)
                     Spacer()
                     Button("Open") { AgentActions.open(agent.target, cwd: agent.cwd) }

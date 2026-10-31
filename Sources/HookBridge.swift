@@ -90,6 +90,10 @@ enum HookBridge {
             // updatedInput replaces the whole input, so the questions go back with the answers.
             var updated = input
             updated["answers"] = response["answers"] as? [String: String] ?? [:]
+            if event["hook_event_name"] as? String == "PermissionRequest" {
+                return ["hookSpecificOutput": ["hookEventName": "PermissionRequest",
+                                               "decision": ["behavior": "allow", "updatedInput": updated]]]
+            }
             return ["hookSpecificOutput": ["hookEventName": "PreToolUse",
                                            "permissionDecision": "allow",
                                            "updatedInput": updated]]
@@ -143,6 +147,13 @@ enum HookBridge {
         for url in files where url.pathExtension == "json" && !url.lastPathComponent.hasPrefix(".") {
             guard let obj = readJSON(url), let request = HookRequest(obj) else { continue }
             if kill(request.pid, 0) != 0 && errno != EPERM {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            // Answered in the terminal: Claude Code moves on without stopping the hook, so let it go.
+            if let path = obj["transcript_path"] as? String,
+               TranscriptReader.toolFinished(request.toolName, input: obj["tool_input"] as? [String: Any] ?? [:], in: path) {
+                respond(to: request, ["action": "pass"])
                 try? FileManager.default.removeItem(at: url)
                 continue
             }
@@ -225,7 +236,8 @@ struct HookRequest: Equatable {
         let input = obj["tool_input"] as? [String: Any] ?? [:]
         canAlwaysAllow = !HookBridge.alwaysRules(obj).isEmpty
 
-        if event == "PreToolUse" {
+        // In auto mode the question also comes as a permission prompt once the PreToolUse hook passes.
+        if event == "PreToolUse" || toolName == "AskUserQuestion" {
             guard let q = TranscriptReader.question(id: "hook:\(id)", input: input) else { return nil }
             kind = .question(q)
             summary = q.items.first?.question ?? ""
@@ -246,8 +258,13 @@ struct HookRequest: Equatable {
         if let url = input["url"] as? String { return url }
         if let pattern = input["pattern"] as? String { return pattern }
         if let d = input["description"] as? String { return d }
-        let json = (try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        return String(json.prefix(300))
+        // Anything else as "key: value" lines, nested values as JSON without escaped slashes.
+        let lines = input.sorted { $0.key < $1.key }.map { key, value -> String in
+            if let text = value as? String { return "\(key): \(text)" }
+            let json = (try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes, .fragmentsAllowed]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "\(value)"
+            return "\(key): \(json)"
+        }
+        return String(lines.joined(separator: "\n").prefix(300))
     }
 }
