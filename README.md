@@ -13,14 +13,15 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 
 ## What it does
 
-- **Keeps the Mac awake.** Off, Always On, or only While Agents Are Working. Optionally keeps the display on too.
+- **Keeps the Mac awake.** Off, Always On, or only While Agents Are Working. Optionally keeps the display on too. Closing the lid still sleeps; when the Mac wakes, background agents cut off mid-reply are told to continue.
 - **Shows agents in the notch.** Hovering over the notch opens a list in three tabs: **Input** (waiting on you), **Working** and **Done**. Each row shows the session name, where it runs (Background, VS Code, Terminal, `claude -p`), when it last changed, your last prompt and what it's doing now.
 - **Peeks when something happens.** When an agent finishes or needs you, the notch slides open briefly with a short summary and plays a sound.
 - **Shows conversations like the terminal.** Click a row to see `❯` prompts, `⏺` replies and `⎿` tool summaries ("Read 2 files, ran 1 shell command").
-- **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`.
+- **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`. Turn it off in Settings to keep replying in the terminal; the notch then just opens the agent there.
 - **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
 - **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
 - **Switches Claude Code accounts.** Every account you sign in to is saved, and one click in the menu points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
+- **Watches the usage limit.** When the account Claude Code is using reaches 90%, then 100%, of its 5-hour or weekly limit, Notchling says so once per window: a notch peek with a sound and a notification (macOS's own when it allows one, otherwise a Notchling banner at the top right). In the default **Notify and Switch** mode it also switches to the saved account with the most room as soon as a window reaches the **Switch At** point (95% by default, 80-99% in Settings; at 90% or below the separate 90% warning is skipped) or a background agent stops on "You've hit your ... limit". It only switches to an account whose limits were fetched in the last 10 minutes and are both under 80%, at most once every 30 minutes, and never back to the account it just left until that window resets; with no such account it only notifies. After a switch, background agents that stopped on the limit are restarted (`claude respawn`) and told to continue. Set it to **Notify** or **Off** instead.
 - **Switches Claude Desktop accounts.** The Claude desktop app's account is swapped too (by restoring its saved session and restarting it). Accounts are shared with the Claude Code list; an account can be switched to once it has been signed in to in Desktop at least once.
 - **Switches Antigravity accounts.** Each Google account you sign in to Antigravity with is saved too. Switching restarts Antigravity on the other account, with no new sign-in. The account in use shows its Gemini, Claude/GPT and Gemini 4 Argon limits while Antigravity is open.
 - **Shows token cost.** What your Claude Code use would cost at API prices: today, the last 7 or 30 days or all time, a 14-day chart, and totals by channel (Claude Code or Desktop), account, model and project.
@@ -62,12 +63,16 @@ Click the cup in the menu bar (filled while the Mac is being kept awake):
 | Antigravity | The Google account Antigravity is on, and Switch Account with every saved one plus Add Account… |
 | Manage Accounts… | The accounts window: a tab per provider (Claude Code, Claude Desktop, Antigravity), plus Claude Token Cost and Settings |
 | Claude Token Cost | Today's cost in the title; click to open the cost window (by day, channel, account, model and project, at API prices) |
+| When the Account in Use Nears Its Limit → Off / Notify / Notify and Switch | Default Notify and Switch. Under it, Switch At → 90% / 95% / 99% (a saved custom value shows as Custom: N%); the Settings tab takes any value from 80% to 99% |
 | Keep Mac Awake → Off / Always On / While Agents Are Working | Holds a power assertion so the Mac doesn't idle-sleep |
 | Keep Display On | Keeps the screen awake as well |
+| Continue Agents After Sleep | On by default. When the Mac wakes, background agents whose reply ended with "went to sleep mid-response" get one message telling them to continue. Terminal sessions and `claude -p` runs can't be written to |
 | Show Agents in Notch | Shows or hides the notch panel |
 | Notch Width → Small / Medium / Large | How wide the list, peeks and chat open |
 | Animate Pet | Lets the monster web-swing along the menu bar |
 | Answer Prompts from the Notch | Installs or removes the Claude Code hook (see below) |
+| Keep Local Copies of Artifacts | On by default. Installs or removes a second Claude Code hook that saves every Artifact you publish on this Mac (see below) |
+| Artifacts → (newest 12) / All Artifacts… / Show in Finder | Opens the Artifacts window on that page (hover for the account it was published from), on all of them, or the folder |
 | Launch at Login | Registers the app as a login item |
 
 ## How it works
@@ -87,6 +92,10 @@ Notchling reads files Claude Code already writes. The only network calls are for
 - `PermissionRequest` (all tools) and `PreToolUse` for `AskUserQuestion`, both running `Notchling --hook`.
 
 The hook writes the request to `~/Library/Application Support/Notchling/requests/` and waits up to 290 seconds for an answer in `responses/`. If you don't answer, or the app isn't running (no heartbeat in the last 15 seconds), the hook steps aside and Claude Code asks in the terminal as usual. Headless `claude -p` sessions are always left alone.
+
+**Local pages.** Claude Code Artifacts (`claude.ai/artifact/...`) are private to the login that published them, so after you switch accounts the earlier pages return 404, and the source file often sat in a background agent's tmp folder that went away with it. **Keep Local Copies of Artifacts** adds a `PostToolUse` hook (matcher `Artifact`, 10-second timeout, installed on its own, separate from the prompt hooks) that runs `Notchling --hook` after each publish. It copies the page to `~/Library/Application Support/Notchling/pages/<slug>/index.html` (or `.md`) with any supporting files named in the publish, wraps fragments in a doctype so they render from disk, and records title, claude.ai link, source path, project, the account active at the time and the date in `pages/pages.json`. A republish of the same artifact overwrites its folder. `pages/index.html` lists everything, newest first. It works without the app running, prints nothing, and always exits 0. Pages published before this was on can't be recovered unless their source file still exists.
+
+The **Artifacts** window lists every saved page with search, a filter by account and a green dot on pages owned by the account in use, and shows the selected page in place. **Open on claude.ai** warns when that link belongs to another account. Removing a local copy leaves the page on claude.ai alone. Pages that use live Artifact features (shared data, asking Claude) show only what they can do from a local file.
 
 **Accounts.** Claude Code keeps its login in the Keychain item `Claude Code-credentials` and the account's profile under `oauthAccount` in `~/.claude.json`. **Add Account** runs the same OAuth sign-in as `claude auth login` (PKCE, with the browser sending the code back to a listener on 127.0.0.1), but saves the result without touching Claude Code's current login. Notchling also copies each login it sees into its own Keychain items (`Notchling Accounts`, one per account). Switching writes the saved login back into Claude Code's item (MCP logins in it are kept) and replaces `oauthAccount` (the previous file is kept as `~/.claude.json.notchling-backup`). The login Claude Code is using is never renewed by Notchling, since that would sign Claude Code out.
 
@@ -110,12 +119,16 @@ Sources/
   main.swift              entry point: --hook, login item flags, app start
   AppDelegate.swift       menu bar item, settings menu, 3-second polling loop
   AwakeController.swift   IOKit power assertion
+  WakeResumer.swift       after a wake, tells background agents cut off by sleep to continue
   AgentMonitor.swift      reads sessions and background jobs into Agent values
   TranscriptReader.swift  parses transcripts into chat lines, activity and open questions
-  HookBridge.swift        the --hook process and installing the hook into settings.json
+  HookBridge.swift        the --hook process and installing the hooks into settings.json
+  PageLibrary.swift       local copies of published Artifact pages (saved by the hook)
+  PagesWindow.swift       the Artifacts window: list, search, preview
   ReplySender.swift       types replies and answers into background agents via claude attach
   AgentActions.swift      opens or focuses a session's terminal or editor window
   SlashCommands.swift     built-in, user, project and plugin commands for completion
+  LimitWatcher.swift      usage-limit alerts, automatic account switch, restarting agents stopped on the limit
   Accounts.swift          saved logins, switching, limits from the usage endpoint
   Antigravity.swift       saved Antigravity logins and switching
   ClaudeDesktop.swift     Claude Desktop cookie-session capture and switching
@@ -135,7 +148,7 @@ Demo/                     renders docs/demo.gif from the real views with made-up
 
 ## Uninstall
 
-1. Turn off **Answer Prompts from the Notch** so the hook entries are removed from `~/.claude/settings.json`.
+1. Turn off **Answer Prompts from the Notch** and **Keep Local Copies of Artifacts** so the hook entries are removed from `~/.claude/settings.json`.
 2. Turn off **Launch at Login**, then quit Notchling.
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
 4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access, and remove `~/Library/Application Support/Notchling/` (captured Claude Desktop sessions).

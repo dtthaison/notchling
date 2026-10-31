@@ -28,7 +28,7 @@ final class AccountRowView: NSView {
         var out: [(String, UsageWindow)] = []
         if let s = usage.session { out.append(("5h", s)) }
         if let w = usage.week { out.append(("Week", w)) }
-        out += usage.models.map { ($0.name, $0.window) }
+        out += (usage.other + usage.models).map { ($0.name, $0.window) }
         return out
     }
 

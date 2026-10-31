@@ -23,15 +23,28 @@ final class NotchModel: ObservableObject {
     @Published var agents: [Agent] = [] { didSet { layoutChanged?() } }
     @Published private(set) var snapshots: [String: Snapshot] = [:] { didSet { layoutChanged?() } }
     /// Prompts a hook is holding open, by session id.
-    @Published var requests: [String: HookRequest] = [:] { didSet { layoutChanged?() } }
-    @Published private(set) var state: NotchState = .collapsed { didSet { layoutChanged?() } }
+    @Published var requests: [String: HookRequest] = [:] {
+        didSet {
+            layoutChanged?()
+            // Its prompt was answered elsewhere: the peek has nothing left to ask.
+            if case .peek(let id) = state, oldValue[id] != nil, requests[id] == nil, !hovering { go(.collapsed) }
+        }
+    }
+    @Published private(set) var state: NotchState = .collapsed {
+        didSet {
+            if case .peek = state {} else { notice = nil }
+            layoutChanged?()
+        }
+    }
+    /// A message from Notchling itself shown in a peek (the agent only lends the slot).
+    @Published var notice: (agentID: String, text: String)?
     /// Which of the three tabs under the camera is showing.
     @Published var tab: AgentGroup = .needsInput { didSet { layoutChanged?() } }
     @Published var draft = "" { didSet { if draft != oldValue { completionIndex = 0 } } }
     /// Highlighted row in the slash-command list.
     @Published var completionIndex = 0
     @Published var sending = false
-    @Published var sendError: String?
+    @Published var sendError: String? { didSet { if (sendError == nil) != (oldValue == nil) { layoutChanged?() } } }
     /// Answers picked so far for the open question, one per item.
     @Published private(set) var choices: [ReplySender.Choice] = [] { didSet { layoutChanged?() } }
 
@@ -43,6 +56,8 @@ final class NotchModel: ObservableObject {
     var layoutChanged: (() -> Void)?
     /// Asks the panel to take keyboard focus (for ⌘1…⌘9 and typing).
     var wantsKey: (() -> Void)?
+    /// Hands the keyboard back to the app underneath (your terminal) without hiding the panel.
+    var releaseKey: (() -> Void)?
     /// Hides everything in the Done tab until it changes again.
     var onClearCompleted: (() -> Void)?
     /// Hides one agent until it changes group; removes a background agent with `claude rm`.
@@ -64,6 +79,25 @@ final class NotchModel: ObservableObject {
         didSet { UserDefaults.standard.set(showPet, forKey: "showPet"); layoutChanged?() }
     }
 
+    /// Off, the notch shows no reply box: background agents are answered in a terminal instead.
+    @Published var replyFromNotch = UserDefaults.standard.object(forKey: "replyFromNotch") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(replyFromNotch, forKey: "replyFromNotch"); layoutChanged?() }
+    }
+
+    /// Whether this agent's conversation gets a reply box.
+    func canReply(_ agent: Agent) -> Bool { replyFromNotch && agent.canReply }
+
+    /// Off, a peek shows only who finished or wants you, not what the agent last said.
+    @Published var showLastReply = UserDefaults.standard.object(forKey: "showLastReply") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showLastReply, forKey: "showLastReply"); layoutChanged?() }
+    }
+
+    /// The agent's last message for a peek, or nil when that's turned off or there is none.
+    func peekText(_ agent: Agent) -> String? {
+        guard showLastReply else { return nil }
+        return snapshot(agent.id).lastReply ?? agent.detail
+    }
+
     /// The pet rolls around the camera whenever any agent is working or waiting on you.
     var petWalking: Bool { showPet && workingCount + needsCount > 0 }
     /// With no session working or waiting, the pet sits on the selected tab of the frontmost window.
@@ -71,6 +105,8 @@ final class NotchModel: ObservableObject {
     /// That tab's frame (or the window's top edge) in the camera-centred frame, from `TabPerch`.
     @Published var perch: CGRect?
     static let flare: CGFloat = 8
+    /// The tallest a peek's card opens; taller cards scroll inside it.
+    static let maxCard: CGFloat = 520
     private var hovering = false
     private var pendingHover: DispatchWorkItem?
     private var pendingPeekEnd: DispatchWorkItem?
@@ -129,6 +165,7 @@ final class NotchModel: ObservableObject {
             tab = AgentGroup.allCases.first { g in agents.contains { $0.group == g } } ?? .needsInput
         }
         withAnimation(.spring(response: 0.36, dampingFraction: 0.9)) { state = new }
+        if new == .collapsed { releaseKey?() }
     }
 
     private var isPeeking: Bool {
@@ -167,14 +204,21 @@ final class NotchModel: ObservableObject {
             // Exactly the camera housing; the pet and its count live outside it.
             return CGSize(width: notch.width + 2 * Self.flare, height: notch.height)
         case .peek(let id):
+            if let n = notice, n.agentID == id {
+                return CGSize(width: width.list, height: chrome + (n.text.count > 70 ? 78 : 58))
+            }
             if let r = permission(id) {
-                return CGSize(width: width.panel, height: chrome + min(cardHeight ?? permissionHeight(r), 520) + 16)
+                return CGSize(width: width.panel, height: chrome + min(cardHeight ?? permissionHeight(r), Self.maxCard) + 16)
             }
             if let q = question(id), let agent = agent(id) {
                 return CGSize(width: width.panel,
-                              height: chrome + min(cardHeight ?? questionHeight(q, canAnswer: canAnswer(agent, q)), 520) + 16)
+                              height: chrome + min(cardHeight ?? questionHeight(q, canAnswer: canAnswer(agent, q)), Self.maxCard) + 16)
             }
-            let hasText = snapshots[id]?.lastReply != nil || agent(id)?.detail != nil
+            if canReplyInPeek(id) {
+                // The whole message and a reply box: as wide as a question, as tall as it measures.
+                return CGSize(width: width.panel, height: chrome + min(cardHeight ?? 160, Self.maxCard) + 16)
+            }
+            let hasText = showLastReply && (snapshots[id]?.lastReply != nil || agent(id)?.detail != nil)
             return CGSize(width: width.list, height: chrome + (hasText ? 100 : 56))
         case .list:
             let rows = agents.filter { $0.group == tab }
@@ -196,7 +240,7 @@ final class NotchModel: ObservableObject {
 
     func permissionHeight(_ r: HookRequest) -> CGFloat {
         let lines = CGFloat(min(4, r.summary.count / 62 + 1))
-        return 28 + 20 + lines * 16 + 14 + CGFloat(r.canAlwaysAllow ? 3 : 2) * 36 + 28
+        return 28 + 20 + lines * 16 + 14 + CGFloat(r.canAlwaysAllow ? 3 : 2) * 36 + 42 + 28
     }
 
     // MARK: Hover and peeking
@@ -210,14 +254,25 @@ final class NotchModel: ObservableObject {
             case .collapsed: work = DispatchWorkItem { [weak self] in self?.go(.list) }
             case .peek(let id):
                 pendingPeekEnd?.cancel()
-                if question(id) != nil || permission(id) != nil { wantsKey?() }
+                if waitsOnYou(id) { wantsKey?() }
                 return
             default: return
             }
             pendingHover = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
         } else {
+            // Keys go back to whatever you were typing in; coming back over the peek takes them again.
+            if isPeeking { releaseKey?() }
             switch state {
+            case .peek(let id) where blocksAgent(id):
+                // It's waiting on you, and it often opens right under the pointer: moving away
+                // mustn't fold it before you've read it. The timer starts over instead.
+                schedulePeekEnd(after: Self.waitingPeek)
+                return
+            case .peek(let id) where canReplyInPeek(id):
+                // A plain reply can wait in the list; give it a moment in case the pointer only slipped off.
+                schedulePeekEnd(after: 1.5)
+                return
             case .list, .peek: work = DispatchWorkItem { [weak self] in
                 if self?.hovering == false, self?.menuOpen == false { self?.go(.collapsed) }
             }
@@ -230,18 +285,62 @@ final class NotchModel: ObservableObject {
 
     /// Slides out a banner for an agent that just replied or asked something.
     func peek(_ agent: Agent) {
-        guard state == .collapsed || isPeeking else { return }
+        notice = nil
+        // Don't swap out a peek you're reading or typing into.
+        guard state == .collapsed || (isPeeking && !hovering) else { return }
+        if state != .peek(agent.id) { draft = ""; sendError = nil }
         cardHeight = nil
         resetChoices(for: agent.id)
         go(.peek(agent.id))
+        // A question stays out longer: it's waiting on you.
+        schedulePeekEnd(after: blocksAgent(agent.id) ? Self.waitingPeek : canReplyInPeek(agent.id) ? 20 : 8)
+    }
+
+    /// Slides out a short message of Notchling's own (a usage limit), borrowing an agent's peek slot.
+    func peekNotice(_ text: String, using agent: Agent) {
+        guard state == .collapsed || (isPeeking && !hovering) else { return }
+        peek(agent)
+        notice = (agent.id, text)
+        schedulePeekEnd(after: 10)
+    }
+
+    /// A question or permission prompt holds the agent until you answer.
+    private func blocksAgent(_ id: String) -> Bool {
+        question(id) != nil || permission(id) != nil
+    }
+
+    /// Anything you can answer from the peek: a question, a permission prompt, or a reply box.
+    private func waitsOnYou(_ id: String) -> Bool {
+        blocksAgent(id) || canReplyInPeek(id)
+    }
+
+    /// A peek gets a reply box when the agent waits on a plain reply that can be sent from here.
+    func canReplyInPeek(_ id: String) -> Bool {
+        guard let agent = agent(id), agent.group == .needsInput, canReply(agent) else { return false }
+        return question(id) == nil && permission(id) == nil
+    }
+
+    /// The agent whose reply box is on show: the conversation's, or a peek's.
+    private var replyID: String? {
+        switch state {
+        case .detail(let id): return replyFromNotch ? id : nil
+        case .peek(let id): return canReplyInPeek(id) ? id : nil
+        default: return nil
+        }
+    }
+
+    /// How long a question or permission peek stays out with the pointer away from it.
+    private static let waitingPeek: TimeInterval = 45
+
+    /// Replaces any earlier timer: peeking the same agent again doesn't change state, so `go` won't cancel it.
+    private func schedulePeekEnd(after seconds: TimeInterval) {
+        pendingPeekEnd?.cancel()
         let end = DispatchWorkItem { [weak self] in
             guard let self, case .peek = self.state, !self.hovering else { return }
             self.go(.collapsed)
         }
         pendingPeekEnd = end
-        // A question stays out longer: it's waiting on you.
-        let waiting = question(agent.id) != nil || permission(agent.id) != nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + (waiting ? 45 : 8), execute: end)
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: end)
     }
 
     // MARK: Conversation
@@ -255,11 +354,14 @@ final class NotchModel: ObservableObject {
     }
 
     func send(_ preset: String? = nil) {
-        guard case .detail(let id) = state, let agent = agent(id), case .job(let jobID) = agent.target, !sending else { return }
+        guard let id = replyID, let agent = agent(id), case .job(let jobID) = agent.target, !sending else { return }
         let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if preset == nil { draft = "" }
-        run(id: id, restoreDraft: preset == nil ? text : nil) {
+        run(id: id, restoreDraft: preset == nil ? text : nil, onSuccess: { [weak self] in
+            // Sent from a peek: it's done its job.
+            if self?.state == .peek(id) { self?.go(.collapsed) }
+        }) {
             try ReplySender.send(text, toJob: jobID)
         }
     }
@@ -280,9 +382,10 @@ final class NotchModel: ObservableObject {
 
     /// Tab, arrows and Return while typing a reply. True when the key was used.
     func handleReplyKey(_ keyCode: UInt16) -> Bool {
-        guard case .detail(let id) = state, let agent = agent(id), agent.canReply,
+        guard let id = replyID, let agent = agent(id), agent.canReply,
               question(id) == nil, permission(id) == nil else { return false }
-        let list = completions(for: agent)
+        // A peek's box has no room for the command list; that's in the conversation.
+        let list = isPeeking ? [] : completions(for: agent)
         switch keyCode {
         case 48: // Tab
             if !list.isEmpty {
@@ -350,7 +453,8 @@ final class NotchModel: ObservableObject {
         foldPeek()
     }
 
-    enum Decision { case allow, allowAlways, deny, terminal }
+    /// `deny` can carry what Claude should do instead.
+    enum Decision { case allow, allowAlways, deny(String?), terminal }
 
     /// Answers a permission prompt, or hands it back to the terminal and jumps there.
     func decide(_ decision: Decision, for id: String) {
@@ -359,7 +463,10 @@ final class NotchModel: ObservableObject {
         switch decision {
         case .allow: HookBridge.respond(to: request, ["action": "allow"])
         case .allowAlways: HookBridge.respond(to: request, ["action": "allow", "always": true])
-        case .deny: HookBridge.respond(to: request, ["action": "deny"])
+        case .deny(let message):
+            var response: [String: Any] = ["action": "deny"]
+            if let message, !message.isEmpty { response["message"] = message }
+            HookBridge.respond(to: request, response)
         case .terminal:
             HookBridge.respond(to: request, ["action": "pass"])
             if let agent = agent(id) { AgentActions.open(agent.target, cwd: agent.cwd) }
@@ -389,7 +496,8 @@ final class NotchModel: ObservableObject {
         if !choices.isEmpty { choices.removeLast() }
     }
 
-    private func run(id: String, restoreDraft: String?, onFailure: (() -> Void)? = nil, _ work: @escaping () throws -> Void) {
+    private func run(id: String, restoreDraft: String?, onFailure: (() -> Void)? = nil, onSuccess: (() -> Void)? = nil,
+                     _ work: @escaping () throws -> Void) {
         sending = true
         sendError = nil
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -402,6 +510,8 @@ final class NotchModel: ObservableObject {
                     self.sendError = failure.localizedDescription
                     if let restoreDraft, self.draft.isEmpty { self.draft = restoreDraft }
                     onFailure?()
+                } else {
+                    onSuccess?()
                 }
             }
         }

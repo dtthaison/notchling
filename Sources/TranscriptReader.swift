@@ -88,6 +88,84 @@ enum TranscriptReader {
         return nil
     }
 
+    /// True once the transcript holds a result for the latest call of `tool` with this input, meaning
+    /// it was answered somewhere else (the terminal) while a hook still held it open.
+    static func toolFinished(_ tool: String, input: [String: Any], in path: String) -> Bool {
+        func key(_ value: Any?) -> Data? {
+            value.flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
+        }
+        guard let wanted = key(input) else { return false }
+        var call: String?
+        var finished = Set<String>()
+        for line in tail(of: path, bytes: 500_000) where line.utf8.count <= 100_000 {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  let content = (obj["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
+            for item in content {
+                switch item["type"] as? String {
+                case "tool_use" where item["name"] as? String == tool && key(item["input"]) == wanted:
+                    call = item["id"] as? String
+                case "tool_result":
+                    if let id = item["tool_use_id"] as? String { finished.insert(id) }
+                default: break
+                }
+            }
+        }
+        return call.map(finished.contains) ?? false
+    }
+
+    /// The id of the transcript's last message when it is the error Claude Code writes after the Mac slept
+    /// mid-reply, so nothing has happened since; nil otherwise.
+    static func sleepCut(for agent: Agent) -> String? {
+        guard let path = path(for: agent) else { return nil }
+        for line in tail(of: path, bytes: 200_000).reversed() where line.utf8.count <= 100_000 {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  let type = obj["type"] as? String, type == "user" || type == "assistant" else { continue }
+            guard obj["isApiErrorMessage"] as? Bool == true,
+                  obj["streamCutCause"] as? String == "stream_suspended" || line.contains("went to sleep mid-response")
+            else { return nil }
+            return obj["uuid"] as? String
+        }
+        return nil
+    }
+
+    /// A usage-limit error ending a transcript: the entry's id and time, and what it said.
+    struct LimitHit: Equatable {
+        let id: String
+        let at: Date?
+        let text: String
+    }
+
+    /// The transcript's last message when it is the account's usage-limit error ("You've hit your session
+    /// limit · resets 7pm"), so nothing has happened since; nil otherwise. The provider's own throttle
+    /// ("API Error: Request rejected (429) · ... cooling down") is a different `error` and text, and
+    /// doesn't count.
+    static func limitHit(for agent: Agent) -> LimitHit? {
+        guard let path = path(for: agent) else { return nil }
+        return limitHit(inFile: path)
+    }
+
+    static func limitHit(inFile path: String) -> LimitHit? {
+        for line in tail(of: path, bytes: 200_000).reversed() where line.utf8.count <= 100_000 {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  let type = obj["type"] as? String, type == "user" || type == "assistant" else { continue }
+            guard obj["isApiErrorMessage"] as? Bool == true, obj["error"] as? String == "rate_limit",
+                  let id = obj["uuid"] as? String else { return nil }
+            var text = ""
+            let content = (obj["message"] as? [String: Any])?["content"]
+            if let s = content as? String {
+                text = s
+            } else if let blocks = content as? [[String: Any]] {
+                text = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            }
+            guard text.hasPrefix("You've hit your") || text.hasPrefix("You\u{2019}ve hit your") else { return nil }
+            let at = (obj["timestamp"] as? String).flatMap { stamp in
+                ISO8601DateFormatter.fractional.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp)
+            }
+            return LimitHit(id: id, at: at, text: text)
+        }
+        return nil
+    }
+
     /// The last few hundred KB, starting at a line boundary.
     private static func tail(of path: String, bytes: UInt64 = 2_000_000) -> [Substring] {
         guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
@@ -287,4 +365,13 @@ enum TranscriptReader {
             return "Using \(short)"
         }
     }
+}
+
+
+private extension ISO8601DateFormatter {
+    static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 }

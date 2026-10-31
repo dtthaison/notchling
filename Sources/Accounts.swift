@@ -20,11 +20,14 @@ struct AccountUsage: Equatable {
     var week: UsageWindow?
     /// Weekly limits for one model family ("Opus", "Sonnet"), when the plan has them.
     var models: [(name: String, window: UsageWindow)] = []
+    /// Account-wide limits of a kind the app doesn't know yet; they stop the account like the two above.
+    var other: [(name: String, window: UsageWindow)] = []
     var fetched = Date()
 
     static func == (a: AccountUsage, b: AccountUsage) -> Bool {
         a.session == b.session && a.week == b.week && a.fetched == b.fetched
             && a.models.map(\.name) == b.models.map(\.name) && a.models.map(\.window) == b.models.map(\.window)
+            && a.other.map(\.name) == b.other.map(\.name) && a.other.map(\.window) == b.other.map(\.window)
     }
 }
 
@@ -278,7 +281,7 @@ final class AccountStore: ObservableObject {
         return .success(fresh)
     }
 
-    private static func parseUsage(_ json: [String: Any]) -> AccountUsage {
+    static func parseUsage(_ json: [String: Any]) -> AccountUsage {
         func window(_ key: String) -> UsageWindow? {
             guard let w = json[key] as? [String: Any], let p = w["utilization"] as? Double else { return nil }
             return UsageWindow(percent: p, resetsAt: (w["resets_at"] as? String).flatMap(parseDate))
@@ -287,7 +290,38 @@ final class AccountStore: ObservableObject {
         for (key, name) in [("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet")] {
             if let w = window(key) { result.models.append((name, w)) }
         }
+        apply(limits: json["limits"] as? [[String: Any]] ?? [], to: &result)
         return result
+    }
+
+    /// The `limits` list names every limit an account has, so it keeps up where the fixed keys don't:
+    /// Max 20x lost `five_hour` in October 2026 and has per-model limits with no key of their own.
+    /// A scoped limit is listed by name; an account-wide one fills the 5-hour or weekly slot, keeping
+    /// the higher figure, or goes in `other` when it's neither.
+    private static func apply(limits: [[String: Any]], to usage: inout AccountUsage) {
+        for limit in limits {
+            guard let percent = limit["percent"] as? Double else { continue }
+            let window = UsageWindow(percent: percent, resetsAt: (limit["resets_at"] as? String).flatMap(parseDate))
+            let kind = limit["kind"] as? String ?? ""
+            let group = limit["group"] as? String ?? ""
+            let readable = kind.replacingOccurrences(of: "_", with: " ").capitalized
+
+            if let scope = limit["scope"] as? [String: Any] {
+                let named = ["model", "surface"].lazy.compactMap { (scope[$0] as? [String: Any])?["display_name"] as? String }.first
+                let name = named ?? readable
+                if let i = usage.models.firstIndex(where: { $0.name == name }) {
+                    usage.models[i].window = window
+                } else {
+                    usage.models.append((name, window))
+                }
+            } else if group == "weekly" {
+                if percent >= usage.week?.percent ?? -1 { usage.week = window }
+            } else if group.contains("session") || kind.contains("session") || kind.contains("five_hour") {
+                if percent >= usage.session?.percent ?? -1 { usage.session = window }
+            } else {
+                usage.other.append((readable, window))
+            }
+        }
     }
 
     // MARK: Switching

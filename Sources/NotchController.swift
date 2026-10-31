@@ -80,6 +80,13 @@ final class NotchController: NSObject, NSWindowDelegate {
 
         model.layoutChanged = { [weak self] in self?.updateMouse() }
         model.wantsKey = { [weak self] in self?.panel.makeKey() }
+        model.releaseKey = { [weak self] in
+            // The panel never activates the app, so ordering it out and back in is what returns the
+            // keyboard to the app you were in.
+            guard let self, self.panel.isKeyWindow else { return }
+            self.panel.orderOut(nil)
+            self.panel.orderFrontRegardless()
+        }
         panel.keyHandler = { [weak self] event in self?.model.handleReplyKey(event.keyCode) ?? false }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
