@@ -45,10 +45,8 @@ enum TranscriptReader {
     private static let projectsDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")
     private static var pathCache: [String: String] = [:]
-    /// Where each transcript was read up to, and the parser's state there.
-    private static var cursors: [String: Cursor] = [:]
-    /// Held while a cursor reads and parses, so two refreshes never advance the same one.
-    private static let cursorLock = NSLock()
+    /// Where each transcript was read up to, and the parser's state there (last 2 MB on first read).
+    private static let cursors = TranscriptCursors<SnapshotParser, Snapshot>(tailBytes: 2_000_000) { $0.snapshot() }
     private static let lock = NSLock()
 
     static func lines(for agent: Agent, limit: Int = 12) -> [ChatLine] {
@@ -61,65 +59,9 @@ enum TranscriptReader {
         return snapshot(atPath: path)
     }
 
-    /// The first call parses the last 2 MB; later calls parse only the lines appended since. A file
-    /// that was replaced, truncated, or grew by more than 2 MB at once is read from its tail again.
+    /// The first call parses the last 2 MB; later calls parse only the lines appended since.
     static func snapshot(atPath path: String) -> Snapshot {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let modified = attrs[.modificationDate] as? Date,
-              let size = (attrs[.size] as? NSNumber)?.uint64Value else { return Snapshot() }
-        let inode = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
-
-        cursorLock.lock(); defer { cursorLock.unlock() }
-        if var cursor = cursors[path], cursor.inode == inode, cursor.offset <= size, size - cursor.offset <= tailBytes {
-            guard cursor.modified != modified || cursor.size != size else { return cursor.snapshot }
-            if size > cursor.offset, let chunk = read(path, from: cursor.offset, to: size) {
-                cursor.offset += chunk.consumed
-                for line in chunk.lines { cursor.parser.consume(line) }
-            }
-            cursor.modified = modified
-            cursor.size = size
-            cursor.snapshot = cursor.parser.snapshot()
-            cursors[path] = cursor
-            return cursor.snapshot
-        }
-
-        let start = size > tailBytes ? size - tailBytes : 0
-        guard let chunk = read(path, from: start, to: size, skipFirstLine: start > 0) else { return Snapshot() }
-        var parser = SnapshotParser()
-        for line in chunk.lines { parser.consume(line) }
-        let snapshot = parser.snapshot()
-        if cursors.count > 300 { cursors.removeAll() }
-        cursors[path] = Cursor(inode: inode, offset: start + chunk.consumed, modified: modified, size: size,
-                               parser: parser, snapshot: snapshot)
-        return snapshot
-    }
-
-    private static let tailBytes: UInt64 = 2_000_000
-
-    private struct Cursor {
-        let inode: UInt64
-        /// Just past the last complete line parsed; a line still being written is read next time.
-        var offset: UInt64
-        var modified: Date
-        var size: UInt64
-        var parser: SnapshotParser
-        var snapshot: Snapshot
-    }
-
-    /// The complete lines in `start..<end` and how many bytes they span. `skipFirstLine`: `start` may be
-    /// mid-line, so everything up to the first newline is dropped.
-    private static func read(_ path: String, from start: UInt64, to end: UInt64,
-                             skipFirstLine: Bool = false) -> (lines: [Data], consumed: UInt64)? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        try? handle.seek(toOffset: start)
-        guard let data = try? handle.read(upToCount: Int(end - start)) else { return ([], 0) }
-        let newline = UInt8(ascii: "\n")
-        guard let last = data.lastIndex(of: newline) else { return ([], 0) }
-        var from = data.startIndex
-        if skipFirstLine, let first = data.firstIndex(of: newline) { from = first + 1 }
-        let lines = from <= last ? data[from..<last].split(separator: newline, omittingEmptySubsequences: true) : []
-        return (lines.map { Data($0) }, UInt64(last - data.startIndex + 1))
+        cursors.read(path) ?? Snapshot()
     }
 
     static func path(for agent: Agent) -> String? {
@@ -312,7 +254,7 @@ enum TranscriptReader {
     /// Turns transcript lines into what the notch shows, one line at a time, so a cursor can keep it
     /// between reads. Keeps only what the snapshot needs: the last messages, the tools since the last
     /// text, the current activity and the last question asked.
-    struct SnapshotParser {
+    struct SnapshotParser: TranscriptLineParser {
         private var messages: [(kind: ChatLine.Kind, text: String)] = []
         /// Tool calls since the last piece of text, summed up when the next text arrives.
         private var tools = ToolTally()

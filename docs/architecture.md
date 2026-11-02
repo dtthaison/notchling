@@ -78,12 +78,15 @@ Measured with `sample` on the installed app:
 - **Transcript lookup.** `TranscriptReader.path(for:)` scanned all ~480 project folders every 3 s for each agent whose transcript it couldn't find. It now checks the cwd's project folder first, rescans at most every 30 s, and caches the `/clear` successor until the folder changes. Its cost went from ~550 samples per 15 s to 7.
 - **Incremental transcript reading.** Each transcript keeps a cursor: a byte offset plus the parser's state. A refresh parses only the lines appended since the last one. On a 5.6 MB transcript that is 24.8 ms → 0.39 ms per refresh (`ZBenchmarkTests`).
 
+- **One shared reader.** `TranscriptCursors<Parser, Output>` (`Agents/TranscriptCursor.swift`) owns the cursors. The notch (`TranscriptReader.SnapshotParser`) and the Chat window (`ConversationReader.ConversationParser`) both read through it. On a 5.6 MB transcript the Chat window went from ~35 ms to ~0.08 ms per refresh. With Chat open, 30 s samples dropped from 249 to 6 for `ChatModel.refresh`, and from 114 to 27 for the notch's snapshots.
+- **Bounded state.** Long sessions drop old items and counted message ids while the cursor is kept, so memory doesn't grow with the session.
+
 **Still to do:**
-- `ConversationReader` (the Chat window, 1 s timer) and `limitHit`/`sleepCut`/`toolFinished` still re-read tails. They should share the same cursors (the `SessionStore` idea below).
-- `CostTracker` scans the whole history on its timer.
+- `limitHit`, `sleepCut` and `toolFinished` still read small tails (200–500 KB) on their own schedules. They could become fields of `SnapshotParser`.
+- `CostTracker` walks every transcript (5,500 files, 8.9 GB) each minute to find the changed ones. FSEvents with a saved event id would give it only the changed files.
 - The Antigravity quota check runs `pgrep`, `ps` and `lsof` every time.
 
-**Event-driven `SessionStore`, the next step:** one actor owns the cursors and listens for file events (FSEvents/DispatchSource) on the project and lane folders. The notch, Chat, limits and wake features read its snapshots instead of polling files on their own timers.
+**File events (deferred).** With cursors, polling costs one `stat` per agent per tick, so FSEvents would mostly cut latency (the 3 s wait). `CostTracker` is where it would cut work.
 
 ### Phase 1: seams (no behavior change)
 1. Add a lane-aware `ClaudePaths`. This removes the 5 hard-coded `~/.claude` paths, and `TranscriptReader`, `SlashCommands` and `desktopSessionID` then see lane folders too.

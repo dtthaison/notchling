@@ -6,6 +6,11 @@ import XCTest
 /// November 2026, a 5.6 MB transcript: 24.8 ms per refresh re-reading the tail, 0.39 ms appending.
 final class ZBenchmarkTests: XCTestCase {
     func testFullReadVersusAppend() throws {
+        try bench("notch") { TranscriptReader.snapshot(atPath: $0) }
+        try bench("chat") { ConversationReader.read($0) }
+    }
+
+    private func bench<T>(_ label: String, _ read: (String) -> T) throws {
         guard let source = ProcessInfo.processInfo.environment["BENCH_TRANSCRIPT"] else { throw XCTSkip("set BENCH_TRANSCRIPT") }
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("bench-\(UUID().uuidString)")
@@ -19,14 +24,14 @@ final class ZBenchmarkTests: XCTestCase {
             let copy = dir.appendingPathComponent("full-\(i).jsonl").path
             try fm.copyItem(atPath: source, toPath: copy)
             let start = Date()
-            _ = TranscriptReader.snapshot(atPath: copy)
+            _ = read(copy)
             full += Date().timeIntervalSince(start)
         }
 
         // Now: one new line, read from the cursor.
         let live = dir.appendingPathComponent("live.jsonl").path
         try fm.copyItem(atPath: source, toPath: live)
-        _ = TranscriptReader.snapshot(atPath: live)
+        _ = read(live)
         let line = Data(#"{"type":"assistant","message":{"content":[{"type":"text","text":"tick"}]}}"#.utf8 + [10])
         var append = 0.0
         for _ in 0..<rounds {
@@ -35,10 +40,10 @@ final class ZBenchmarkTests: XCTestCase {
             handle.write(line)
             try handle.close()
             let start = Date()
-            _ = TranscriptReader.snapshot(atPath: live)
+            _ = read(live)
             append += Date().timeIntervalSince(start)
         }
-        print(String(format: "BENCH full re-read: %.2f ms per refresh, append-only: %.3f ms per refresh",
+        print(String(format: "BENCH \(label) full re-read: %.2f ms per refresh, append-only: %.3f ms per refresh",
                      full / Double(rounds) * 1000, append / Double(rounds) * 1000))
     }
 }

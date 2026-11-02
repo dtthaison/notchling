@@ -81,41 +81,39 @@ struct Conversation: Equatable {
 }
 
 enum ConversationReader {
-    private static var cache: [String: (modified: Date, size: UInt64, value: Conversation)] = [:]
-    private static let lock = NSLock()
+    /// Where each transcript was read up to, and the parser's state there (last 4 MB on first read).
+    private static let cursors = TranscriptCursors<ConversationParser, Conversation>(tailBytes: 4_000_000, limit: 60) {
+        $0.conversation()
+    }
 
+    /// Reads only what was appended since the last call.
     static func read(_ path: String) -> Conversation {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let modified = attrs[.modificationDate] as? Date,
-              let size = (attrs[.size] as? NSNumber)?.uint64Value else { return Conversation() }
-        lock.lock()
-        if let hit = cache[path], hit.modified == modified, hit.size == size { lock.unlock(); return hit.value }
-        lock.unlock()
-        let value = parse(tail(of: path))
-        lock.lock()
-        cache[path] = (modified, size, value)
-        lock.unlock()
-        return value
+        cursors.read(path) ?? Conversation()
     }
 
     // MARK: Parsing
 
-    private static func parse(_ raw: [Substring]) -> Conversation {
-        var c = Conversation()
-        var callIndex: [String: (item: Int, call: Int)] = [:]
-        var countedMessages = Set<String>()
+    /// The chat's items, built one transcript line at a time so a cursor can keep the state between reads.
+    struct ConversationParser: TranscriptLineParser {
+        private var c = Conversation()
+        private var callIndex: [String: (item: Int, call: Int)] = [:]
+        /// Message ids whose usage was counted, oldest first, so the set can be kept small.
+        private var countedMessages = Set<String>()
+        private var countedOrder: [String] = []
         // Output tokens per message in the current turn; a message's lines repeat its usage as it streams.
-        var turnOutput: [String: Int] = [:]
-        var files: [String] = []
-        var serial = 0
-        func nextID(_ prefix: String) -> String { serial += 1; return "\(prefix)\(serial)" }
-
+        private var turnOutput: [String: Int] = [:]
+        private var files: [String] = []
+        private var serial = 0
         // A turn's thinking shows as one row, at its first thought: where it is, and seconds per message
         // (a message's lines each carry its duration, so the largest counts).
-        var thinkingAt: Int?
-        var thinkingSeconds: [String: Double] = [:]
+        private var thinkingAt: Int?
+        private var thinkingSeconds: [String: Double] = [:]
 
-        func append(_ kind: ChatItem.Kind, _ date: Date?) {
+        init() {}
+
+        private mutating func nextID(_ prefix: String) -> String { serial += 1; return "\(prefix)\(serial)" }
+
+        private mutating func append(_ kind: ChatItem.Kind, _ date: Date?) {
             switch kind {
             case .user, .turnEnd, .notice: thinkingAt = nil; thinkingSeconds = [:]
             default: break
@@ -123,12 +121,17 @@ enum ConversationReader {
             c.items.append(ChatItem(id: nextID("i"), kind: kind, date: date))
         }
 
-        for line in raw {
+        mutating func consume(_ line: Data) {
+            parseLine(line)
+            trim()
+        }
+
+        private mutating func parseLine(_ line: Data) {
             // Screenshots and huge tool output: slow to decode and nothing the chat shows whole.
-            if line.utf8.count > 400_000 { continue }
-            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+            if line.count > 400_000 { return }
+            guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
                   let type = obj["type"] as? String,
-                  obj["isSidechain"] as? Bool != true else { continue }
+                  obj["isSidechain"] as? Bool != true else { return }
             let date = (obj["timestamp"] as? String).flatMap(parseDate)
             if let branch = obj["gitBranch"] as? String, !branch.isEmpty, branch != "HEAD" { c.facts.branch = branch }
 
@@ -151,13 +154,13 @@ enum ConversationReader {
 
             case "assistant":
                 guard let message = obj["message"] as? [String: Any],
-                      let blocks = message["content"] as? [[String: Any]] else { continue }
+                      let blocks = message["content"] as? [[String: Any]] else { return }
                 if let model = message["model"] as? String, model != "<synthetic>" { c.facts.model = model }
                 if let id = message["id"] as? String, let out = ((message["usage"] as? [String: Any])?["output_tokens"] as? NSNumber)?.intValue {
                     turnOutput[id] = max(turnOutput[id] ?? 0, out)
                 }
                 if let id = message["id"] as? String, !countedMessages.contains(id), let usage = message["usage"] as? [String: Any] {
-                    countedMessages.insert(id)
+                    countedMessages.insert(id); countedOrder.append(id)
                     func n(_ k: String) -> Int { (usage[k] as? NSNumber)?.intValue ?? 0 }
                     c.facts.inputTokens += n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
                     c.facts.outputTokens += n("output_tokens")
@@ -212,10 +215,10 @@ enum ConversationReader {
                 }
 
             case "user":
-                guard obj["isMeta"] as? Bool != true, let message = obj["message"] as? [String: Any] else { continue }
+                guard obj["isMeta"] as? Bool != true, let message = obj["message"] as? [String: Any] else { return }
                 if obj["isCompactSummary"] as? Bool == true {
                     append(.notice(text: "Conversation compacted", symbol: "rectangle.compress.vertical"), date)
-                    continue
+                    return
                 }
                 let result = obj["toolUseResult"] as? [String: Any]
                 if let text = message["content"] as? String {
@@ -223,9 +226,9 @@ enum ConversationReader {
                         append(kind, date)
                         if case .user = kind { c.turnStart = date; turnOutput = [:] }
                     }
-                    continue
+                    return
                 }
-                guard let blocks = message["content"] as? [[String: Any]] else { continue }
+                guard let blocks = message["content"] as? [[String: Any]] else { return }
                 var text = ""
                 var images = 0
                 for block in blocks {
@@ -264,14 +267,34 @@ enum ConversationReader {
             }
         }
 
-        // Task subjects come from the TaskCreate inputs; statuses from the results.
-        c.facts.files = files
-        c.turnTokens = turnOutput.values.reduce(0, +)
-        if let last = c.items.last, case .tools(let calls) = last.kind, let open = calls.last(where: { !$0.finished }) {
-            c.activity = open.title
+        /// Keeps a long session bounded: the chat shows the last 500 items, and calls can only finish
+        /// in recent ones.
+        private mutating func trim() {
+            if c.items.count > 1000 {
+                let drop = c.items.count - 500
+                c.items.removeFirst(drop)
+                callIndex = callIndex.compactMapValues { $0.item >= drop ? ($0.item - drop, $0.call) : nil }
+                thinkingAt = thinkingAt.flatMap { $0 >= drop ? $0 - drop : nil }
+            }
+            if countedOrder.count > 4000 {
+                countedOrder.prefix(2000).forEach { countedMessages.remove($0) }
+                countedOrder.removeFirst(2000)
+            }
         }
-        if c.items.count > 500 { c.items = Array(c.items.suffix(500)) }
-        return c
+
+        /// The conversation as of the lines read so far.
+        func conversation() -> Conversation {
+            var c = self.c
+
+            // Task subjects come from the TaskCreate inputs; statuses from the results.
+            c.facts.files = files
+            c.turnTokens = turnOutput.values.reduce(0, +)
+            if let last = c.items.last, case .tools(let calls) = last.kind, let open = calls.last(where: { !$0.finished }) {
+                c.activity = open.title
+            }
+            if c.items.count > 500 { c.items = Array(c.items.suffix(500)) }
+            return c
+        }
     }
 
     /// What a user line shows as: the text, a slash command as typed, an interruption, or nothing
@@ -437,17 +460,4 @@ enum ConversationReader {
 
     private static func parseDate(_ s: String) -> Date? { isoFractional.date(from: s) ?? ISO8601DateFormatter().date(from: s) }
 
-    /// The last few MB, starting at a line boundary.
-    private static func tail(of path: String, bytes: UInt64 = 4_000_000) -> [Substring] {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        let start = size > bytes ? size - bytes : 0
-        try? handle.seek(toOffset: start)
-        guard let data = try? handle.readToEnd() else { return [] }
-        let text = String(decoding: data, as: UTF8.self)
-        var lines = text.split(separator: "\n")
-        if start > 0, !lines.isEmpty { lines.removeFirst() }
-        return lines
-    }
 }
