@@ -180,8 +180,6 @@ final class ChatModel: ObservableObject {
     /// Lanes by session id, from the lane folder each session runs in. Re-read every few seconds, since a
     /// switch changes a lane's account.
     @Published private(set) var lanes: [String: Lane] = [:]
-    /// Lanes exist, so sessions can be on different accounts: the sidebar then names each one's account.
-    @Published private(set) var lanesInUse = false
     private var lanesChecked = Date.distantPast
     /// Limit switches by lane name ("" for the main login), shown in the sessions they moved.
     @Published var accountNotes: [String: AccountNote] = [:]
@@ -220,7 +218,6 @@ final class ChatModel: ObservableObject {
         let agents = notch.agents
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let all = LaneStore.all()
-            let inUse = !all.isEmpty
             var found: [String: Lane] = [:]
             for agent in agents {
                 if let dir = agent.configDir, let lane = all.first(where: { $0.path == dir }) { found[agent.id] = lane }
@@ -228,7 +225,6 @@ final class ChatModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if self.lanes != found { self.lanes = found }
-                if self.lanesInUse != inUse { self.lanesInUse = inUse }
             }
         }
     }
@@ -572,7 +568,6 @@ final class ChatModel: ObservableObject {
     /// Made-up lanes for a probe render; only builds with -D DEMO.
     func demo(lanes: [String: Lane]) {
         self.lanes = lanes
-        lanesInUse = true
         lanesChecked = .distantFuture
     }
     #endif
@@ -850,7 +845,7 @@ private struct SessionSidebar: View {
                             ForEach(agents, id: \.id) { agent in
                                 Button { model.selection = agent.id; listFocused = true } label: {
                                     SessionRowLabel(agent: agent, line: statusLine(agent),
-                                                    account: model.lanesInUse ? model.account(for: agent) : nil)
+                                                    account: model.account(for: agent))
                                 }
                                 .buttonStyle(KitSessionRowStyle(selected: model.selection == agent.id, focused: listFocused))
                                 .accessibilityAddTraits(model.selection == agent.id ? .isSelected : [])
@@ -904,15 +899,14 @@ private struct SessionSidebar: View {
 private struct SessionRowLabel: View {
     let agent: Agent
     let line: String
-    /// Shown only while lanes exist; otherwise every session is on the one main account.
     var account: ChatModel.SessionAccount?
 
     var body: some View {
         HStack(spacing: 10) {
             KitAvatar(name: agent.name, size: 30, status: agent.group)
             VStack(alignment: .leading, spacing: 2) {
+                // Three lines: who, on which account, doing what.
                 Text(agent.name).kitType(.heading).foregroundColor(KitInk.text).lineLimit(1)
-                Text(line).kitType(.meta).foregroundColor(agent.group == .needsInput ? KitInk.accentText : KitInk.textMuted).lineLimit(1)
                 if let account {
                     HStack(spacing: 4) {
                         Image(systemName: account.lane == nil ? "person.crop.circle" : "arrow.triangle.branch")
@@ -921,6 +915,7 @@ private struct SessionRowLabel: View {
                     }
                     .kitType(.meta).foregroundColor(KitInk.textFaint)
                 }
+                Text(line).kitType(.meta).foregroundColor(agent.group == .needsInput ? KitInk.accentText : KitInk.textMuted).lineLimit(1)
             }
             Spacer(minLength: 4)
             Text(ChatFormat.age(agent.since)).kitType(.meta).foregroundColor(KitInk.textFaint)
