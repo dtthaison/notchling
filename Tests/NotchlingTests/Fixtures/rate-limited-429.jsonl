@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"u-429","isApiErrorMessage":true,"error":"rate_limit","timestamp":"2026-11-01T10:00:01.500Z","message":{"content":[{"type":"text","text":"API Error: Request rejected (429) · cooling down"}]}}

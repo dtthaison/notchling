@@ -46,7 +46,16 @@ final class PagesWindowController: NSObject, NSWindowDelegate {
 }
 
 /// The app has no main menu, so nothing else sends ⌘C, ⌘V and friends to the search field or the page.
-private final class EditingWindow: NSWindow {
+/// Shared by the Artifacts and Chat windows.
+final class EditingWindow: NSWindow {
+    /// Gets first look at plain key presses (Tab, arrows) while typing, like the notch's reply box.
+    var keyHandler: ((NSEvent) -> Bool)?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, !event.modifierFlags.contains(.command), keyHandler?(event) == true { return }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else {
             return super.performKeyEquivalent(with: event)
@@ -93,7 +102,7 @@ final class PagesModel: ObservableObject {
         let words = search.lowercased().split(separator: " ")
         return pages.filter { page in
             (account.isEmpty || page.account == account)
-                && words.allSatisfy { "\(page.title) \(page.project) \(page.account)".lowercased().contains($0) }
+                && page.matches(words)
         }
     }
 
@@ -151,7 +160,7 @@ private struct PageList: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                TextField("Search", text: $model.search)
+                TextField("Search or Paste Artifact ID", text: $model.search)
                     .textFieldStyle(.roundedBorder)
                 if model.owners.count > 1 {
                     Picker("", selection: $model.account) {
@@ -282,7 +291,7 @@ private struct PageDetail: View {
     }
 }
 
-private enum PageDates {
+enum PageDates {
     private static let shortFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
@@ -299,7 +308,7 @@ private enum PageDates {
 }
 
 /// Shows the saved file itself. Links leave for the default browser; the page can read only its own folder.
-private struct PagePreview: NSViewRepresentable {
+struct PagePreview: NSViewRepresentable {
     let page: PageLibrary.Entry
 
     func makeCoordinator() -> Coordinator { Coordinator() }

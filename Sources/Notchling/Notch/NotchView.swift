@@ -1159,6 +1159,7 @@ struct AgentListView: View {
                             AgentRow(model: model, agent: agent)
                                 .onTapGesture { model.open(agent.id) }
                                 .contextMenu {
+                                    Button("Open in Chat") { model.go(.collapsed); model.onOpenChat?(agent.id) }
                                     Button("Hide") { model.onHide?(agent) }
                                     if case .job = agent.target {
                                         Divider()
@@ -1659,6 +1660,13 @@ struct DetailView: View {
                     .font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer()
+            Button {
+                model.go(.collapsed)
+                model.onOpenChat?(agent.id)
+            } label: {
+                Image(systemName: "bubble.left.and.bubble.right")
+            }
+            .buttonStyle(.plain).foregroundColor(.secondary).help("Open in Chat window")
             Button { AgentActions.open(agent.target, cwd: agent.cwd) } label: {
                 Image(systemName: "arrow.up.forward.app")
             }

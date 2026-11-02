@@ -5,9 +5,10 @@ enum AgentActions {
     static func open(_ target: AgentTarget, cwd: String = "") {
         switch target {
         case .job(let id):
-            runInTerminal("\(shellQuote(ReplySender.claudePath)) attach \(id)")
+            runInTerminal(lanePrefix(AgentMonitor.configDir(forJob: id)) + "\(shellQuote(ReplySender.claudePath)) attach \(id)")
         case .resume(let sessionID, let cwd):
-            runInTerminal("cd \(shellQuote(cwd)) && \(shellQuote(ReplySender.claudePath)) --resume \(sessionID)")
+            runInTerminal("cd \(shellQuote(cwd)) && " + lanePrefix(AgentMonitor.configDir(forSession: sessionID))
+                          + "\(shellQuote(ReplySender.claudePath)) --resume \(sessionID)")
         case .process(let pid):
             if !jump(to: pid, cwd: cwd) { NSSound.beep() }
         }
@@ -137,6 +138,12 @@ enum AgentActions {
     }
 
     /// Opens the command in the default terminal app via a throwaway .command file.
+    /// `CLAUDE_CONFIG_DIR=<lane> ` for a session in a lane, so it's reached (and resumed) on the lane's login.
+    private static func lanePrefix(_ dir: String?) -> String {
+        guard let dir else { return "" }
+        return "\(LaneStore.variable)=\(shellQuote(dir)) "
+    }
+
     private static func runInTerminal(_ command: String) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("awake-\(UUID().uuidString).command")
         let script = "#!/bin/zsh -l\nrm -f \(shellQuote(url.path))\n\(command)\n"

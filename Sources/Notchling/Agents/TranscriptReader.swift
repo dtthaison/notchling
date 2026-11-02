@@ -73,8 +73,10 @@ enum TranscriptReader {
         return snapshot
     }
 
-    private static func path(for agent: Agent) -> String? {
-        if let p = agent.transcriptPath, FileManager.default.fileExists(atPath: p) { return p }
+    static func path(for agent: Agent) -> String? {
+        if let p = agent.transcriptPath, FileManager.default.fileExists(atPath: p) {
+            return successor(of: p, name: agent.name) ?? p
+        }
         lock.lock(); defer { lock.unlock() }
         if let cached = pathCache[agent.id] { return cached }
         let dirs = (try? FileManager.default.contentsOfDirectory(atPath: projectsDir.path)) ?? []
@@ -86,6 +88,40 @@ enum TranscriptReader {
             }
         }
         return nil
+    }
+
+    /// The transcript a background job moved to after /clear. Clearing starts a new file, but the job's
+    /// state keeps naming the old one until its next link scan; the new file starts with the job's
+    /// name and a SessionStart:clear hook. Follows several clears in a row.
+    private static func successor(of path: String, name: String) -> String? {
+        let fm = FileManager.default
+        let dir = (path as NSString).deletingLastPathComponent
+        guard !name.isEmpty, let nameData = try? JSONSerialization.data(withJSONObject: [name]),
+              let quoted = String(data: nameData, encoding: .utf8)?.dropFirst().dropLast() else { return nil }
+        let marker = "\"agentName\":\(quoted)"
+        func modified(_ p: String) -> Date? { (try? fm.attributesOfItem(atPath: p))?[.modificationDate] as? Date }
+        func created(_ p: String) -> Date? { (try? fm.attributesOfItem(atPath: p))?[.creationDate] as? Date }
+
+        var current = path
+        var found: String?
+        for _ in 0..<4 {
+            guard let since = modified(current)?.addingTimeInterval(-10),
+                  let files = try? fm.contentsOfDirectory(atPath: dir) else { break }
+            let next = files.lazy
+                .filter { $0.hasSuffix(".jsonl") }
+                .map { (dir as NSString).appendingPathComponent($0) }
+                .filter { $0 != current && $0 != path && (created($0) ?? .distantPast) > since }
+                .first { candidate in
+                    guard let handle = FileHandle(forReadingAtPath: candidate) else { return false }
+                    defer { try? handle.close() }
+                    let head = String(decoding: handle.readData(ofLength: 16_384), as: UTF8.self)
+                    return head.contains(marker) && head.contains("SessionStart:clear")
+                }
+            guard let next else { break }
+            found = next
+            current = next
+        }
+        return found
     }
 
     /// True once the transcript holds a result for the latest call of `tool` with this input, meaning
@@ -327,7 +363,7 @@ enum TranscriptReader {
     }
 
     /// Text pasted into a prompt shows as "[Pasted text +N lines]", like the terminal shows it.
-    private static func collapsePastes(_ text: String) -> String {
+    static func collapsePastes(_ text: String) -> String {
         guard text.contains("<pasted_content") else { return text }
         var out = text
         while let open = out.range(of: "<pasted_content"),

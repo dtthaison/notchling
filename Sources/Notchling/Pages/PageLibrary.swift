@@ -25,11 +25,15 @@ enum PageLibrary {
         var project: String
         var account: String
         var updated: Double
+        /// claude.ai's id of the version last published from this Mac ("" when unknown), so a publish
+        /// made for its owner can tell when the page changed elsewhere since.
+        var version = ""
 
         init(folder: String, file: String, title: String, url: String, source: String,
-             project: String, account: String, updated: Double) {
+             project: String, account: String, updated: Double, version: String = "") {
             self.folder = folder; self.file = file; self.title = title; self.url = url
             self.source = source; self.project = project; self.account = account; self.updated = updated
+            self.version = version
         }
 
         init?(_ obj: [String: Any]) {
@@ -37,15 +41,25 @@ enum PageLibrary {
             self.init(folder: folder, file: file, title: obj["title"] as? String ?? folder,
                       url: obj["url"] as? String ?? "", source: obj["source"] as? String ?? "",
                       project: obj["project"] as? String ?? "", account: obj["account"] as? String ?? "",
-                      updated: (obj["updated"] as? NSNumber)?.doubleValue ?? 0)
+                      updated: (obj["updated"] as? NSNumber)?.doubleValue ?? 0, version: obj["version"] as? String ?? "")
         }
 
         var json: [String: Any] {
             ["folder": folder, "file": file, "title": title, "url": url, "source": source,
-             "project": project, "account": account, "updated": updated]
+             "project": project, "account": account, "updated": updated, "version": version]
         }
 
         var localURL: URL { PageLibrary.dir.appendingPathComponent(folder).appendingPathComponent(file) }
+
+        /// The last part of the claude.ai link; nil for a page that never got one.
+        var artifactID: String? { url.isEmpty ? nil : url.components(separatedBy: "/").last }
+
+        /// Every word (lowercased) is in the title, project, account or link. The link holds the id,
+        /// so a pasted id or link matches too.
+        func matches(_ words: [Substring]) -> Bool {
+            let text = "\(title) \(project) \(account) \(url)".lowercased()
+            return words.allSatisfy { text.contains($0) }
+        }
     }
 
     // MARK: - Reading (app side)
@@ -54,6 +68,102 @@ enum PageLibrary {
     static func entries() -> [Entry] {
         let list = HookBridge.readJSON(listURL)?["pages"] as? [[String: Any]] ?? []
         return list.compactMap(Entry.init).sorted { $0.updated > $1.updated }
+    }
+
+    // MARK: - Finding (for agents: `Notchling --page`, and failed Artifact reads)
+
+    /// The artifact id in a claude.ai link, or the text itself when it looks like a bare id.
+    static func artifactID(in text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let r = t.range(of: #"claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+"#, options: .regularExpression) {
+            return t[r].components(separatedBy: "/").last
+        }
+        return t.range(of: #"^[A-Za-z0-9_-]{16,}$"#, options: .regularExpression) != nil ? t : nil
+    }
+
+    /// The page with this link or id, else the pages whose text holds every word of the query.
+    static func find(_ query: String) -> [Entry] { find(query, in: entries()) }
+
+    /// `find` over a list already read, for the search panel, which searches on every key press.
+    static func find(_ query: String, in all: [Entry]) -> [Entry] {
+        if let id = artifactID(in: query) {
+            let exact = all.filter { $0.artifactID == id }
+            if !exact.isEmpty { return exact }
+            let loose = all.filter { $0.artifactID?.lowercased() == id.lowercased() }
+            if !loose.isEmpty { return loose }
+        }
+        let words = query.lowercased().split(separator: " ")
+        return words.isEmpty ? all : all.filter { $0.matches(words) }
+    }
+
+    /// Plain lines an agent can act on: where the copy is, and who can republish it.
+    static func describe(_ e: Entry) -> String {
+        let fm = FileManager.default
+        let folder = dir.appendingPathComponent(e.folder)
+        let others = ((try? fm.subpathsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0 != e.file && !$0.hasPrefix(".") }
+            .filter { var d: ObjCBool = false; return fm.fileExists(atPath: folder.appendingPathComponent($0).path, isDirectory: &d) && !d.boolValue }
+            .sorted()
+        let date = ISO8601DateFormatter.string(from: Date(timeIntervalSince1970: e.updated), timeZone: .current,
+                                               formatOptions: [.withFullDate, .withTime, .withColonSeparatorInTime, .withDashSeparatorInDate, .withSpaceBetweenDateAndTime])
+        var lines = ["Title: \(e.title)",
+                     "Link: \(e.url.isEmpty ? "(never published to claude.ai)" : e.url)",
+                     "Published by: \(e.account.isEmpty ? "unknown account" : e.account)"]
+        if !e.project.isEmpty { lines.append("Project: \(e.project)") }
+        lines.append("Last published: \(date)")
+        lines.append("Local copy: \(e.localURL.path)")
+        if !others.isEmpty { lines.append("Supporting files (next to it): \(others.joined(separator: ", "))") }
+        if !e.source.isEmpty, fm.fileExists(atPath: e.source) { lines.append("Original source file: \(e.source)") }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `Notchling --page <link | id | words>` and `Notchling --pages`: print what's saved, then exit.
+    static func runCLI(_ query: String, list: Bool) -> Never {
+        let found = find(query)
+        if found.isEmpty {
+            FileHandle.standardError.write(Data("No saved page matches \"\(query)\".\n".utf8))
+            exit(1)
+        }
+        if list {
+            for e in found {
+                print([e.artifactID ?? "-", e.title, e.account.isEmpty ? "-" : e.account].joined(separator: "\t"))
+            }
+        } else {
+            let shown = found.prefix(10)
+            print(shown.map(describe).joined(separator: "\n\n"))
+            if found.count > shown.count { print("\n…and \(found.count - shown.count) more. Narrow the search, or use --pages.") }
+        }
+        exit(0)
+    }
+
+    /// The saved page an `Artifact read` of a whole page asks for. Reads of one file (`path`/`paths`)
+    /// aren't matched, so `path: "index.html"` still fetches the live page.
+    private static func savedPage(for event: [String: Any]) -> Entry? {
+        let input = event["tool_input"] as? [String: Any] ?? [:]
+        guard input["action"] as? String == "read", input["path"] == nil, input["paths"] == nil,
+              let link = input["url"] as? String, let id = artifactID(in: link) else { return nil }
+        return entries().first(where: { $0.artifactID == id })
+    }
+
+    /// The deny reason for a `PreToolUse(Artifact)` read we can answer locally: where the copy is. Nil
+    /// (the real read runs) when we don't keep the page or its file is gone.
+    static func localRead(_ event: [String: Any]) -> String? {
+        guard let page = savedPage(for: event),
+              FileManager.default.fileExists(atPath: page.localURL.path) else { return nil }
+        return "Notchling answered this read from its local copy of the artifact, as last published from this Mac. "
+            + "Read the \"Local copy\" file with the Read tool; this is not an error.\n"
+            + describe(page)
+            + "\nIt doesn't hold edits made on claude.ai after that publish. To get those, read the live page with "
+            + "action \"read\", this url and path \"index.html\" (only the account that published it can)."
+    }
+
+    /// Context for a failed `Artifact read`: the link's page is usually another account's (artifacts are
+    /// private to their login), and the local copy still reads.
+    static func readFallback(_ event: [String: Any]) -> String? {
+        guard let page = savedPage(for: event) else { return nil }
+        return "Notchling keeps a local copy of this artifact, as last published from this Mac. Read the local file instead:\n"
+            + describe(page)
+            + "\nOnly the account that published it can republish to this link; from another account, publishing makes a new link."
     }
 
     // MARK: - Hook side
@@ -102,7 +212,8 @@ enum PageLibrary {
                               project: projectName(cwd),
                               // The first publisher owns the page; only they can republish it.
                               account: backfill?["account"] as? String ?? existing.map { list[$0].account }.flatMap { $0.isEmpty ? nil : $0 } ?? activeEmail(),
-                              updated: (backfill?["updated"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970)
+                              updated: (backfill?["updated"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970,
+                              version: publishedVersion(in: response))
             if let i = existing { list[i] = entry } else { list.append(entry) }
             HookBridge.writeJSON(["pages": list.map(\.json)], to: listURL)
             writeIndex(list)
@@ -155,6 +266,13 @@ enum PageLibrary {
     }
 
     /// The first claude.ai artifact link in a tool result, whatever shape the result has.
+    /// The version id a publish result names: Claude Code's "version id 1793506664-65e3", or Notchling's
+    /// own "(version 1793506664-65e3)".
+    private static func publishedVersion(in text: String) -> String {
+        guard let r = text.range(of: #"version (?:id )?[0-9]{6,}-[0-9a-f]{2,}"#, options: .regularExpression) else { return "" }
+        return String(text[r].split(separator: " ").last ?? "")
+    }
+
     private static func artifactURL(in text: String) -> String? {
         guard let r = text.range(of: #"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+"#, options: .regularExpression) else { return nil }
         return String(text[r])
@@ -175,6 +293,8 @@ enum PageLibrary {
     }
 
     private static func activeEmail() -> String {
+        // A session in a lane publishes as the lane's account; ~/.claude.json only knows the main one.
+        if let lane = LaneStore.current() { return lane.email }
         let claude = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
         let account = HookBridge.readJSON(claude)?["oauthAccount"] as? [String: Any]
         return account?["emailAddress"] as? String ?? ""

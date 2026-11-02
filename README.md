@@ -44,7 +44,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 ./build.sh --install  # also quits the running copy, installs to /Applications and opens it
 ```
 
-`build.sh` compiles `Sources/*.swift` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
+`build.sh` compiles every file under `Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
 
 To start at login, use **Launch at Login** in the menu, or run:
 
@@ -115,32 +115,26 @@ Unlike Claude Code, switching here **restarts** Antigravity rather than being se
 ## Project layout
 
 ```
-Sources/
-  main.swift              entry point: --hook, login item flags, app start
-  AppDelegate.swift       menu bar item, settings menu, 3-second polling loop
-  AwakeController.swift   IOKit power assertion
-  WakeResumer.swift       after a wake, tells background agents cut off by sleep to continue
-  AgentMonitor.swift      reads sessions and background jobs into Agent values
-  TranscriptReader.swift  parses transcripts into chat lines, activity and open questions
-  HookBridge.swift        the --hook process and installing the hooks into settings.json
-  PageLibrary.swift       local copies of published Artifact pages (saved by the hook)
-  PagesWindow.swift       the Artifacts window: list, search, preview
-  ReplySender.swift       types replies and answers into background agents via claude attach
-  AgentActions.swift      opens or focuses a session's terminal or editor window
-  SlashCommands.swift     built-in, user, project and plugin commands for completion
-  LimitWatcher.swift      usage-limit alerts, automatic account switch, restarting agents stopped on the limit
-  Accounts.swift          saved logins, switching, limits from the usage endpoint
-  Antigravity.swift       saved Antigravity logins and switching
-  ClaudeDesktop.swift     Claude Desktop cookie-session capture and switching
-  CostTracker.swift       token cost at API prices from transcripts
-  UsageMenuViews.swift    the account rows and cost chart in the menu
-  AccountLogin.swift      in-app OAuth sign-in for adding an account
-  AccountsWindow.swift    the Claude Accounts window (accounts, sign-in, token cost)
-  NotchModel.swift        notch state, sizes and actions
-  NotchController.swift   the transparent panel over the notch and mouse handling
-  NotchView.swift         all SwiftUI views (list, peek, cards, chat, pet)
-  PetLayer.swift          draws the pet in Core Animation layers
-  TabPerch.swift          finds the frontmost window's title bar for the idle pet (Accessibility)
+Package.swift             SwiftPM manifest, used for `swift test` (build.sh builds the app)
+Sources/Notchling/
+  App/        main.swift (--hook, login item flags, app start), AppDelegate (menu bar item,
+              settings menu, polling loop), DockPresence, AwakeController (IOKit power
+              assertion), WakeResumer (continues agents cut off by sleep)
+  Notch/      NotchModel (state, sizes, actions), NotchController (panel and mouse
+              handling), NotchView (SwiftUI views and the pet), PetLayer, TabPerch
+  Agents/     AgentMonitor (sessions and jobs into Agent values), TranscriptReader,
+              ReplySender (claude attach), AgentActions (open a session's window),
+              SlashCommands
+  Hook/       HookBridge: the --hook process and installing hooks into settings.json
+  Accounts/   saved logins and switching (Accounts, Antigravity, ClaudeDesktop),
+              AccountLogin (OAuth), AccountsWindow, CostTracker, UsageMenuViews
+  Limits/     LimitWatcher: limit alerts, automatic switch, restarting stopped agents
+  Lanes/      Lanes: Claude Code config folders used with CLAUDE_CONFIG_DIR
+  Chat/       ChatWindow, ChatParts, ChatMarkdown, ConversationReader
+  DesignKit/  ChatKit: tokens, type, icons and parts used by the windows
+  Pages/      PageLibrary (local Artifact copies), PagesWindow, PageSkill, OwnerPublish
+  Search/     SearchPanel (⌘⇧P)
+Tests/NotchlingTests/     unit tests (`swift test`), with transcript fixtures
 Icon/make-icon.swift      draws the app icon
 Pet/                      the pet's drawings (swing, sit, look, yawn, doze, hop poses)
 Demo/                     renders docs/demo.gif from the real views with made-up agents

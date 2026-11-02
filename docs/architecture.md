@@ -1,0 +1,131 @@
+# Architecture review and restructuring plan
+
+November 2026. The review covered all 35 source files (about 15,000 lines). The guidance comes from the SD knowledge base notebooks ("SD · 1 Architecture Fundamentals", "SD · 3 Testing & Quality", "SD · 5 Implementation").
+
+## Where it stands
+
+**Already good:**
+- A lot of logic is written as static functions with no state: `LimitLogic`, `MarkdownParser`, the transcript parsers, `PageLibrary.find`, the base58 decoding. They can be tested as they are.
+- `CLAUDE.md` records the hard-won rules (accounts, Keychain, lanes, hooks).
+- The design kit (`ChatKit`) depends on almost nothing else.
+
+**What makes it hard to change and test:**
+
+| Problem | Where |
+|---|---|
+| No module boundaries: one `swiftc` call over everything, so any file can reach any other. | whole app |
+| Side effects are called directly, not passed in: `FileManager.default` ×95, `UserDefaults.standard` ×47, plus `Process`, `URLSession` with semaphores, and `/usr/bin/security`. | everywhere |
+| God objects | `AppDelegate` (885 lines: wiring, polling, agent-list policy, the whole menu, about 10 alerts, `claude rm`)<br>`ChatModel` (610 lines inside `ChatWindow.swift`, 1,910 lines)<br>`AccountStore` (about 560 lines: persistence, Keychain, HTTP, JSON mapping, switching, lanes)<br>`PetView` (about 870 lines inside `NotchView.swift`) |
+| Dependency cycles | `HookBridge` ↔ `PageLibrary` / `OwnerPublish`<br>`AccountStore` ↔ `LaneStore`<br>`AgentMonitor` ↔ `AgentActions`<br>`LaneStore` → `ReplySender` → `AgentMonitor` → `LaneStore`<br>`ChatWindow` ↔ `ChatParts` |
+| Adding a provider means editing core code: the `Provider` enum, `switch` statements, window init parameters, `sync` calls, menu sections. | Accounts, AppDelegate |
+| Duplicated code | three `Process` runners; two semaphore-based HTTP clients; four copies of JSON-file read-modify-write; ISO date parsing ×4; `readJSON` ×2; `parentPID` ×2; `activeEmail` ×2; the `DesktopPage` and `AntigravityPage` views; the two menu row views |
+| Values passed around as strings | about 20 UserDefaults keys across 6 files (the `migrateFromAwake` list must be kept in step by hand); `~/.claude` hard-coded in 5 files; the account id `"uuid:org"` built and split in 5 places; the hook protocol as `[String: Any]`, built in 4 places |
+| The hook process links AppKit and SwiftUI, and reaches `AccountStore` through `OwnerPublish`. | `--hook` |
+
+## Target structure
+
+Dependencies point inward: UI → features → core, and the adapters implement protocols that core defines.
+
+```
+NotchlingCore        pure Foundation, no AppKit/SwiftUI, no disk/process/network
+                     models (Agent, Snapshot, ChatItem, ClaudeAccount, AccountUsage, PageEntry…)
+                     parsers (transcripts, conversation, usage JSON, jobs/sessions, front matter)
+                     policies (LimitLogic, agent-list reducer, peek rules, notch layout math,
+                     pet simulation with an injected clock and random source)
+                     hook protocol as Codable HookRequest/HookResponse
+                     ports: FileSystem, Settings, ProcessRunner, HTTPClient, Keychain, Clock
+
+NotchlingSystem      adapters for the ports: lane-aware ClaudePaths, typed SettingsStore,
+                     SecurityCLIKeychain, ProcessRunner, async HTTPClient, JSONFileEditor,
+                     pty attach, AppLifecycle (quit/open/isRunning), file IPC for the hook
+
+Providers            AccountProvider protocol + ClaudeCode, ClaudeDesktop, Antigravity
+                     (and later Codex, Gemini), registered at launch
+
+NotchlingUI          DesignKit, SharedUI (EditingWindow, PagePreview, alerts),
+                     Notch, Pet, Chat, Pages, Search, Accounts. Views draw; view models hold state
+
+Notchling (app)      composition root: builds the adapters and passes them down
+                     --hook path uses Core + System only (no AppKit)
+```
+
+The SD guidance this follows:
+- **Functional core, imperative shell.** Logic takes values and returns values. Only adapters touch disk, Keychain, processes or the network.
+- **Constructor injection with defaults:** `init(fs: FileSystem = LocalFileSystem())`. This adds a seam without touching any caller.
+- **Open/closed for providers.** A new provider is a new file that conforms to `AccountProvider` and is registered in one place. Nothing else changes.
+- **Humble views.** SwiftUI views hold no I/O. State changes live in `@MainActor` view models that tests can drive.
+- **Size targets:** files under about 400 lines, functions under about 40, at most 4 parameters (otherwise pass a parameter struct).
+- **Strangler fig.** Each step is small and leaves the app shippable. No rewrite on a separate branch.
+
+## Phases
+
+### Phase 0: safety net (done)
+- Moved the flat folder into `Sources/Notchling/<Feature>/`: App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search. `build.sh` and `Demo/make-demo.sh` compile that tree.
+- Added `Package.swift` and `Tests/NotchlingTests`, using `@testable import Notchling`. The 30 characterization tests cover:
+  - `LimitLogic`
+  - the usage JSON mapping, including the `limits` list
+  - the conversation and transcript parsers (fixtures)
+  - limit-hit detection
+  - paste collapsing
+  - the hook's output for each action
+  - page lookup by link, id and words
+  - base58 → UUID
+  - markdown blocks
+- CI runs `swift test` before building.
+
+### Phase 1: seams (no behavior change)
+1. Add a lane-aware `ClaudePaths`. This removes the 5 hard-coded `~/.claude` paths, and `TranscriptReader`, `SlashCommands` and `desktopSessionID` then see lane folders too.
+2. Add a typed `SettingsStore`: one enum of keys, with the migration list built from it. This replaces the 47 calls to `UserDefaults.standard`.
+3. Write one `ProcessRunner` and one async `HTTPClient` to replace the three runners and the semaphores. Add a `JSONFileEditor` that keeps file permissions and a backup.
+4. Add an `AccountID` value type in place of `"uuid:org"` strings.
+5. Make the hook protocol `Codable`, shared by `NotchModel` and `HookBridge`.
+
+### Phase 2: the `NotchlingCore` target
+Move the pure models, parsers and policies listed above into a library target with no AppKit import. Make them `public` and move their tests to `NotchlingCoreTests`. This breaks the cycles, because `PageLibrary`, `OwnerPublish` and `HookBridge` then share Core types and no longer depend on each other.
+
+### Phase 3: break up the god objects
+| Today | Becomes |
+|---|---|
+| `AppDelegate` | `AppCoordinator` (polling, wiring)<br>`StatusMenuBuilder`<br>`AgentListReducer` (pure)<br>`Alerts` |
+| `ChatModel` | `ChatViewModel` (selection, drafts, send)<br>`SessionAccountsCoordinator` (move, switch, new session)<br>`DropIntake`<br>`ClaudeCLI` adapter |
+| `AccountStore` | `AccountRepository`<br>`UsageAPI`<br>`ClaudeCodeSwitcher`<br>`LaneSwitcher` (ends the Lanes cycle) |
+| `ConversationReader.parse` (172 lines) | per-type handlers over a `ParseState` struct, plus a `ToolCallFactory` |
+| `NotchView.swift` | one file per card; `PetView` goes to a Pet folder with an injected clock and random source |
+| `LimitWatcher` | one switch flow for the main login and for lanes; the notifier and banner move to UI |
+
+### Phase 4: provider registry
+```swift
+protocol AccountProvider: AnyObject {
+    var id: String { get }
+    var title: String { get }
+    var capabilities: ProviderCapabilities { get }   // add flow, needs restart, usage, auto-switch, cost
+    var state: ProviderState { get }                  // accounts, activeID, busy
+    func sync(force: Bool)
+    func switchTo(_ id: AccountID) async throws
+    func beginAdd() throws
+    func cancelAdd()
+    func remove(_ id: AccountID)
+}
+```
+- Usage becomes a generic `UsageReport`: groups of bars, each bar with a kind (`session`, `week`, `other`). The cards and `LimitLogic` read that.
+- The Accounts window, the menu sections and the limit watcher iterate the registry.
+- Desktop and Antigravity share one `RestartingAppProvider` base class: quit, open, watch for a new login, cancel.
+
+### Phase 5: a hook with no AppKit
+Once Core and System are separate targets, the `--hook` path links only those two, so the hook starts faster and pulls in less.
+
+## Possible bugs found in the review (not yet verified)
+- `AccountsView.refresh()` doesn't call `desktop.sync()`, but `show()` does.
+- Usage freshness is `15*60` in Accounts, while `LimitLogic.freshFor` is 10 minutes.
+- `CostTracker.Summary.==` ignores projects, channels and models, so changes to those may not publish.
+- The `DayBars` title says "Last 14 Days" but it can show up to 30 bars.
+- `ChatModel.refreshPage` reads `pages.json` on the main thread on every 1-second tick.
+- `ConversationReader.cache` has no size limit.
+- `AccountStore.snapshot()` calls `DispatchQueue.main.sync` and would deadlock if it were ever called on the main thread.
+- The `NotchController` NotificationCenter observers are never removed.
+
+## Rules for new code
+- No `FileManager.default`, `UserDefaults.standard`, `Process` or `URLSession` outside the adapters. Take the dependency in `init` instead.
+- Every new parser or policy ships with a test. Parsers of Claude Code's formats get a fixture in `Tests/NotchlingTests/Fixtures`.
+- A new account provider must not need an edit outside its own file and its registration.
+- Keep files under about 400 lines. Split by feature, not by layer.

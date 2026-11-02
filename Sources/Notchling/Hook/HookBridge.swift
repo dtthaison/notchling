@@ -50,10 +50,48 @@ enum HookBridge {
     /// with no output (Claude Code's normal prompt) when the app isn't running, and for `claude -p` runs.
     static func runHook() -> Never {
         let input = FileHandle.standardInput.readDataToEndOfFile()
+        // An Artifact read of a page we keep is answered from the local copy before it reaches claude.ai
+        // (or auto mode's check); anything we don't have passes through to the real read.
+        if let event = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any],
+           event["hook_event_name"] as? String == "PreToolUse", event["tool_name"] as? String == "Artifact" {
+            // A publish to a page another saved account owns goes out with that account's login.
+            switch OwnerPublish.run(event) {
+            case .done(let reason)?, .refused(let reason)?:
+                if let out = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": [
+                    "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason]]) {
+                    FileHandle.standardOutput.write(out)
+                }
+                exit(0)
+            case .failed(let context)?:
+                if let out = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": [
+                    "hookEventName": "PreToolUse", "additionalContext": context]]) {
+                    FileHandle.standardOutput.write(out)
+                }
+                exit(0)
+            case nil:
+                break
+            }
+            if let reason = PageLibrary.localRead(event),
+               let out = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": [
+                   "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason]]) {
+                FileHandle.standardOutput.write(out)
+            }
+            exit(0)
+        }
         // Saving a published page needs no running app, and never answers Claude Code.
         if let event = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any],
-           event["hook_event_name"] as? String == "PostToolUse", event["tool_name"] as? String == "Artifact" {
-            PageLibrary.handle(event)
+           let name = event["hook_event_name"] as? String, name == "PostToolUse" || name == "PostToolUseFailure",
+           event["tool_name"] as? String == "Artifact" {
+            if name == "PostToolUse" { PageLibrary.handle(event) }
+            // A read that failed (or came back as a short "not found") gets pointed at the local copy.
+            let response = name == "PostToolUse" ? "\(event["tool_response"] ?? "")" : ""
+            let failed = name == "PostToolUseFailure"
+                || (response.count < 2000 && response.range(of: "404|not found|no access|not allowed|forbidden",
+                                                           options: [.regularExpression, .caseInsensitive]) != nil)
+            if failed, let context = PageLibrary.readFallback(event),
+               let out = try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": ["hookEventName": name, "additionalContext": context]]) {
+                FileHandle.standardOutput.write(out)
+            }
             exit(0)
         }
         guard appIsRunning,
@@ -89,7 +127,8 @@ enum HookBridge {
         exit(0)
     }
 
-    private static func output(for response: [String: Any], event: [String: Any]) -> [String: Any]? {
+    /// The hook's stdout for the app's response; internal so tests can check every action.
+    static func output(for response: [String: Any], event: [String: Any]) -> [String: Any]? {
         let input = event["tool_input"] as? [String: Any] ?? [:]
         switch response["action"] as? String {
         case "answer":
@@ -185,36 +224,48 @@ enum HookBridge {
         "'" + Bundle.main.bundlePath + "/Contents/MacOS/Notchling' --hook"
     }
 
+    /// Whether a settings.json hook group runs our command.
+    private static func isOurs(_ group: [String: Any]) -> Bool {
+        (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) ?? false }
+    }
+
+    /// The page hooks are our groups matched on `Artifact`; the prompt hooks share `PreToolUse` with them.
+    private static func isPageGroup(_ group: [String: Any]) -> Bool {
+        isOurs(group) && group["matcher"] as? String == "Artifact"
+    }
+
     /// Whether our entry is in settings.json for these events (the prompt hooks and the page hook are separate).
-    private static func hasHook(in events: [String]) -> Bool {
+    private static func hasHook(in events: [String], pages: Bool) -> Bool {
         guard let settings = readJSON(settingsURL), let hooks = settings["hooks"] as? [String: Any] else { return false }
         return events.contains { event in
-            (hooks[event] as? [[String: Any]] ?? []).contains { group in
-                (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) ?? false }
-            }
+            (hooks[event] as? [[String: Any]] ?? []).contains { isOurs($0) && isPageGroup($0) == pages }
         }
     }
 
-    static var isInstalled: Bool { hasHook(in: ["PreToolUse", "PermissionRequest"]) }
+    static var isInstalled: Bool { hasHook(in: ["PreToolUse", "PermissionRequest"], pages: false) }
 
-    static var pagesInstalled: Bool { hasHook(in: ["PostToolUse"]) }
+    static var pagesInstalled: Bool { hasHook(in: ["PostToolUse"], pages: true) }
 
-    /// Adds (or removes) the PostToolUse(Artifact) hook that keeps a local copy of each published page.
+    /// Adds (or removes) the Artifact hooks that keep a local copy of each published page and read from it.
     /// Short timeout: it only copies files. Other hooks, and the settings, stay as they were.
     static func setPagesInstalled(_ install: Bool) throws {
         let data = (try? Data(contentsOf: settingsURL)) ?? Data("{}".utf8)
         guard var settings = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
         let before = settings
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
-        var groups = (hooks["PostToolUse"] as? [[String: Any]] ?? []).filter { group in
-            !((group["hooks"] as? [[String: Any]]) ?? []).contains { ($0["command"] as? String)?.contains(marker) ?? false }
+        // PreToolUse answers a read of a saved page locally; PostToolUse saves each publish;
+        // PostToolUseFailure points a failed read at the saved copy.
+        for event in ["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+            var groups = (hooks[event] as? [[String: Any]] ?? []).filter { !isPageGroup($0) }
+            if install {
+                // PreToolUse may publish a page as its owner, which takes longer than copying files.
+                groups.append(["matcher": "Artifact",
+                               "hooks": [["type": "command", "command": hookCommand, "timeout": event == "PreToolUse" ? 60 : 10]]])
+            }
+            hooks[event] = groups.isEmpty ? nil : groups
         }
-        if install {
-            groups.append(["matcher": "Artifact",
-                           "hooks": [["type": "command", "command": hookCommand, "timeout": 10]]])
-        }
-        hooks["PostToolUse"] = groups.isEmpty ? nil : groups
         settings["hooks"] = hooks.isEmpty ? nil : hooks
+        PageSkill.setInstalled(install)
         if NSDictionary(dictionary: settings).isEqual(to: before) { return }
         try? data.write(to: settingsURL.appendingPathExtension("notchling-backup"))
         let out = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .withoutEscapingSlashes])
@@ -231,7 +282,7 @@ enum HookBridge {
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
         for (event, matcher) in [("PreToolUse", "AskUserQuestion"), ("PermissionRequest", "*")] {
             var groups = (hooks[event] as? [[String: Any]] ?? []).filter { group in
-                !((group["hooks"] as? [[String: Any]]) ?? []).contains { hook in
+                isPageGroup(group) || !((group["hooks"] as? [[String: Any]]) ?? []).contains { hook in
                     let command = hook["command"] as? String ?? ""
                     return command.contains(marker) || command.contains(oldMarker)
                 }

@@ -240,6 +240,11 @@ final class AccountStore: ObservableObject {
             guard let oauth = liveCredentials()?["claudeAiOauth"] as? [String: Any], !isExpired(oauth) else { return nil }
             return oauth["accessToken"] as? String
         }
+        if let lane = LaneStore.lane(forAccount: id) {
+            // Live in a lane: Claude Code renews it there, and renewing it here would sign that lane out.
+            guard let oauth = LaneStore.login(lane), !isExpired(oauth) else { return nil }
+            return oauth["accessToken"] as? String
+        }
         guard var saved = savedLogin(id), var oauth = saved["claudeAiOauth"] as? [String: Any] else { return nil }
         if !isExpired(oauth) { return oauth["accessToken"] as? String }
         guard let refresh = oauth["refreshToken"] as? String else { return nil }
@@ -327,6 +332,9 @@ final class AccountStore: ObservableObject {
     // MARK: Switching
 
     private static func activate(_ id: String) throws {
+        if let lane = LaneStore.lane(forAccount: id) {
+            throw AccountError("\(lane.email) is in use in the \(lane.name) lane. Switch or close that lane first.")
+        }
         guard let saved = savedLogin(id), let oauth = saved["claudeAiOauth"], let account = saved["oauthAccount"] else {
             throw AccountError("No saved login for this account. Sign in to it once with claude auth login.")
         }
@@ -589,3 +597,133 @@ extension AccountStore {
     }
 }
 #endif
+
+extension AccountStore {
+    /// A usable token for a saved account that isn't the active one, found by email, with its organization.
+    /// For publishing to that account's Artifacts without switching. Nil for the active account (Claude Code
+    /// publishes for it itself) or an account Notchling hasn't saved.
+    static func savedAccountToken(email: String) -> (token: String, org: String)? {
+        let mainID = oauthAccount().flatMap { accountID(config: $0) }
+        // In a lane, "this session's account" is the lane's; the main login is then just another account.
+        let selfID = LaneStore.current()?.accountID ?? mainID
+        guard let data = UserDefaults.standard.data(forKey: "accounts"),
+              let list = try? JSONDecoder().decode([ClaudeAccount].self, from: data),
+              let account = list.first(where: { $0.email.caseInsensitiveCompare(email) == .orderedSame }),
+              account.id != selfID else { return nil }
+        var needsLogin = false
+        guard let token = accessToken(for: account.id, active: account.id == mainID, needsLogin: &needsLogin) else { return nil }
+        return (token, String(account.id.split(separator: ":").last ?? ""))
+    }
+}
+
+// MARK: - Lanes
+
+extension AccountStore {
+    /// Starts a lane on a saved account (or returns the one it's already in): its login goes into the
+    /// lane's own Keychain item. The account must not be the main login.
+    func openLane(for accountID: String, done: @escaping (Result<Lane, Error>) -> Void) {
+        queue.async {
+            let state = self.snapshot()
+            let result = Result<Lane, Error> {
+                var lanes = LaneStore.all()
+                if let lane = lanes.first(where: { $0.accountID == accountID }) {
+                    LaneStore.relink(lane)
+                    return lane
+                }
+                guard accountID != state.activeID else {
+                    throw AccountError("That account is the main login. Open Claude Code as usual for it.")
+                }
+                guard let account = state.accounts.first(where: { $0.id == accountID }) else {
+                    throw AccountError("Notchling has no saved login for that account.")
+                }
+                let oauth = try Self.loginForLane(accountID)
+                guard let profile = Self.savedLogin(accountID)?["oauthAccount"] else {
+                    throw AccountError("Notchling has no profile saved for that account. Add the account again.")
+                }
+                let name = LaneStore.newName(for: account.email, taken: lanes.map(\.name))
+                let lane = Lane(name: name, path: LaneStore.lanesDir.appendingPathComponent(name).path,
+                                accountID: accountID, email: account.email)
+                try LaneStore.prepare(lane, profile: profile)
+                guard LaneStore.setLogin(oauth, in: lane) else { throw AccountError("Couldn't write the lane's login to the Keychain.") }
+                lanes.append(lane)
+                LaneStore.save(lanes)
+                return lane
+            }
+            DispatchQueue.main.async {
+                self.changed?()
+                done(result)
+            }
+        }
+    }
+
+    /// Moves a lane to another account. Sessions in the lane carry on with the new login on their next
+    /// request; the old account's login (maybe renewed by them) goes back to its saved slot first.
+    func switchLane(_ name: String, to accountID: String, done: @escaping (Result<Void, Error>) -> Void) {
+        queue.async {
+            let state = self.snapshot()
+            let result = Result<Void, Error> {
+                var lanes = LaneStore.all()
+                guard let i = lanes.firstIndex(where: { $0.name == name }) else { throw AccountError("There's no \(name) lane.") }
+                guard lanes[i].accountID != accountID else { return }
+                guard accountID != state.activeID, !lanes.contains(where: { $0.accountID == accountID }) else {
+                    throw AccountError("That account is already in use in the main login or another lane.")
+                }
+                guard let account = state.accounts.first(where: { $0.id == accountID }) else {
+                    throw AccountError("Notchling has no saved login for that account.")
+                }
+                let oauth = try Self.loginForLane(accountID)
+                guard let profile = Self.savedLogin(accountID)?["oauthAccount"] else {
+                    throw AccountError("Notchling has no profile saved for that account. Add the account again.")
+                }
+                Self.returnLogin(from: lanes[i])
+                guard LaneStore.setLogin(oauth, in: lanes[i]) else { throw AccountError("Couldn't write the lane's login to the Keychain.") }
+                try? LaneStore.setProfile(profile, in: lanes[i])
+                lanes[i].accountID = accountID
+                lanes[i].email = account.email
+                LaneStore.save(lanes)
+            }
+            DispatchQueue.main.async {
+                self.changed?()
+                done(result)
+            }
+        }
+    }
+
+    /// Ends a lane: its login goes back to the saved account, and the lane's Keychain item is removed.
+    func closeLane(_ name: String) {
+        queue.async {
+            var lanes = LaneStore.all()
+            guard let i = lanes.firstIndex(where: { $0.name == name }) else { return }
+            Self.returnLogin(from: lanes[i])
+            LaneStore.removeLogin(lanes[i])
+            LaneStore.removeFolder(lanes[i])
+            lanes.remove(at: i)
+            LaneStore.save(lanes)
+            DispatchQueue.main.async { self.changed?() }
+        }
+    }
+
+    /// A saved login fit to hand to a lane, renewed first when it has expired (it isn't live anywhere yet).
+    private static func loginForLane(_ id: String) throws -> [String: Any] {
+        var needsLogin = false
+        _ = accessToken(for: id, active: false, needsLogin: &needsLogin)
+        guard !needsLogin, let oauth = savedLogin(id)?["claudeAiOauth"] as? [String: Any] else {
+            throw AccountError("The saved login for that account is signed out. Add the account again in Notchling.")
+        }
+        return oauth
+    }
+
+    /// Copies a lane's login back to its account's saved slot, since Claude Code may have renewed it there
+    /// (the old refresh token no longer works). Checked with claude.ai first when the token can be checked,
+    /// so a login only ever goes back to the account it belongs to.
+    private static func returnLogin(from lane: Lane) {
+        guard let oauth = LaneStore.login(lane), var saved = savedLogin(lane.accountID) else { return }
+        if !isExpired(oauth), let access = oauth["accessToken"] as? String,
+           let profile = get("https://api.anthropic.com/api/oauth/profile", token: access),
+           accountID(profile: profile) != lane.accountID { return }
+        let current = (saved["claudeAiOauth"] as? [String: Any])?["refreshToken"] as? String
+        guard current != oauth["refreshToken"] as? String else { return }
+        saved["claudeAiOauth"] = oauth
+        writeSaved(lane.accountID, saved)
+    }
+}

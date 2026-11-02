@@ -63,6 +63,8 @@ final class NotchModel: ObservableObject {
     /// Hides one agent until it changes group; removes a background agent with `claude rm`.
     var onHide: ((Agent) -> Void)?
     var onRemove: ((Agent) -> Void)?
+    /// Opens the session in the Chat window.
+    var onOpenChat: ((String) -> Void)?
     /// While a menu is open the pointer can leave the shape without the notch folding away.
     var menuOpen = false
 

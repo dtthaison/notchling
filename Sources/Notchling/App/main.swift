@@ -4,6 +4,12 @@ import ServiceManagement
 // Run by Claude Code as a hook: hand the prompt to the running app and wait for a decision.
 if CommandLine.arguments.contains("--hook") { HookBridge.runHook() }
 
+// For agents: find saved Artifact pages by link, id or title words, print where they are, and exit.
+if let i = CommandLine.arguments.firstIndex(where: { $0 == "--page" || $0 == "--pages" }) {
+    let rest = CommandLine.arguments.dropFirst(i + 1).joined(separator: " ")
+    PageLibrary.runCLI(rest, list: CommandLine.arguments[i] == "--pages")
+}
+
 // Scriptable equivalents of the "Launch at Login" menu item: register/unregister and exit.
 let args = CommandLine.arguments
 if args.contains("--enable-login-item") || args.contains("--disable-login-item") {

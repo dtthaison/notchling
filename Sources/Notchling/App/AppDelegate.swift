@@ -12,8 +12,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let cost = CostTracker()
     private let settings = SettingsModel()
     private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
+    private lazy var lanesMenu = LanesMenu(accounts: accounts)
     private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, cost: cost, settings: settings)
     private lazy var pagesWindow = PagesWindowController(accounts: accounts)
+    private lazy var search: SearchPanelController = {
+        let search = SearchPanelController()
+        search.onOpen = { [weak self] folder in self?.chatWindow.showPage(folder: folder) }
+        return search
+    }()
+    /// ⌘⇧P was free when Notchling started (another app may hold it).
+    private var searchShortcut = false
+    private lazy var chatWindow: ChatWindowController = {
+        let chat = ChatWindowController(notch: notch.model, accounts: accounts)
+        // An artifact link in a conversation opens Notchling's saved copy, readable from any account.
+        chat.onOpenArtifact = { [weak self] folder in
+            self?.pagesWindow.show(select: folder)
+            return self != nil
+        }
+        return chat
+    }()
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
     private var lastGroups: [String: AgentGroup]?
@@ -37,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DockPresence.start()
+        searchShortcut = search.start()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.imagePosition = .imageLeading
         let menu = NSMenu()
@@ -51,10 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setAnswerFromNotch(true)
         }
 
-        // Same for keeping local copies of published pages; its hook is installed on its own.
-        if UserDefaults.standard.object(forKey: "keepPages") == nil || keepPages {
-            if !HookBridge.pagesInstalled || UserDefaults.standard.object(forKey: "keepPages") == nil { setKeepPages(true) }
-        }
+        // Same for keeping local copies of published pages; its hook is installed on its own. Reinstalled
+        // every launch (a no-op when nothing changed) so older installs get the read hook and the skill.
+        if keepPages { setKeepPages(true) }
 
         refresh()
         if showNotch { notch.show() }
@@ -76,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.claudeDesktop.sync()
             self?.cost.refresh()
         }
+        // An install relaunches Notchling: bring Chat back if it was open, once sessions are listed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.chatWindow.restore() }
     }
 
     private var answerFromNotch: Bool {
@@ -127,6 +147,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(true, forKey: "migratedFromAwake")
     }
 
+    /// The Dock icon (shown only while a window is open) brings that window back, even when minimized.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let windows = NSApp.windows.filter { !($0 is NSPanel) && $0.styleMask.contains(.titled) }
+        if let window = windows.first(where: \.isVisible) ?? windows.first(where: \.isMiniaturized) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            chatWindow.show()
+        }
+        return false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         awake.stop()
     }
@@ -160,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notch.model.onClearCompleted = { [weak self] in self?.clearCompleted() }
         notch.model.onHide = { [weak self] in self?.hide($0) }
         notch.model.onRemove = { [weak self] in self?.remove($0) }
+        notch.model.onOpenChat = { [weak self] in self?.chatWindow.show(select: $0) }
         if let request = fresh.first, let agent = agents.first(where: { $0.id == request.sessionID }), notch.isVisible {
             NSSound(named: "Tink")?.play()
             notch.model.peek(agent)
@@ -234,6 +267,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(resumeItem)
 
         menu.addItem(.separator())
+        let chatItem = action("Chat…", #selector(openChat))
+        chatItem.toolTip = "Read every Claude Code session and reply to background ones."
+        menu.addItem(chatItem)
+        let searchItem = action("Search Artifacts…", #selector(openSearch))
+        if searchShortcut {
+            searchItem.keyEquivalent = "p"
+            searchItem.keyEquivalentModifierMask = [.command, .shift]
+        }
+        searchItem.toolTip = searchShortcut ? "Find a saved Artifact from anywhere with ⌘⇧P."
+            : "Find a saved Artifact. ⌘⇧P is taken by another app."
+        menu.addItem(searchItem)
+
+        menu.addItem(.separator())
         menu.addItem(header("Notch"))
         let notchItem = action("Show Agents in Notch", #selector(toggleNotch))
         notchItem.state = showNotch ? .on : .off
@@ -301,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
         switchItem.submenu = switchMenu()
         menu.addItem(switchItem)
+        menu.addItem(lanesMenu.item())
         // Opens the cost window; the breakdown lives there, not in a submenu.
         menu.addItem(action(costTitle, #selector(showCost)))
         menu.addItem(limitItem())
@@ -355,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSSound(named: "Tink")?.play()
         if notch.isVisible, let agent = agents.first { notch.model.peekNotice(text, using: agent) }
         UserNotifier.post("Notchling", text)
+        chatWindow.noteLimitSwitch(text)
     }
 
     /// The account Claude Desktop is on, and a Switch Account submenu for the rest.
@@ -721,8 +769,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    /// A page from the menu opens beside the chat, like one from search.
     @objc private func openPage(_ sender: NSMenuItem) {
-        pagesWindow.show(select: sender.representedObject as? String)
+        guard let folder = sender.representedObject as? String else { return }
+        chatWindow.showPage(folder: folder)
+    }
+
+    @objc private func openChat() {
+        chatWindow.show()
+    }
+
+    @objc private func openSearch() {
+        search.show()
     }
 
     @objc private func openAllPages() {
@@ -764,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
             process.arguments = ["rm", id]
+            process.environment = AgentMonitor.environment(forJob: id)
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe

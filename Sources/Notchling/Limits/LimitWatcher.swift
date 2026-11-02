@@ -126,7 +126,9 @@ final class LimitWatcher {
 
     /// Called from the polling loop.
     func check(_ agents: [Agent]) {
-        guard mode != .off, let active = accounts.active else { return }
+        guard mode != .off else { return }
+        checkLanes(now: Date())
+        guard let active = accounts.active else { return }
         let now = Date()
         if activeSeen?.id != active.id { activeSeen = (active.id, now) }
         let usage = accounts.usage[active.id]
@@ -169,7 +171,12 @@ final class LimitWatcher {
             announce(fired.text)
         }
 
-        if lastSwitch != nil { nudgeStopped(hits, now: now) }
+        // Each switch restarts only the jobs it moved: the main login's, or one lane's.
+        if let switched = lastSwitch { nudgeStopped(hits.filter { $0.agent.configDir == nil }, switched: switched, now: now) }
+        for lane in LaneStore.all() {
+            guard let switched = laneSwitched[lane.name] else { continue }
+            nudgeStopped(hits.filter { $0.agent.configDir == lane.path }, switched: switched, now: now)
+        }
     }
 
     // MARK: - Switching
@@ -180,14 +187,7 @@ final class LimitWatcher {
     private func trySwitch(from active: ClaudeAccount, usage: AccountUsage?, now: Date) -> Outcome {
         guard !switching else { return .started }
         guard LimitLogic.maySwitch(lastSwitch: lastSwitch, now: now) else { return .none }
-        let candidates = accounts.accounts.map { a -> LimitLogic.Candidate in
-            let u = accounts.usage[a.id]
-            // An unknown account-wide limit leaves no more room than the 5-hour one it sits beside.
-            let short = ([u?.session?.percent] + (u?.other ?? []).map { $0.window.percent }).compactMap { $0 }.max()
-            return .init(id: a.id, fetched: u?.fetched ?? .distantPast, session: short,
-                         week: u?.week?.percent, needsLogin: a.needsLogin)
-        }
-        guard let target = LimitLogic.pickTarget(candidates, activeID: active.id, now: now, blockedUntil: blocked),
+        guard let target = LimitLogic.pickTarget(candidates(), activeID: active.id, now: now, blockedUntil: blocked),
               let to = accounts.accounts.first(where: { $0.id == target.id }) else {
             // Say it once per half hour; the climb itself may already have been announced.
             guard lastNoRoom.map({ now.timeIntervalSince($0) > LimitLogic.switchGap }) ?? true else { return .announced }
@@ -218,6 +218,65 @@ final class LimitWatcher {
         return .started
     }
 
+    /// Every saved account as a switch target; an account live in a lane can't be taken from it.
+    private func candidates() -> [LimitLogic.Candidate] {
+        let inLanes = Set(LaneStore.all().map(\.accountID))
+        return accounts.accounts.map { a -> LimitLogic.Candidate in
+            let u = accounts.usage[a.id]
+            // An unknown account-wide limit leaves no more room than the 5-hour one it sits beside.
+            let short = ([u?.session?.percent] + (u?.other ?? []).map { $0.window.percent }).compactMap { $0 }.max()
+            return .init(id: a.id, fetched: u?.fetched ?? .distantPast, session: short,
+                         week: u?.week?.percent, needsLogin: a.needsLogin || inLanes.contains(a.id))
+        }
+    }
+
+    // MARK: - Lanes
+
+    private var laneSwitched: [String: Date] = [:]
+    private var laneSwitching = Set<String>()
+    private var laneNoRoom: [String: Date] = [:]
+
+    /// Each lane switches on its own: when its account reaches the switch point, the lane moves to the
+    /// saved account with the most room that isn't live anywhere, and its sessions carry on.
+    private func checkLanes(now: Date) {
+        guard mode == .notifyAndSwitch else { return }
+        for lane in LaneStore.all() where !laneSwitching.contains(lane.name) {
+            guard let usage = accounts.usage[lane.accountID], now.timeIntervalSince(usage.fetched) <= 15 * 60 else { continue }
+            let windows = [usage.session, usage.week].compactMap { $0 } + usage.other.map(\.window)
+            guard windows.contains(where: { $0.percent >= Double(switchAt) }),
+                  LimitLogic.maySwitch(lastSwitch: laneSwitched[lane.name], now: now) else { continue }
+            let pool = candidates().map { c -> LimitLogic.Candidate in
+                var c = c
+                if c.id == accounts.activeID { c.needsLogin = true }
+                return c
+            }
+            guard let target = LimitLogic.pickTarget(pool, activeID: lane.accountID, now: now, blockedUntil: blocked),
+                  let to = accounts.accounts.first(where: { $0.id == target.id }) else {
+                if laneNoRoom[lane.name].map({ now.timeIntervalSince($0) > LimitLogic.switchGap }) ?? true {
+                    laneNoRoom[lane.name] = now
+                    announce("The \(lane.name) lane (\(lane.email)) is near its limit and no free account has room left.")
+                }
+                continue
+            }
+            laneSwitching.insert(lane.name)
+            let until = LimitLogic.blockedUntil(session: usage.session, week: usage.week, other: usage.other.map(\.window),
+                                                at: Double(switchAt), now: now)
+            accounts.switchLane(lane.name, to: to.id) { [weak self] result in
+                guard let self else { return }
+                self.laneSwitching.remove(lane.name)
+                switch result {
+                case .failure(let error):
+                    self.announce("Couldn't switch the \(lane.name) lane: \(error.localizedDescription)")
+                case .success:
+                    self.laneSwitched[lane.name] = Date()
+                    self.laneNoRoom[lane.name] = nil
+                    self.blocked[lane.accountID] = until
+                    self.announce("The \(lane.name) lane switched from \(lane.email) to \(to.email) because of the usage limit. Its sessions carry on.")
+                }
+            }
+        }
+    }
+
     // MARK: - Agents stopped on the limit
 
     private func limitHits(_ agents: [Agent], now: Date) -> [(agent: Agent, jobID: String, hit: TranscriptReader.LimitHit)] {
@@ -240,8 +299,8 @@ final class LimitWatcher {
 
     /// After a switch: restart each background job that stopped on the limit, then tell it to go on.
     /// One nudge per error entry, and per job at most once in half an hour.
-    private func nudgeStopped(_ hits: [(agent: Agent, jobID: String, hit: TranscriptReader.LimitHit)], now: Date) {
-        guard let switched = lastSwitch, now.timeIntervalSince(switched) < 2 * 3600 else { return }
+    private func nudgeStopped(_ hits: [(agent: Agent, jobID: String, hit: TranscriptReader.LimitHit)], switched: Date, now: Date) {
+        guard now.timeIntervalSince(switched) < 2 * 3600 else { return }
         for (_, jobID, hit) in hits {
             guard !nudged.contains(hit.id), !working.contains(jobID),
                   hit.at.map({ now.timeIntervalSince($0) <= Self.nudgeWindow }) ?? false,
@@ -258,16 +317,17 @@ final class LimitWatcher {
         }
     }
 
-    /// `claude respawn <id>` restarts the session on the current login; then wait for its state file to
-    /// move (it is running again) and let it settle before typing.
+    /// `claude respawn <id>` restarts the session on its config folder's current login (a lane job in its
+    /// lane); then wait for its state file to move (it is running again) and let it settle before typing.
     private static func respawn(_ jobID: String) {
-        let state = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/jobs/\(jobID)/state.json").path
+        let dir = AgentMonitor.configDir(forJob: jobID).map { URL(fileURLWithPath: $0) } ?? LaneStore.mainDir
+        let state = dir.appendingPathComponent("jobs/\(jobID)/state.json").path
         func stamp() -> Date? { (try? FileManager.default.attributesOfItem(atPath: state))?[.modificationDate] as? Date }
         let before = stamp()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
         p.arguments = ["respawn", jobID]
+        p.environment = AgentMonitor.environment(forJob: jobID)
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return }

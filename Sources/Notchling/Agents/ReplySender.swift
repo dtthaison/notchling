@@ -68,7 +68,8 @@ enum ReplySender {
         process.standardInput = slave
         process.standardOutput = slave
         process.standardError = slave
-        var env = ProcessInfo.processInfo.environment
+        // A lane's job is only reachable through its own config folder.
+        var env = AgentMonitor.environment(forJob: jobID)
         env["TERM"] = "xterm-256color"
         process.environment = env
         do { try process.run() } catch { throw Failure.launch(error.localizedDescription) }

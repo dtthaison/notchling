@@ -33,6 +33,8 @@ struct Agent {
     var transcriptPath: String? = nil
     /// Where it runs: "Background", "claude -p", or the app hosting its terminal.
     var host: String = ""
+    /// The lane's config folder (`CLAUDE_CONFIG_DIR`) it runs in; nil for ~/.claude, the main login.
+    var configDir: String? = nil
 
     /// Replies can be typed in only for background jobs; terminal sessions belong to their window.
     var canReply: Bool {
@@ -41,11 +43,36 @@ struct Agent {
     }
 }
 
-/// Reads Claude Code's own state files:
-///   ~/.claude/sessions/<pid>.json   one per running session, status busy|shell|waiting|idle
-///   ~/.claude/jobs/<id>/state.json  one per background job, state working|blocked|done|...
+/// Reads Claude Code's own state files, in ~/.claude and in each lane's folder:
+///   <dir>/sessions/<pid>.json   one per running session, status busy|shell|waiting|idle
+///   <dir>/jobs/<id>/state.json  one per background job, state working|blocked|done|...
 final class AgentMonitor {
-    private let claudeDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+    /// Sessions seen in a lane, by session id, so an ended one resumes in its lane.
+    private static var laneOfSession: [String: String] = [:]
+    private static let laneLock = NSLock()
+
+    /// The lane folder a session ran in, nil for the main login.
+    static func configDir(forSession id: String) -> String? {
+        laneLock.lock(); defer { laneLock.unlock() }
+        return laneOfSession[id]
+    }
+
+    /// The lane folder a background job lives in (`<lane>/jobs/<id>`), nil for ~/.claude. `claude attach`,
+    /// `rm` and `respawn` for it need `CLAUDE_CONFIG_DIR` set to this.
+    static func configDir(forJob id: String) -> String? {
+        LaneStore.all().first { lane in
+            FileManager.default.fileExists(atPath: URL(fileURLWithPath: lane.path)
+                .appendingPathComponent("jobs").appendingPathComponent(id).path)
+        }?.path
+    }
+
+    /// The environment to run `claude` in for a job: the lane's `CLAUDE_CONFIG_DIR` when it has one.
+    static func environment(forJob id: String) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        if let dir = configDir(forJob: id) { env[LaneStore.variable] = dir } else { env[LaneStore.variable] = nil }
+        return env
+    }
+
     private var lastLive: [String: Agent] = [:]
     private var exited: [String: Agent] = [:]
 
@@ -53,34 +80,47 @@ final class AgentMonitor {
     var completedWindow: TimeInterval = 24 * 3600
 
     func poll() -> [Agent] {
-        let sessions = readSessions()
-        let jobs = readJobs()
-
-        var sessionByJob: [String: [String: Any]] = [:]
-        for s in sessions {
-            if let jobID = s["jobId"] as? String { sessionByJob[jobID] = s }
-        }
-
         var result: [Agent] = []
-        for (shortID, job) in jobs {
-            result.append(agent(fromJob: job, shortID: shortID, live: sessionByJob[shortID]))
-        }
-
         var live: [String: Agent] = [:]
-        for s in sessions {
-            if let jobID = s["jobId"] as? String, jobs[jobID] != nil { continue }
-            // A terminal session that handed its work to a background job is shown as that job.
-            if let parked = s["parkedJobId"] as? String, jobs[parked] != nil { continue }
-            guard let a = agent(fromSession: s) else { continue }
-            live[a.id] = a
-            exited[a.id] = nil
+        var lanes: [String: String] = [:]
+        for (dir, lane) in LaneStore.configDirs() {
+            let sessions = readSessions(in: dir)
+            let jobs = readJobs(in: dir)
+
+            var sessionByJob: [String: [String: Any]] = [:]
+            for s in sessions {
+                if let jobID = s["jobId"] as? String { sessionByJob[jobID] = s }
+            }
+
+            for (shortID, job) in jobs {
+                var a = agent(fromJob: job, shortID: shortID, live: sessionByJob[shortID])
+                a.configDir = lane?.path
+                result.append(a)
+                if let lane { lanes[a.id] = lane.path }
+            }
+
+            for s in sessions {
+                if let jobID = s["jobId"] as? String, jobs[jobID] != nil { continue }
+                // A terminal session that handed its work to a background job is shown as that job.
+                if let parked = s["parkedJobId"] as? String, jobs[parked] != nil { continue }
+                guard var a = agent(fromSession: s) else { continue }
+                a.configDir = lane?.path
+                live[a.id] = a
+                exited[a.id] = nil
+                if let lane { lanes[a.id] = lane.path }
+            }
+        }
+        if !lanes.isEmpty {
+            Self.laneLock.lock()
+            Self.laneOfSession.merge(lanes) { _, new in new }
+            Self.laneLock.unlock()
         }
 
         let jobSessionIDs = Set(result.map(\.id))
         for (id, old) in lastLive where live[id] == nil && !jobSessionIDs.contains(id) {
             exited[id] = Agent(id: id, name: old.name, project: old.project, cwd: old.cwd,
                                group: .completed, label: "Exited", detail: old.detail, since: Date(),
-                               target: .resume(sessionID: id, cwd: old.cwd))
+                               target: .resume(sessionID: id, cwd: old.cwd), configDir: old.configDir)
         }
         lastLive = live
 
@@ -131,8 +171,8 @@ final class AgentMonitor {
                      host: "Background")
     }
 
-    private func readJobs() -> [String: [String: Any]] {
-        let dir = claudeDir.appendingPathComponent("jobs")
+    private func readJobs(in base: URL) -> [String: [String: Any]] {
+        let dir = base.appendingPathComponent("jobs")
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         var jobs: [String: [String: Any]] = [:]
         for name in names {
@@ -170,8 +210,8 @@ final class AgentMonitor {
     }
 
     /// Session files whose process is still alive.
-    private func readSessions() -> [[String: Any]] {
-        let dir = claudeDir.appendingPathComponent("sessions")
+    private func readSessions(in base: URL) -> [[String: Any]] {
+        let dir = base.appendingPathComponent("sessions")
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         return names.filter { $0.hasSuffix(".json") }.compactMap { name in
             guard let obj = Self.readJSON(dir.appendingPathComponent(name)),

@@ -5,11 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP=build/Notchling.app
+SOURCES=$(find Sources/Notchling -name '*.swift' | sort)
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 
-swiftc -O -target arm64-apple-macos13.0 -o build/Notchling-arm64 Sources/*.swift
-swiftc -O -target x86_64-apple-macos13.0 -o build/Notchling-x86_64 Sources/*.swift
+swiftc -O -target arm64-apple-macos13.0 -o build/Notchling-arm64 $SOURCES
+swiftc -O -target x86_64-apple-macos13.0 -o build/Notchling-x86_64 $SOURCES
 lipo -create build/Notchling-arm64 build/Notchling-x86_64 -output "$APP/Contents/MacOS/Notchling"
 rm build/Notchling-arm64 build/Notchling-x86_64
 
