@@ -86,3 +86,14 @@ final class ShellCommandTests: XCTestCase {
         ])
     }
 }
+
+final class ShellModeTests: XCTestCase {
+    func testDraftsThatRunAsShellCommands() {
+        XCTAssertTrue(ChatFormat.isShellCommand("!git status"))
+        XCTAssertTrue(ChatFormat.isShellCommand("!"))
+        XCTAssertTrue(ChatFormat.isShellCommand("  !ls"), "sending trims, so leading spaces still run it")
+        XCTAssertFalse(ChatFormat.isShellCommand("run git status!"))
+        XCTAssertFalse(ChatFormat.isShellCommand(""))
+        XCTAssertFalse(ChatFormat.isShellCommand("/clear"))
+    }
+}

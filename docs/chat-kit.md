@@ -24,6 +24,7 @@ Warm, quiet, alive. It looks like the notch it opens from: near-black surfaces w
 | orange300 | #FFB47E | orange500 | #F7873B |
 | orange700 | #B4540E | lime500 | #7DCB2C |
 | blue400 | #6EB0FF | blue600 | #2C78D4 |
+| pink400 | #FF7AB8 | pink600 | #C2307A |
 
 ### Meaning (`KitInk`, light / dark)
 
@@ -43,6 +44,9 @@ Warm, quiet, alive. It looks like the notch it opens from: near-black surfaces w
 | onAccent | soot | night0 | text on accent fills (dark text: white fails on orange) |
 | accentWash | orange500 14% | orange500 18% | your messages |
 | needs / working / done | orange500 / blue600 / lime500 | orange500 / blue400 / lime500 | status, always with an icon and a word |
+| shell | pink600 | pink400 | a `!` shell command: composer border and header, run button, the `!` in sent commands (Claude Code's terminal marks shell mode in pink) |
+| shellWash | pink600 10% | pink400 14% | composer in shell mode, sent shell commands |
+| onShell | paper0 | night0 | the icon on the run button |
 
 ### Metric
 
@@ -106,6 +110,8 @@ A question's answer: number badge (1, 2, 3, matching the terminal's digits), tit
 
 ### Composer
 Card fill, radius composer, hairline border (accent 60% while focused), soft shadow. Send is a 30 pt accent disc with an `arrow.up`, faint when empty.
+
+**Shell mode**, when the draft starts with `!`: a 1.5 pt shell border over a shellWash fill, a header row (`terminal` icon, "Shell command" in label type, then "runs in <folder> · Claude sees the output" in meta), the draft in mono, a shell-colored run disc, and the hint "Return runs it like ! in the terminal · delete the ! to send a message instead". A sent `! command` shows in a shellWash bubble, mono, with the `!` in shell.
 
 ### Messages
 Claude: card with the mark, radius card. You: accentWash bubble, right-aligned, max 75% of the column. Tools: raised capsule chip with a wrench. Code: raised box, mono.

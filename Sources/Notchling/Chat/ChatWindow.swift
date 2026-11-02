@@ -1347,7 +1347,13 @@ private struct UserBubble: View {
                         Label(images == 1 ? "1 image" : "\(images) images", systemImage: "photo")
                             .kitType(.label).foregroundColor(KitInk.accentText)
                     }
-                    if Self.isPlain(text) {
+                    if text.hasPrefix("! ") {
+                        // A shell command: "!" in the shell color, the command in mono.
+                        (Text("! ").foregroundColor(KitInk.shell) + Text(text.dropFirst(2)).foregroundColor(KitInk.text))
+                            .kitType(.mono)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if Self.isPlain(text) {
                         // Hugs its text, so a short message is a short bubble at full window width.
                         Text(text).kitType(.body).foregroundColor(KitInk.text)
                             .textSelection(.enabled)
@@ -1359,7 +1365,8 @@ private struct UserBubble: View {
                 }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(KitInk.accentWash))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(text.hasPrefix("! ") ? KitInk.shellWash : KitInk.accentWash))
                 if let note {
                     Text(note).kitType(.meta).foregroundColor(KitInk.textFaint)
                 }
@@ -1405,6 +1412,7 @@ private struct Composer: View {
         let empty = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let commands = model.completions(for: agent)
         let sending = model.isSending(agent.id)
+        let shell = ChatFormat.isShellCommand(draft.wrappedValue)
         // A session waiting on you gets its suggested reply as a one-click chip; otherwise Tab takes it.
         let showsChip = commands.isEmpty && empty && agent.group == .needsInput && !(agent.suggestedReply ?? "").isEmpty
         VStack(alignment: .leading, spacing: 8) {
@@ -1442,12 +1450,25 @@ private struct Composer: View {
                     .padding(6)
                     Rectangle().fill(KitInk.hairline).frame(height: 1)
                 }
+                if shell {
+                    // Shell mode, so it's clear Return runs a command rather than sending a message.
+                    HStack(spacing: 6) {
+                        KitIconView(icon: .terminal, size: 11)
+                        Text("Shell command").kitType(.label)
+                        Text("runs in \((agent.cwd as NSString).lastPathComponent) · Claude sees the output")
+                            .kitType(.meta).foregroundColor(KitInk.textMuted).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundColor(KitInk.shell)
+                    .padding(.horizontal, 14).padding(.top, 9)
+                    .accessibilityElement(children: .combine)
+                }
                 HStack(alignment: .bottom, spacing: 10) {
                     TextField(showsChip || model.suggestion(for: agent) == nil ? "Reply to \(agent.name), or / for commands…"
                               : "\(model.suggestion(for: agent) ?? "")   ⇥ Tab",
                               text: draft, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .kitType(.body).foregroundColor(KitInk.text)
+                        .kitType(shell ? .mono : .body).foregroundColor(KitInk.text)
                         .lineLimit(1...8)
                         .focused($focused)
                         .onSubmit { model.send() }
@@ -1455,31 +1476,36 @@ private struct Composer: View {
                         .accessibilityLabel("Reply to \(agent.name)")
                     Button { model.send() } label: {
                         ZStack {
-                            Circle().fill(empty ? KitInk.raised : KitInk.accent)
+                            Circle().fill(empty ? KitInk.raised : shell ? KitInk.shell : KitInk.accent)
                             if sending {
                                 ProgressView().controlSize(.small)
                             } else {
                                 KitIconView(icon: .send, size: 13)
-                                    .foregroundColor(empty ? KitInk.textFaint : KitInk.onAccent)
+                                    .foregroundColor(empty ? KitInk.textFaint : shell ? KitInk.onShell : KitInk.onAccent)
                             }
                         }
                         .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.plain)
                     .disabled(empty || sending)
-                    .help("Send the reply (Return)")
-                    .accessibilityLabel("Send")
+                    .help(shell ? "Run the command in the session (Return)" : "Send the reply (Return)")
+                    .accessibilityLabel(shell ? "Run" : "Send")
                     .pointerCursor()
                 }
                 .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 8)
             }
-            .background(RoundedRectangle(cornerRadius: KitMetric.radiusComposer, style: .continuous).fill(KitInk.card))
+            .background(ZStack {
+                RoundedRectangle(cornerRadius: KitMetric.radiusComposer, style: .continuous).fill(KitInk.card)
+                RoundedRectangle(cornerRadius: KitMetric.radiusComposer, style: .continuous)
+                    .fill(shell ? KitInk.shellWash : .clear)
+            })
             .overlay(RoundedRectangle(cornerRadius: KitMetric.radiusComposer, style: .continuous)
-                .strokeBorder(dropping ? KitInk.accent : focused ? KitInk.accent.opacity(0.6) : KitInk.hairline,
-                              lineWidth: focused || dropping ? 1.5 : 1))
+                .strokeBorder(dropping ? KitInk.accent : shell ? KitInk.shell : focused ? KitInk.accent.opacity(0.6) : KitInk.hairline,
+                              lineWidth: focused || dropping || shell ? 1.5 : 1))
             .shadow(color: KitInk.shadow, radius: 14, y: 6)
             .animation(KitMotion.hover, value: focused)
             .animation(KitMotion.hover, value: dropping)
+            .animation(KitMotion.hover, value: shell)
             if let error = model.errors[agent.id] {
                 HStack(spacing: 6) {
                     KitIconView(icon: .info, size: 11)
@@ -1488,7 +1514,8 @@ private struct Composer: View {
                 .foregroundColor(.red)
                 .padding(.leading, 6)
             } else {
-                Text("Return sends · ⌥Return new line · typed into the session with claude attach")
+                Text(shell ? "Return runs it like ! in the terminal · delete the ! to send a message instead"
+                     : "Return sends · ⌥Return new line · typed into the session with claude attach")
                     .kitType(.meta).foregroundColor(KitInk.textFaint)
                     .frame(maxWidth: .infinity)
             }
@@ -1661,6 +1688,11 @@ private struct EmptyState: View {
 }
 
 enum ChatFormat {
+    /// A draft that runs as a shell command: Claude Code treats a prompt starting with "!" that way.
+    static func isShellCommand(_ draft: String) -> Bool {
+        draft.drop { $0.isWhitespace }.hasPrefix("!")
+    }
+
     /// "47s · ↓ 2.3k tokens", "3m 5s · ↓ 12k tokens".
     static func workStats(since start: Date, now: Date, tokens: Int) -> String {
         let s = max(0, Int(now.timeIntervalSince(start)))

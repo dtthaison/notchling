@@ -30,6 +30,9 @@ private enum KitPalette {
     static let lime500 = Color(hex: 0x7DCB2C)
     static let blue400 = Color(hex: 0x6EB0FF)
     static let blue600 = Color(hex: 0x2C78D4)
+    /// Shell mode, as Claude Code's terminal marks a "!" command.
+    static let pink400 = Color(hex: 0xFF7AB8)
+    static let pink600 = Color(hex: 0xC2307A)
 
     /// Avatar gradients: warm and cool pairs that read on both surfaces.
     static let avatars: [(Color, Color)] = [
@@ -61,6 +64,10 @@ enum KitInk {
     static let working = Color(light: KitPalette.blue600, dark: KitPalette.blue400)
     static let done = KitPalette.lime500
     static let shadow = Color(light: Color.black.opacity(0.08), dark: Color.black.opacity(0.45))
+    /// A "!" shell command: the composer in shell mode and the command in the conversation.
+    static let shell = Color(light: KitPalette.pink600, dark: KitPalette.pink400)
+    static let shellWash = Color(light: KitPalette.pink600.opacity(0.10), dark: KitPalette.pink400.opacity(0.14))
+    static let onShell = Color(light: KitPalette.paper0, dark: KitPalette.night0)
 
     static func status(_ group: AgentGroup) -> Color {
         switch group {
