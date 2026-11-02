@@ -77,23 +77,68 @@ enum TranscriptReader {
         if let p = agent.transcriptPath, FileManager.default.fileExists(atPath: p) {
             return successor(of: p, name: agent.name) ?? p
         }
-        lock.lock(); defer { lock.unlock() }
-        if let cached = pathCache[agent.id] { return cached }
-        let dirs = (try? FileManager.default.contentsOfDirectory(atPath: projectsDir.path)) ?? []
-        for dir in dirs {
-            let candidate = projectsDir.appendingPathComponent(dir).appendingPathComponent("\(agent.id).jsonl").path
-            if FileManager.default.fileExists(atPath: candidate) {
-                pathCache[agent.id] = candidate
-                return candidate
-            }
+        let now = Date()
+        lock.lock()
+        if let cached = pathCache[agent.id] { lock.unlock(); return cached }
+        let lastScan = missedAt[agent.id]
+        lock.unlock()
+
+        // Where Claude Code puts it: the project folder named after the working directory.
+        let fm = FileManager.default
+        let file = "\(agent.id).jsonl"
+        let guess = projectsDir.path + "/" + projectFolder(for: agent.cwd) + "/" + file
+        var found: String? = fm.fileExists(atPath: guess) ? guess : nil
+
+        // Otherwise every project folder (hundreds of them), at most every 30 s per agent: a session that
+        // has no transcript yet, or keeps it elsewhere, would rescan on every refresh.
+        if found == nil, lastScan.map({ now.timeIntervalSince($0) >= 30 }) ?? true {
+            let dirs = (try? fm.contentsOfDirectory(atPath: projectsDir.path)) ?? []
+            found = dirs.lazy.map { projectsDir.path + "/" + $0 + "/" + file }.first { fm.fileExists(atPath: $0) }
+            if found == nil { lock.lock(); missedAt[agent.id] = now; lock.unlock() }
         }
-        return nil
+        guard let found else { return nil }
+        lock.lock()
+        pathCache[agent.id] = found
+        missedAt[agent.id] = nil
+        lock.unlock()
+        return found
+    }
+
+    private static var missedAt: [String: Date] = [:]
+
+    /// Claude Code's folder name for a working directory: every character other than a letter or digit
+    /// becomes "-" ("/Users/me/.claude" → "-Users-me--claude").
+    static func projectFolder(for cwd: String) -> String {
+        String(cwd.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "-" })
     }
 
     /// The transcript a background job moved to after /clear. Clearing starts a new file, but the job's
     /// state keeps naming the old one until its next link scan; the new file starts with the job's
     /// name and a SessionStart:clear hook. Follows several clears in a row.
-    private static func successor(of path: String, name: String) -> String? {
+    ///
+    /// The search lists the whole project folder and reads every file's dates, and it runs for every
+    /// agent on every refresh, so its answer is kept until the folder's modification date changes.
+    /// Appending to a transcript leaves that date alone; creating a file (a new transcript after
+    /// /clear) moves it.
+    static func successor(of path: String, name: String) -> String? {
+        let dir = (path as NSString).deletingLastPathComponent
+        guard let dirModified = (try? FileManager.default.attributesOfItem(atPath: dir))?[.modificationDate] as? Date
+        else { return searchSuccessor(of: path, name: name) }
+        let key = path + "\n" + name
+        lock.lock()
+        if let hit = successorCache[key], hit.dirModified == dirModified { lock.unlock(); return hit.result }
+        lock.unlock()
+        let result = searchSuccessor(of: path, name: name)
+        lock.lock()
+        if successorCache.count > 500 { successorCache.removeAll() }
+        successorCache[key] = (dirModified, result)
+        lock.unlock()
+        return result
+    }
+
+    private static var successorCache: [String: (dirModified: Date, result: String?)] = [:]
+
+    private static func searchSuccessor(of path: String, name: String) -> String? {
         let fm = FileManager.default
         let dir = (path as NSString).deletingLastPathComponent
         guard !name.isEmpty, let nameData = try? JSONSerialization.data(withJSONObject: [name]),
