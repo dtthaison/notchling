@@ -1903,7 +1903,8 @@ private struct SessionMeters: View {
     let usage: AccountUsage?
 
     var body: some View {
-        HStack(spacing: 14) {
+        // Top-aligned so the bars line up when only the limits have a reset line under them.
+        HStack(alignment: .top, spacing: 14) {
             if context > 0 {
                 let fraction = window.map { Double(context) / Double($0) }
                 meter("Context", width: 120,
@@ -1914,9 +1915,12 @@ private struct SessionMeters: View {
                     .part("Context Meter", .bottom)
             }
             if let usage, usage.session != nil || usage.week != nil {
-                HStack(spacing: 10) {
-                    if let session = usage.session { limit("5h", session, short: true, name: "5-hour limit") }
-                    if let week = usage.week { limit("Week", week, short: false, name: "Weekly limit") }
+                // Redrawn each minute so "in 2h 13m" counts down without a new usage fetch.
+                TimelineView(.everyMinute) { _ in
+                    HStack(alignment: .top, spacing: 10) {
+                        if let session = usage.session { limit("5h", session, short: true, name: "5-hour limit") }
+                        if let week = usage.week { limit("Week", week, short: false, name: "Weekly limit") }
+                    }
                 }
                 .part("Limit Meters", .bottom)
             }
@@ -1924,12 +1928,13 @@ private struct SessionMeters: View {
     }
 
     private func limit(_ label: String, _ window: UsageWindow, short: Bool, name: String) -> some View {
-        meter(label, width: 64, "\(Int(window.percent.rounded()))%", window.percent / 100,
-              help: "\(name): \(Int(window.percent.rounded()))% used"
-                + (window.resetsAt.map { ", resets \(AccountRowView.resetText($0, short: short))" } ?? ""))
+        let reset = window.resetsAt.map { AccountRowView.resetText($0, short: short) }
+        return meter(label, width: 64, "\(Int(window.percent.rounded()))%", window.percent / 100, below: reset,
+                     help: "\(name): \(Int(window.percent.rounded()))% used" + (reset.map { ", resets \($0)" } ?? ""))
     }
 
-    private func meter(_ label: String, width: CGFloat, _ value: String, _ fraction: Double?, help: String) -> some View {
+    private func meter(_ label: String, width: CGFloat, _ value: String, _ fraction: Double?, below: String? = nil,
+                       help: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text(label).kitType(.meta).foregroundColor(KitInk.textMuted)
@@ -1945,6 +1950,10 @@ private struct SessionMeters: View {
                         }
                     }
                     .frame(height: 3)
+            }
+            if let below {
+                Text(below).kitType(.meta).foregroundColor(KitInk.textFaint).monospacedDigit()
+                    .lineLimit(1).fixedSize()
             }
         }
         .frame(minWidth: width, alignment: .leading)
