@@ -199,6 +199,14 @@ final class ChatModel: ObservableObject {
         return accounts?.active.map { SessionAccount(email: $0.email, lane: nil) }
     }
 
+    /// The limits of the account the session runs on, as last fetched.
+    func usage(for agent: Agent) -> AccountUsage? {
+        guard let accounts else { return nil }
+        if let lane = lanes[agent.id] { return accounts.usage[lane.accountID] }
+        if agent.configDir != nil { return nil }
+        return accounts.activeID.flatMap { accounts.usage[$0] }
+    }
+
     /// Saved accounts no session uses: not signed out, not the main login, not in a lane.
     var freeAccounts: [ClaudeAccount] {
         guard let accounts else { return [] }
@@ -720,6 +728,7 @@ struct ChatView: View {
     var body: some View {
         HStack(spacing: 0) {
             SessionSidebar(model: model, notch: notch)
+                .part("Sidebar", .trailing)
                 .frame(width: KitMetric.sidebarWidth)
                 .background(KitInk.sidebar)
             Rectangle().fill(KitInk.hairline).frame(width: 1)
@@ -740,7 +749,7 @@ struct ChatView: View {
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             if let page = model.page {
-                                PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 280))
+                                PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 280)).part("Page Panel", .topTrailing)
                                     .transition(.move(edge: .trailing))
                             }
                         }
@@ -813,6 +822,7 @@ private struct SessionSidebar: View {
                 }
                 .buttonStyle(.kit(.ghost))
                 .help("New background session: pick an account (a free one gets a lane) and a folder")
+                .part("New Session Button", .bottomTrailing)
                 if notch.needsCount > 0 {
                     KitStatusPill(group: .needsInput, text: notch.needsCount == 1 ? "1 needs you" : "\(notch.needsCount) need you")
                 }
@@ -825,6 +835,7 @@ private struct SessionSidebar: View {
                     TextField("Search", text: $model.search).focused($searchFocused)
                 }
                 .modifier(KitField(focused: searchFocused))
+                .part("Session Search", .trailing)
                 .padding(.horizontal, 12).padding(.bottom, 8)
             }
             ScrollView {
@@ -835,6 +846,7 @@ private struct SessionSidebar: View {
                             Text(group == .needsInput ? "Needs You" : group == .working ? "Working" : "Done")
                                 .kitType(.section).foregroundColor(KitInk.textFaint)
                                 .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
+                                .part("Group Heading", .trailing)
                             ForEach(agents, id: \.id) { agent in
                                 Button { model.selection = agent.id; listFocused = true } label: {
                                     SessionRowLabel(agent: agent, line: statusLine(agent),
@@ -842,6 +854,7 @@ private struct SessionSidebar: View {
                                 }
                                 .buttonStyle(KitSessionRowStyle(selected: model.selection == agent.id, focused: listFocused))
                                 .accessibilityAddTraits(model.selection == agent.id ? .isSelected : [])
+                                .part("Session Row", .trailing)
                                 // The notch's actions: Hide drops it from the lists until it changes state;
                                 // Remove stops a background session and deletes it (`claude rm`), after asking.
                                 .contextMenu {
@@ -869,6 +882,11 @@ private struct SessionSidebar: View {
                 default: break
                 }
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // The ? button: names every part on screen, here and in the notch.
+            HStack { KitPartsButton(); Spacer() }
+                .padding(.horizontal, 10).padding(.vertical, 8)
         }
         .onChange(of: model.sidebarFocusRequest) { _ in listFocused = true }
     }
@@ -938,6 +956,7 @@ private struct SessionDetail: View {
                             .equatable()
                             // A fresh view per session, so switching back opens at the newest message.
                             .id(agent.id)
+                            .part("Conversation", .bottom)
                     }
                     bottom
                 }
@@ -947,11 +966,11 @@ private struct SessionDetail: View {
                     agent.canReply && model.receiveDrop(providers, for: agent.id)
                 }
                 if let page = model.page {
-                    PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 380))
+                    PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 380)).part("Page Panel", .topTrailing)
                         .transition(.move(edge: .trailing))
                 } else if model.showInspector {
                     Rectangle().fill(KitInk.hairline).frame(width: 1)
-                    SessionInspector(agent: agent, conversation: model.conversation)
+                    SessionInspector(agent: agent, conversation: model.conversation).part("Details Panel", .topTrailing)
                         .frame(width: 250)
                         .transition(.move(edge: .trailing))
                 }
@@ -966,18 +985,25 @@ private struct SessionDetail: View {
             KitAvatar(name: agent.name, size: 36, status: agent.group)
                 .help(agent.label)
                 .accessibilityLabel("\(agent.name), \(agent.label)")
+                .part("Avatar", .bottomLeading)
             VStack(alignment: .leading, spacing: 4) {
                 Text(agent.name).kitType(.title).foregroundColor(KitInk.text).lineLimit(1)
+                    .part("Session Name", .topTrailing)
                 HStack(spacing: 8) {
                     Text([agent.project, agent.host].filter { !$0.isEmpty }.joined(separator: " · "))
                         .kitType(.meta).foregroundColor(KitInk.textMuted).lineLimit(1)
                         .layoutPriority(1)
+                        .part("Project Line", .bottomLeading)
                     if let account = model.account(for: agent) {
                         AccountMenu(model: model, agent: agent, account: account)
+                            .part("Account Menu", .bottomLeading)
                     }
                 }
             }
             Spacer(minLength: 8)
+            SessionMeters(context: model.conversation.facts.contextTokens,
+                          window: ChatFormat.contextWindow(model: model.conversation.facts.model),
+                          usage: model.usage(for: agent))
             // Icon only, so the line under the title has the room.
             Button { AgentActions.open(agent.target, cwd: agent.cwd) } label: {
                 KitIconView(icon: ChatFormat.openIcon(agent), size: 13)
@@ -985,29 +1011,32 @@ private struct SessionDetail: View {
             .buttonStyle(.kit(.ghost))
             .help("\(ChatFormat.openTitle(agent)): \(ChatFormat.openHelp(agent))")
             .accessibilityLabel(ChatFormat.openTitle(agent))
+            .part("Open Button", .top)
             Button { withAnimation(KitMotion.appear) { model.showInspector.toggle() } } label: {
                 Image(systemName: "sidebar.right").font(.system(size: 13, weight: .medium))
             }
             .buttonStyle(.kit(model.showInspector ? .secondary : .ghost))
             .help(model.showInspector ? "Hide the session details" : "Show the session details: branch, model, tokens, tasks, files changed")
+            .part("Details Button", .bottomTrailing)
         }
         .padding(.horizontal, 16)
         .padding(.top, 14).padding(.bottom, 12)
         .frame(minHeight: 64)
+        .part("Header", .bottom)
     }
 
     @ViewBuilder private var bottom: some View {
         VStack(spacing: 8) {
         if let error = model.accountErrors[agent.id] {
-            AccountBanner(text: error, isError: true) { model.accountErrors[agent.id] = nil }
+            AccountBanner(text: error, isError: true) { model.accountErrors[agent.id] = nil }.part("Account Banner", .trailing)
         } else if let note = model.accountNote(for: agent) {
-            AccountBanner(text: note.text, isError: false) { model.dismissAccountNote(for: agent) }
+            AccountBanner(text: note.text, isError: false) { model.dismissAccountNote(for: agent) }.part("Account Banner", .trailing)
         }
         Group {
             if let request = notch.permission(agent.id) {
-                ChatPermissionCard(notch: notch, agent: agent, request: request)
+                ChatPermissionCard(notch: notch, agent: agent, request: request).part("Permission Card", .topTrailing)
             } else if let question = notch.question(agent.id) {
-                ChatQuestionCard(notch: notch, agent: agent, question: question)
+                ChatQuestionCard(notch: notch, agent: agent, question: question).part("Question Card", .topTrailing)
             } else {
                 switch agent.target {
                 case .job:
@@ -1016,8 +1045,9 @@ private struct SessionDetail: View {
                     Notice(text: agent.host == "claude -p"
                            ? "This session runs headless (claude -p) and can't take replies."
                            : "Replies to this session go to its terminal. The terminal button at the top right brings it forward.")
+                        .part("Read-Only Notice", .trailing)
                 case .resume:
-                    Notice(text: "This session has ended. Resume it in a terminal to keep going.")
+                    Notice(text: "This session has ended. Resume it in a terminal to keep going.").part("Read-Only Notice", .trailing)
                 }
             }
         }
@@ -1077,7 +1107,7 @@ private struct ConversationView: View, Equatable {
         let turnOver: Bool = { if case .turnEnd = conversation.items.last?.kind { return true } else { return false } }()
         VStack(spacing: 0) {
         if !conversation.tasks.isEmpty {
-            TaskPanel(tasks: conversation.tasks, expansion: expansion)
+            TaskPanel(tasks: conversation.tasks, expansion: expansion).part("Task Panel", .topTrailing)
                         .padding(.horizontal, 16).padding(.top, 12)
                 .frame(maxWidth: .infinity)
         }
@@ -1089,7 +1119,7 @@ private struct ConversationView: View, Equatable {
                             ForEach(rows) { row in
                                 Group {
                                     if let day = row.day {
-                                        DaySeparator(date: day)
+                                        DaySeparator(date: day).part("Day Separator", .trailing)
                                     } else if let item = row.item {
                                         itemView(item, liveTools: live && !turnOver && item.id == lastToolID && item.id == lastID)
                                     }
@@ -1098,6 +1128,7 @@ private struct ConversationView: View, Equatable {
                             }
                             if let pending, !pending.landed(in: conversation) {
                                 UserBubble(text: pending.text, images: 0, date: nil, note: pending.sending ? "Sending…" : "Sent")
+                                    .part("Sending Bubble", .topTrailing)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
                             if live && turnOver {
@@ -1184,18 +1215,19 @@ private struct ConversationView: View, Equatable {
         switch item.kind {
         case .user(let text, let images):
             UserBubble(text: text, images: images, date: item.date, note: nil)
+                .part(text.hasPrefix("! ") ? "Shell Command Bubble" : "Your Message", .topTrailing)
         case .assistant(let text):
-            AssistantMessage(text: text, date: item.date)
+            AssistantMessage(text: text, date: item.date).part("Claude's Reply")
         case .thinking(let seconds, let text):
-            ThinkingRow(id: item.id, seconds: seconds, text: text, expansion: expansion)
+            ThinkingRow(id: item.id, seconds: seconds, text: text, expansion: expansion).part("Thinking Row", .trailing)
         case .tools(let calls):
-            ToolStepView(id: item.id, calls: calls, live: liveTools, expansion: expansion)
+            ToolStepView(id: item.id, calls: calls, live: liveTools, expansion: expansion).part("Tool Steps", .topTrailing)
         case .turnEnd(let seconds, let model):
-            TurnFooter(seconds: seconds, model: model)
+            TurnFooter(seconds: seconds, model: model).part("Turn Footer", .trailing)
         case .notice(let text, let symbol):
-            NoticeRow(text: text, symbol: symbol)
+            NoticeRow(text: text, symbol: symbol).part("Notice", .leading)
         case .commandOutput(let text):
-            CommandOutputView(text: text)
+            CommandOutputView(text: text).part("Command Output", .topTrailing)
         }
     }
 }
@@ -1433,6 +1465,7 @@ private struct Composer: View {
                 .buttonStyle(.kit(.secondary))
                 .disabled(sending)
                 .help("Send the suggested reply")
+                .part("Suggested Reply", .trailing)
             }
             VStack(alignment: .leading, spacing: 0) {
                 if !commands.isEmpty {
@@ -1455,6 +1488,7 @@ private struct Composer: View {
                         }
                     }
                     .padding(6)
+                    .part("Command List", .topTrailing)
                     Rectangle().fill(KitInk.hairline).frame(height: 1)
                 }
                 if shell {
@@ -1469,6 +1503,7 @@ private struct Composer: View {
                     .foregroundColor(KitInk.shell)
                     .padding(.horizontal, 14).padding(.top, 9)
                     .accessibilityElement(children: .combine)
+                    .part("Shell Header", .trailing)
                     if let fixed {
                         // A command copied from a terminal comes with its line wrapping; this is what runs.
                         VStack(alignment: .leading, spacing: 3) {
@@ -1482,6 +1517,7 @@ private struct Composer: View {
                         .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.raised))
                         .padding(.horizontal, 12).padding(.top, 6)
                         .accessibilityElement(children: .combine)
+                        .part("Will Run Box", .trailing)
                     }
                 }
                 HStack(alignment: .bottom, spacing: 10) {
@@ -1512,6 +1548,7 @@ private struct Composer: View {
                     .help(shell ? "Run the command in the session (Return)" : "Send the reply (Return)")
                     .accessibilityLabel(shell ? "Run" : "Send")
                     .pointerCursor()
+                    .part("Send Button", .top)
                 }
                 .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 8)
             }
@@ -1524,6 +1561,7 @@ private struct Composer: View {
                 .strokeBorder(dropping ? KitInk.accent : shell ? KitInk.shell : focused ? KitInk.accent.opacity(0.6) : KitInk.hairline,
                               lineWidth: focused || dropping || shell ? 1.5 : 1))
             .shadow(color: KitInk.shadow, radius: 14, y: 6)
+            .part("Composer", .bottomLeading)
             .animation(KitMotion.hover, value: focused)
             .animation(KitMotion.hover, value: dropping)
             .animation(KitMotion.hover, value: shell)
@@ -1539,6 +1577,7 @@ private struct Composer: View {
                      : "Return sends · ⌥Return new line · typed into the session with claude attach")
                     .kitType(.meta).foregroundColor(KitInk.textFaint)
                     .frame(maxWidth: .infinity)
+                    .part("Composer Hint", .trailing)
             }
         }
         .onChange(of: focused) { model.composerFocused = $0 }
@@ -1767,11 +1806,24 @@ enum ChatFormat {
         return family.prefix(1).uppercased() + family.dropFirst() + (version.isEmpty ? "" : " " + version)
     }
 
-    /// "12.4k", "1.2M".
+    /// "12.4k", "1.2M", "400k".
     static func tokens(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000) }
+        func short(_ v: Double, _ unit: String) -> String {
+            var s = String(format: "%.1f", v)
+            if s.hasSuffix(".0") { s.removeLast(2) }
+            return s + unit
+        }
+        if n >= 1_000_000 { return short(Double(n) / 1_000_000, "M") }
+        if n >= 1000 { return short(Double(n) / 1000, "k") }
         return "\(n)"
+    }
+
+    /// The model's context window in Claude Code, where it's known (Opus 5.5's /context says 400k).
+    /// Others give nil, and the header shows the count alone rather than guess a percentage.
+    static func contextWindow(model: String?) -> Int? {
+        guard let model else { return nil }
+        if model.hasPrefix("claude-opus-5-5") { return 400_000 }
+        return nil
     }
 
     private static let timeFormat: DateFormatter = { let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f }()
@@ -1843,6 +1895,65 @@ private struct PagePanel: View {
 /// The session's account in its header, with a menu to move it to another account or start a new
 /// terminal session on one. A lane moves as a whole; so does the main login. The menu is AppKit's: on
 /// macOS 13 a SwiftUI borderless Menu drops a custom label.
+/// How full the session's context is and how much of its account's limits is used: what /context and
+/// /usage would say, without typing them.
+private struct SessionMeters: View {
+    let context: Int
+    let window: Int?
+    let usage: AccountUsage?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if context > 0 {
+                let fraction = window.map { Double(context) / Double($0) }
+                meter("Context", width: 120,
+                      window.map { "\(ChatFormat.tokens(context)) / \(ChatFormat.tokens($0))" } ?? ChatFormat.tokens(context),
+                      fraction,
+                      help: "Context: \(context.formatted()) tokens"
+                        + (window.map { " of \($0.formatted()) (\(Int((fraction ?? 0) * 100))%). Claude Code compacts the conversation near the limit." } ?? "."))
+                    .part("Context Meter", .bottom)
+            }
+            if let usage, usage.session != nil || usage.week != nil {
+                HStack(spacing: 10) {
+                    if let session = usage.session { limit("5h", session, short: true, name: "5-hour limit") }
+                    if let week = usage.week { limit("Week", week, short: false, name: "Weekly limit") }
+                }
+                .part("Limit Meters", .bottom)
+            }
+        }
+    }
+
+    private func limit(_ label: String, _ window: UsageWindow, short: Bool, name: String) -> some View {
+        meter(label, width: 64, "\(Int(window.percent.rounded()))%", window.percent / 100,
+              help: "\(name): \(Int(window.percent.rounded()))% used"
+                + (window.resetsAt.map { ", resets \(AccountRowView.resetText($0, short: short))" } ?? ""))
+    }
+
+    private func meter(_ label: String, width: CGFloat, _ value: String, _ fraction: Double?, help: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(label).kitType(.meta).foregroundColor(KitInk.textMuted)
+                Text(value).kitType(.label).foregroundColor(KitInk.text).monospacedDigit()
+            }
+            .lineLimit(1).fixedSize()
+            if let fraction {
+                let f = min(max(fraction, 0), 1)
+                Capsule().fill(KitInk.raised)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { g in
+                            Capsule().fill(f >= 0.8 ? KitInk.needs : KitInk.working).frame(width: max(g.size.width * f, 3))
+                        }
+                    }
+                    .frame(height: 3)
+            }
+        }
+        .frame(minWidth: width, alignment: .leading)
+        .fixedSize()
+        .help(help)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct AccountMenu: View {
     @ObservedObject var model: ChatModel
     let agent: Agent

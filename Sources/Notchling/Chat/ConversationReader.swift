@@ -59,6 +59,8 @@ struct SessionFacts: Equatable {
     var model: String?
     var inputTokens = 0
     var outputTokens = 0
+    /// What the model holds after the latest reply (what /context counts): its last request's input and output.
+    var contextTokens = 0
     var turns = 0
     var files: [String] = []
     var commands = 0
@@ -144,6 +146,9 @@ enum ConversationReader {
                     c.facts.turns += 1
                 case "compact_boundary":
                     append(.notice(text: "Conversation compacted", symbol: "rectangle.compress.vertical"), date)
+                    if let post = ((obj["compactMetadata"] as? [String: Any])?["postTokens"] as? NSNumber)?.intValue {
+                        c.facts.contextTokens = post
+                    }
                 case "local_command":
                     // Claude Code 2.1.31x logs slash commands and their output here instead of as user lines.
                     if let text = obj["content"] as? String, let kind = userItem(text, images: 0) {
@@ -164,6 +169,12 @@ enum ConversationReader {
                     func n(_ k: String) -> Int { (usage[k] as? NSNumber)?.intValue ?? 0 }
                     c.facts.inputTokens += n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
                     c.facts.outputTokens += n("output_tokens")
+                }
+                if let usage = message["usage"] as? [String: Any] {
+                    func n(_ k: String) -> Int { (usage[k] as? NSNumber)?.intValue ?? 0 }
+                    let held = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens")
+                    // Synthetic messages (errors, interruptions) carry zeros.
+                    if held > 0 { c.facts.contextTokens = held }
                 }
                 for block in blocks {
                     switch block["type"] as? String {

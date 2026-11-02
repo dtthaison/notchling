@@ -47,6 +47,8 @@ Warm, quiet, alive. It looks like the notch it opens from: near-black surfaces w
 | shell | pink600 | pink400 | a `!` shell command: composer border and header, run button, the `!` in sent commands (Claude Code's terminal marks shell mode in pink) |
 | shellWash | pink600 10% | pink400 14% | composer in shell mode, sent shell commands |
 | onShell | paper0 | night0 | the icon on the run button |
+| guide | blue600 | blue400 | part labels (the ? button) |
+| onGuide | paper0 | night0 | text on a part label |
 
 ### Metric
 
@@ -111,7 +113,11 @@ A question's answer: number badge (1, 2, 3, matching the terminal's digits), tit
 ### Composer
 Card fill, radius composer, hairline border (accent 60% while focused), soft shadow. Send is a 30 pt accent disc with an `arrow.up`, faint when empty.
 
-**Shell mode**, when the draft starts with `!`: a 1.5 pt shell border over a shellWash fill, a header row (`terminal` icon, "Shell command" in label type, then "runs in <folder> · Claude sees the output" in meta), the draft in mono, a shell-colored run disc, and the hint "Return runs it like ! in the terminal · delete the ! to send a message instead". A sent `! command` shows in a shellWash bubble, mono, with the `!` in shell.
+**Shell mode**, when the draft starts with `!`: a 1.5 pt shell border over a shellWash fill, a header row (`terminal` icon, "Shell command" in label type, then "runs in <folder> · Claude sees the output" in meta), the draft in mono, a shell-colored run disc, and the hint "Return runs it like ! in the terminal · delete the ! to send a message instead". A sent `! command` shows in a shellWash bubble, mono, with the `!` in shell. When putting a copied command back together changes it, a raised "Will run" box under the header shows the command as it will run.
+
+**Header meters**, between the title and the buttons: Context (`148.8k / 400k`, a 3 pt bar, only for models whose window is known), then the account's 5h and Week limits. Bars are `working`, `needs` from 80%. Exact numbers and reset times are in the tooltips.
+
+**Part labels**: the ? button at the sidebar's bottom left toggles `PartLabels.shared`. Every view tagged `.part("Name", alignment)` gets a dashed `guide` outline and a name tag on its edge (`inside: true` where the edge is clipped). Tags never take clicks. Name parts as the user would say them, and keep names unique per window.
 
 ### Messages
 Claude: card with the mark, radius card. You: accentWash bubble, right-aligned, max 75% of the column. Tools: raised capsule chip with a wrench. Code: raised box, mono.

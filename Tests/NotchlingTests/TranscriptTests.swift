@@ -69,6 +69,23 @@ final class TranscriptTests: XCTestCase {
                        [.user(text: "Before", images: 0), compacted, .user(text: "After", images: 0), compacted])
     }
 
+    func testContextIsTheLatestRequest() throws {
+        // The last message's input (with cache) and output, not the session's total.
+        XCTAssertEqual(ConversationReader.read(try fixture("conversation")).facts.contextTokens, 1 + 3)
+        // Right after a compaction, what it left.
+        XCTAssertEqual(ConversationReader.read(try fixture("compact")).facts.contextTokens, 28610)
+    }
+
+    func testTokenTextAndContextWindow() {
+        XCTAssertEqual(ChatFormat.tokens(950), "950")
+        XCTAssertEqual(ChatFormat.tokens(96_400), "96.4k")
+        XCTAssertEqual(ChatFormat.tokens(400_000), "400k")
+        XCTAssertEqual(ChatFormat.tokens(1_250_000), "1.2M")
+        XCTAssertEqual(ChatFormat.contextWindow(model: "claude-opus-5-5"), 400_000)
+        XCTAssertNil(ChatFormat.contextWindow(model: "claude-sonnet-5-5"), "unknown: no guessed percentage")
+        XCTAssertNil(ChatFormat.contextWindow(model: nil))
+    }
+
     func testCollapsePastes() {
         XCTAssertEqual(TranscriptReader.collapsePastes("see <pasted_content id=\"1\">\na\nb\nc\n</pasted_content> ok"),
                        "see [Pasted text +3 lines] ok")

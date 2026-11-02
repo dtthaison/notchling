@@ -68,6 +68,9 @@ enum KitInk {
     static let shell = Color(light: KitPalette.pink600, dark: KitPalette.pink400)
     static let shellWash = Color(light: KitPalette.pink600.opacity(0.10), dark: KitPalette.pink400.opacity(0.14))
     static let onShell = Color(light: KitPalette.paper0, dark: KitPalette.night0)
+    /// Part labels (the ? button): blue, so they read as a guide over the UI, not part of it.
+    static let guide = Color(light: KitPalette.blue600, dark: KitPalette.blue400)
+    static let onGuide = Color(light: KitPalette.paper0, dark: KitPalette.night0)
 
     static func status(_ group: AgentGroup) -> Color {
         switch group {
@@ -433,6 +436,70 @@ struct KitPet: View {
         } else {
             KitClaudeMark(size: size * 0.5)
         }
+    }
+}
+
+// MARK: - Part labels
+
+/// Names the parts on screen while the ? button is on, so a change can be asked for by name ("make the
+/// Context Meter smaller"). Shared by every window, so the notch shows its names too.
+final class PartLabels: ObservableObject {
+    static let shared = PartLabels()
+    @Published var on = false
+}
+
+/// A dashed outline and a name tag over one part. It never takes clicks: the UI keeps working under it.
+struct KitPartLabel: ViewModifier {
+    let name: String
+    var alignment: Alignment = .topLeading
+    /// Keep the tag inside the outline, where the edge is clipped (the notch's rounded bottom).
+    var inside = false
+    @ObservedObject private var labels = PartLabels.shared
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: alignment) {
+            if labels.on {
+                ZStack(alignment: alignment) {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(KitInk.guide.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    Text(name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(KitInk.onGuide)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Capsule().fill(KitInk.guide))
+                        // On the outline's edge rather than inside it, so the part's own text stays readable.
+                        .offset(x: alignment.horizontal == .leading ? 6 : alignment.horizontal == .trailing ? -6 : 0,
+                                y: inside ? (alignment.vertical == .bottom ? -6 : alignment.vertical == .top ? 6 : 0)
+                                    : alignment.vertical == .top ? -8 : alignment.vertical == .bottom ? 8 : 0)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Names this part for the ? button. Use the name the user will see; search the code for `.part("Name"`.
+    func part(_ name: String, _ alignment: Alignment = .topLeading, inside: Bool = false) -> some View {
+        modifier(KitPartLabel(name: name, alignment: alignment, inside: inside))
+    }
+}
+
+/// The ? button: shows or hides the part labels everywhere.
+struct KitPartsButton: View {
+    @ObservedObject private var labels = PartLabels.shared
+
+    var body: some View {
+        Button { withAnimation(KitMotion.appear) { labels.on.toggle() } } label: {
+            Image(systemName: labels.on ? "questionmark.circle.fill" : "questionmark.circle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(labels.on ? KitInk.guide : KitInk.textMuted)
+        }
+        .buttonStyle(.kit(.ghost))
+        .help(labels.on ? "Hide the part names" : "Show the name of every part, to point at one when asking for a change")
+        .accessibilityLabel(labels.on ? "Hide Part Names" : "Show Part Names")
     }
 }
 

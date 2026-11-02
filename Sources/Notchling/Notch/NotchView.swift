@@ -93,13 +93,13 @@ struct NotchView: View {
     var body: some View {
         let size = model.size(for: model.state)
         VStack(spacing: 0) {
-            topBar.frame(height: model.notchSize.height)
+            topBar.frame(height: model.notchSize.height).part("Notch Bar", .bottom)
             Group {
                 switch model.state {
                 case .collapsed: EmptyView()
-                case .peek(let id): if let agent = model.agent(id) { PeekView(model: model, agent: agent) }
-                case .list: AgentListView(model: model)
-                case .detail(let id): if let agent = model.agent(id) { DetailView(model: model, agent: agent) }
+                case .peek(let id): if let agent = model.agent(id) { PeekView(model: model, agent: agent).part("Peek", .bottom, inside: true) }
+                case .list: AgentListView(model: model).part("Notch List", .bottom, inside: true)
+                case .detail(let id): if let agent = model.agent(id) { DetailView(model: model, agent: agent).part("Notch Detail", .bottom, inside: true) }
                 }
             }
             // Content grows out of the notch as the shape opens, and fades quickly as it closes.
@@ -1147,7 +1147,7 @@ struct AgentListView: View {
     var body: some View {
         let members = model.agents.filter { $0.group == model.tab }
         VStack(spacing: 0) {
-            TabBar(model: model)
+            TabBar(model: model).part("Notch Tabs", .trailing)
             if members.isEmpty {
                 Text(model.agents.isEmpty ? "No Claude agents running" : "Nothing \(model.tab.title.lowercased())")
                     .font(.system(size: 12)).foregroundColor(.secondary)
@@ -1156,7 +1156,7 @@ struct AgentListView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(members, id: \.id) { agent in
-                            AgentRow(model: model, agent: agent)
+                            AgentRow(model: model, agent: agent).part("Notch Session Row", .trailing)
                                 .onTapGesture { model.open(agent.id) }
                                 .contextMenu {
                                     Button("Open in Chat") { model.go(.collapsed); model.onOpenChat?(agent.id) }
@@ -1264,17 +1264,17 @@ struct PeekView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { model.go(.collapsed) }
             } else if let request = model.permission(agent.id) {
-                PermissionCard(model: model, agent: agent, request: request, showsAgent: true)
+                PermissionCard(model: model, agent: agent, request: request, showsAgent: true).part("Notch Permission Card", .topTrailing)
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             } else if let q = model.question(agent.id) {
-                QuestionCard(model: model, agent: agent, question: q, showsAgent: true, bodyLimit: QuestionCard.peekBodyLimit)
+                QuestionCard(model: model, agent: agent, question: q, showsAgent: true, bodyLimit: QuestionCard.peekBodyLimit).part("Notch Question Card", .topTrailing)
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             } else if model.canReplyInPeek(agent.id) {
-                ReplyPeek(model: model, agent: agent)
+                ReplyPeek(model: model, agent: agent).part("Reply Peek", .topTrailing)
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
@@ -1330,7 +1330,7 @@ struct ReplyPeek: View {
                 Button("Open ›") { model.open(agent.id) }
                     .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
                     .pointerCursor()
-                HideButton(model: model)
+                HideButton(model: model).part("Hide Button", .bottom)
             }
             .frame(height: 22)
             if !text.isEmpty {
@@ -1359,7 +1359,7 @@ struct ReplyPeek: View {
                 .pointerCursor()
                 .help("Click, or press Tab, to put it in the box")
             }
-            PeekReplyBox(model: model, agent: agent)
+            PeekReplyBox(model: model, agent: agent).part("Peek Reply Box", .trailing)
         }
         .padding(.bottom, 4)
     }
@@ -1449,7 +1449,7 @@ struct QuestionCard: View {
                 Spacer()
                 if showsAgent {
                     Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
-                    HideButton(model: model)
+                    HideButton(model: model).part("Hide Button", .bottom)
                 }
                 if step > 0 {
                     Button("Back") { model.undoChoice() }.buttonStyle(.plain)
@@ -1544,7 +1544,7 @@ struct PermissionCard: View {
                 Spacer()
                 if showsAgent {
                     Text(agent.name).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
-                    HideButton(model: model)
+                    HideButton(model: model).part("Hide Button", .bottom)
                 }
             }
             .frame(height: 22)
@@ -1623,15 +1623,15 @@ struct DetailView: View {
             // Cards keep their full height and the conversation above gives way; squeezed, the
             // wrapped option text spills out of its buttons and overlaps.
             if let permission {
-                PermissionCard(model: model, agent: agent, request: permission)
+                PermissionCard(model: model, agent: agent, request: permission).part("Notch Permission Card", .topTrailing)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             } else if let question {
-                QuestionCard(model: model, agent: agent, question: question, bodyLimit: Self.questionBodyLimit)
+                QuestionCard(model: model, agent: agent, question: question, bodyLimit: Self.questionBodyLimit).part("Notch Question Card", .topTrailing)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             } else if model.canReply(agent) {
-                replyBox
+                replyBox.part("Notch Reply Box", .trailing)
             } else {
                 HStack {
                     Text(agent.label == "Exited" ? "This session has exited. Open it to resume."
@@ -1674,6 +1674,7 @@ struct DetailView: View {
             Button { model.go(.collapsed) } label: { Image(systemName: "xmark") }
                 .buttonStyle(.plain).foregroundColor(.secondary)
         }
+        .part("Notch Detail Header", .bottomTrailing)
     }
 
     private func conversation(showNeeds: Bool) -> some View {
@@ -1684,7 +1685,7 @@ struct DetailView: View {
                     if lines.isEmpty {
                         Text("No messages yet").font(.system(size: 12)).foregroundColor(.secondary)
                     }
-                    ForEach(lines) { line in Bubble(line: line) }
+                    ForEach(lines) { line in Bubble(line: line) }.part("Message Line", .trailing)
                     if showNeeds, agent.group == .needsInput, let needs = agent.detail, !needs.isEmpty {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "hand.raised.fill").foregroundColor(.orange)
@@ -1712,7 +1713,7 @@ struct DetailView: View {
         let suggestion = model.suggestion(for: agent)
         return VStack(alignment: .leading, spacing: 6) {
             if !completions.isEmpty {
-                CommandList(model: model, commands: completions)
+                CommandList(model: model, commands: completions).part("Notch Command List", .topTrailing)
             }
             if completions.isEmpty, let suggested = agent.suggestedReply, !suggested.isEmpty, agent.group == .needsInput {
                 Button { model.send(suggested) } label: {
