@@ -22,6 +22,8 @@ enum ReplySender {
 
     /// Blocking; call off the main thread.
     static func send(_ text: String, toJob jobID: String) throws {
+        // A "!" command copied from a terminal is put back together first (wrapped lines, prompts, quotes).
+        let text = ShellCommand.normalize(text)
         // Bracketed paste keeps newlines in the reply from submitting early.
         let flat = text.replacingOccurrences(of: "\r\n", with: "\n")
         try type(["\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID)

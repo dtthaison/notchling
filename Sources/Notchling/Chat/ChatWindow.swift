@@ -637,8 +637,8 @@ final class ChatModel: ObservableObject {
     func send(_ preset: String? = nil) {
         guard let agent = selected, case .job(let jobID) = agent.target, pending[agent.id]?.sending != true,
               notch.question(agent.id) == nil, notch.permission(agent.id) == nil else { return }
-        let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !text.isEmpty, text != "!" else { return }
         let id = agent.id
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
@@ -1412,7 +1412,14 @@ private struct Composer: View {
         let empty = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let commands = model.completions(for: agent)
         let sending = model.isSending(agent.id)
-        let shell = ChatFormat.isShellCommand(draft.wrappedValue)
+        let shell = ShellCommand.isCommand(draft.wrappedValue)
+        // What will actually run, when putting a copied command back together changed it.
+        let fixed: String? = {
+            guard shell else { return nil }
+            let typed = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normal = ShellCommand.normalize(typed)
+            return normal != typed && normal != "!" ? String(normal.dropFirst()) : nil
+        }()
         // A session waiting on you gets its suggested reply as a one-click chip; otherwise Tab takes it.
         let showsChip = commands.isEmpty && empty && agent.group == .needsInput && !(agent.suggestedReply ?? "").isEmpty
         VStack(alignment: .leading, spacing: 8) {
@@ -1462,6 +1469,20 @@ private struct Composer: View {
                     .foregroundColor(KitInk.shell)
                     .padding(.horizontal, 14).padding(.top, 9)
                     .accessibilityElement(children: .combine)
+                    if let fixed {
+                        // A command copied from a terminal comes with its line wrapping; this is what runs.
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Will run, with the copied line breaks joined:").kitType(.meta).foregroundColor(KitInk.textMuted)
+                            Text(fixed).kitType(.mono).foregroundColor(KitInk.text)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.raised))
+                        .padding(.horizontal, 12).padding(.top, 6)
+                        .accessibilityElement(children: .combine)
+                    }
                 }
                 HStack(alignment: .bottom, spacing: 10) {
                     TextField(showsChip || model.suggestion(for: agent) == nil ? "Reply to \(agent.name), or / for commands…"
@@ -1688,11 +1709,6 @@ private struct EmptyState: View {
 }
 
 enum ChatFormat {
-    /// A draft that runs as a shell command: Claude Code treats a prompt starting with "!" that way.
-    static func isShellCommand(_ draft: String) -> Bool {
-        draft.drop { $0.isWhitespace }.hasPrefix("!")
-    }
-
     /// "47s · ↓ 2.3k tokens", "3m 5s · ↓ 12k tokens".
     static func workStats(since start: Date, now: Date, tokens: Int) -> String {
         let s = max(0, Int(now.timeIntervalSince(start)))
