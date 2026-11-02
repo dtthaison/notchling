@@ -80,13 +80,19 @@ Measured with `sample` on the installed app:
 
 - **One shared reader.** `TranscriptCursors<Parser, Output>` (`Agents/TranscriptCursor.swift`) owns the cursors. The notch (`TranscriptReader.SnapshotParser`) and the Chat window (`ConversationReader.ConversationParser`) both read through it. On a 5.6 MB transcript the Chat window went from ~35 ms to ~0.08 ms per refresh. With Chat open, 30 s samples dropped from 249 to 6 for `ChatModel.refresh`, and from 114 to 27 for the notch's snapshots.
 - **Bounded state.** Long sessions drop old items and counted message ids while the cursor is kept, so memory doesn't grow with the session.
+- **Cost tracking driven by file events.** `CostTracker` walked all 5,600 transcripts (15,000 entries) every minute and re-encoded its 3.4 MB cache after every scan that found something. That was half the app's CPU when the disk was busy. Now:
+  - `System/FileEvents.swift` (FSEvents) tells it which files changed. The full walk runs only at launch, after dropped events, and every 30 minutes.
+  - The cache is saved at most every 5 minutes and on quit.
+  - Summaries are rebuilt only when something changed or the day rolled over.
+
+  70 s sample: 12.7% → 1.3% of a core, and `CostTracker` 4,389 → 42 samples.
 
 **Still to do:**
 - `limitHit`, `sleepCut` and `toolFinished` still read small tails (200–500 KB) on their own schedules. They could become fields of `SnapshotParser`.
-- `CostTracker` walks every transcript (5,500 files, 8.9 GB) each minute to find the changed ones. FSEvents with a saved event id would give it only the changed files.
 - The Antigravity quota check runs `pgrep`, `ps` and `lsof` every time.
 
-**File events (deferred).** With cursors, polling costs one `stat` per agent per tick, so FSEvents would mostly cut latency (the 3 s wait). `CostTracker` is where it would cut work.
+**File events for the notch (deferred).** With cursors, polling costs one `stat` per agent per tick, so `FileEvents` there would mostly cut latency (the 3 s wait).
+- `AccountStore.sync` (Keychain through `/usr/bin/security`) is now the largest periodic cost, but it is small.
 
 ### Phase 1: seams (no behavior change)
 1. Add a lane-aware `ClaudePaths`. This removes the 5 hard-coded `~/.claude` paths, and `TranscriptReader`, `SlashCommands` and `desktopSessionID` then see lane folders too.

@@ -52,7 +52,7 @@ final class CostTracker: ObservableObject {
     private static let projectsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
     /// Where transcripts live, and the channel each one belongs to. Claude Code writes to ~/.claude;
     /// the Claude desktop app writes its own Claude Code sessions under its Application Support folder.
-    private static let roots: [(dir: URL, channel: String)] = {
+    static let defaultRoots: [(dir: URL, channel: String)] = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let desktop = home.appendingPathComponent("Library/Application Support/Claude")
         return [
@@ -61,7 +61,32 @@ final class CostTracker: ObservableObject {
             (desktop.appendingPathComponent("claude-code-sessions"), "Desktop"),
         ]
     }()
-    private static let cacheURL = HookBridge.dir.appendingPathComponent("cost-cache.json")
+    static let defaultCacheURL = HookBridge.dir.appendingPathComponent("cost-cache.json")
+
+    private let roots: [(dir: URL, channel: String)]
+    private let cacheURL: URL
+
+    /// `roots` and `cacheURL` are for tests; the app uses the real folders.
+    init(roots: [(dir: URL, channel: String)] = CostTracker.defaultRoots, cacheURL: URL = CostTracker.defaultCacheURL) {
+        self.roots = roots
+        self.cacheURL = cacheURL
+    }
+
+    /// Transcripts FSEvents reported as changed since the last scan. Walking every transcript (thousands
+    /// of files) each minute was most of the app's CPU, so the walk only runs when FSEvents can't say:
+    /// at launch, after dropped events, and every `fullScanEvery` as a safety net.
+    private var events: FileEvents?
+    private var changedPaths = Set<String>()
+    private var needsFullScan = true
+    private var lastFullScan: Date?
+    private static let fullScanEvery: TimeInterval = 30 * 60
+    /// The cache is several MB of JSON, so it is saved at most this often. Offsets, totals and counted
+    /// ids are saved together, so a crash only means re-reading from the last save, never double counting.
+    private var lastPersist: Date?
+    private var unsaved = false
+    private static let persistEvery: TimeInterval = 5 * 60
+    /// The day the summaries were built for: they change at midnight even when nothing new was read.
+    private var summarizedDay: String?
     private static let keepDays = 400
     /// The three ranges the Token Cost view can show: last 7 days, last 30, and all of it.
     static let windows = [7, 30, Int.max]
@@ -72,10 +97,32 @@ final class CostTracker: ObservableObject {
         scanning = true
         queue.async {
             if self.cache == nil { self.load() }
+            self.watch()
             let dirty = self.scan()
             self.prune()
-            if dirty { self.persist() }
-            self.publishSummary(markScanned: true)
+            if dirty { self.unsaved = true }
+            if self.unsaved, self.lastPersist.map({ Date().timeIntervalSince($0) >= Self.persistEvery }) ?? true {
+                self.persist()
+                self.unsaved = false
+                self.lastPersist = Date()
+            }
+            let today = Self.dayKey(Date())
+            if dirty || self.summarizedDay != today {
+                self.summarizedDay = today
+                self.publishSummary(markScanned: true)
+            } else {
+                DispatchQueue.main.async { self.scanning = false; self.scanned = Date() }
+            }
+        }
+    }
+
+    /// Writes counts not saved yet; called when the app quits. Waits for a scan in progress.
+    func saveNow() {
+        queue.sync {
+            guard unsaved else { return }
+            persist()
+            unsaved = false
+            lastPersist = Date()
         }
     }
 
@@ -133,7 +180,7 @@ final class CostTracker: ObservableObject {
     private var seenToday: [String: [UInt64]] = [:]
 
     private func load() {
-        if let data = try? Data(contentsOf: Self.cacheURL), let saved = try? JSONDecoder().decode(Cache.self, from: data),
+        if let data = try? Data(contentsOf: cacheURL), let saved = try? JSONDecoder().decode(Cache.self, from: data),
            saved.version == Cache.current {
             cache = saved
             for (day, packed) in saved.seen {
@@ -150,7 +197,7 @@ final class CostTracker: ObservableObject {
         guard var cache else { return }
         cache.seen = seenToday.mapValues { hashes in hashes.withUnsafeBufferPointer { Data(buffer: $0) } }
         try? FileManager.default.createDirectory(at: HookBridge.dir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(cache) { try? data.write(to: Self.cacheURL, options: .atomic) }
+        if let data = try? JSONEncoder().encode(cache) { try? data.write(to: cacheURL, options: .atomic) }
     }
 
     private func prune() {
@@ -171,24 +218,40 @@ final class CostTracker: ObservableObject {
     private func scan() -> Bool {
         guard cache != nil else { return false }
         log = AccountLog.load()
+        let due = lastFullScan.map { Date().timeIntervalSince($0) >= Self.fullScanEvery } ?? true
+        if needsFullScan || due || events == nil {
+            needsFullScan = false
+            changedPaths = []
+            lastFullScan = Date()
+            return scanAll()
+        }
+        let paths = changedPaths
+        changedPaths = []
+        return scan(paths)
+    }
+
+    /// Starts listening for changed transcripts, once.
+    private func watch() {
+        guard events == nil else { return }
+        events = FileEvents(folders: roots.map(\.dir), queue: queue) { [weak self] batch in
+            guard let self else { return }
+            if batch.rescan { self.needsFullScan = true }
+            self.changedPaths.formUnion(batch.paths.filter { $0.hasSuffix(".jsonl") })
+        }
+    }
+
+    /// Every transcript, however old: "All Time" needs the whole history. Each is read once (by offset).
+    private func scanAll() -> Bool {
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
         var dirty = false
         var present = Set<String>()
-        for root in Self.roots {
+        for root in roots {
             guard let walk = FileManager.default.enumerator(at: root.dir, includingPropertiesForKeys: keys) else { continue }
             for case let url as URL in walk where url.pathExtension == "jsonl" {
-                // Every file, however old: "All Time" needs the whole history. Each is read once (by offset).
                 guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
                       let size = values.fileSize.map(UInt64.init) else { continue }
                 present.insert(url.path)
-                var mark = cache?.files[url.path] ?? Mark(size: 0, offset: 0)
-                if mark.size == size { continue }
-                // A file that shrank was rewritten; read it again (ids already counted are skipped).
-                if size < mark.offset { mark.offset = 0 }
-                mark.offset = read(url, from: mark.offset, channel: root.channel, account: Self.account(inPath: url))
-                mark.size = size
-                cache?.files[url.path] = mark
-                dirty = true
+                if update(url, size: size, channel: root.channel) { dirty = true }
             }
         }
         let gone = cache?.files.keys.filter { !present.contains($0) } ?? []
@@ -197,6 +260,34 @@ final class CostTracker: ObservableObject {
             dirty = true
         }
         return dirty
+    }
+
+    /// Only the transcripts FSEvents reported; a path that no longer exists is forgotten.
+    private func scan(_ paths: Set<String>) -> Bool {
+        var dirty = false
+        for path in paths {
+            guard let root = roots.first(where: { path.hasPrefix($0.dir.standardizedFileURL.path + "/") }) else { continue }
+            let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+            guard let attrs, attrs[.type] as? FileAttributeType == .typeRegular,
+                  let size = (attrs[.size] as? NSNumber)?.uint64Value else {
+                if cache?.files.removeValue(forKey: path) != nil { dirty = true }
+                continue
+            }
+            if update(URL(fileURLWithPath: path), size: size, channel: root.channel) { dirty = true }
+        }
+        return dirty
+    }
+
+    /// Reads what was added to one transcript since its saved offset. True when anything moved.
+    private func update(_ url: URL, size: UInt64, channel: String) -> Bool {
+        var mark = cache?.files[url.path] ?? Mark(size: 0, offset: 0)
+        if mark.size == size { return false }
+        // A file that shrank was rewritten; read it again (ids already counted are skipped).
+        if size < mark.offset { mark.offset = 0 }
+        mark.offset = read(url, from: mark.offset, channel: channel, account: Self.account(inPath: url))
+        mark.size = size
+        cache?.files[url.path] = mark
+        return true
     }
 
     /// Counts every complete line from `offset` on and returns where the last complete line ends.
