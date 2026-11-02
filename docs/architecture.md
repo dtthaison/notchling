@@ -77,7 +77,6 @@ The SD guidance this follows:
 Measured with `sample` on the installed app:
 - **Transcript lookup.** `TranscriptReader.path(for:)` scanned all ~480 project folders every 3 s for each agent whose transcript it couldn't find. It now checks the cwd's project folder first, rescans at most every 30 s, and caches the `/clear` successor until the folder changes. Its cost went from ~550 samples per 15 s to 7.
 - **Incremental transcript reading.** Each transcript keeps a cursor: a byte offset plus the parser's state. A refresh parses only the lines appended since the last one. On a 5.6 MB transcript that is 24.8 ms → 0.39 ms per refresh (`ZBenchmarkTests`).
-
 - **One shared reader.** `TranscriptCursors<Parser, Output>` (`Agents/TranscriptCursor.swift`) owns the cursors. The notch (`TranscriptReader.SnapshotParser`) and the Chat window (`ConversationReader.ConversationParser`) both read through it. On a 5.6 MB transcript the Chat window went from ~35 ms to ~0.08 ms per refresh. With Chat open, 30 s samples dropped from 249 to 6 for `ChatModel.refresh`, and from 114 to 27 for the notch's snapshots.
 - **Bounded state.** Long sessions drop old items and counted message ids while the cursor is kept, so memory doesn't grow with the session.
 - **Cost tracking driven by file events.** `CostTracker` walked all 5,600 transcripts (15,000 entries) every minute and re-encoded its 3.4 MB cache after every scan that found something. That was half the app's CPU when the disk was busy. Now:
