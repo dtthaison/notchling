@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-11-02T07:00:00.000Z","message":{"role":"user","content":"Before"}}
+{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","timestamp":"2026-11-02T07:10:00.000Z"}
+{"type":"user","isCompactSummary":true,"timestamp":"2026-11-02T07:10:01.000Z","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}
+{"type":"user","timestamp":"2026-11-02T07:11:00.000Z","message":{"role":"user","content":"After"}}
+{"type":"user","isCompactSummary":true,"timestamp":"2026-11-02T07:20:01.000Z","message":{"role":"user","content":"An older build writes only the summary."}}

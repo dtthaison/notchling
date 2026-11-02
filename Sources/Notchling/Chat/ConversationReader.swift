@@ -217,7 +217,9 @@ enum ConversationReader {
             case "user":
                 guard obj["isMeta"] as? Bool != true, let message = obj["message"] as? [String: Any] else { return }
                 if obj["isCompactSummary"] as? Bool == true {
-                    append(.notice(text: "Conversation compacted", symbol: "rectangle.compress.vertical"), date)
+                    // The compact_boundary line just before it already showed this; older builds wrote only the summary.
+                    let notice = ChatItem.Kind.notice(text: "Conversation compacted", symbol: "rectangle.compress.vertical")
+                    if c.items.last?.kind != notice { append(notice, date) }
                     return
                 }
                 let result = obj["toolUseResult"] as? [String: Any]

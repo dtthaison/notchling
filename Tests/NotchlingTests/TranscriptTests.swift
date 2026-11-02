@@ -62,6 +62,13 @@ final class TranscriptTests: XCTestCase {
         XCTAssertNil(TranscriptReader.limitHit(inFile: try fixture("rate-limited-429")))
     }
 
+    func testOneCompactionShowsOnce() throws {
+        // Claude Code writes a compact_boundary line and then the summary; older builds only the summary.
+        let compacted = ChatItem.Kind.notice(text: "Conversation compacted", symbol: "rectangle.compress.vertical")
+        XCTAssertEqual(ConversationReader.read(try fixture("compact")).items.map(\.kind),
+                       [.user(text: "Before", images: 0), compacted, .user(text: "After", images: 0), compacted])
+    }
+
     func testCollapsePastes() {
         XCTAssertEqual(TranscriptReader.collapsePastes("see <pasted_content id=\"1\">\na\nb\nc\n</pasted_content> ok"),
                        "see [Pasted text +3 lines] ok")
