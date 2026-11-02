@@ -305,6 +305,11 @@ enum ConversationReader {
             return .notice(text: "Interrupted", symbol: "stop.circle")
         }
         if let output = commandOutput(text) { return output.isEmpty ? nil : .commandOutput(text: output) }
+        // A "!" shell command typed at the prompt (or sent from Chat), and what it printed.
+        if let command = between(text, "<bash-input>", "</bash-input>") {
+            return .user(text: "! " + command, images: images)
+        }
+        if let output = shellOutput(text) { return output.isEmpty ? nil : .commandOutput(text: output) }
         // A slash command shows as what was typed: "/name args".
         if let name = between(text, "<command-name>", "</command-name>") {
             let args = between(text, "<command-args>", "</command-args>") ?? ""
@@ -447,9 +452,22 @@ enum ConversationReader {
         return clean.count > 6000 ? String(clean.prefix(6000)) + "\n…" : clean
     }
 
-    private static func between(_ text: String, _ open: String, _ close: String) -> String? {
+    /// What a "!" command printed: its stdout, then its stderr.
+    private static func shellOutput(_ text: String) -> String? {
+        let out = between(text, "<bash-stdout>", "</bash-stdout>", trim: false)
+        let err = between(text, "<bash-stderr>", "</bash-stderr>", trim: false)
+        guard out != nil || err != nil else { return nil }
+        let joined = [out, err].compactMap { $0?.trimmingCharacters(in: .newlines) }.filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let clean = joined.replacingOccurrences(of: "\u{1b}\\[[0-9;?]*[A-Za-z]", with: "", options: .regularExpression)
+        return clean.count > 6000 ? String(clean.prefix(6000)) + "\n…" : clean
+    }
+
+    /// The text between two tags. `trim: false` keeps leading spaces, which shell output lines up with.
+    private static func between(_ text: String, _ open: String, _ close: String, trim: Bool = true) -> String? {
         guard let a = text.range(of: open), let b = text.range(of: close, range: a.upperBound..<text.endIndex) else { return nil }
-        return String(text[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let inner = String(text[a.upperBound..<b.lowerBound])
+        return trim ? inner.trimmingCharacters(in: .whitespacesAndNewlines) : inner
     }
 
     private static let isoFractional: ISO8601DateFormatter = {

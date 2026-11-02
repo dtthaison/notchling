@@ -69,3 +69,20 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(TranscriptReader.collapsePastes("plain"), "plain")
     }
 }
+
+/// "!" shell commands, as Claude Code 2.1.316 records them (checked against a real session).
+final class ShellCommandTests: XCTestCase {
+    func testShellCommandsAndOutput() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "bash-mode", withExtension: "jsonl", subdirectory: "Fixtures"))
+        let kinds = ConversationReader.read(url.path).items.map(\.kind)
+        XCTAssertEqual(kinds, [
+            .user(text: "! git branch", images: 0),
+            .commandOutput(text: "  feat/x\n* main"), // indentation kept
+            .user(text: "! ped", images: 0),
+            .commandOutput(text: "(eval):1: command not found: ped"),
+            .user(text: "! true", images: 0),
+            // Printed nothing: no output row.
+            .commandOutput(text: "green"),
+        ])
+    }
+}
