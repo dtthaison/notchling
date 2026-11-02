@@ -73,6 +73,18 @@ The SD guidance this follows:
   - markdown blocks
 - CI runs `swift test` before building.
 
+### Performance work (done)
+Measured with `sample` on the installed app:
+- **Transcript lookup.** `TranscriptReader.path(for:)` scanned all ~480 project folders every 3 s for each agent whose transcript it couldn't find. It now checks the cwd's project folder first, rescans at most every 30 s, and caches the `/clear` successor until the folder changes. Its cost went from ~550 samples per 15 s to 7.
+- **Incremental transcript reading.** Each transcript keeps a cursor: a byte offset plus the parser's state. A refresh parses only the lines appended since the last one. On a 5.6 MB transcript that is 24.8 ms → 0.39 ms per refresh (`ZBenchmarkTests`).
+
+**Still to do:**
+- `ConversationReader` (the Chat window, 1 s timer) and `limitHit`/`sleepCut`/`toolFinished` still re-read tails. They should share the same cursors (the `SessionStore` idea below).
+- `CostTracker` scans the whole history on its timer.
+- The Antigravity quota check runs `pgrep`, `ps` and `lsof` every time.
+
+**Event-driven `SessionStore`, the next step:** one actor owns the cursors and listens for file events (FSEvents/DispatchSource) on the project and lane folders. The notch, Chat, limits and wake features read its snapshots instead of polling files on their own timers.
+
 ### Phase 1: seams (no behavior change)
 1. Add a lane-aware `ClaudePaths`. This removes the 5 hard-coded `~/.claude` paths, and `TranscriptReader`, `SlashCommands` and `desktopSessionID` then see lane folders too.
 2. Add a typed `SettingsStore`: one enum of keys, with the migration list built from it. This replaces the 47 calls to `UserDefaults.standard`.

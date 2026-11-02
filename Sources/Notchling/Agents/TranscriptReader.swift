@@ -45,32 +45,81 @@ enum TranscriptReader {
     private static let projectsDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")
     private static var pathCache: [String: String] = [:]
-    private static var snapshotCache: [String: (modified: Date, size: UInt64, snapshot: Snapshot)] = [:]
+    /// Where each transcript was read up to, and the parser's state there.
+    private static var cursors: [String: Cursor] = [:]
+    /// Held while a cursor reads and parses, so two refreshes never advance the same one.
+    private static let cursorLock = NSLock()
     private static let lock = NSLock()
 
     static func lines(for agent: Agent, limit: Int = 12) -> [ChatLine] {
         Array(snapshot(for: agent).lines.suffix(limit))
     }
 
-    /// Re-parses only when the transcript changed since the last call.
+    /// Reads only what was appended since the last call.
     static func snapshot(for agent: Agent) -> Snapshot {
-        guard let path = path(for: agent),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+        guard let path = path(for: agent) else { return Snapshot() }
+        return snapshot(atPath: path)
+    }
+
+    /// The first call parses the last 2 MB; later calls parse only the lines appended since. A file
+    /// that was replaced, truncated, or grew by more than 2 MB at once is read from its tail again.
+    static func snapshot(atPath path: String) -> Snapshot {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let modified = attrs[.modificationDate] as? Date,
               let size = (attrs[.size] as? NSNumber)?.uint64Value else { return Snapshot() }
+        let inode = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
 
-        lock.lock()
-        if let cached = snapshotCache[path], cached.modified == modified, cached.size == size {
-            lock.unlock()
-            return cached.snapshot
+        cursorLock.lock(); defer { cursorLock.unlock() }
+        if var cursor = cursors[path], cursor.inode == inode, cursor.offset <= size, size - cursor.offset <= tailBytes {
+            guard cursor.modified != modified || cursor.size != size else { return cursor.snapshot }
+            if size > cursor.offset, let chunk = read(path, from: cursor.offset, to: size) {
+                cursor.offset += chunk.consumed
+                for line in chunk.lines { cursor.parser.consume(line) }
+            }
+            cursor.modified = modified
+            cursor.size = size
+            cursor.snapshot = cursor.parser.snapshot()
+            cursors[path] = cursor
+            return cursor.snapshot
         }
-        lock.unlock()
 
-        let snapshot = parse(tail(of: path))
-        lock.lock()
-        snapshotCache[path] = (modified, size, snapshot)
-        lock.unlock()
+        let start = size > tailBytes ? size - tailBytes : 0
+        guard let chunk = read(path, from: start, to: size, skipFirstLine: start > 0) else { return Snapshot() }
+        var parser = SnapshotParser()
+        for line in chunk.lines { parser.consume(line) }
+        let snapshot = parser.snapshot()
+        if cursors.count > 300 { cursors.removeAll() }
+        cursors[path] = Cursor(inode: inode, offset: start + chunk.consumed, modified: modified, size: size,
+                               parser: parser, snapshot: snapshot)
         return snapshot
+    }
+
+    private static let tailBytes: UInt64 = 2_000_000
+
+    private struct Cursor {
+        let inode: UInt64
+        /// Just past the last complete line parsed; a line still being written is read next time.
+        var offset: UInt64
+        var modified: Date
+        var size: UInt64
+        var parser: SnapshotParser
+        var snapshot: Snapshot
+    }
+
+    /// The complete lines in `start..<end` and how many bytes they span. `skipFirstLine`: `start` may be
+    /// mid-line, so everything up to the first newline is dropped.
+    private static func read(_ path: String, from start: UInt64, to end: UInt64,
+                             skipFirstLine: Bool = false) -> (lines: [Data], consumed: UInt64)? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.read(upToCount: Int(end - start)) else { return ([], 0) }
+        let newline = UInt8(ascii: "\n")
+        guard let last = data.lastIndex(of: newline) else { return ([], 0) }
+        var from = data.startIndex
+        if skipFirstLine, let first = data.firstIndex(of: newline) { from = first + 1 }
+        let lines = from <= last ? data[from..<last].split(separator: newline, omittingEmptySubsequences: true) : []
+        return (lines.map { Data($0) }, UInt64(last - data.startIndex + 1))
     }
 
     static func path(for agent: Agent) -> String? {
@@ -260,26 +309,29 @@ enum TranscriptReader {
         return lines
     }
 
-    private static func parse(_ raw: [Substring], limit: Int = 40) -> Snapshot {
-        var messages: [(kind: ChatLine.Kind, text: String)] = []
-        // Tool calls since the last piece of text, summed up when the next text arrives.
-        var tools = ToolTally()
-        func flushTools() {
-            if let summary = tools.summary { messages.append((.tools, summary)) }
-            tools = ToolTally()
-        }
-        var activity: String?
-        var asked: [String: PendingQuestion] = [:]
-        var lastAsked: String?
-        var answered = Set<String>()
+    /// Turns transcript lines into what the notch shows, one line at a time, so a cursor can keep it
+    /// between reads. Keeps only what the snapshot needs: the last messages, the tools since the last
+    /// text, the current activity and the last question asked.
+    struct SnapshotParser {
+        private var messages: [(kind: ChatLine.Kind, text: String)] = []
+        /// Tool calls since the last piece of text, summed up when the next text arrives.
+        private var tools = ToolTally()
+        private var activity: String?
+        private var lastPrompt: String?
+        private var lastQuestion: PendingQuestion?
+        private var lastQuestionAnswered = false
 
-        for line in raw {
+        private static let keptMessages = 120
+        /// A message is shown as its last 3000 characters, so longer runs are cut down while kept.
+        private static let keptBytes = 16_000
+
+        mutating func consume(_ line: Data) {
             // Screenshots and long tool output: nothing the chat shows, and slow to decode.
-            if line.utf8.count > 100_000 { continue }
-            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+            if line.count > 100_000 { return }
+            guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
                   let type = obj["type"] as? String, type == "user" || type == "assistant",
                   obj["isSidechain"] as? Bool != true, obj["isMeta"] as? Bool != true,
-                  let message = obj["message"] as? [String: Any] else { continue }
+                  let message = obj["message"] as? [String: Any] else { return }
 
             var text = ""
             if let s = message["content"] as? String {
@@ -292,23 +344,25 @@ enum TranscriptReader {
                     case "tool_use":
                         let name = block["name"] as? String ?? ""
                         let input = block["input"] as? [String: Any] ?? [:]
-                        activity = describe(tool: name, input: input)
+                        activity = TranscriptReader.describe(tool: name, input: input)
                         tools.add(name, input)
                         if name == "AskUserQuestion", let id = block["id"] as? String,
-                           let question = question(id: id, input: input) {
-                            asked[id] = question
-                            lastAsked = id
+                           let question = TranscriptReader.question(id: id, input: input) {
+                            lastQuestion = question
+                            lastQuestionAnswered = false
                         }
                     case "tool_result":
-                        if let id = block["tool_use_id"] as? String { answered.insert(id) }
+                        if let id = block["tool_use_id"] as? String, id == lastQuestion?.toolUseID {
+                            lastQuestionAnswered = true
+                        }
                     default:
                         break
                     }
                 }
             }
-            text = collapsePastes(text).trimmingCharacters(in: .whitespacesAndNewlines)
+            text = TranscriptReader.collapsePastes(text).trimmingCharacters(in: .whitespacesAndNewlines)
             // Skip injected wrappers like <command-name>, <system-reminder> and interrupt markers.
-            if text.isEmpty || text.hasPrefix("<") || text.hasPrefix("[Request interrupted") { continue }
+            if text.isEmpty || text.hasPrefix("<") || text.hasPrefix("[Request interrupted") { return }
             if type == "assistant" { activity = nil }
 
             flushTools()
@@ -318,18 +372,38 @@ enum TranscriptReader {
             } else {
                 messages.append((kind, text))
             }
+            if kind == .user { lastPrompt = messages[messages.count - 1].text }
+            trim()
         }
-        flushTools()
 
-        var snapshot = Snapshot()
-        snapshot.lines = messages.suffix(limit).enumerated().map { i, m in
-            let text = m.text.count > 3000 ? "…" + String(m.text.suffix(3000)) : m.text
-            return ChatLine(id: i, kind: m.kind, text: text)
+        private mutating func flushTools() {
+            if let summary = tools.summary { messages.append((.tools, summary)) }
+            tools = ToolTally()
         }
-        snapshot.lastPrompt = messages.last { $0.kind == .user }?.text
-        snapshot.activity = activity
-        if let id = lastAsked, !answered.contains(id) { snapshot.question = asked[id] }
-        return snapshot
+
+        private mutating func trim() {
+            if messages.count > Self.keptMessages * 2 { messages.removeFirst(messages.count - Self.keptMessages) }
+            let i = messages.count - 1
+            if messages[i].kind != .user, messages[i].text.utf8.count > Self.keptBytes {
+                messages[i].text = String(messages[i].text.suffix(3001))
+            }
+        }
+
+        /// The snapshot as of the lines read so far. Tools still pending show as the last line, but stay
+        /// open so the next lines can add to them.
+        func snapshot(limit: Int = 40) -> Snapshot {
+            var shown = messages
+            if let summary = tools.summary { shown.append((.tools, summary)) }
+            var snapshot = Snapshot()
+            snapshot.lines = shown.suffix(limit).enumerated().map { i, m in
+                let text = m.text.count > 3000 ? "…" + String(m.text.suffix(3000)) : m.text
+                return ChatLine(id: i, kind: m.kind, text: text)
+            }
+            snapshot.lastPrompt = lastPrompt
+            snapshot.activity = activity
+            if !lastQuestionAnswered { snapshot.question = lastQuestion }
+            return snapshot
+        }
     }
 
     static func question(id: String, input: [String: Any]) -> PendingQuestion? {
@@ -424,7 +498,7 @@ enum TranscriptReader {
     }
 
     /// A short "what it's doing now" line, like "Editing main.swift".
-    private static func describe(tool: String, input: [String: Any]) -> String {
+    fileprivate static func describe(tool: String, input: [String: Any]) -> String {
         func file(_ key: String = "file_path") -> String {
             ((input[key] as? String ?? "") as NSString).lastPathComponent
         }
