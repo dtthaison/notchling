@@ -60,7 +60,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
             self.window = window
             // The title (hidden, but used by Mission Control and the Window menu) names the session.
             watch = model.$selection.sink { [weak self] id in
-                if let id { UserDefaults.standard.set(id, forKey: Self.selectionKey) }
+                UserDefaults.standard.set(id, forKey: Self.selectionKey)
                 DispatchQueue.main.async { self?.window?.title = self?.model.selected?.name ?? "Chat" }
             }
             // A page needs room beside the chat: widen a narrow window, within the screen.
@@ -155,12 +155,19 @@ final class ChatModel: ObservableObject {
     /// Sessions seen, so one that drops off the list stays readable while it's open.
     private var seen: [String: Agent] = [:]
     private var watch: AnyCancellable?
+    private var removedWatch: AnyCancellable?
 
     init(notch: NotchModel, accounts: AccountStore? = nil) {
         self.notch = notch
         self.accounts = accounts
         watch = notch.$agents.sink { [weak self] list in
             for agent in list { self?.seen[agent.id] = agent }
+        }
+        // A removed session is gone: stop showing it, leave nothing picked.
+        removedWatch = NotificationCenter.default.publisher(for: .sessionRemoved).sink { [weak self] note in
+            guard let self, let id = note.object as? String else { return }
+            self.seen[id] = nil
+            if self.selection == id { self.selection = nil }
         }
         accountsWatch = accounts?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
@@ -737,9 +744,12 @@ struct ChatView: View {
                             Group {
                                 if notch.agents.isEmpty {
                                     EmptyState(pose: "doze-2", title: "No Sessions",
-                                               message: "Sessions show up here when you run claude in a terminal or start a background session.")
+                                               message: "Sessions show up here when you run claude in a terminal or start a background session.",
+                                               action: newSessionButton)
                                 } else {
-                                    EmptyState(pose: "wave-3", title: "Pick a Session", message: "Choose one on the left to read its conversation.")
+                                    EmptyState(pose: "wave-3", title: "Pick a Session",
+                                               message: "Choose one on the left to read its conversation, or start a new one.",
+                                               action: newSessionButton)
                                 }
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -760,17 +770,21 @@ struct ChatView: View {
         .kitNoFocusRing()
         .frame(minWidth: 720, minHeight: 460)
     }
+
+    private var newSessionButton: AnyView {
+        AnyView(Button { NewSessionMenu.popUp(model: model) } label: {
+            Label("New Session", systemImage: "plus")
+        }
+        .buttonStyle(.kit(.primary))
+        .help("New background session: pick an account (a free one gets a lane) and a folder")
+        .part("New Session Button", .bottom))
+    }
 }
 
-private struct SessionSidebar: View {
-    @ObservedObject var model: ChatModel
-    @ObservedObject var notch: NotchModel
-    @FocusState private var listFocused: Bool
-    @FocusState private var searchFocused: Bool
-
-    /// Account first, then the project: folders your sessions work in, folders added before, or a new one.
-    /// The session starts idle and opens here.
-    private func newSessionMenu() {
+/// Account first, then the project: folders your sessions work in, folders added before, or a new one.
+/// The session starts idle and opens in Chat. From the sidebar's + and the empty screen.
+enum NewSessionMenu {
+    static func popUp(model: ChatModel) {
         let menu = NSMenu()
         menu.autoenablesItems = false
         if #available(macOS 14, *) { menu.addItem(.sectionHeader(title: "New Background Session On")) }
@@ -803,6 +817,13 @@ private struct SessionSidebar: View {
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
+}
+
+private struct SessionSidebar: View {
+    @ObservedObject var model: ChatModel
+    @ObservedObject var notch: NotchModel
+    @FocusState private var listFocused: Bool
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         let shown = model.shown
@@ -812,7 +833,7 @@ private struct SessionSidebar: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Sessions").kitType(.title).foregroundColor(KitInk.text)
                 Spacer()
-                Button { newSessionMenu() } label: {
+                Button { NewSessionMenu.popUp(model: model) } label: {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
                 }
                 .buttonStyle(.kit(.ghost))
@@ -1729,6 +1750,7 @@ private struct EmptyState: View {
     let pose: String
     let title: String
     let message: String
+    var action: AnyView? = nil
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1736,10 +1758,16 @@ private struct EmptyState: View {
             Text(title).kitType(.title).foregroundColor(KitInk.text)
             Text(message).kitType(.body).foregroundColor(KitInk.textMuted)
                 .multilineTextAlignment(.center).frame(maxWidth: 320)
+            if let action { action.padding(.top, 6) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
     }
+}
+
+extension Notification.Name {
+    /// A background session was removed (`claude rm`); the object is its agent id.
+    static let sessionRemoved = Notification.Name("NotchlingSessionRemoved")
 }
 
 enum ChatFormat {

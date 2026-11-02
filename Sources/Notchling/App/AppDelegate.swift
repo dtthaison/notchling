@@ -820,24 +820,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
-            process.arguments = ["rm", id]
-            process.environment = AgentMonitor.environment(forJob: id)
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
+            // A session moved to another account left a stopped copy behind; remove that too, or it shows
+            // up again in place of the one removed. Only the current copy's result counts.
+            let dirs = AgentMonitor.jobDirs(forJob: id)
+            var failed = false
             var output = ""
-            do {
-                try process.run()
-                output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                process.waitUntilExit()
-            } catch {
-                output = error.localizedDescription
+            for (index, dir) in (dirs.isEmpty ? [nil] : dirs).enumerated() {
+                let result = Self.removeJob(id, configDir: dir)
+                if index == 0 { (failed, output) = result }
             }
-            let failed = process.isRunning || process.terminationStatus != 0
             DispatchQueue.main.async {
                 self.refresh()
+                if !failed { NotificationCenter.default.post(name: .sessionRemoved, object: agent.id) }
                 guard failed else { return }
                 let note = NSAlert()
                 note.messageText = "Couldn't remove “\(agent.name)”"
@@ -846,6 +840,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 note.runModal()
             }
         }
+    }
+
+    /// `claude rm <id>` in one config folder; whether it failed, and what it printed.
+    private static func removeJob(_ id: String, configDir: String?) -> (failed: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
+        process.arguments = ["rm", id]
+        process.environment = AgentMonitor.environment(configDir: configDir)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            return (true, error.localizedDescription)
+        }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
+        return (process.terminationStatus != 0, output)
     }
 
     @objc private func clearCompleted() {

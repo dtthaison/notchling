@@ -60,16 +60,35 @@ final class AgentMonitor {
     /// The lane folder a background job lives in (`<lane>/jobs/<id>`), nil for ~/.claude. `claude attach`,
     /// `rm` and `respawn` for it need `CLAUDE_CONFIG_DIR` set to this.
     static func configDir(forJob id: String) -> String? {
-        LaneStore.all().first { lane in
-            FileManager.default.fileExists(atPath: URL(fileURLWithPath: lane.path)
-                .appendingPathComponent("jobs").appendingPathComponent(id).path)
-        }?.path
+        jobDirs(forJob: id).first ?? nil
+    }
+
+    /// Every folder holding this job, newest first (nil is ~/.claude). Moving a session to another account
+    /// resumes it there under the same id, and the stopped copy stays in the folder it left.
+    static func jobDirs(forJob id: String) -> [String?] {
+        newestFirst(LaneStore.configDirs().compactMap { dir, lane in
+            readJSON(dir.appendingPathComponent("jobs").appendingPathComponent(id).appendingPathComponent("state.json"))
+                .map { (lane?.path, $0) }
+        })
+    }
+
+    /// The folders of one job's copies, the most recently created first.
+    static func newestFirst(_ copies: [(dir: String?, job: [String: Any])]) -> [String?] {
+        copies.map { ($0.dir, created($0.job)) }.sorted { $0.1 > $1.1 }.map { $0.0 }
+    }
+
+    static func created(_ job: [String: Any]) -> Date {
+        (job["createdAt"] as? String).flatMap(parseISO) ?? .distantPast
     }
 
     /// The environment to run `claude` in for a job: the lane's `CLAUDE_CONFIG_DIR` when it has one.
     static func environment(forJob id: String) -> [String: String] {
+        environment(configDir: configDir(forJob: id))
+    }
+
+    static func environment(configDir dir: String?) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        if let dir = configDir(forJob: id) { env[LaneStore.variable] = dir } else { env[LaneStore.variable] = nil }
+        env[LaneStore.variable] = dir
         return env
     }
 
@@ -83,6 +102,9 @@ final class AgentMonitor {
         var result: [Agent] = []
         var live: [String: Agent] = [:]
         var lanes: [String: String] = [:]
+        var mainIDs: [String] = []
+        // One row per conversation: a moved session's stopped copy in the folder it left is hidden.
+        var jobCreated: [String: Date] = [:]
         for (dir, lane) in LaneStore.configDirs() {
             let sessions = readSessions(in: dir)
             let jobs = readJobs(in: dir)
@@ -95,8 +117,15 @@ final class AgentMonitor {
             for (shortID, job) in jobs {
                 var a = agent(fromJob: job, shortID: shortID, live: sessionByJob[shortID])
                 a.configDir = lane?.path
-                result.append(a)
-                if let lane { lanes[a.id] = lane.path }
+                let created = Self.created(job)
+                if let index = result.firstIndex(where: { $0.id == a.id }) {
+                    guard created > jobCreated[a.id] ?? .distantPast else { continue }
+                    result[index] = a
+                } else {
+                    result.append(a)
+                }
+                jobCreated[a.id] = created
+                if let lane { lanes[a.id] = lane.path } else { lanes[a.id] = nil; mainIDs.append(a.id) }
             }
 
             for s in sessions {
@@ -110,9 +139,11 @@ final class AgentMonitor {
                 if let lane { lanes[a.id] = lane.path }
             }
         }
-        if !lanes.isEmpty {
+        if !lanes.isEmpty || !mainIDs.isEmpty {
             Self.laneLock.lock()
             Self.laneOfSession.merge(lanes) { _, new in new }
+            // Moved back to the main login: forget the lane it left.
+            for id in mainIDs where lanes[id] == nil { Self.laneOfSession[id] = nil }
             Self.laneLock.unlock()
         }
 
