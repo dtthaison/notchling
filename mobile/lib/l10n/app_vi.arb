@@ -1,0 +1,247 @@
+{
+  "@@locale": "vi",
+  "appName": "Agent Console",
+  "tabSessions": "Session",
+  "tabChat": "Chat",
+  "tabVisualize": "Visualize",
+  "connecting": "Đang kết nối",
+  "connectionLostRetry": "Mất kết nối, thử lại sau {seconds}s",
+  "@connectionLostRetry": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "connected": "Đã kết nối",
+  "retryNow": "Thử lại",
+  "retry": "Thử lại",
+  "cancel": "Huỷ",
+  "close": "Đóng",
+  "stateNeedsInput": "Cần input",
+  "stateRunning": "Đang chạy",
+  "stateDone": "Xong",
+  "stateExited": "Đã thoát",
+  "sessionsEmptyTitle": "Chưa có session nào",
+  "sessionsEmptyBody": "Các session Claude Code trên Mac sẽ hiện ở đây.",
+  "searchHint": "Tìm session",
+  "searchNoMatch": "Không có session khớp “{query}”.",
+  "@searchNoMatch": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "loadFailed": "Không thể tải dữ liệu. Vui lòng thử lại.",
+  "newSession": "Session mới",
+  "newSessionFolder": "Thư mục",
+  "newSessionModel": "Model",
+  "modelDefault": "Mặc định",
+  "newSessionNoProjects": "Chưa có thư mục gần đây trên Mac.",
+  "newSessionConfirmTitle": "Mở session mới?",
+  "newSessionConfirmBody": "Claude sẽ chạy trong {folder} trên Mac.",
+  "@newSessionConfirmBody": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "newSessionOpen": "Mở",
+  "newSessionStarted": "Mac đã mở session mới.",
+  "newSessionFailed": "Không thể mở session mới. Vui lòng thử lại.",
+  "runningSubagents": "{count} subagent đang chạy",
+  "@runningSubagents": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "subagentsShow": "Mở {count} subagent",
+  "@subagentsShow": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "subagentsHide": "Thu gọn {count} subagent",
+  "@subagentsHide": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "justNow": "Vừa xong",
+  "minutesShort": "{n} phút",
+  "@minutesShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "hoursShort": "{n} giờ",
+  "@hoursShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "daysShort": "{n} ngày",
+  "@daysShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "viewOnly": "Chỉ xem",
+  "viewOnlyReason": "Session mở ngoài Console — chỉ xem",
+  "controlConsole": "Console",
+  "controlJob": "Job nền",
+  "chatSelectSession": "Chọn một session để xem chat.",
+  "chatEmpty": "Chưa có tin nhắn nào.",
+  "chatLoadOlder": "Tải tin cũ hơn",
+  "chatNewMessages": "Tin mới",
+  "composerHint": "Nhắn cho session này",
+  "send": "Gửi",
+  "sending": "Đang gửi",
+  "sendFailed": "Không thể gửi tin nhắn. Vui lòng thử lại.",
+  "pendingPermission": "Cần permission: {tool}",
+  "@pendingPermission": {
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
+  "pendingQuestion": "Câu hỏi từ Claude",
+  "allow": "Cho phép",
+  "deny": "Từ chối",
+  "answerOnMac": "Trả lời trên Mac",
+  "multiSelectOnMac": "Câu hỏi này cho chọn nhiều đáp án. Trả lời trên Mac.",
+  "answerFailed": "Không thể gửi câu trả lời. Vui lòng thử lại.",
+  "toolsExpand": "Mở rộng",
+  "toolsCollapse": "Thu gọn",
+  "pairTitle": "Ghép đôi với Mac",
+  "pairIntro": "Trên Mac, mở Agent Console, bấm Điện thoại rồi Ghép đôi điện thoại.",
+  "pairScan": "Quét mã QR",
+  "pairManual": "Nhập thủ công",
+  "pairPasteJson": "Dán nội dung mã QR (JSON)",
+  "pairHost": "Địa chỉ Mac (IP hoặc tên .local)",
+  "pairPort": "Cổng",
+  "pairFingerprint": "Vân tay chứng chỉ (SHA-256)",
+  "pairCode": "Mã ghép đôi (8 ký tự)",
+  "pairDeviceName": "Tên thiết bị",
+  "pairConnect": "Ghép đôi",
+  "pairWaiting": "Chờ Mac cho phép…",
+  "pairFailed": "Không thể ghép đôi. Vui lòng thử lại.",
+  "pairInvalid": "Mã ghép đôi không hợp lệ.",
+  "pairFingerprintMismatch": "Chứng chỉ của Mac không khớp vân tay đã ghim. Kết nối bị từ chối.",
+  "pairDenied": "Mac đã từ chối thiết bị này hoặc mã đã hết hạn.",
+  "pairUnreachable": "Không kết nối được tới Mac. Kiểm tra mạng và địa chỉ.",
+  "pairCameraDenied": "Chưa có quyền dùng camera. Dùng nhập thủ công.",
+  "macsTitle": "Mac đã ghép",
+  "macsAdd": "Thêm Mac",
+  "macsActive": "Đang dùng",
+  "macsUse": "Dùng Mac này",
+  "macsRemove": "Gỡ Mac",
+  "macsRemoveConfirm": "Gỡ “{name}” khỏi điện thoại?",
+  "@macsRemoveConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "vizSuggested": "Gợi ý",
+  "vizPhoneNoPermission": "Mac chưa cấp quyền ghi màn hình cho Agent Console.",
+  "vizPhoneNoWindow": "Mac chưa có cửa sổ máy ảo đang hiện.",
+  "vizPhoneStarting": "Đang chờ hình từ Mac…",
+  "vizPhoneError": "Không thể xem máy ảo: {message}",
+  "@vizPhoneError": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "vizWebUrl": "Địa chỉ trang (localhost trên Mac)",
+  "vizWebRefresh": "Chụp lại",
+  "vizWebNoUrl": "Session này chưa có địa chỉ web. Nhập địa chỉ ở trên.",
+  "vizWebFailed": "Không thể chụp trang. Vui lòng thử lại.",
+  "vizLoadFailed": "Không thể tải visualize. Vui lòng thử lại.",
+  "vizSelectSession": "Chọn một session để xem visualize.",
+  "vizBundleMissing": "Thiếu bundle viz. Chạy tool/sync_viz.sh rồi build lại.",
+  "notifNeedsInputTitle": "Session cần input",
+  "notifNeedsInputBody": "{name} đang chờ bạn.",
+  "@notifNeedsInputBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pullToRefresh": "Kéo để tải lại",
+  "connectionRevoked": "Mac đã thu hồi thiết bị này. Hãy ghép đôi lại.",
+  "openMacs": "Mac đã ghép",
+  "routeHome": "Wi-Fi nhà",
+  "routeInternet": "Internet",
+  "connectedVia": "Đã kết nối · {route}",
+  "@connectedVia": {
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "noRouteToMac": "Không tới được Mac. Bật Truy cập qua internet trên Mac hoặc vào cùng Wi-Fi.",
+  "takeover": "Tiếp quản",
+  "takeoverHint": "Session mở ngoài Console — chỉ xem. Có thể tiếp quản để nhắn từ điện thoại.",
+  "takeoverTitle": "Tiếp quản session này?",
+  "takeoverBody": "Mac sẽ mở lại session này trong Terminal của Console (claude --resume). Session gốc phải đã đóng. Nếu Claude hỏi gì, trả lời trên Mac.",
+  "takeoverRunning": "Đang tiếp quản…",
+  "takeoverFailed": "Không tiếp quản được: {reason}",
+  "@takeoverFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "micStart": "Nói để nhập",
+  "micStop": "Dừng và nhận dạng",
+  "micCancel": "Huỷ nhận dạng",
+  "transcribing": "Đang nhận dạng…",
+  "voicePermissionDenied": "Chưa cho phép dùng micro.",
+  "voiceOpenSettings": "Mở cài đặt",
+  "voiceNoSpeech": "Không nghe thấy tiếng nói. Thử nói gần micro hơn.",
+  "voiceTooLong": "Đã dừng ở 60 giây.",
+  "voiceEngineError": "Nhận dạng lỗi. Thử lại.",
+  "voiceRecorderError": "Không ghi âm được.",
+  "keepAliveTitle": "Giữ kết nối nền?",
+  "keepAliveBody": "Để nhận thông báo khi session cần input hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Agent Console đang theo dõi\". Tắt được trong Mac đã ghép.",
+  "keepAliveEnable": "Bật",
+  "notNow": "Để sau",
+  "keepAliveSetting": "Giữ kết nối nền",
+  "keepAliveHint": "Nhận thông báo khi app ở nền. Hiện một thông báo nhỏ cố định.",
+  "muteSession": "Tắt thông báo session này",
+  "unmuteSession": "Bật lại thông báo session này",
+  "takeoverStopBody": "Dừng session trên Mac (Claude desktop / VS Code) và mở lại trong Console để nhắn từ điện thoại?",
+  "takeoverStopConfirm": "Dừng và tiếp quản",
+  "takeoverBusyTitle": "Session đang chạy",
+  "takeoverBusyBody": "Session đang chạy — lượt hiện tại sẽ bị dừng giữa chừng.",
+  "takeoverBusyConfirm": "Vẫn dừng",
+  "chatQueued": "đang chờ",
+  "chatSending": "đang gửi",
+  "chatSendFailed": "Chưa gửi được",
+  "chatUpdating": "Đang cập nhật",
+  "pictureFailed": "Không tải được ảnh",
+  "pictureClose": "Đóng ảnh",
+  "pictureOpen": "Mở ảnh"
+}
