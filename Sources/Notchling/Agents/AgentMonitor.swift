@@ -35,10 +35,13 @@ struct Agent {
     var host: String = ""
     /// The lane's config folder (`CLAUDE_CONFIG_DIR`) it runs in; nil for ~/.claude, the main login.
     var configDir: String? = nil
+    /// A background job that runs a shell command (template "exec", such as a script that starts
+    /// `claude -p` sessions) rather than a conversation: it has no transcript and takes no replies.
+    var command: String? = nil
 
-    /// Replies can be typed in only for background jobs; terminal sessions belong to their window.
+    /// Replies can be typed in only for background conversations; terminal sessions belong to their window.
     var canReply: Bool {
-        if case .job = target { return true }
+        if case .job = target { return command == nil }
         return false
     }
 }
@@ -199,7 +202,8 @@ final class AgentMonitor {
                      target: .job(shortID),
                      suggestedReply: job["suggestedReply"] as? String,
                      transcriptPath: job["linkScanPath"] as? String,
-                     host: "Background")
+                     host: "Background",
+                     command: (job["template"] as? String) == "exec" ? (job["intent"] as? String ?? "") : nil)
     }
 
     private func readJobs(in base: URL) -> [String: [String: Any]] {

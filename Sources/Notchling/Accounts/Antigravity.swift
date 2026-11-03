@@ -363,15 +363,16 @@ enum AntigravityQuota {
         return args[range].split(whereSeparator: \.isWhitespace).last.map(String.init)
     }
 
-    /// The server picks a random port, so read the ones it's listening on. Highest first: its port is
-    /// an ephemeral (high) one, while the low ports are other services that can hang the TLS probe.
+    /// The server picks random ports, so read the ones it's listening on (`-a`: this process's TCP
+    /// listeners only; without it lsof lists every listener on the Mac). Lowest first: the server opens
+    /// its HTTPS port, then a plain HTTP one just above it.
     private static func ports(pid: String) -> [Int] {
-        guard let out = shell("/usr/sbin/lsof", ["-nP", "-p", pid, "-iTCP", "-sTCP:LISTEN"]) else { return [] }
+        guard let out = shell("/usr/sbin/lsof", ["-nP", "-a", "-p", pid, "-iTCP", "-sTCP:LISTEN"]) else { return [] }
         var seen: [Int] = []
         for match in out.matches(of: #/:(\d+) \(LISTEN\)/#) {
             if let port = Int(match.1), !seen.contains(port) { seen.append(port) }
         }
-        return seen.sorted(by: >)
+        return seen.sorted()
     }
 
     // MARK: The call
