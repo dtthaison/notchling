@@ -219,7 +219,7 @@ final class ChatModel: ObservableObject {
         return accounts.accounts.filter { !$0.needsLogin && $0.id != accounts.activeID && !taken.contains($0.id) }
     }
 
-    private func refreshLanes(force: Bool = false) {
+    func refreshLanes(force: Bool = false) {
         guard force || Date().timeIntervalSince(lanesChecked) > 5 else { return }
         lanesChecked = Date()
         let agents = notch.agents
@@ -464,7 +464,7 @@ final class ChatModel: ObservableObject {
     }
 
     /// The flags the job was started with (name, model, permission mode), so the moved session keeps them.
-    private static func launchFlags(forJob shortID: String, name: String) -> [String] {
+    static func launchFlags(forJob shortID: String, name: String) -> [String] {
         let dir = AgentMonitor.configDir(forJob: shortID).map { URL(fileURLWithPath: $0) } ?? LaneStore.mainDir
         let url = dir.appendingPathComponent("jobs/\(shortID)/state.json")
         guard let data = try? Data(contentsOf: url),
@@ -482,7 +482,7 @@ final class ChatModel: ObservableObject {
         return out
     }
 
-    private static func stopJob(_ shortID: String) -> Result<Void, Error> {
+    static func stopJob(_ shortID: String) -> Result<Void, Error> {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
         p.arguments = ["stop", shortID]
@@ -503,7 +503,7 @@ final class ChatModel: ObservableObject {
         return .success(())
     }
 
-    private static func startBackground(in folder: String, configDir: String?,
+    static func startBackground(in folder: String, configDir: String?,
                                         arguments: [String] = ["--bg"]) -> Result<String, Error> {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
@@ -2030,6 +2030,26 @@ private struct AccountMenu: View {
         note(account.lane == nil ? "Moves every session on the main login, background ones too."
                                  : "Moves every session in this lane.")
         menu.addItem(.separator())
+        if let accounts = model.accounts {
+            // Any saved account, even one in a lane: its lane closes and everything runs on the main login.
+            let lanes = LaneStore.all()
+            var choices: [(id: String?, email: String)] = [(nil, accounts.active?.email ?? "Main Login")]
+            choices += lanes.map { ($0.accountID, $0.email) }
+            choices += free.map { ($0.id, $0.email) }
+            let shown = choices.filter { choice in
+                !MoveAllPlan.make(agents: model.notch.agents, lanes: lanes, activeID: accounts.activeID, target: choice.id).isEmpty
+            }
+            if !shown.isEmpty {
+                header("Move Every Session To")
+                for choice in shown {
+                    menu.addItem(ActionMenuItem(choice.id == nil ? "\(choice.email) (main login)" : choice.email) { [model, agent] in
+                        model.moveAll(to: choice.id, email: choice.email, from: agent)
+                    })
+                }
+                note("Lane sessions resume on the main login, which switches to that account.")
+                menu.addItem(.separator())
+            }
+        }
         if case .job = agent.target, agent.transcriptPath != nil {
             header("Move Only This Session To")
             let here = account.lane?.accountID

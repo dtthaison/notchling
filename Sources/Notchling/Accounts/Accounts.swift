@@ -690,16 +690,20 @@ extension AccountStore {
     }
 
     /// Ends a lane: its login goes back to the saved account, and the lane's Keychain item is removed.
-    func closeLane(_ name: String) {
+    /// `done` runs on the main thread once the lane is gone (or wasn't there).
+    func closeLane(_ name: String, done: (() -> Void)? = nil) {
         queue.async {
             var lanes = LaneStore.all()
-            guard let i = lanes.firstIndex(where: { $0.name == name }) else { return }
+            guard let i = lanes.firstIndex(where: { $0.name == name }) else {
+                DispatchQueue.main.async { done?() }
+                return
+            }
             Self.returnLogin(from: lanes[i])
             LaneStore.removeLogin(lanes[i])
             LaneStore.removeFolder(lanes[i])
             lanes.remove(at: i)
             LaneStore.save(lanes)
-            DispatchQueue.main.async { self.changed?() }
+            DispatchQueue.main.async { self.changed?(); done?() }
         }
     }
 
