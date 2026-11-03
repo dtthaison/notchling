@@ -346,14 +346,15 @@ final class ChatModel: ObservableObject {
     }
 
     /// Where a new background session can run: the main login, each lane, then each free saved account
-    /// (picking one makes a lane for it). `accountID` nil means the main login.
+    /// (picking one makes a lane for it). `accountID` nil means the main login. Named by account only: a
+    /// lane keeps the name of the account it was made for, which after a switch is just misleading.
     struct SessionTarget { let title: String; let accountID: String? }
 
     var sessionTargets: [SessionTarget] {
         guard let accounts else { return [] }
-        var out = [SessionTarget(title: "\(accounts.active?.email ?? "Main Login") · main", accountID: nil)]
-        out += LaneStore.all().map { SessionTarget(title: "\($0.email) · \($0.name) lane", accountID: $0.accountID) }
-        out += freeAccounts.map { SessionTarget(title: $0.email, accountID: $0.id) }
+        var out = [SessionTarget(title: "\(accounts.active?.email ?? "Main Login") (main login)", accountID: nil)]
+        out += LaneStore.all().map { SessionTarget(title: "\($0.email) (lane)", accountID: $0.accountID) }
+        out += freeAccounts.map { SessionTarget(title: "\($0.email) (new lane)", accountID: $0.id) }
         return out
     }
 
@@ -1997,7 +1998,7 @@ private struct AccountMenu: View {
                 Image(systemName: account.lane == nil ? "person.crop.circle" : "arrow.triangle.branch")
                     .font(.system(size: 10, weight: .semibold))
                 Text(account.email).lineLimit(1).truncationMode(.middle)
-                if let lane = account.lane { Text("· \(lane.name) lane").foregroundColor(KitInk.textFaint) }
+                if account.lane != nil { Text("· lane").foregroundColor(KitInk.textFaint) }
                 Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
             }
             .kitType(.meta).foregroundColor(KitInk.textMuted)
@@ -2021,7 +2022,7 @@ private struct AccountMenu: View {
         func header(_ title: String) {
             if #available(macOS 14, *) { menu.addItem(.sectionHeader(title: title)) } else { note(title) }
         }
-        header(account.lane.map { "Switch the \($0.name) Lane To" } ?? "Switch the Main Login To")
+        header(account.lane == nil ? "Switch the Main Login To" : "Switch This Lane To")
         if free.isEmpty { note("No Free Saved Account") }
         for other in free {
             menu.addItem(ActionMenuItem(other.email) { [model, agent] in model.switchAccount(of: agent, to: other.id) })
@@ -2045,7 +2046,7 @@ private struct AccountMenu: View {
         if case .process = agent.target {
             header("New Terminal Session")
             if let lane = account.lane {
-                menu.addItem(ActionMenuItem("In the \(lane.name) Lane") { [model, agent] in model.newTerminalSession(for: agent, on: lane.accountID) })
+                menu.addItem(ActionMenuItem("In This Lane (\(lane.email))") { [model, agent] in model.newTerminalSession(for: agent, on: lane.accountID) })
             }
             for other in free {
                 menu.addItem(ActionMenuItem("On \(other.email)") { [model, agent] in model.newTerminalSession(for: agent, on: other.id) })
