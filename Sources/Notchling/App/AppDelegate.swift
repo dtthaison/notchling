@@ -358,6 +358,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
+        // Only once Agent Console is installed; it is a separate app in Console/.
+        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: "local.agentconsole") != nil {
+            menu.addItem(action("Open Agent Console", #selector(openAgentConsole)))
+        }
         let settingsItem = action("Settings…", #selector(showSettings))
         settingsItem.keyEquivalent = ","
         menu.addItem(settingsItem)
@@ -636,6 +640,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showCost() {
         accountsWindow.show(.cost)
+    }
+
+    /// Agent Console brings its window up and, with `phones=1`, tells paired phones to open too.
+    @objc private func openAgentConsole() {
+        guard let url = URL(string: "agentconsole://open?phones=1"), NSWorkspace.shared.open(url) else {
+            NSLog("openAgentConsole: Agent Console did not open")
+            return
+        }
     }
 
     @objc private func showSettings() {
