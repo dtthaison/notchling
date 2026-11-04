@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -18,6 +19,7 @@ class BridgeException implements Exception {
   bool get isViewOnly => code == 'view_only';
   bool get isUnauthorized => code == 'unauthorized';
   bool get isNotFound => code == 'not_found';
+  bool get isInvalid => code == 'invalid';
 
   @override
   String toString() => 'BridgeException($code): $message';
@@ -431,6 +433,38 @@ class BridgeClient {
     }
   }
 
+  /// The slash commands of [sessionId] (built-ins plus the user's, the project's and plugins'). Macs that do not
+  /// know the op answer `invalid`; the caller keeps its built-in list then.
+  Future<List<({String name, String description, String? argumentHint})>> commandsList(String sessionId) async {
+    final Json data = await request('commands.list', <String, Object?>{'sessionId': sessionId});
+    return <({String name, String description, String? argumentHint})>[
+      for (final Json row in data.objects('commands')) (name: row.str('name'), description: row.strOrNull('description') ?? '', argumentHint: row.strOrNull('argumentHint')),
+    ];
+  }
+
+  /// Sends a photo to [sessionId] with an optional caption. The bridge caps a message at 256 KB, so the bytes go in
+  /// base64 pieces between `session.image.begin` and `.end`; [onProgress] gets 0..1 after each piece.
+  Future<void> sessionImage(String sessionId, Uint8List bytes, {String caption = '', void Function(double fraction)? onProgress}) async {
+    final Json begin = await request(
+      'session.image.begin',
+      <String, Object?>{'sessionId': sessionId, 'bytes': bytes.length, if (caption.trim().isNotEmpty) 'caption': caption.trim()},
+      const Duration(seconds: 30),
+    );
+    final String uploadId = begin.str('uploadId');
+    final int piece = math.min(begin['chunkBytes'] is num ? (begin['chunkBytes']! as num).toInt() : 96 * 1024, 96 * 1024);
+    int sequence = 0;
+    for (int offset = 0; offset < bytes.length; offset += piece) {
+      final int end = math.min(offset + piece, bytes.length);
+      await request(
+        'session.image.chunk',
+        <String, Object?>{'uploadId': uploadId, 'seq': sequence++, 'data': base64Encode(Uint8List.sublistView(bytes, offset, end))},
+        const Duration(seconds: 30),
+      );
+      onProgress?.call(end / bytes.length);
+    }
+    await request('session.image.end', <String, Object?>{'uploadId': uploadId}, const Duration(seconds: 60));
+  }
+
   Future<Json> vizGet(String sessionId, {bool entity = false}) =>
       request('viz.get', <String, Object?>{'sessionId': sessionId, if (entity) 'entity': true}, const Duration(seconds: 30));
 
@@ -453,6 +487,11 @@ class BridgeClient {
   /// Sends [text] to exactly [sessionId]. A view-only session answers `view_only`.
   Future<void> sessionMessage(String sessionId, String text) async {
     await request('session.message', <String, Object?>{'sessionId': sessionId, 'text': text}, const Duration(seconds: 60));
+  }
+
+  /// Interrupts the running turn so the queued message runs next. Macs from before this op answer `invalid`.
+  Future<void> sessionSendNow(String sessionId) async {
+    await request('session.sendNow', <String, Object?>{'sessionId': sessionId}, const Duration(seconds: 15));
   }
 
   Future<void> promptAllow(String requestId, {required bool allow}) async {

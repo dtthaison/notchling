@@ -44,16 +44,16 @@ class AppL10nEn extends AppL10n {
   String get close => 'Close';
 
   @override
-  String get stateNeedsInput => 'Needs input';
+  String get stateNeedsInput => 'Needs Input';
 
   @override
-  String get stateRunning => 'Running';
+  String get stateRunning => 'Working';
 
   @override
   String get stateDone => 'Done';
 
   @override
-  String get stateExited => 'Exited';
+  String get stateExited => 'Ended';
 
   @override
   String get sessionsEmptyTitle => 'No sessions yet';
@@ -311,6 +311,13 @@ class AppL10nEn extends AppL10n {
       'This session has no web address yet. Enter one above.';
 
   @override
+  String get vizWebHint =>
+      'Start the dev server on the Mac and refresh, or pick another address below.';
+
+  @override
+  String get vizWebCandidates => 'Running on the Mac';
+
+  @override
   String get vizWebFailed => 'Couldn\'t capture the page. Please try again.';
 
   @override
@@ -456,6 +463,19 @@ class AppL10nEn extends AppL10n {
   String get chatQueued => 'waiting';
 
   @override
+  String get chatSendNow => 'Send now';
+
+  @override
+  String get chatSendNowTitle => 'Interrupt the running turn to send now?';
+
+  @override
+  String get chatSendNowBody =>
+      'Claude stops the current turn and runs this waiting message right away.';
+
+  @override
+  String get chatSendNowFailed => 'Could not interrupt';
+
+  @override
   String get chatSending => 'sending';
 
   @override
@@ -472,4 +492,126 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get pictureOpen => 'Open picture';
+
+  @override
+  String get allProjects => 'All projects';
+
+  @override
+  String get archive => 'Archive';
+
+  @override
+  String archivedToast(String name) {
+    return 'Archived $name';
+  }
+
+  @override
+  String get undo => 'Undo';
+
+  @override
+  String get sessionsFilteredEmpty => 'No sessions in this project.';
+
+  @override
+  String get chatContext => 'Context';
+
+  @override
+  String get limit5h => '5h';
+
+  @override
+  String get limitWeek => 'Week';
+
+  @override
+  String get shellHeader => 'Shell command';
+
+  @override
+  String shellRunsIn(String folder) {
+    return 'runs in $folder · Claude sees the output';
+  }
+
+  @override
+  String get shellHint =>
+      'Send runs it like ! in the terminal · delete the ! to send a message instead';
+
+  @override
+  String get shellWillRun => 'Will run';
+
+  @override
+  String get slashHeader => 'Commands';
+
+  @override
+  String toolStepsCount(int count) {
+    return '$count tool steps';
+  }
+
+  @override
+  String get toolStepOne => '1 tool step';
+
+  @override
+  String get compactionTitle => 'Conversation compacted';
+
+  @override
+  String get showOutput => 'Show output';
+
+  @override
+  String get copyCode => 'Copy';
+
+  @override
+  String get copied => 'Copied';
+
+  @override
+  String get takeoverShort => 'Take over';
+
+  @override
+  String get activityIdle => 'Idle';
+
+  @override
+  String get viewOnlyChip => 'View only';
+
+  @override
+  String get newMessagesBelow => 'New messages';
+
+  @override
+  String get attachPhoto => 'Attach a photo';
+
+  @override
+  String get photoCamera => 'Take a photo';
+
+  @override
+  String get photoGallery => 'Choose from library';
+
+  @override
+  String get photoPickFailed => 'Could not open the camera or library.';
+
+  @override
+  String get photoSent => 'Photo sent';
+
+  @override
+  String get photoTitle => 'Send a photo';
+
+  @override
+  String get photoCaptionHint => 'Add a caption (optional)';
+
+  @override
+  String get settingsTitle => 'Settings';
+
+  @override
+  String get settingsTheme => 'Appearance';
+
+  @override
+  String get themeSystem => 'System';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get settingsNotifications => 'Notifications';
+
+  @override
+  String get settingsSound => 'Notification sounds';
+
+  @override
+  String get settingsSoundHint =>
+      'A soft sound for new messages and sessions that need you while the app is open.';
 }

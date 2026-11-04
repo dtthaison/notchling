@@ -44,7 +44,7 @@ class AppL10nVi extends AppL10n {
   String get close => 'Đóng';
 
   @override
-  String get stateNeedsInput => 'Cần input';
+  String get stateNeedsInput => 'Cần bạn';
 
   @override
   String get stateRunning => 'Đang chạy';
@@ -176,7 +176,7 @@ class AppL10nVi extends AppL10n {
 
   @override
   String pendingPermission(String tool) {
-    return 'Cần permission: $tool';
+    return 'Cần cấp quyền: $tool';
   }
 
   @override
@@ -311,6 +311,13 @@ class AppL10nVi extends AppL10n {
       'Session này chưa có địa chỉ web. Nhập địa chỉ ở trên.';
 
   @override
+  String get vizWebHint =>
+      'Chạy dev server trên Mac rồi bấm làm mới, hoặc chọn địa chỉ khác bên dưới.';
+
+  @override
+  String get vizWebCandidates => 'Đang chạy trên Mac';
+
+  @override
   String get vizWebFailed => 'Không thể chụp trang. Vui lòng thử lại.';
 
   @override
@@ -324,7 +331,7 @@ class AppL10nVi extends AppL10n {
       'Thiếu bundle viz. Chạy tool/sync_viz.sh rồi build lại.';
 
   @override
-  String get notifNeedsInputTitle => 'Session cần input';
+  String get notifNeedsInputTitle => 'Session cần bạn';
 
   @override
   String notifNeedsInputBody(String name) {
@@ -414,7 +421,7 @@ class AppL10nVi extends AppL10n {
 
   @override
   String get keepAliveBody =>
-      'Để nhận thông báo khi session cần input hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Agent Console đang theo dõi\". Tắt được trong Mac đã ghép.';
+      'Để nhận thông báo khi session cần bạn hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Đang theo dõi\". Tắt được trong Mac đã ghép.';
 
   @override
   String get keepAliveEnable => 'Bật';
@@ -456,6 +463,19 @@ class AppL10nVi extends AppL10n {
   String get chatQueued => 'đang chờ';
 
   @override
+  String get chatSendNow => 'Gửi ngay';
+
+  @override
+  String get chatSendNowTitle => 'Ngắt lượt đang chạy để gửi ngay?';
+
+  @override
+  String get chatSendNowBody =>
+      'Claude sẽ dừng lượt hiện tại và chạy tin đang chờ này ngay.';
+
+  @override
+  String get chatSendNowFailed => 'Chưa ngắt được';
+
+  @override
   String get chatSending => 'đang gửi';
 
   @override
@@ -472,4 +492,126 @@ class AppL10nVi extends AppL10n {
 
   @override
   String get pictureOpen => 'Mở ảnh';
+
+  @override
+  String get allProjects => 'Tất cả project';
+
+  @override
+  String get archive => 'Lưu trữ';
+
+  @override
+  String archivedToast(String name) {
+    return 'Đã lưu trữ $name';
+  }
+
+  @override
+  String get undo => 'Hoàn tác';
+
+  @override
+  String get sessionsFilteredEmpty => 'Không có session trong project này.';
+
+  @override
+  String get chatContext => 'Ngữ cảnh';
+
+  @override
+  String get limit5h => '5 giờ';
+
+  @override
+  String get limitWeek => 'Tuần';
+
+  @override
+  String get shellHeader => 'Lệnh shell';
+
+  @override
+  String shellRunsIn(String folder) {
+    return 'chạy trong $folder · Claude thấy kết quả';
+  }
+
+  @override
+  String get shellHint =>
+      'Gửi sẽ chạy như ! trong terminal · xoá ! để gửi tin nhắn thường';
+
+  @override
+  String get shellWillRun => 'Sẽ chạy';
+
+  @override
+  String get slashHeader => 'Lệnh';
+
+  @override
+  String toolStepsCount(int count) {
+    return '$count bước công cụ';
+  }
+
+  @override
+  String get toolStepOne => '1 bước công cụ';
+
+  @override
+  String get compactionTitle => 'Đã nén cuộc trò chuyện';
+
+  @override
+  String get showOutput => 'Xem kết quả';
+
+  @override
+  String get copyCode => 'Chép';
+
+  @override
+  String get copied => 'Đã chép';
+
+  @override
+  String get takeoverShort => 'Tiếp quản';
+
+  @override
+  String get activityIdle => 'Không có hoạt động';
+
+  @override
+  String get viewOnlyChip => 'Chỉ xem';
+
+  @override
+  String get newMessagesBelow => 'Tin mới';
+
+  @override
+  String get attachPhoto => 'Đính kèm ảnh';
+
+  @override
+  String get photoCamera => 'Chụp ảnh';
+
+  @override
+  String get photoGallery => 'Chọn từ thư viện';
+
+  @override
+  String get photoPickFailed => 'Không mở được camera hoặc thư viện.';
+
+  @override
+  String get photoSent => 'Đã gửi ảnh';
+
+  @override
+  String get photoTitle => 'Gửi ảnh';
+
+  @override
+  String get photoCaptionHint => 'Thêm chú thích (tuỳ chọn)';
+
+  @override
+  String get settingsTitle => 'Cài đặt';
+
+  @override
+  String get settingsTheme => 'Giao diện';
+
+  @override
+  String get themeSystem => 'Hệ thống';
+
+  @override
+  String get themeDark => 'Tối';
+
+  @override
+  String get themeLight => 'Sáng';
+
+  @override
+  String get settingsNotifications => 'Thông báo';
+
+  @override
+  String get settingsSound => 'Âm thanh thông báo';
+
+  @override
+  String get settingsSoundHint =>
+      'Phát tiếng nhẹ khi có tin mới hoặc session cần bạn trong lúc đang mở app.';
 }

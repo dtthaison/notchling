@@ -147,9 +147,9 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
       PictureLoad.loading => const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
       PictureLoad.failed => Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-            const Icon(Icons.broken_image_outlined, size: 20, color: Token.muted),
+            Icon(Icons.broken_image_outlined, size: 20, color: Kit.of(context).textMuted),
             const SizedBox(height: 2),
-            Text(l10n.pictureFailed, style: TypeToken.labelSm, textAlign: TextAlign.center),
+            Text(l10n.pictureFailed, style: Kit.of(context).labelSm, textAlign: TextAlign.center),
           ]),
         ),
     };
@@ -157,7 +157,7 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
       button: true,
       label: l10n.pictureOpen,
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.lg),
+        borderRadius: BorderRadius.circular(Radii.md),
         onTap: switch (_phase) {
           PictureLoad.ready => () => unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
                 fullscreenDialog: true,
@@ -170,7 +170,7 @@ class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
           width: box.width,
           height: box.height,
           clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(color: Token.surface, borderRadius: BorderRadius.circular(Radii.lg), border: Border.all(color: Token.border)),
+          decoration: BoxDecoration(color: Kit.of(context).sidebar, borderRadius: BorderRadius.circular(Radii.md), border: Border.all(color: Kit.of(context).hairline)),
           child: child,
         ),
       ),
@@ -217,9 +217,9 @@ class _PictureViewerState extends ConsumerState<PictureViewer> {
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Kit.dark.sidebar,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: Kit.dark.sidebar,
         leading: IconButton(tooltip: l10n.pictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
         bottom: _sharp ? null : const PreferredSize(preferredSize: Size.fromHeight(2), child: LinearProgressIndicator(minHeight: 2)),
       ),

@@ -12,7 +12,7 @@ import '../features/sessions/sessions_notifier.dart';
 import 'providers.dart';
 
 /// What changed in a session that is worth a notification.
-enum AlertKind { needsInput, finished }
+enum AlertKind { needsInput, finished, message }
 
 /// Alerts between two session lists, once per change: a session that has just gone to "Cần input", or from
 /// running to done. [announced] remembers what each session was last announced as, so repeated lists carrying
@@ -137,7 +137,7 @@ final Provider<void> keepAliveControllerProvider = Provider<void>((Ref ref) {
   final int count = ref.watch(sessionsProvider.select((SessionsState s) => s.sessions.where((Session x) => x.state == SessionState.running || x.state == SessionState.needsInput).length));
   final BackgroundKeeper service = ref.read(keepAliveProvider);
   if (on && hasMac) {
-    unawaited(service.start(count == 0 ? 'Agent Console đang theo dõi' : 'Agent Console đang theo dõi $count session'));
+    unawaited(service.start(count == 0 ? 'Đang theo dõi' : 'Đang theo dõi · $count session'));
   } else {
     unawaited(service.stop());
   }

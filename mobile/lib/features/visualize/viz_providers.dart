@@ -16,6 +16,9 @@ enum VizTab {
   const VizTab(this.title);
   final String title;
 
+  /// The tabs the phone shows. Phone capture was dropped, so that tab is gone (an old Mac may still suggest it).
+  static List<VizTab> get shown => <VizTab>[for (final VizTab tab in values) if (tab != phone) tab];
+
   static VizTab? byName(String? name) {
     for (final VizTab tab in VizTab.values) {
       if (tab.name == name) return tab;

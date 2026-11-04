@@ -103,8 +103,8 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Token.surface,
-        title: Text(l10n.pairTitle, style: TypeToken.titleMd),
+        backgroundColor: Kit.of(context).sidebar,
+        title: Text(l10n.pairTitle, style: Kit.of(context).titleMd),
         leading: widget.canCancel ? IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close), tooltip: l10n.close) : null,
         automaticallyImplyLeading: false,
       ),
@@ -112,7 +112,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
         child: ListView(
           padding: const EdgeInsets.all(Space.lg),
           children: <Widget>[
-            Text(l10n.pairIntro, style: TypeToken.bodyMd.copyWith(color: Token.muted)),
+            Text(l10n.pairIntro, style: Kit.of(context).bodyMd.copyWith(color: Kit.of(context).textMuted)),
             const SizedBox(height: Space.lg),
             Row(children: <Widget>[
               Expanded(child: _ModeButton(label: l10n.pairScan, icon: Icons.qr_code_scanner, selected: _scanning, onTap: () => setState(() => _scanning = true))),
@@ -122,7 +122,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
             const SizedBox(height: Space.lg),
             if (_scanning)
               ClipRRect(
-                borderRadius: BorderRadius.circular(Radii.lg),
+                borderRadius: BorderRadius.circular(Radii.md),
                 child: SizedBox(
                   height: 320,
                   child: MobileScanner(
@@ -142,7 +142,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
               Row(children: <Widget>[
                 const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: Space.md),
-                Expanded(child: Text(l10n.pairWaiting, style: TypeToken.bodyMd)),
+                Expanded(child: Text(l10n.pairWaiting, style: Kit.of(context).bodyMd)),
               ])
             else if (ui.failure != null)
               Semantics(
@@ -154,7 +154,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
                     PairingFailure.denied => l10n.pairDenied,
                     PairingFailure.unreachable => l10n.pairUnreachable,
                   },
-                  style: TypeToken.bodyMd.copyWith(color: Token.statusError),
+                  style: Kit.of(context).bodyMd.copyWith(color: Kit.of(context).danger),
                 ),
               ),
           ],
@@ -200,14 +200,14 @@ class _ModeButton extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: Metric.minTarget),
           padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.sm),
           decoration: BoxDecoration(
-            color: selected ? Token.surfaceRaised : Colors.transparent,
+            color: selected ? Kit.of(context).card : Colors.transparent,
             borderRadius: BorderRadius.circular(Radii.md),
-            border: Border.all(color: selected ? Token.primary : Token.border),
+            border: Border.all(color: selected ? Kit.of(context).accent : Kit.of(context).hairline),
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: <Widget>[
-            Icon(icon, size: 18, color: selected ? Token.primary : Token.muted),
+            Icon(icon, size: 18, color: selected ? Kit.of(context).accent : Kit.of(context).textMuted),
             const SizedBox(width: Space.sm),
-            Flexible(child: Text(label, style: TypeToken.labelSm.copyWith(color: selected ? Token.onSurface : Token.muted, fontSize: 13))),
+            Flexible(child: Text(label, style: Kit.of(context).labelSm.copyWith(color: selected ? Kit.of(context).text : Kit.of(context).textMuted, fontSize: 13))),
           ]),
         ),
       ),
@@ -236,8 +236,8 @@ class _Field extends StatelessWidget {
       autocorrect: false,
       enableSuggestions: false,
       textCapitalization: caps ? TextCapitalization.characters : TextCapitalization.none,
-      style: (mono ? TypeToken.codeSm : TypeToken.bodyMd).copyWith(color: Token.onSurface),
-      decoration: InputDecoration(labelText: label, labelStyle: TypeToken.bodySm),
+      style: (mono ? Kit.of(context).codeSm : Kit.of(context).bodyMd).copyWith(color: Kit.of(context).text),
+      decoration: InputDecoration(labelText: label, labelStyle: Kit.of(context).bodySm),
     );
   }
 }

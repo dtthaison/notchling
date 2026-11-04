@@ -47,6 +47,7 @@ dependencies:
   record: ^7.1.2
   path_provider: ^2.1.6
   app_settings: ^9.0.1
+  image_picker: ^1.2.4
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +70,7 @@ flutter:
   generate: true
   assets:
     - assets/fonts/OFL.txt
+    - assets/pet/
     # Whisper model, git-ignored: run tool/fetch_model.sh. The build fails naming this file when it is missing.
     - assets/models/ggml-small-q5_1.bin
     # Copied from ../viz by tool/sync_viz.sh (git-ignored). The build fails clearly when it is missing.
@@ -76,14 +78,6 @@ flutter:
     - assets/viz/vendor/
     - assets/viz/fonts/
   fonts:
-    - family: Geist
-      fonts:
-        - asset: assets/fonts/Geist-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/Geist-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Geist-SemiBold.ttf
-          weight: 600
     - family: GeistMono
       fonts:
         - asset: assets/fonts/GeistMono-Regular.ttf

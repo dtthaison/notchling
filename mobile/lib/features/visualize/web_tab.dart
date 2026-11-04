@@ -12,9 +12,12 @@ import '../connection/connection.dart';
 
 /// A picture of the session's dev server (v1 is a snapshot, not an interactive page).
 class WebTab extends ConsumerStatefulWidget {
-  const WebTab({super.key, required this.sessionId, this.initialUrl});
+  const WebTab({super.key, required this.sessionId, this.initialUrl, this.candidates = const <String>[]});
   final String sessionId;
   final String? initialUrl;
+
+  /// Page addresses the Mac found listening, newest first: chips under the field.
+  final List<String> candidates;
 
   @override
   ConsumerState<WebTab> createState() => _WebTabState();
@@ -25,6 +28,7 @@ class _WebTabState extends ConsumerState<WebTab> {
   Uint8List? _image;
   bool _loading = false;
   bool _failed = false;
+  String? _reason;
 
   @override
   void initState() {
@@ -45,12 +49,19 @@ class _WebTabState extends ConsumerState<WebTab> {
     setState(() {
       _loading = true;
       _failed = false;
+      _reason = null;
     });
     try {
       final Uint8List jpeg = await client.webSnapshot(widget.sessionId, url: url.isEmpty ? null : url, width: 600);
       if (mounted) setState(() => _image = jpeg);
-    } on BridgeException {
-      if (mounted) setState(() => _failed = true);
+    } on BridgeException catch (error) {
+      // The Mac says which server is down ("localhost:3040 không chạy trên Mac"): show that, not a generic line.
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _reason = error.code == 'not_reachable' || error.code == 'invalid' || error.code == 'not_found' ? error.message : null;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -64,7 +75,14 @@ class _WebTabState extends ConsumerState<WebTab> {
     if (_loading && image == null) {
       content = const SkeletonRows(count: 4);
     } else if (_failed && image == null) {
-      content = ErrorState(message: l10n.vizWebFailed, onRetry: () => unawaited(_capture()));
+      content = Column(mainAxisAlignment: MainAxisAlignment.center, children: <Widget>[
+        ErrorState(message: _reason ?? l10n.vizWebFailed, onRetry: () => unawaited(_capture())),
+        if (_reason != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+            child: Text(l10n.vizWebHint, textAlign: TextAlign.center, style: Kit.of(context).meta),
+          ),
+      ]);
     } else if (image != null) {
       content = InteractiveViewer(maxScale: 4, child: Center(child: Image.memory(image, gaplessPlayback: true)));
     } else {
@@ -79,7 +97,7 @@ class _WebTabState extends ConsumerState<WebTab> {
               controller: _url,
               keyboardType: TextInputType.url,
               autocorrect: false,
-              style: TypeToken.codeSm.copyWith(color: Token.onSurface),
+              style: Kit.of(context).codeSm.copyWith(color: Kit.of(context).text),
               decoration: InputDecoration(hintText: 'http://localhost:3000', labelText: l10n.vizWebUrl),
               onSubmitted: (_) => unawaited(_capture()),
             ),
@@ -98,6 +116,27 @@ class _WebTabState extends ConsumerState<WebTab> {
           ),
         ]),
       ),
+      if (widget.candidates.isNotEmpty)
+        SizedBox(
+          height: Metric.minTarget,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: Space.md),
+            children: <Widget>[
+              for (final String candidate in widget.candidates)
+                Padding(
+                  padding: const EdgeInsets.only(right: Space.sm),
+                  child: ActionChip(
+                    label: Text(candidate.replaceFirst('http://', ''), style: Kit.of(context).codeSm),
+                    onPressed: () {
+                      _url.text = candidate;
+                      unawaited(_capture());
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
       Expanded(child: content),
     ]);
   }

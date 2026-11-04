@@ -15,6 +15,7 @@ import '../features/macs/macs_screen.dart';
 import '../features/pairing/pairing_screen.dart';
 import '../features/sessions/sessions_notifier.dart';
 import '../features/sessions/sessions_screen.dart';
+import '../features/settings/settings_screen.dart';
 import '../features/visualize/visualize_screen.dart';
 import '../l10n/app_localizations.dart';
 import 'alerts.dart';
@@ -22,6 +23,10 @@ import 'nav_state.dart';
 import 'notifications.dart';
 import 'theme/tokens.dart';
 import 'widgets/common.dart';
+import 'widgets/alert_banner.dart';
+import 'widgets/glass_nav.dart';
+import 'widgets/kit.dart';
+import 'widgets/motion.dart';
 
 /// Root: pair first, then the three tabs (or three panels from 840 dp, like the Mac).
 class AppRoot extends ConsumerStatefulWidget {
@@ -64,16 +69,25 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
         title: Text(l10n.keepAliveTitle),
         content: Text(l10n.keepAliveBody),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.notNow)),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.keepAliveEnable)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.notNow),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.keepAliveEnable),
+          ),
         ],
       ),
     );
-    if (on != null) await ref.read(alertPrefsProvider.notifier).setKeepAlive(on: on);
+    if (on != null) {
+      await ref.read(alertPrefsProvider.notifier).setKeepAlive(on: on);
+    }
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) => ref.read(lifecycleProvider.notifier).set(state);
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      ref.read(lifecycleProvider.notifier).set(state);
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +100,9 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
       }
     });
     final MacsState macs = ref.watch(macsProvider);
-    if (!macs.loaded) return const Scaffold(body: SafeArea(child: SkeletonRows()));
+    if (!macs.loaded) {
+      return const Scaffold(body: SafeArea(child: SkeletonRows()));
+    }
     if (macs.active == null) return const PairingScreen();
     ref.watch(subscriptionSyncProvider);
     return const HomeShell();
@@ -114,7 +130,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   void _bind(BridgeClient? client) {
     unawaited(_events?.cancel());
     _events = client?.events.listen((BridgeEvent event) {
-      if (event is OpenEvent && ref.read(lifecycleProvider) == AppLifecycleState.resumed) showSessionsTab(ref);
+      if (event is OpenEvent &&
+          ref.read(lifecycleProvider) == AppLifecycleState.resumed) {
+        showSessionsTab(ref);
+      }
     });
   }
 
@@ -127,50 +146,155 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
-    ref.listen<BridgeClient?>(bridgeClientProvider, (BridgeClient? previous, BridgeClient? next) => _bind(next));
+    ref.listen<BridgeClient?>(
+      bridgeClientProvider,
+      (BridgeClient? previous, BridgeClient? next) => _bind(next),
+    );
     final int tab = ref.watch(activeTabProvider);
+    final bool hideBar =
+        tab == 1 &&
+        ref.watch(selectedSessionIdProvider) != null &&
+        MediaQuery.sizeOf(context).width < Metric.threePanelBreakpoint;
+
+    final bool wide =
+        MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint;
+    final Kit kit = Kit.of(context);
+
+    Widget inset(Widget child, {bool bottom = false}) {
+      final EdgeInsets p = MediaQuery.paddingOf(context);
+      return MediaQuery.removePadding(
+        context: context,
+        removeTop: true,
+        removeBottom: bottom,
+        child: Padding(
+          padding: EdgeInsets.only(top: p.top, bottom: bottom ? p.bottom : 0),
+          child: child,
+        ),
+      );
+    }
 
     return Scaffold(
       // The keyboard must not resize the whole page each frame of its animation (all three tabs would relayout);
       // the chat composer alone follows the inset (KeyboardInset) and the tab bar steps aside while it is up.
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: Token.surface,
-        title: Text(l10n.appName, style: TypeToken.titleMd),
-        actions: <Widget>[
-          IconButton(
-            tooltip: l10n.openMacs,
-            icon: const Icon(Icons.laptop_mac),
-            constraints: const BoxConstraints(minWidth: Metric.minTarget, minHeight: Metric.minTarget),
-            onPressed: () => unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (BuildContext context) => const MacsScreen()))),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        bottom: false,
-        child: Column(children: <Widget>[
-          const ConnectionBanner(),
-          Expanded(
-            child: LayoutBuilder(builder: (BuildContext context, BoxConstraints constraints) {
-              if (constraints.maxWidth >= Metric.threePanelBreakpoint) {
-                return Row(children: <Widget>[
-                  SizedBox(width: 360, child: SessionsScreen(onOpenChat: () {})),
-                  const VerticalDivider(),
-                  const Expanded(child: ChatScreen()),
-                  const VerticalDivider(),
-                  const Expanded(child: VisualizeScreen()),
-                ]);
-              }
-              return IndexedStack(index: tab, children: <Widget>[
-                _TabSlot(active: tab == 0, child: SessionsScreen(onOpenChat: () => ref.read(activeTabProvider.notifier).show(1))),
-                _TabSlot(active: tab == 1, child: const ChatScreen()),
-                // Only built while shown, so the Phone stream and viz loads stop when you leave.
-                if (tab == 2) const VisualizeScreen() else const SizedBox.shrink(),
-              ]);
-            }),
-          ),
-        ]),
-      ),
+      // The bars are frosted glass over the content: the lists scroll under them (their padding comes from the
+      // Scaffold's MediaQuery), so nothing needs an opaque strip behind it.
+      extendBody: !wide,
+      extendBodyBehindAppBar: true,
+      // The Chat tab with a session open has its own header (with the Macs button): a second bar above it would eat a
+      // quarter of the screen.
+      appBar: hideBar
+          ? null
+          : AppBar(
+              toolbarHeight: 48,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              flexibleSpace: const GlassBar(
+                top: true,
+                child: SizedBox.expand(),
+              ),
+              title: Text(l10n.appName, style: kit.titleMd),
+              actions: <Widget>[
+                IconButton(
+                  tooltip: l10n.openMacs,
+                  icon: const Icon(Icons.laptop_mac),
+                  constraints: const BoxConstraints(
+                    minWidth: Metric.minTarget,
+                    minHeight: Metric.minTarget,
+                  ),
+                  onPressed: () => unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) => const MacsScreen(),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: l10n.settingsTitle,
+                  icon: const Icon(Icons.settings_outlined),
+                  constraints: const BoxConstraints(
+                    minWidth: Metric.minTarget,
+                    minHeight: Metric.minTarget,
+                  ),
+                  onPressed: () => unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            const SettingsScreen(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+      body: wide
+          ? SafeArea(
+              bottom: false,
+              child: Column(
+                children: <Widget>[
+                  const ConnectionBanner(),
+                  Expanded(
+                    child: Row(
+                      children: <Widget>[
+                        SizedBox(
+                          width: 360,
+                          child: SessionsScreen(onOpenChat: () {}),
+                        ),
+                        const VerticalDivider(),
+                        const Expanded(child: ChatScreen()),
+                        const VerticalDivider(),
+                        const Expanded(child: VisualizeScreen()),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: _TabFade(
+                    index: tab,
+                    child: IndexedStack(
+                      index: tab,
+                      children: <Widget>[
+                        _TabSlot(
+                          active: tab == 0,
+                          child: SessionsScreen(
+                            onOpenChat: () =>
+                                ref.read(activeTabProvider.notifier).show(1),
+                          ),
+                        ),
+                        _TabSlot(
+                          active: tab == 1,
+                          child: inset(const ChatScreen()),
+                        ),
+                        // Only built while shown, so the Phone stream and viz loads stop when you leave.
+                        if (tab == 2)
+                          inset(const VisualizeScreen(), bottom: true)
+                        else
+                          const SizedBox.shrink(),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top,
+                  left: 0,
+                  right: 0,
+                  child: const ConnectionBanner(),
+                ),
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top,
+                  left: 0,
+                  right: 0,
+                  child: const InAppAlertBanner(),
+                ),
+              ],
+            ),
       bottomNavigationBar: const _BottomNav(),
     );
   }
@@ -195,7 +319,10 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
     super.initState();
     // Only the retry countdown needs a once-a-second redraw; a connected, idle app asks for no frames.
     _tick = Timer.periodic(const Duration(seconds: 1), (Timer _) {
-      if (mounted && ref.read(connectionStatusProvider).phase == LinkPhase.disconnected) setState(() {});
+      if (mounted &&
+          ref.read(connectionStatusProvider).phase == LinkPhase.disconnected) {
+        setState(() {});
+      }
     });
   }
 
@@ -222,7 +349,7 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
     }
 
     String? text;
-    Color color = Token.muted;
+    Color color = Kit.of(context).textMuted;
     IconData icon = Icons.sync;
     VoidCallback? retry;
     switch (status.phase) {
@@ -231,12 +358,19 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
       case LinkPhase.disconnected:
         if (status.revoked) {
           text = l10n.connectionRevoked;
-          color = Token.statusError;
+          color = Kit.of(context).danger;
           icon = Icons.link_off;
         } else {
-          final int seconds = status.retryAt == null ? 0 : status.retryAt!.difference(DateTime.now()).inSeconds.clamp(0, 999);
-          text = status.error != null ? l10n.noRouteToMac : l10n.connectionLostRetry(seconds);
-          color = Token.statusError;
+          final int seconds = status.retryAt == null
+              ? 0
+              : status.retryAt!
+                    .difference(DateTime.now())
+                    .inSeconds
+                    .clamp(0, 999);
+          text = status.error != null
+              ? l10n.noRouteToMac
+              : l10n.connectionLostRetry(seconds);
+          color = Kit.of(context).danger;
           icon = Icons.wifi_off;
           retry = () => ref.read(bridgeClientProvider)?.retryNow();
         }
@@ -244,9 +378,13 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
         final bool viaInternet = status.route == RouteKind.tunnel;
         // The home network is the normal case and fades after two seconds; the internet route stays visible.
         if (_showConnected || viaInternet) {
-          final String route = viaInternet ? l10n.routeInternet : l10n.routeHome;
-          text = status.route == null ? l10n.connected : l10n.connectedVia(route);
-          color = viaInternet ? Token.statusInput : Token.statusRunning;
+          final String route = viaInternet
+              ? l10n.routeInternet
+              : l10n.routeHome;
+          text = status.route == null
+              ? l10n.connected
+              : l10n.connectedVia(route);
+          color = viaInternet ? Kit.of(context).needs : Kit.of(context).working;
           icon = viaInternet ? Icons.public : Icons.check;
         }
     }
@@ -256,14 +394,32 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
       label: text,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.sm),
-        decoration: const BoxDecoration(color: Token.surface, border: Border(bottom: BorderSide(color: Token.border))),
-        child: Row(children: <Widget>[
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: Space.sm),
-          Expanded(child: Text(text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TypeToken.labelSm.copyWith(color: color, fontSize: 12))),
-          if (retry != null) TextButton(onPressed: retry, child: Text(l10n.retryNow)),
-        ]),
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.sm,
+        ),
+        decoration: BoxDecoration(
+          color: Kit.of(context).sidebar,
+          border: Border(bottom: BorderSide(color: Kit.of(context).hairline)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Kit.of(
+                  context,
+                ).labelSm.copyWith(color: color, fontSize: 12),
+              ),
+            ),
+            if (retry != null)
+              TextButton(onPressed: retry, child: Text(l10n.retryNow)),
+          ],
+        ),
       ),
     );
   }
@@ -276,16 +432,14 @@ class _BottomNav extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint) return const SizedBox.shrink();
-    final AppL10n l10n = AppL10n.of(context);
-    return NavigationBar(
-      selectedIndex: ref.watch(activeTabProvider),
-      onDestinationSelected: (int index) => ref.read(activeTabProvider.notifier).show(index),
-      destinations: <NavigationDestination>[
-        NavigationDestination(icon: const Icon(Icons.list_alt), label: l10n.tabSessions),
-        NavigationDestination(icon: const Icon(Icons.chat_bubble_outline), label: l10n.tabChat),
-        NavigationDestination(icon: const Icon(Icons.insights), label: l10n.tabVisualize),
-      ],
+    if (MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint) {
+      return const SizedBox.shrink();
+    }
+    return GlassNav(
+      selected: ref.watch(activeTabProvider),
+      // Chat is the tab whose list moves under the bar with the keyboard: no blur there.
+      solid: ref.watch(activeTabProvider) == 1,
+      onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
     );
   }
 }
@@ -311,7 +465,12 @@ class KeyboardLiftController {
 /// The same widgets at every inset, so the composer keeps the focus that opened the keyboard. A transform keeps
 /// hit testing correct. [composer] should include anything that rises with it (a pending-prompt card).
 class KeyboardLift extends StatefulWidget {
-  const KeyboardLift({super.key, required this.controller, required this.list, required this.composer});
+  const KeyboardLift({
+    super.key,
+    required this.controller,
+    required this.list,
+    required this.composer,
+  });
   final KeyboardLiftController controller;
   final Widget list;
   final Widget composer;
@@ -355,33 +514,58 @@ class _KeyboardLiftState extends State<KeyboardLift> {
   void _measure() {
     final RenderObject? box = context.findRenderObject();
     if (!mounted || box is! RenderBox || !box.hasSize) return;
-    final double below = MediaQuery.sizeOf(context).height - box.localToGlobal(Offset(0, box.size.height)).dy;
+    final double below =
+        MediaQuery.sizeOf(context).height -
+        box.localToGlobal(Offset(0, box.size.height)).dy;
     // Measured only while the keyboard is down: with it up the page is covered, not moved, so it stays right.
-    if (MediaQuery.viewInsetsOf(context).bottom == 0 && (below - _below).abs() > 0.5) setState(() => _below = below);
+    if (MediaQuery.viewInsetsOf(context).bottom == 0 &&
+        (below - _below).abs() > 0.5) {
+      setState(() => _below = below);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final double inset = MediaQuery.viewInsetsOf(context).bottom;
     final double lift = math.max(0, inset - _below);
-    if (inset == 0) WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
+    if (inset == 0) {
+      WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
+    }
     if (lift != _lastLift) {
+      final bool closing = lift < _lastLift;
       _lastLift = lift;
       _settle?.cancel();
-      if (lift == 0) {
+      if (closing && lift > 0) {
+        // Closing: the list's extra room goes at once and the transform alone carries the content down with the
+        // keyboard. Keeping the room while the transform moved the list down left an empty band (the window colour)
+        // at the top of the list for the whole animation, about half the screen.
+        WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+          if (_lastLift > 0 && widget.controller.settled.value != 0) widget.controller.settled.value = 0;
+        });
+      } else if (lift == 0) {
         // Closed: drop the list's extra room right away; the transform it replaces is already at zero.
         WidgetsBinding.instance.addPostFrameCallback((Duration _) {
           if (_lastLift == 0) widget.controller.settled.value = 0;
         });
       } else {
-        _settle = Timer(settleAfter, () => widget.controller.settled.value = _lastLift);
+        _settle = Timer(
+          settleAfter,
+          () => widget.controller.settled.value = _lastLift,
+        );
       }
     }
     final double settled = widget.controller.settled.value;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Expanded(child: ClipRect(child: Transform.translate(offset: Offset(0, settled - lift), child: widget.list))),
+        Expanded(
+          child: ClipRect(
+            child: Transform.translate(
+              offset: Offset(0, settled - lift),
+              child: widget.list,
+            ),
+          ),
+        ),
         Transform.translate(offset: Offset(0, -lift), child: widget.composer),
       ],
     );
@@ -410,7 +594,54 @@ class _TabSlotState extends State<_TabSlot> {
     // TickerMode off for a hidden tab: its animations (the breathing dots) stop instead of keeping frames going.
     return TickerMode(
       enabled: widget.active,
-      child: MediaQuery(data: widget.active ? live : (_frozen ?? live), child: widget.child),
+      child: MediaQuery(
+        data: widget.active ? live : (_frozen ?? live),
+        child: widget.child,
+      ),
     );
   }
+}
+
+/// A short fade when the tab changes, so switching tabs reads as one gesture. Opacity only (a layer property): the
+/// tabs themselves do not rebuild. Reduce Motion skips it.
+class _TabFade extends StatefulWidget {
+  const _TabFade({required this.index, required this.child});
+  final int index;
+  final Widget child;
+
+  @override
+  State<_TabFade> createState() => _TabFadeState();
+}
+
+class _TabFadeState extends State<_TabFade>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: Motion.ui,
+    value: 1,
+  );
+  late final CurvedAnimation _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Motion.out,
+  );
+
+  @override
+  void didUpdateWidget(_TabFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index != widget.index &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _controller.forward(from: 0.25);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FadeTransition(opacity: _fade, child: widget.child);
 }

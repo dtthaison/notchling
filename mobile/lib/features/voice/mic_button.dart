@@ -52,19 +52,19 @@ class MicButton extends StatelessWidget {
                       curve: Curves.easeOut,
                       width: still ? 40 : 28 + 20 * math.sqrt(level),
                       height: still ? 40 : 28 + 20 * math.sqrt(level),
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: Token.primary.withValues(alpha: still ? 0.18 : 0.12 + 0.2 * level)),
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: Kit.of(context).accent.withValues(alpha: still ? 0.18 : 0.12 + 0.2 * level)),
                     ),
                   if (transcribing)
-                    const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Token.primary))
+                    SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Kit.of(context).accent))
                   else
-                    Icon(recording ? Icons.stop_rounded : Icons.mic_none, size: 22, color: onPressed == null ? Token.statusExited : (recording ? Token.primary : Token.muted)),
+                    Icon(recording ? Icons.stop_rounded : Icons.mic_none, size: 22, color: onPressed == null ? Kit.of(context).textFaint : (recording ? Kit.of(context).accent : Kit.of(context).textMuted)),
                 ]),
               ),
-              if (recording) Text(_clock(current.elapsed), style: TypeToken.codeSm.copyWith(color: Token.primary)),
+              if (recording) Text(_clock(current.elapsed), style: Kit.of(context).codeSm.copyWith(color: Kit.of(context).accent)),
               if (transcribing)
                 Padding(
                   padding: const EdgeInsets.only(right: Space.sm),
-                  child: Text(l10n.transcribing, style: TypeToken.bodySm.copyWith(color: Token.muted)),
+                  child: Text(l10n.transcribing, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
                 ),
             ]),
           ),

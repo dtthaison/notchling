@@ -1,6 +1,11 @@
 package com.trietdigital.agentconsole
 
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.view.Display
 import io.flutter.embedding.android.FlutterActivity
@@ -10,6 +15,14 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "local.agentconsole/sounds").setMethodCallHandler { call, result ->
+            if (call.method == "play") {
+                playSound(call.argument<String>("name"))
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "local.agentconsole/keepalive").setMethodCallHandler { call, result ->
             when (call.method) {
                 "start" -> {
@@ -29,6 +42,31 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /// A short in-app sound ("needs_you" or "new_message" from res/raw). Silent when the ringer is not normal or Do Not
+    /// Disturb is on, and never louder than a notification.
+    private fun playSound(name: String?) {
+        if (name == null) return
+        val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        val notifications = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && notifications.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) return
+        val resource = resources.getIdentifier(name, "raw", packageName)
+        if (resource == 0) return
+        try {
+            val player = MediaPlayer()
+            player.setAudioAttributes(
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
+            )
+            resources.openRawResourceFd(resource).use { player.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+            player.setVolume(0.7f, 0.7f)
+            player.setOnCompletionListener { it.release() }
+            player.prepare()
+            player.start()
+        } catch (error: Exception) {
+            // A sound that cannot play is not worth an error: the banner and the notification already say it.
         }
     }
 

@@ -67,7 +67,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera dùng để quét mã QR ghép đôi với Mac.</string>
+	<string>Camera dùng để quét mã QR ghép đôi với Mac và chụp ảnh gửi vào session. / The camera scans the pairing QR code and takes photos to send to a session.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Chọn ảnh để gửi vào session Claude. / Pick a photo to send to a Claude session.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Micro dùng để nói thay gõ trong ô nhập. / The microphone is used to dictate into the message box.</string>
 	<key>NSLocalNetworkUsageDescription</key>

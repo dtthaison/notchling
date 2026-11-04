@@ -119,7 +119,7 @@ void main() {
       final _FakeKeeper service = _FakeKeeper();
       final ProviderContainer c = container(service, paired: true);
       await until(() => service.calls.any((String x) => x.startsWith('start')));
-      expect(service.calls.firstWhere((String x) => x.startsWith('start')), contains('Agent Console đang theo dõi'));
+      expect(service.calls.firstWhere((String x) => x.startsWith('start')), contains('Đang theo dõi'));
       await c.read(alertPrefsProvider.notifier).setKeepAlive(on: false);
       await until(() => service.calls.contains('stop'));
     });

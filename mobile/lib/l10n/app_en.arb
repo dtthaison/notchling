@@ -18,10 +18,10 @@
   "retry": "Retry",
   "cancel": "Cancel",
   "close": "Close",
-  "stateNeedsInput": "Needs input",
-  "stateRunning": "Running",
+  "stateNeedsInput": "Needs Input",
+  "stateRunning": "Working",
   "stateDone": "Done",
-  "stateExited": "Exited",
+  "stateExited": "Ended",
   "sessionsEmptyTitle": "No sessions yet",
   "sessionsEmptyBody": "Claude Code sessions on your Mac show up here.",
   "searchHint": "Search sessions",
@@ -174,6 +174,8 @@
   "vizWebUrl": "Page address (localhost on the Mac)",
   "vizWebRefresh": "Capture again",
   "vizWebNoUrl": "This session has no web address yet. Enter one above.",
+  "vizWebHint": "Start the dev server on the Mac and refresh, or pick another address below.",
+  "vizWebCandidates": "Running on the Mac",
   "vizWebFailed": "Couldn't capture the page. Please try again.",
   "vizLoadFailed": "Couldn't load the visualization. Please try again.",
   "vizSelectSession": "Select a session to see its visualization.",
@@ -238,10 +240,73 @@
   "takeoverBusyBody": "The session is running; the current turn will be cut off.",
   "takeoverBusyConfirm": "Stop anyway",
   "chatQueued": "waiting",
+  "chatSendNow": "Send now",
+  "chatSendNowTitle": "Interrupt the running turn to send now?",
+  "chatSendNowBody": "Claude stops the current turn and runs this waiting message right away.",
+  "chatSendNowFailed": "Could not interrupt",
   "chatSending": "sending",
   "chatSendFailed": "Not sent",
   "chatUpdating": "Updating",
   "pictureFailed": "Could not load the picture",
   "pictureClose": "Close picture",
-  "pictureOpen": "Open picture"
+  "pictureOpen": "Open picture",
+  "allProjects": "All projects",
+  "archive": "Archive",
+  "archivedToast": "Archived {name}",
+  "@archivedToast": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "undo": "Undo",
+  "sessionsFilteredEmpty": "No sessions in this project.",
+  "chatContext": "Context",
+  "limit5h": "5h",
+  "limitWeek": "Week",
+  "shellHeader": "Shell command",
+  "shellRunsIn": "runs in {folder} · Claude sees the output",
+  "@shellRunsIn": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "shellHint": "Send runs it like ! in the terminal · delete the ! to send a message instead",
+  "shellWillRun": "Will run",
+  "slashHeader": "Commands",
+  "toolStepsCount": "{count} tool steps",
+  "@toolStepsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "toolStepOne": "1 tool step",
+  "compactionTitle": "Conversation compacted",
+  "showOutput": "Show output",
+  "copyCode": "Copy",
+  "copied": "Copied",
+  "takeoverShort": "Take over",
+  "activityIdle": "Idle",
+  "viewOnlyChip": "View only",
+  "newMessagesBelow": "New messages",
+  "attachPhoto": "Attach a photo",
+  "photoCamera": "Take a photo",
+  "photoGallery": "Choose from library",
+  "photoPickFailed": "Could not open the camera or library.",
+  "photoSent": "Photo sent",
+  "photoTitle": "Send a photo",
+  "photoCaptionHint": "Add a caption (optional)",
+  "settingsTitle": "Settings",
+  "settingsTheme": "Appearance",
+  "themeSystem": "System",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "settingsNotifications": "Notifications",
+  "settingsSound": "Notification sounds",
+  "settingsSoundHint": "A soft sound for new messages and sessions that need you while the app is open."
 }

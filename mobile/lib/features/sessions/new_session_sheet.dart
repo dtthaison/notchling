@@ -79,7 +79,7 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: Text(l10n.newSession, style: TypeToken.titleMd)),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: Text(l10n.newSession, style: Kit.of(context).titleMd)),
           const SizedBox(height: Space.md),
           Padding(padding: const EdgeInsets.symmetric(horizontal: Space.lg), child: PanelTitle(l10n.newSessionFolder)),
           Flexible(
@@ -87,7 +87,7 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
               loading: () => const SkeletonRows(count: 4),
               error: (Object error, StackTrace stack) => ErrorState(message: l10n.loadFailed, onRetry: () => ref.invalidate(recentProjectsProvider)),
               data: (List<String> folders) => folders.isEmpty
-                  ? Padding(padding: const EdgeInsets.all(Space.lg), child: Text(l10n.newSessionNoProjects, style: TypeToken.bodyMd))
+                  ? Padding(padding: const EdgeInsets.all(Space.lg), child: Text(l10n.newSessionNoProjects, style: Kit.of(context).bodyMd))
                   : ListView(
                       shrinkWrap: true,
                       children: <Widget>[
@@ -106,9 +106,9 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
                                   padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.sm),
                                   child: Row(children: <Widget>[
                                     Icon(folder == _folder ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                                        size: 20, color: folder == _folder ? Token.primary : Token.muted),
+                                        size: 20, color: folder == _folder ? Kit.of(context).accent : Kit.of(context).textMuted),
                                     const SizedBox(width: Space.md),
-                                    Expanded(child: Text(folder, style: TypeToken.codeSm.copyWith(color: Token.onSurface))),
+                                    Expanded(child: Text(folder, style: Kit.of(context).codeSm.copyWith(color: Kit.of(context).text))),
                                   ]),
                                 ),
                               ),
@@ -128,10 +128,10 @@ class _NewSessionSheetState extends ConsumerState<_NewSessionSheet> {
                   selected: _model == model,
                   onSelected: (_) => setState(() => _model = model),
                   showCheckmark: false,
-                  labelStyle: TypeToken.labelSm.copyWith(color: _model == model ? Token.primary : Token.muted, fontSize: 13),
-                  backgroundColor: Token.surface,
-                  selectedColor: Token.surfaceRaised,
-                  side: const BorderSide(color: Token.border),
+                  labelStyle: Kit.of(context).labelSm.copyWith(color: _model == model ? Kit.of(context).accent : Kit.of(context).textMuted, fontSize: 13),
+                  backgroundColor: Kit.of(context).sidebar,
+                  selectedColor: Kit.of(context).card,
+                  side: BorderSide(color: Kit.of(context).hairline),
                   materialTapTargetSize: MaterialTapTargetSize.padded,
                 ),
             ]),

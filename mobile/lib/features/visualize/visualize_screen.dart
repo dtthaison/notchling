@@ -6,7 +6,6 @@ import '../../app/widgets/common.dart';
 import '../../core/protocol/json.dart';
 import '../../l10n/app_localizations.dart';
 import '../sessions/sessions_notifier.dart';
-import 'phone_tab.dart';
 import 'viz_providers.dart';
 import 'viz_webview.dart';
 import 'web_tab.dart';
@@ -23,8 +22,10 @@ class VisualizeScreen extends ConsumerWidget {
     if (id == null) return StateMessage(icon: Icons.insights, title: l10n.vizSelectSession);
 
     final AsyncValue<Json> viz = ref.watch(vizProvider(id));
-    final VizTab? suggested = VizTab.byName(viz.value?.strOrNull('suggested'));
-    final VizTab selected = ref.watch(vizTabChoiceProvider)[id] ?? suggested ?? VizTab.flow;
+    VizTab? suggested = VizTab.byName(viz.value?.strOrNull('suggested'));
+    if (suggested == VizTab.phone) suggested = null;
+    VizTab selected = ref.watch(vizTabChoiceProvider)[id] ?? suggested ?? VizTab.flow;
+    if (selected == VizTab.phone) selected = VizTab.flow;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
       _TabBar(
@@ -35,8 +36,7 @@ class VisualizeScreen extends ConsumerWidget {
       const Divider(),
       Expanded(
         child: switch (selected) {
-          VizTab.phone => const PhoneTab(),
-          VizTab.web => WebTab(key: ValueKey<String>('web-$id-${viz.value?.strOrNull('webURL')}'), sessionId: id, initialUrl: viz.value?.strOrNull('webURL')),
+          VizTab.web => WebTab(key: ValueKey<String>('web-$id-${viz.value?.strOrNull('webURL')}'), sessionId: id, initialUrl: viz.value?.strOrNull('webURL'), candidates: viz.value == null ? const <String>[] : viz.value!.strings('webCandidates')),
           VizTab.entity => _EntityBody(sessionId: id),
           _ => _SpecBody(viz: viz, tab: selected, onRetry: () => ref.invalidate(vizProvider(id))),
         },
@@ -58,7 +58,7 @@ class _TabBar extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs),
       child: Row(children: <Widget>[
-        for (final VizTab tab in VizTab.values)
+        for (final VizTab tab in VizTab.shown)
           Semantics(
             button: true,
             selected: tab == selected,
@@ -73,12 +73,12 @@ class _TabBar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: Space.md),
                 margin: const EdgeInsets.only(right: Space.xs),
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: tab == selected ? Token.surfaceRaised : Colors.transparent, borderRadius: BorderRadius.circular(Radii.sm)),
+                decoration: BoxDecoration(color: tab == selected ? Kit.of(context).card : Colors.transparent, borderRadius: BorderRadius.circular(Radii.sm)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-                  Text(tab.title, style: TypeToken.labelSm.copyWith(color: tab == selected ? Token.primary : Token.muted, fontSize: 13)),
+                  Text(tab.title, style: Kit.of(context).labelSm.copyWith(color: tab == selected ? Kit.of(context).accent : Kit.of(context).textMuted, fontSize: 13)),
                   if (tab == suggested) ...<Widget>[
                     const SizedBox(width: 4),
-                    Container(width: 5, height: 5, decoration: const BoxDecoration(color: Token.muted, shape: BoxShape.circle)),
+                    Container(width: 5, height: 5, decoration: BoxDecoration(color: Kit.of(context).textMuted, shape: BoxShape.circle)),
                   ],
                 ]),
               ),

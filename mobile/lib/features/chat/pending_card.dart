@@ -2,13 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
+import '../../app/widgets/kit.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 
 /// The question or permission the Mac is waiting on, above the composer. Permissions have Cho phép /
 /// Từ chối; questions list their options as buttons. Multi-select questions are answered on the Mac.
 class PendingCard extends StatefulWidget {
-  const PendingCard({super.key, required this.prompt, required this.onAllow, required this.onChoose, this.error});
+  const PendingCard({
+    super.key,
+    required this.prompt,
+    required this.onAllow,
+    required this.onChoose,
+    this.error,
+  });
 
   final PendingPrompt prompt;
   final String? error;
@@ -42,69 +49,119 @@ class _PendingCardState extends State<PendingCard> {
 
     if (prompt.isPermission) {
       body
-        ..add(Text(prompt.summary, maxLines: 4, overflow: TextOverflow.ellipsis, style: TypeToken.codeSm.copyWith(color: Token.onSurface)))
+        ..add(
+          Text(
+            prompt.summary,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: Kit.of(context).codeSm.copyWith(color: Kit.of(context).text),
+          ),
+        )
         ..add(const SizedBox(height: Space.md))
-        ..add(Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[
-          PrimaryButton(label: l10n.allow, semanticLabel: '${l10n.allow} ${prompt.toolName}', onPressed: () => widget.onAllow(allow: true)),
-          SecondaryButton(label: l10n.deny, semanticLabel: '${l10n.deny} ${prompt.toolName}', onPressed: () => widget.onAllow(allow: false)),
-        ]));
+        ..add(
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            children: <Widget>[
+              PrimaryButton(
+                label: l10n.allow,
+                semanticLabel: '${l10n.allow} ${prompt.toolName}',
+                onPressed: () => widget.onAllow(allow: true),
+              ),
+              SecondaryButton(
+                label: l10n.deny,
+                semanticLabel: '${l10n.deny} ${prompt.toolName}',
+                onPressed: () => widget.onAllow(allow: false),
+              ),
+            ],
+          ),
+        );
     } else if (prompt.hasMultiSelect || prompt.questions.isEmpty) {
       body
-        ..add(Text(l10n.multiSelectOnMac, style: TypeToken.bodyMd))
+        ..add(Text(l10n.multiSelectOnMac, style: Kit.of(context).bodyMd))
         ..add(const SizedBox(height: Space.sm))
-        ..add(Text(prompt.summary, style: TypeToken.bodySm));
+        ..add(Text(prompt.summary, style: Kit.of(context).bodySm));
     } else {
-      final PromptQuestion question = prompt.questions[_picked.length.clamp(0, prompt.questions.length - 1)];
+      final PromptQuestion question = prompt
+          .questions[_picked.length.clamp(0, prompt.questions.length - 1)];
       body
-        ..add(if_(question.header.isNotEmpty, Text(question.header, style: TypeToken.labelSm)))
-        ..add(Text(question.question, style: TypeToken.bodyMd))
+        ..add(
+          if_(
+            question.header.isNotEmpty,
+            Text(question.header, style: Kit.of(context).labelSm),
+          ),
+        )
+        ..add(Text(question.question, style: Kit.of(context).bodyMd))
         ..add(const SizedBox(height: Space.md))
-        ..add(Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[
-          for (int i = 0; i < question.options.length; i++)
-            SecondaryButton(label: '${i + 1}  ${question.options[i]}', semanticLabel: '${i + 1}: ${question.options[i]}', onPressed: () => _pick(i + 1)),
-        ]));
+        ..add(
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            children: <Widget>[
+              for (int i = 0; i < question.options.length; i++)
+                SecondaryButton(
+                  label: '${i + 1}  ${question.options[i]}',
+                  semanticLabel: '${i + 1}: ${question.options[i]}',
+                  onPressed: () => _pick(i + 1),
+                ),
+            ],
+          ),
+        );
     }
 
     return Semantics(
       container: true,
-      label: prompt.isPermission ? l10n.pendingPermission(prompt.toolName) : l10n.pendingQuestion,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
-        decoration: BoxDecoration(
-          color: Token.surfaceRaised,
-          borderRadius: BorderRadius.circular(Radii.lg),
-          border: Border.all(color: Token.border),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: IntrinsicHeight(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
-            Container(width: 2, color: Token.statusInput),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(Space.md),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-                  Row(children: <Widget>[
-                    const Icon(Icons.mark_unread_chat_alt, size: 14, color: Token.statusInput),
-                    const SizedBox(width: Space.sm),
-                    Expanded(
-                      child: Text(prompt.isPermission ? l10n.pendingPermission(prompt.toolName) : l10n.pendingQuestion,
-                          style: TypeToken.labelSm.copyWith(color: Token.statusInput)),
-                    ),
-                  ]),
-                  const SizedBox(height: Space.sm),
-                  ...body,
-                  if (widget.error != null) ...<Widget>[
-                    const SizedBox(height: Space.sm),
-                    Text(l10n.answerFailed, style: TypeToken.bodySm.copyWith(color: Token.statusError)),
-                  ],
-                ]),
-              ),
+      label: prompt.isPermission
+          ? l10n.pendingPermission(prompt.toolName)
+          : l10n.pendingQuestion,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+        child: Surface(
+        level: 2,
+        radius: BorderRadius.circular(Radii.md),
+        outline: Kit.of(context).needs.withValues(alpha: 0.5),
+        padding: const EdgeInsets.all(Space.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  prompt.isPermission ? Icons.lock_outline : Icons.help_outline,
+                  size: 16,
+                  color: Kit.of(context).accentText,
+                ),
+                const SizedBox(width: Space.sm),
+                Expanded(
+                  child: Text(
+                    prompt.isPermission
+                        ? l10n.pendingPermission(prompt.toolName)
+                        : l10n.pendingQuestion,
+                    style: Kit.of(
+                      context,
+                    ).label.copyWith(color: Kit.of(context).accentText),
+                  ),
+                ),
+              ],
             ),
-          ]),
+            const SizedBox(height: Space.sm),
+            ...body,
+            if (widget.error != null) ...<Widget>[
+              const SizedBox(height: Space.sm),
+              Text(
+                l10n.answerFailed,
+                style: Kit.of(
+                  context,
+                ).bodySm.copyWith(color: Kit.of(context).danger),
+              ),
+            ],
+          ],
+        ),
         ),
       ),
     );
   }
 }
 
-Widget if_(bool condition, Widget child) => condition ? child : const SizedBox.shrink();
+Widget if_(bool condition, Widget child) =>
+    condition ? child : const SizedBox.shrink();

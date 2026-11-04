@@ -4,6 +4,7 @@ import 'package:agent_console/core/net/ws_transport.dart';
 import 'package:agent_console/core/pairing/mac_profile.dart';
 import 'package:agent_console/core/pairing/mac_store.dart';
 import 'package:agent_console/features/chat/chat_cache.dart';
+import 'package:agent_console/features/sessions/archive_store.dart';
 import 'package:agent_console/features/connection/connection.dart';
 import 'package:agent_console/features/macs/macs_notifier.dart';
 import 'package:agent_console/l10n/app_localizations.dart';
@@ -32,6 +33,7 @@ ProviderContainer containerWith(FakeWs socket, {WsConnector? connector, MacProfi
   final ProviderContainer container = ProviderContainer(overrides: <Override>[
     secretStoreProvider.overrideWithValue(secrets),
     chatCacheProvider.overrideWithValue(cache ?? MemoryChatCache()),
+    archiveStoreProvider.overrideWithValue(MemoryArchiveStore()),
     wsConnectorProvider.overrideWithValue(connector ?? (Endpoint endpoint) async => socket),
     networkChangesProvider.overrideWithValue(networkChanges ?? const Stream<void>.empty()),
   ]);
@@ -67,7 +69,8 @@ FakeWs macWithSessions(List<Map<String, Object?>> sessions, {List<Map<String, Ob
 }
 
 /// Wraps a widget the way the app does: dark theme, localizations (Vietnamese unless [locale] says otherwise).
-Widget host(Widget child, {Locale locale = const Locale('vi'), double textScale = 1}) {
+/// With [screen], [child] is the whole page (a Scaffold of its own) instead of sitting in a scroll view.
+Widget host(Widget child, {Locale locale = const Locale('vi'), double textScale = 1, bool screen = false}) {
   return MaterialApp(
     theme: buildTheme(),
     locale: locale,
@@ -80,6 +83,6 @@ Widget host(Widget child, {Locale locale = const Locale('vi'), double textScale 
     supportedLocales: AppL10n.supportedLocales,
     builder: (BuildContext context, Widget? app) =>
         MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)), child: app!),
-    home: Scaffold(body: SingleChildScrollView(child: child)),
+    home: screen ? child : Scaffold(body: SingleChildScrollView(child: child)),
   );
 }

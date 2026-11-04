@@ -166,7 +166,7 @@ abstract class AppL10n {
   /// No description provided for @stateNeedsInput.
   ///
   /// In vi, this message translates to:
-  /// **'Cần input'**
+  /// **'Cần bạn'**
   String get stateNeedsInput;
 
   /// No description provided for @stateRunning.
@@ -394,7 +394,7 @@ abstract class AppL10n {
   /// No description provided for @pendingPermission.
   ///
   /// In vi, this message translates to:
-  /// **'Cần permission: {tool}'**
+  /// **'Cần cấp quyền: {tool}'**
   String pendingPermission(String tool);
 
   /// No description provided for @pendingQuestion.
@@ -637,6 +637,18 @@ abstract class AppL10n {
   /// **'Session này chưa có địa chỉ web. Nhập địa chỉ ở trên.'**
   String get vizWebNoUrl;
 
+  /// No description provided for @vizWebHint.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chạy dev server trên Mac rồi bấm làm mới, hoặc chọn địa chỉ khác bên dưới.'**
+  String get vizWebHint;
+
+  /// No description provided for @vizWebCandidates.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đang chạy trên Mac'**
+  String get vizWebCandidates;
+
   /// No description provided for @vizWebFailed.
   ///
   /// In vi, this message translates to:
@@ -664,7 +676,7 @@ abstract class AppL10n {
   /// No description provided for @notifNeedsInputTitle.
   ///
   /// In vi, this message translates to:
-  /// **'Session cần input'**
+  /// **'Session cần bạn'**
   String get notifNeedsInputTitle;
 
   /// No description provided for @notifNeedsInputBody.
@@ -820,7 +832,7 @@ abstract class AppL10n {
   /// No description provided for @keepAliveBody.
   ///
   /// In vi, this message translates to:
-  /// **'Để nhận thông báo khi session cần input hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Agent Console đang theo dõi\". Tắt được trong Mac đã ghép.'**
+  /// **'Để nhận thông báo khi session cần bạn hoặc xong, app cần chạy nền. Android sẽ hiện một thông báo nhỏ \"Đang theo dõi\". Tắt được trong Mac đã ghép.'**
   String get keepAliveBody;
 
   /// No description provided for @keepAliveEnable.
@@ -895,6 +907,30 @@ abstract class AppL10n {
   /// **'đang chờ'**
   String get chatQueued;
 
+  /// No description provided for @chatSendNow.
+  ///
+  /// In vi, this message translates to:
+  /// **'Gửi ngay'**
+  String get chatSendNow;
+
+  /// No description provided for @chatSendNowTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Ngắt lượt đang chạy để gửi ngay?'**
+  String get chatSendNowTitle;
+
+  /// No description provided for @chatSendNowBody.
+  ///
+  /// In vi, this message translates to:
+  /// **'Claude sẽ dừng lượt hiện tại và chạy tin đang chờ này ngay.'**
+  String get chatSendNowBody;
+
+  /// No description provided for @chatSendNowFailed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chưa ngắt được'**
+  String get chatSendNowFailed;
+
   /// No description provided for @chatSending.
   ///
   /// In vi, this message translates to:
@@ -930,6 +966,234 @@ abstract class AppL10n {
   /// In vi, this message translates to:
   /// **'Mở ảnh'**
   String get pictureOpen;
+
+  /// No description provided for @allProjects.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tất cả project'**
+  String get allProjects;
+
+  /// No description provided for @archive.
+  ///
+  /// In vi, this message translates to:
+  /// **'Lưu trữ'**
+  String get archive;
+
+  /// No description provided for @archivedToast.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã lưu trữ {name}'**
+  String archivedToast(String name);
+
+  /// No description provided for @undo.
+  ///
+  /// In vi, this message translates to:
+  /// **'Hoàn tác'**
+  String get undo;
+
+  /// No description provided for @sessionsFilteredEmpty.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không có session trong project này.'**
+  String get sessionsFilteredEmpty;
+
+  /// No description provided for @chatContext.
+  ///
+  /// In vi, this message translates to:
+  /// **'Ngữ cảnh'**
+  String get chatContext;
+
+  /// No description provided for @limit5h.
+  ///
+  /// In vi, this message translates to:
+  /// **'5 giờ'**
+  String get limit5h;
+
+  /// No description provided for @limitWeek.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tuần'**
+  String get limitWeek;
+
+  /// No description provided for @shellHeader.
+  ///
+  /// In vi, this message translates to:
+  /// **'Lệnh shell'**
+  String get shellHeader;
+
+  /// No description provided for @shellRunsIn.
+  ///
+  /// In vi, this message translates to:
+  /// **'chạy trong {folder} · Claude thấy kết quả'**
+  String shellRunsIn(String folder);
+
+  /// No description provided for @shellHint.
+  ///
+  /// In vi, this message translates to:
+  /// **'Gửi sẽ chạy như ! trong terminal · xoá ! để gửi tin nhắn thường'**
+  String get shellHint;
+
+  /// No description provided for @shellWillRun.
+  ///
+  /// In vi, this message translates to:
+  /// **'Sẽ chạy'**
+  String get shellWillRun;
+
+  /// No description provided for @slashHeader.
+  ///
+  /// In vi, this message translates to:
+  /// **'Lệnh'**
+  String get slashHeader;
+
+  /// No description provided for @toolStepsCount.
+  ///
+  /// In vi, this message translates to:
+  /// **'{count} bước công cụ'**
+  String toolStepsCount(int count);
+
+  /// No description provided for @toolStepOne.
+  ///
+  /// In vi, this message translates to:
+  /// **'1 bước công cụ'**
+  String get toolStepOne;
+
+  /// No description provided for @compactionTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã nén cuộc trò chuyện'**
+  String get compactionTitle;
+
+  /// No description provided for @showOutput.
+  ///
+  /// In vi, this message translates to:
+  /// **'Xem kết quả'**
+  String get showOutput;
+
+  /// No description provided for @copyCode.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chép'**
+  String get copyCode;
+
+  /// No description provided for @copied.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã chép'**
+  String get copied;
+
+  /// No description provided for @takeoverShort.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tiếp quản'**
+  String get takeoverShort;
+
+  /// No description provided for @activityIdle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không có hoạt động'**
+  String get activityIdle;
+
+  /// No description provided for @viewOnlyChip.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chỉ xem'**
+  String get viewOnlyChip;
+
+  /// No description provided for @newMessagesBelow.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tin mới'**
+  String get newMessagesBelow;
+
+  /// No description provided for @attachPhoto.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đính kèm ảnh'**
+  String get attachPhoto;
+
+  /// No description provided for @photoCamera.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chụp ảnh'**
+  String get photoCamera;
+
+  /// No description provided for @photoGallery.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chọn từ thư viện'**
+  String get photoGallery;
+
+  /// No description provided for @photoPickFailed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không mở được camera hoặc thư viện.'**
+  String get photoPickFailed;
+
+  /// No description provided for @photoSent.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã gửi ảnh'**
+  String get photoSent;
+
+  /// No description provided for @photoTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Gửi ảnh'**
+  String get photoTitle;
+
+  /// No description provided for @photoCaptionHint.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thêm chú thích (tuỳ chọn)'**
+  String get photoCaptionHint;
+
+  /// No description provided for @settingsTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Cài đặt'**
+  String get settingsTitle;
+
+  /// No description provided for @settingsTheme.
+  ///
+  /// In vi, this message translates to:
+  /// **'Giao diện'**
+  String get settingsTheme;
+
+  /// No description provided for @themeSystem.
+  ///
+  /// In vi, this message translates to:
+  /// **'Hệ thống'**
+  String get themeSystem;
+
+  /// No description provided for @themeDark.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tối'**
+  String get themeDark;
+
+  /// No description provided for @themeLight.
+  ///
+  /// In vi, this message translates to:
+  /// **'Sáng'**
+  String get themeLight;
+
+  /// No description provided for @settingsNotifications.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thông báo'**
+  String get settingsNotifications;
+
+  /// No description provided for @settingsSound.
+  ///
+  /// In vi, this message translates to:
+  /// **'Âm thanh thông báo'**
+  String get settingsSound;
+
+  /// No description provided for @settingsSoundHint.
+  ///
+  /// In vi, this message translates to:
+  /// **'Phát tiếng nhẹ khi có tin mới hoặc session cần bạn trong lúc đang mở app.'**
+  String get settingsSoundHint;
 }
 
 class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {

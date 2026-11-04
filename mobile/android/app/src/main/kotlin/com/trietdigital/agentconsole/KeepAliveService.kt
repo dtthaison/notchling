@@ -23,7 +23,7 @@ class KeepAliveService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Agent Console đang theo dõi"
+        val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Đang theo dõi"
         createChannel()
         val notification = buildNotification(text)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -38,9 +38,16 @@ class KeepAliveService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // The first channel ("keepalive") could have been raised by the system or the user; this one is born minimal:
+        // no sound, no vibration, nothing on the lock screen, collapsed in the shade.
+        manager.deleteNotificationChannel(OLD_CHANNEL_ID)
         val channel = NotificationChannel(CHANNEL_ID, "Giữ kết nối nền", NotificationManager.IMPORTANCE_MIN).apply {
-            description = "Thông báo cố định khi Agent Console chạy nền để nhận cảnh báo session"
+            description = "Thông báo nhỏ, im lặng, khi app chạy nền để nhận cảnh báo session"
             setShowBadge(false)
+            setSound(null, null)
+            enableVibration(false)
+            enableLights(false)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
         manager.createNotificationChannel(channel)
     }
@@ -57,11 +64,16 @@ class KeepAliveService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setShowWhen(false)
+            .setOnlyAlertOnce(true)
+            .setPriority(Notification.PRIORITY_MIN)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_SECRET)
             .build()
     }
 
     companion object {
-        const val CHANNEL_ID = "keepalive"
+        const val OLD_CHANNEL_ID = "keepalive"
+        const val CHANNEL_ID = "keepalive_min"
         const val NOTIFICATION_ID = 4101
         const val EXTRA_TEXT = "text"
         const val ACTION_STOP = "local.agentconsole.STOP_KEEPALIVE"

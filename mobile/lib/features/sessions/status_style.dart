@@ -6,40 +6,57 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
+import '../../app/widgets/kit.dart';
+import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 
 extension SessionStateStyle on SessionState {
-  Color get color => switch (this) {
-        SessionState.needsInput => Token.statusInput,
-        SessionState.running => Token.statusRunning,
-        SessionState.done => Token.muted,
-        SessionState.exited => Token.statusExited,
-      };
+  /// Needs Input orange, Working blue, Done lime; an ended session is faint.
+  Color color(Kit kit) => switch (this) {
+    SessionState.needsInput => kit.needs,
+    SessionState.running => kit.working,
+    SessionState.done => kit.done,
+    SessionState.exited => kit.textFaint,
+  };
 
-  /// Text never uses `status-exited` (3.7:1): the dot does, the words use muted.
-  Color get labelColor => this == SessionState.exited ? Token.muted : color;
+  /// Words in the status color where it reads (blue and lime on the kit surfaces; orange is the accent-text tone).
+  Color labelColor(Kit kit) => switch (this) {
+    SessionState.needsInput => kit.accentText,
+    SessionState.running => kit.working,
+    SessionState.done => kit.brightness == Brightness.dark ? kit.done : kit.add,
+    SessionState.exited => kit.textMuted,
+  };
 
   IconData get icon => switch (this) {
-        SessionState.needsInput => Icons.mark_unread_chat_alt,
-        SessionState.running => Icons.bolt,
-        SessionState.done => Icons.check,
-        SessionState.exited => Icons.power_settings_new,
-      };
+    SessionState.needsInput => Icons.mark_chat_unread_outlined,
+    SessionState.running => Icons.motion_photos_on_outlined,
+    SessionState.done => Icons.check_circle,
+    SessionState.exited => Icons.power_settings_new,
+  };
 
   String label(AppL10n l10n) => switch (this) {
-        SessionState.needsInput => l10n.stateNeedsInput,
-        SessionState.running => l10n.stateRunning,
-        SessionState.done => l10n.stateDone,
-        SessionState.exited => l10n.stateExited,
-      };
+    SessionState.needsInput => l10n.stateNeedsInput,
+    SessionState.running => l10n.stateRunning,
+    SessionState.done => l10n.stateDone,
+    SessionState.exited => l10n.stateExited,
+  };
 }
 
 /// 8 px status dot. "Đang chạy" breathes between 0.45 and 1 opacity over 1.6 s, the one loop in the app;
 /// with Reduce Motion it stays still.
 class StatusDot extends StatefulWidget {
-  const StatusDot({super.key, required this.state});
+  const StatusDot({
+    super.key,
+    required this.state,
+    this.size = 8,
+    this.ring = false,
+  });
   final SessionState state;
+
+  /// 8 in lists; 14 as the badge on an avatar, with a ring in the window color around it.
+  final double size;
+  final bool ring;
 
   @override
   State<StatusDot> createState() => _StatusDotState();
@@ -71,7 +88,8 @@ class BreathClock extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 1.0 -> 0.45 -> 1.0, eased.
   double get alpha {
-    final double t = (_phase <= steps / 2 ? _phase : steps - _phase) / (steps / 2);
+    final double t =
+        (_phase <= steps / 2 ? _phase : steps - _phase) / (steps / 2);
     return 1 - 0.55 * Curves.easeInOut.transform(t);
   }
 
@@ -119,7 +137,11 @@ class BreathClock extends ChangeNotifier with WidgetsBindingObserver {
           }
           return;
         }
-        final bool keyboardMoving = WidgetsBinding.instance.platformDispatcher.views.any((ui.FlutterView v) => v.viewInsets.bottom > 0);
+        final bool keyboardMoving = WidgetsBinding
+            .instance
+            .platformDispatcher
+            .views
+            .any((ui.FlutterView v) => v.viewInsets.bottom > 0);
         if (keyboardMoving) return;
         _phase = (_phase + 1) % steps;
         notifyListeners();
@@ -148,7 +170,12 @@ class _StatusDotState extends State<StatusDot> {
 
   void _sync() {
     // A hidden tab has TickerMode off: its dots hold still and do not ask for frames.
-    final bool breathe = widget.state == SessionState.running && !reduceMotion(context) && TickerMode.valuesOf(context).enabled;
+    final bool breathe =
+        (widget.state == SessionState.running || widget.state == SessionState.needsInput) &&
+        !reduceMotion(context) &&
+        // Still while the keyboard moves the page: one less thing to repaint per frame.
+        MediaQuery.viewInsetsOf(context).bottom == 0 &&
+        TickerMode.valuesOf(context).enabled;
     if (breathe && !_listening) {
       BreathClock.instance
         ..addListener(_onTick)
@@ -178,29 +205,65 @@ class _StatusDotState extends State<StatusDot> {
 
   @override
   Widget build(BuildContext context) {
-    final double alpha = _listening ? BreathClock.instance.alpha : 1;
-    return RepaintBoundary(
-      child: ExcludeSemantics(
-        child: SizedBox(
-          width: 8,
-          height: 8,
-          child: DecoratedBox(decoration: BoxDecoration(color: widget.state.color.withValues(alpha: alpha), shape: BoxShape.circle)),
+    final Kit kit = Kit.of(context);
+    final bool needs = widget.state == SessionState.needsInput;
+    final double breath = _listening ? BreathClock.instance.alpha : 1;
+    // Working breathes (opacity). Needs Input does not blink: it bounces once when it appears, then a faint ring
+    // swells and fades slowly around it.
+    final double alpha = needs ? 1 : breath;
+    final double ring = needs && _listening ? (1 - breath) * 0.9 : 0;
+    Widget dot = TweenAnimationBuilder<Color?>(
+      tween: ColorTween(end: widget.state.color(kit)),
+      duration: motionDuration(context, const Duration(milliseconds: 250)),
+      builder: (BuildContext context, Color? color, Widget? _) => SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: (color ?? widget.state.color(kit)).withValues(alpha: alpha),
+            shape: BoxShape.circle,
+            border: widget.ring ? Border.all(color: kit.window, width: 2) : null,
+            boxShadow: ring > 0.02 ? <BoxShadow>[BoxShadow(color: kit.needs.withValues(alpha: ring), spreadRadius: 2.5 * (1 - breath) * 2)] : null,
+          ),
         ),
       ),
     );
+    if (needs && !reduceMotion(context)) {
+      // Keyed by the state, so it plays each time a session turns to Needs Input.
+      dot = TweenAnimationBuilder<double>(
+        key: const ValueKey<String>('needs-bounce'),
+        tween: Tween<double>(begin: 0.3, end: 1),
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeOutBack,
+        builder: (BuildContext context, double scale, Widget? child) => Transform.scale(scale: scale, child: child),
+        child: dot,
+      );
+    }
+    return RepaintBoundary(child: ExcludeSemantics(child: dot));
   }
 }
 
-class InputBadge extends StatelessWidget {
-  const InputBadge({super.key});
+/// The state as icon and word, crossfading to the new one when the state changes.
+class StatePill extends StatelessWidget {
+  const StatePill({super.key, required this.state});
+  final SessionState state;
 
   @override
   Widget build(BuildContext context) {
-    return ExcludeSemantics(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(color: Token.statusInput, borderRadius: BorderRadius.circular(Radii.sm)),
-        child: Text(AppL10n.of(context).stateNeedsInput, style: TypeToken.labelSm.copyWith(color: Token.onStatusInput)),
+    final Kit kit = Kit.of(context);
+    return AnimatedSwitcher(
+      duration: motionDuration(context),
+      switchInCurve: Motion.out,
+      layoutBuilder: (Widget? current, List<Widget> previous) => Stack(
+        alignment: Alignment.centerLeft,
+        children: <Widget>[...previous, ?current],
+      ),
+      child: KitStatusPill(
+        key: ValueKey<SessionState>(state),
+        color: state.color(kit),
+        icon: state.icon,
+        text: state.label(AppL10n.of(context)),
+        accentText: state == SessionState.needsInput,
       ),
     );
   }

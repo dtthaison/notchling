@@ -37,7 +37,7 @@ class _VizWebViewState extends State<VizWebView> {
     unawaited(_checkBundle());
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Token.surface)
+      ..setBackgroundColor(Kit.of(context).sidebar)
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (String url) {
           _ready = true;

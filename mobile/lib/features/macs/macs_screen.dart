@@ -21,7 +21,7 @@ class MacsScreen extends ConsumerWidget {
     final AppL10n l10n = AppL10n.of(context);
     final MacsState state = ref.watch(macsProvider);
     return Scaffold(
-      appBar: AppBar(backgroundColor: Token.surface, title: Text(l10n.macsTitle, style: TypeToken.titleMd)),
+      appBar: AppBar(backgroundColor: Kit.of(context).sidebar, title: Text(l10n.macsTitle, style: Kit.of(context).titleMd)),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(Space.lg),
@@ -29,8 +29,8 @@ class MacsScreen extends ConsumerWidget {
             if (Platform.isAndroid) ...<Widget>[
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(l10n.keepAliveSetting, style: TypeToken.bodyMd),
-                subtitle: Text(l10n.keepAliveHint, style: TypeToken.bodySm.copyWith(color: Token.muted)),
+                title: Text(l10n.keepAliveSetting, style: Kit.of(context).bodyMd),
+                subtitle: Text(l10n.keepAliveHint, style: Kit.of(context).bodySm.copyWith(color: Kit.of(context).textMuted)),
                 value: ref.watch(alertPrefsProvider.select((AlertPrefs p) => p.keepAlive == true)),
                 onChanged: (bool on) => unawaited(ref.read(alertPrefsProvider.notifier).setKeepAlive(on: on)),
               ),
@@ -41,19 +41,19 @@ class MacsScreen extends ConsumerWidget {
                 margin: const EdgeInsets.only(bottom: Space.md),
                 padding: const EdgeInsets.all(Space.md),
                 decoration: BoxDecoration(
-                  color: Token.surface,
-                  borderRadius: BorderRadius.circular(Radii.lg),
-                  border: Border.all(color: mac.id == state.activeId ? Token.primary : Token.border),
+                  color: Kit.of(context).sidebar,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  border: Border.all(color: mac.id == state.activeId ? Kit.of(context).accent : Kit.of(context).hairline),
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
                   Row(children: <Widget>[
-                    const Icon(Icons.laptop_mac, size: 18, color: Token.muted),
+                    Icon(Icons.laptop_mac, size: 18, color: Kit.of(context).textMuted),
                     const SizedBox(width: Space.sm),
-                    Expanded(child: Text(mac.name, style: TypeToken.titleMd)),
-                    if (mac.id == state.activeId) Text(l10n.macsActive, style: TypeToken.labelSm.copyWith(color: Token.primary)),
+                    Expanded(child: Text(mac.name, style: Kit.of(context).titleMd)),
+                    if (mac.id == state.activeId) Text(l10n.macsActive, style: Kit.of(context).labelSm.copyWith(color: Kit.of(context).accent)),
                   ]),
                   const SizedBox(height: Space.xs),
-                  Text('${mac.lastGoodHost ?? mac.hosts.first}:${mac.port}', style: TypeToken.codeSm),
+                  Text('${mac.lastGoodHost ?? mac.hosts.first}:${mac.port}', style: Kit.of(context).codeSm),
                   const SizedBox(height: Space.md),
                   Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[
                     if (mac.id != state.activeId) SecondaryButton(label: l10n.macsUse, onPressed: () => unawaited(ref.read(macsProvider.notifier).setActive(mac.id))),

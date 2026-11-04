@@ -1,8 +1,11 @@
+import 'dart:ui' show Tristate;
+
 import 'package:agent_console/core/protocol/models.dart';
 import 'package:agent_console/features/chat/chat_notifier.dart';
 import 'package:agent_console/features/chat/composer.dart';
 import 'package:agent_console/features/chat/markdown_text.dart';
 import 'package:agent_console/features/chat/pending_card.dart';
+import 'package:agent_console/app/widgets/kit.dart';
 import 'package:agent_console/features/sessions/session_row.dart';
 import 'package:agent_console/features/sessions/status_style.dart';
 import 'package:flutter/material.dart';
@@ -39,10 +42,11 @@ void main() {
       expect(find.bySemanticsLabel(RegExp('Notching repo startup, truongbinhtriet, Đang chạy')), findsOneWidget);
     });
 
-    testWidgets('a session that needs input shows the amber badge', (WidgetTester tester) async {
+    testWidgets('the status is the badge and the group, not a pill that repeats the group; screen readers still hear it', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(state: SessionState.needsInput), now: _now, onTap: () {})));
-      expect(find.byType(InputBadge), findsOneWidget);
-      expect(find.text('Cần input'), findsOneWidget);
+      expect(find.byType(KitStatusPill), findsNothing);
+      expect(find.byType(StatusDot), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Cần bạn')), findsOneWidget);
     });
 
     testWidgets('running subagents show as a count, and the arrow opens the tree', (WidgetTester tester) async {
@@ -53,7 +57,7 @@ void main() {
         onTap: () {},
         onToggleExpand: () => toggled++,
       )));
-      expect(find.text('1'), findsOneWidget, reason: 'one of two subagents is running');
+      expect(find.text('2'), findsOneWidget, reason: 'the number of subagents');
       await tester.tap(find.bySemanticsLabel(RegExp('Mở 2 subagent')));
       expect(toggled, 1);
     });
@@ -63,19 +67,20 @@ void main() {
       expect(find.byIcon(Icons.chevron_right), findsNothing);
     });
 
-    testWidgets('tapping the row selects it; a selected row has the primary bar', (WidgetTester tester) async {
+    testWidgets('tapping the row selects it, and a selected row says so', (WidgetTester tester) async {
       int taps = 0;
+      final SemanticsHandle handle = tester.ensureSemantics();
       await tester.pumpWidget(host(SessionRow(session: _session(), now: _now, onTap: () => taps++, selected: true)));
       await tester.tap(find.text('Notching repo startup'));
       expect(taps, 1);
-      final Iterable<Container> bars = tester.widgetList<Container>(find.byType(Container)).where((Container c) => c.constraints?.maxWidth == 2);
-      expect(bars, isNotEmpty);
+      expect(tester.getSemantics(find.bySemanticsLabel(RegExp('Notching repo startup, truongbinhtriet'))).flagsCollection.isSelected, Tristate.isTrue);
+      handle.dispose();
     });
 
-    testWidgets('tap targets are at least 48 dp', (WidgetTester tester) async {
+    testWidgets('the row is at least 56 dp and the subagent toggle at least 32 (a secondary target; the row is the main one)', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(subagents: <Subagent>[_agent()]), now: _now, onTap: () {}, onToggleExpand: () {})));
-      expect(tester.getSize(find.byType(SessionRow)).height, greaterThanOrEqualTo(48));
-      expect(tester.getSize(find.bySemanticsLabel(RegExp('Mở 1 subagent'))).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(find.byType(SessionRow)).height, greaterThanOrEqualTo(56));
+      expect(tester.getSize(find.bySemanticsLabel(RegExp('Mở 1 subagent'))).height, greaterThanOrEqualTo(32));
     });
 
     testWidgets('survives the largest text size without overflow', (WidgetTester tester) async {
@@ -90,8 +95,8 @@ void main() {
 
     testWidgets('subagent row: type, description, model in mono, state', (WidgetTester tester) async {
       await tester.pumpWidget(host(SubagentRow(agent: _agent())));
-      expect(find.text('general-purpose'), findsOneWidget);
-      expect(find.text('Spike voice model'), findsOneWidget);
+      expect(find.textContaining('general-purpose', findRichText: true), findsOneWidget);
+      expect(find.textContaining('Spike voice model', findRichText: true), findsOneWidget);
       expect(find.text('sonnet'), findsOneWidget);
       expect(find.text('Đang chạy'), findsOneWidget);
       expect(tester.widget<Text>(find.text('sonnet')).style?.fontFamily, 'GeistMono');
@@ -100,7 +105,7 @@ void main() {
     testWidgets('English strings when the device asks for English', (WidgetTester tester) async {
       await tester.pumpWidget(host(SessionRow(session: _session(), now: _now, onTap: () {}), locale: const Locale('en')));
       expect(find.text('3 min'), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Running')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Working')), findsOneWidget);
     });
   });
 
@@ -123,11 +128,11 @@ void main() {
     testWidgets('idle: Send is disabled until there is text, then sends', (WidgetTester tester) async {
       int sends = 0;
       await pump(tester, onSend: () => sends++);
-      await tester.tap(find.text('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Gửi'));
       expect(sends, 0);
       await tester.enterText(find.byType(TextField), 'chạy flutter test');
       await tester.pump();
-      await tester.tap(find.text('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Gửi'));
       expect(sends, 1);
     });
 
@@ -136,13 +141,13 @@ void main() {
       await pump(tester, onSend: () => sends++);
       await tester.enterText(find.byType(TextField), '   \n ');
       await tester.pump();
-      await tester.tap(find.text('Gửi'));
+      await tester.tap(find.bySemanticsLabel('Gửi'));
       expect(sends, 0);
     });
 
     testWidgets('sending: the field locks and the button says Đang gửi', (WidgetTester tester) async {
       await pump(tester, send: const SendSending());
-      expect(find.text('Đang gửi'), findsOneWidget);
+      expect(find.bySemanticsLabel('Đang gửi'), findsOneWidget);
       expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
     });
 
@@ -158,7 +163,7 @@ void main() {
       await pump(tester, viewOnly: true);
       expect(find.byType(TextField), findsNothing);
       expect(find.text('Session mở ngoài Console — chỉ xem'), findsOneWidget);
-      expect(find.text('Gửi'), findsNothing);
+      expect(find.bySemanticsLabel('Gửi'), findsNothing);
     });
 
     testWidgets('a subagent transcript is read-only with its own sentence', (WidgetTester tester) async {
@@ -191,7 +196,7 @@ void main() {
       final List<bool> answers = <bool>[];
       await tester.pumpWidget(host(PendingCard(prompt: permission, onAllow: ({required bool allow}) => answers.add(allow), onChoose: (List<int> c) {})));
       expect(find.text('rm -rf build'), findsOneWidget);
-      expect(find.text('Cần permission: Bash'), findsOneWidget);
+      expect(find.text('Cần cấp quyền: Bash'), findsOneWidget);
       await tester.tap(find.text('Cho phép'));
       await tester.tap(find.text('Từ chối'));
       expect(answers, <bool>[true, false]);
@@ -238,10 +243,23 @@ void main() {
 
     testWidgets('bold and inline code render, the rest stays as written', (WidgetTester tester) async {
       await tester.pumpWidget(host(const MarkdownText('Chạy **flutter test** rồi `git diff` xong')));
-      final Text text = tester.widget<Text>(find.byType(Text));
+      final Text text = tester.widgetList<Text>(find.byType(Text)).firstWhere((Text t) => t.textSpan != null);
       final List<InlineSpan> children = (text.textSpan! as TextSpan).children!;
-      expect(children.whereType<TextSpan>().map((TextSpan s) => s.text), <String?>['Chạy ', 'flutter test', ' rồi ', 'git diff', ' xong']);
-      expect(children.whereType<TextSpan>().elementAt(3).style?.fontFamily, 'GeistMono');
+      expect(children.whereType<TextSpan>().map((TextSpan s) => s.text), <String?>['Chạy ', 'flutter test', ' rồi ', ' xong']);
+      expect(children.whereType<TextSpan>().elementAt(1).style?.fontWeight, FontWeight.w600);
+      // Short inline code is a small box on the text baseline, in the mono font.
+      expect(children.whereType<WidgetSpan>().length, 1);
+      expect(tester.widget<Text>(find.text('git diff')).style?.fontFamily, 'GeistMono');
+    });
+
+    testWidgets('inline code inside bold, italics inside bold and links parse; no backtick is shown', (WidgetTester tester) async {
+      await tester.pumpWidget(host(const MarkdownText('**Gõ `!` và `/` trong ô:** xem *nghiêng* và [tài liệu](https://x.y)')));
+      final Text text = tester.widgetList<Text>(find.byType(Text)).firstWhere((Text t) => t.textSpan != null);
+      final String plain = (text.textSpan! as TextSpan).toPlainText();
+      expect(plain.contains('`'), isFalse);
+      expect(plain.contains('**'), isFalse);
+      expect(find.text('!'), findsOneWidget);
+      expect(find.text('/'), findsOneWidget);
     });
   });
 }
