@@ -346,15 +346,15 @@ final class ChatModel: ObservableObject {
     }
 
     /// Where a new background session can run: the main login, each lane, then each free saved account
-    /// (picking one makes a lane for it). `accountID` nil means the main login. Named by account only: a
-    /// lane keeps the name of the account it was made for, which after a switch is just misleading.
+    /// (picking one makes a lane for it). `accountID` nil means the main login. Titled by email only:
+    /// where a session runs is Notchling's business, and a lane's name goes stale after a switch.
     struct SessionTarget { let title: String; let accountID: String? }
 
     var sessionTargets: [SessionTarget] {
         guard let accounts else { return [] }
-        var out = [SessionTarget(title: "\(accounts.active?.email ?? "Main Login") (main login)", accountID: nil)]
-        out += LaneStore.all().map { SessionTarget(title: "\($0.email) (lane)", accountID: $0.accountID) }
-        out += freeAccounts.map { SessionTarget(title: "\($0.email) (new lane)", accountID: $0.id) }
+        var out = [SessionTarget(title: accounts.active?.email ?? "Main Login", accountID: nil)]
+        out += LaneStore.all().map { SessionTarget(title: $0.email, accountID: $0.accountID) }
+        out += freeAccounts.map { SessionTarget(title: $0.email, accountID: $0.id) }
         return out
     }
 
@@ -2098,8 +2098,11 @@ private struct AccountMenu: View {
               ?? "This session runs on the main login. Click to switch it.")
     }
 
+    /// One question per menu: which account this session uses. Picking another moves just this session;
+    /// where it then runs (the main login, a lane, a new lane) is Notchling's business, not a choice.
+    /// Moving everything is one submenu below. Switching the main login or a whole lane lives in the
+    /// menu bar (accounts list, Lanes), and new sessions start from the sidebar's +.
     private func popUp() {
-        let free = model.freeAccounts
         let menu = NSMenu()
         menu.autoenablesItems = false
         func note(_ title: String) {
@@ -2110,64 +2113,59 @@ private struct AccountMenu: View {
         func header(_ title: String) {
             if #available(macOS 14, *) { menu.addItem(.sectionHeader(title: title)) } else { note(title) }
         }
-        header(account.lane == nil ? "Switch the Main Login To" : "Switch This Lane To")
-        if free.isEmpty { note("No Free Saved Account") }
-        for other in free {
-            menu.addItem(ActionMenuItem(other.email) { [model, agent] in model.switchAccount(of: agent, to: other.id) })
-        }
-        note(account.lane == nil ? "Moves every session on the main login, background ones too."
-                                 : "Moves every session in this lane.")
-        menu.addItem(.separator())
-        if let accounts = model.accounts {
-            // Any saved account, even one in a lane: its lane closes and everything runs on the main login.
-            let lanes = LaneStore.all()
-            var choices: [(id: String?, email: String)] = [(nil, accounts.active?.email ?? "Main Login")]
-            choices += lanes.map { ($0.accountID, $0.email) }
-            choices += free.map { ($0.id, $0.email) }
-            let shown = choices.filter { choice in
-                !MoveAllPlan.make(agents: model.notch.agents, lanes: lanes, activeID: accounts.activeID, target: choice.id).isEmpty
+        let here = account.lane?.accountID
+        let targets = model.sessionTargets
+        header("This Session's Account")
+        switch agent.target {
+        case .job where agent.command == nil && agent.transcriptPath != nil:
+            for target in targets {
+                let current = target.accountID == here
+                let item = ActionMenuItem(target.title) { [model, agent] in
+                    guard !current else { return }
+                    model.moveSession(agent, to: target.accountID, title: target.title)
+                }
+                item.state = current ? .on : .off
+                menu.addItem(item)
             }
-            if !shown.isEmpty {
-                header("Move Every Session To")
-                for choice in shown {
-                    menu.addItem(ActionMenuItem(choice.id == nil ? "\(choice.email) (main login)" : choice.email) { [model, agent] in
-                        model.moveAll(to: choice.id, email: choice.email, from: agent)
+            note("Picking one moves only this session; the conversation continues there.")
+        default:
+            // A terminal session keeps the account it was started with.
+            let item = NSMenuItem(title: account.email, action: nil, keyEquivalent: "")
+            item.state = .on
+            item.isEnabled = false
+            menu.addItem(item)
+            if case .process = agent.target {
+                let others = targets.filter { $0.accountID != nil }
+                if !others.isEmpty {
+                    let open = NSMenuItem(title: "New Terminal Session On", action: nil, keyEquivalent: "")
+                    let sub = NSMenu()
+                    for target in others {
+                        sub.addItem(ActionMenuItem(target.title) { [model, agent] in
+                            if let id = target.accountID { model.newTerminalSession(for: agent, on: id) }
+                        })
+                    }
+                    open.submenu = sub
+                    menu.addItem(open)
+                }
+            }
+        }
+        if let accounts = model.accounts {
+            let lanes = LaneStore.all()
+            let all = targets.filter { target in
+                !MoveAllPlan.make(agents: model.notch.agents, lanes: lanes, activeID: accounts.activeID, target: target.accountID).isEmpty
+            }
+            if !all.isEmpty {
+                menu.addItem(.separator())
+                let item = NSMenuItem(title: "Move All Sessions To", action: nil, keyEquivalent: "")
+                let sub = NSMenu()
+                for target in all {
+                    sub.addItem(ActionMenuItem(target.title) { [model, agent] in
+                        model.moveAll(to: target.accountID, email: target.title, from: agent)
                     })
                 }
-                note("Lane sessions resume on the main login, which switches to that account.")
-                menu.addItem(.separator())
+                item.submenu = sub
+                menu.addItem(item)
             }
-        }
-        if case .job = agent.target, agent.transcriptPath != nil {
-            header("Move Only This Session To")
-            let here = account.lane?.accountID
-            let targets = model.sessionTargets.filter { $0.accountID != here }
-            if targets.isEmpty { note("No Other Account") }
-            for target in targets {
-                menu.addItem(ActionMenuItem(target.title) { [model, agent] in
-                    model.moveSession(agent, to: target.accountID, title: target.title)
-                })
-            }
-            note("Stops it and resumes the same conversation there.")
-            menu.addItem(.separator())
-        }
-        if case .process = agent.target {
-            header("New Terminal Session")
-            if let lane = account.lane {
-                menu.addItem(ActionMenuItem("In This Lane (\(lane.email))") { [model, agent] in model.newTerminalSession(for: agent, on: lane.accountID) })
-            }
-            for other in free {
-                menu.addItem(ActionMenuItem("On \(other.email)") { [model, agent] in model.newTerminalSession(for: agent, on: other.id) })
-            }
-            if account.lane == nil && free.isEmpty { note("No Free Saved Account") }
-            menu.addItem(.separator())
-        }
-        header("New Background Session Here")
-        let folder = agent.cwd.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : agent.cwd
-        for target in model.sessionTargets {
-            menu.addItem(ActionMenuItem(target.title) { [model, agent] in
-                model.newBackgroundSession(in: folder, on: target.accountID, errorKey: agent.id)
-            })
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
