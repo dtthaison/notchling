@@ -667,6 +667,12 @@ final class ChatModel: ObservableObject {
         let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty, text != "!" else { return }
         let id = agent.id
+        // A bare /model wants a picker, which a background session can't show: show ours.
+        if text == "/model" {
+            if preset == nil { drafts[id] = "" }
+            ModelPicker.popUp(model: self, current: conversation.facts.model)
+            return
+        }
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
         pending[id] = Pending(text: text, at: Date(), sending: true)
@@ -1470,14 +1476,17 @@ private struct CappedWidth: Layout {
 
 /// The session's model, and a menu to change it: picking one types `/model <alias>` into the session,
 /// as you would in the terminal. Full model ids, so the menu names exactly what you get.
-private struct ModelPicker: View {
+struct ModelPicker: View {
     @ObservedObject var model: ChatModel
     let current: String?
 
-    static let choices = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+    /// The current models, then older ones under More Models (Claude Code's own /model list).
+    static let choices = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"]
+    static let older = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5",
+                        "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
 
     var body: some View {
-        Button { popUp() } label: {
+        Button { Self.popUp(model: model, current: current) } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu").font(.system(size: 9, weight: .semibold))
                 Text(current.map(ChatFormat.modelName) ?? "Model")
@@ -1492,16 +1501,25 @@ private struct ModelPicker: View {
         .help("The model this session uses. Pick another to switch it (like /model in the terminal).")
     }
 
-    private func popUp() {
+    /// Also what typing /model in the reply box opens, instead of sending it to a session that can't show a picker.
+    static func popUp(model: ChatModel, current: String?) {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let shown = current.map(ChatFormat.modelName)
-        for id in Self.choices {
+        func item(_ id: String) -> NSMenuItem {
             let name = ChatFormat.modelName(id)
-            let item = ActionMenuItem(name) { [model] in model.send("/model \(id)") }
-            item.state = shown == name ? .on : .off
-            menu.addItem(item)
+            let row = ActionMenuItem(name) { [model] in model.send("/model \(id)") }
+            row.state = shown == name ? .on : .off
+            return row
         }
+        Self.choices.forEach { menu.addItem(item($0)) }
+        menu.addItem(.separator())
+        let more = NSMenuItem(title: "More Models", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        Self.older.forEach { sub.addItem(item($0)) }
+        more.submenu = sub
+        menu.addItem(more)
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 }
