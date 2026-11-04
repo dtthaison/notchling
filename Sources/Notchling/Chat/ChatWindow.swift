@@ -110,6 +110,8 @@ final class ChatModel: ObservableObject {
         /// since it was sent (a long paste lands in another shape). Until then it shows as pending.
         func landed(in conversation: Conversation) -> Bool {
             let want = Self.words(text)
+            // Queued behind a busy turn: it reached the session, and shows as a queued bubble.
+            if conversation.queued.contains(where: { Self.words($0) == want }) { return true }
             return conversation.items.suffix(12).contains { item in
                 guard case .user(let said, _) = item.kind else { return false }
                 guard let date = item.date else { return Self.words(said) == want }
@@ -632,13 +634,21 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    /// A sent reply leaves the pending row once the transcript shows it (or after a while, since a
-    /// long paste can land in the transcript in another shape).
+    /// A sent reply leaves the pending row once the transcript shows it, or its queue. One that never
+    /// shows up didn't reach the session: say so and put it back in the box rather than drop it quietly.
     private func dropDelivered(_ id: String) {
         guard let p = pending[id] else { return }
         // Landed even while the send is still finishing: otherwise it shows twice for a moment.
-        if p.landed(in: conversation) || (!p.sending && Date().timeIntervalSince(p.at) > 30) { pending[id] = nil }
+        if p.landed(in: conversation) { pending[id] = nil; return }
+        guard !p.sending, Date().timeIntervalSince(p.at) > Self.deliveryWait else { return }
+        pending[id] = nil
+        errors[id] = "The session didn't get this message. It's back in the reply box."
+        if (drafts[id] ?? "").isEmpty { drafts[id] = p.text }
     }
+
+    /// Claude Code writes a reply (or its queue entry) as soon as it's submitted; this leaves room for
+    /// slow UserPromptSubmit hooks.
+    static let deliveryWait: TimeInterval = 45
 
     /// A link in the conversation: a saved Artifact opens in the panel beside the chat (readable from
     /// any account), anything else in the browser.
@@ -1169,6 +1179,13 @@ private struct ConversationView: View, Equatable {
                                     }
                                 }
                                 .id(row.id)
+                            }
+                            // Only while it works: a queue left by a session that stopped never runs.
+                            if live {
+                                ForEach(Array(conversation.queued.enumerated()), id: \.offset) { _, text in
+                                    UserBubble(text: text, images: 0, date: nil, note: "Queued, sends when this turn ends")
+                                        .part("Queued Bubble", .topTrailing)
+                                }
                             }
                             if let pending, !pending.landed(in: conversation) {
                                 UserBubble(text: pending.text, images: 0, date: nil, note: pending.sending ? "Sending…" : "Sent")

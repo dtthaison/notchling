@@ -76,6 +76,8 @@ struct Conversation: Equatable {
     /// "47s · ↓ 2.3k tokens" while it works).
     var turnStart: Date?
     var turnTokens = 0
+    /// Your messages typed while it worked, waiting for the turn to end (or to be taken in mid-turn).
+    var queued: [String] = []
 
     var lastUserText: [String] {
         items.suffix(8).compactMap { if case .user(let t, _) = $0.kind { return t } else { return nil } }
@@ -110,6 +112,8 @@ enum ConversationReader {
         // (a message's lines each carry its duration, so the largest counts).
         private var thinkingAt: Int?
         private var thinkingSeconds: [String: Double] = [:]
+        /// Claude Code's input queue (its queue-operation lines), task notifications included, oldest first.
+        private var queue: [String] = []
 
         init() {}
 
@@ -291,6 +295,27 @@ enum ConversationReader {
                     if case .user = kind { c.turnStart = date; turnOutput = [:] }
                 }
 
+            case "queue-operation":
+                let content = obj["content"] as? String ?? ""
+                switch obj["operation"] as? String {
+                case "enqueue": queue.append(content)
+                case "dequeue": if !queue.isEmpty { queue.removeFirst() }
+                case "remove": if let i = queue.firstIndex(of: content) { queue.remove(at: i) }
+                default: break
+                }
+
+            case "attachment":
+                // A message sent while it worked is taken in mid-turn as an attachment, with no user line.
+                guard let a = obj["attachment"] as? [String: Any], a["type"] as? String == "queued_command",
+                      (a["commandMode"] as? String ?? "prompt") == "prompt" else { return }
+                var text = a["prompt"] as? String ?? ""
+                var images = 0
+                if let blocks = a["prompt"] as? [[String: Any]] {
+                    text = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n\n")
+                    images = blocks.filter { $0["type"] as? String == "image" }.count
+                }
+                if let kind = userItem(text, images: images), case .user = kind { append(kind, date) }
+
             default: break
             }
         }
@@ -317,6 +342,7 @@ enum ConversationReader {
             // Task subjects come from the TaskCreate inputs; statuses from the results.
             c.facts.files = files
             c.turnTokens = turnOutput.values.reduce(0, +)
+            c.queued = queue.compactMap { if case .user(let t, _)? = ConversationReader.userItem($0, images: 0) { return t } else { return nil } }
             if let last = c.items.last, case .tools(let calls) = last.kind, let open = calls.last(where: { !$0.finished }) {
                 c.activity = open.title
             }
@@ -342,7 +368,7 @@ enum ConversationReader {
         if let name = between(text, "<command-name>", "</command-name>") {
             let args = between(text, "<command-args>", "</command-args>") ?? ""
             text = (name.hasPrefix("/") ? name : "/" + name) + (args.isEmpty ? "" : " " + args)
-        } else if text.hasPrefix("<") {
+        } else if text.hasPrefix("<"), !text.hasPrefix("<pasted_content") {
             // Injected wrappers: system reminders, command output, hook context.
             return nil
         }

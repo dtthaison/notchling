@@ -26,8 +26,16 @@ enum ReplySender {
         let text = ShellCommand.normalize(text)
         // Bracketed paste keeps newlines in the reply from submitting early.
         let flat = text.replacingOccurrences(of: "\r\n", with: "\n")
-        try type(["\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID)
+        try type([clearInput, "\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID)
     }
+
+    /// Empties the session's input box first. It keeps a draft across attaches, so text left there
+    /// ("/rename", half a message) would join the reply: "/renamethe padding…" ran as an unknown
+    /// command and the session did nothing. Per line: Ctrl+E (end), Ctrl+U (delete to start), Backspace
+    /// (join the line above). Not Ctrl+K: sent in a burst it lands as a literal vertical tab, a line
+    /// break that keeps Enter from submitting. Never Esc or Ctrl+C, which interrupt a busy session.
+    /// Ctrl+Y in the terminal brings the text back. (Checked on 2.1.318.)
+    static let clearInput = String(repeating: "\u{05}\u{15}\u{7F}", count: 20) + "\u{05}\u{15}"
 
     enum Choice: Equatable {
         case option(Int)   // 1-based
