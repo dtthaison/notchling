@@ -113,6 +113,17 @@ enum ConversationReader {
 
         init() {}
 
+        /// The model id from /model's confirmation: "Set model to `Sonnet 5.5` and saved as …" or
+        /// "Kept model as `Opus 5.5`" become "claude-sonnet-5-5".
+        static func modelID(inConfirmation text: String) -> String? {
+            guard let range = text.range(of: #"(?:Set model to|Kept model as) `([^`]+)`"#, options: .regularExpression),
+                  let open = text[range].firstIndex(of: "`"), let close = text[range].lastIndex(of: "`"), open < close
+            else { return nil }
+            let name = text[text.index(after: open)..<close].lowercased()
+            let slug = name.split(whereSeparator: { $0 == " " || $0 == "." }).joined(separator: "-")
+            return slug.isEmpty || slug.contains("default") ? nil : "claude-" + slug
+        }
+
         private mutating func nextID(_ prefix: String) -> String { serial += 1; return "\(prefix)\(serial)" }
 
         private mutating func append(_ kind: ChatItem.Kind, _ date: Date?) {
@@ -151,8 +162,10 @@ enum ConversationReader {
                     }
                 case "local_command":
                     // Claude Code 2.1.31x logs slash commands and their output here instead of as user lines.
-                    if let text = obj["content"] as? String, let kind = userItem(text, images: 0) {
-                        append(kind, date)
+                    if let text = obj["content"] as? String {
+                        // /model takes effect now, not at the next reply, so the header shouldn't wait for one.
+                        if let id = Self.modelID(inConfirmation: text) { c.facts.model = id }
+                        if let kind = userItem(text, images: 0) { append(kind, date) }
                     }
                 default: break
                 }
