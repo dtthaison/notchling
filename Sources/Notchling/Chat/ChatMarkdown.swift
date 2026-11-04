@@ -373,13 +373,17 @@ struct ProseText: NSViewRepresentable {
         guard context.coordinator.shown != blocks || context.coordinator.muted != muted else { return }
         context.coordinator.shown = blocks
         context.coordinator.muted = muted
-        view.textStorage?.setAttributedString(Self.text(blocks, muted: muted))
+        let text = Self.text(blocks, muted: muted)
+        view.textStorage?.setAttributedString(text)
+        context.coordinator.measurer.set(text)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: ProseTextView, context: Context) -> CGSize? {
         var width = proposal.width ?? 560
         if !width.isFinite { width = 560 }
-        let used = view.layout(width: width)
+        // Measured off-screen: the view's own container follows its current frame, so asking it about a
+        // wider proposal (the window grew) answered with the old width and the text never rewrapped.
+        let used = context.coordinator.measurer.size(width: width)
         // Short text hugs its width (a one-line reply bubble); long text wraps at the offered width.
         return CGSize(width: min(width, ceil(used.width) + 1), height: ceil(used.height))
     }
@@ -388,6 +392,7 @@ struct ProseText: NSViewRepresentable {
         var shown: [MarkdownBlock]?
         var muted = false
         var openURL: OpenURLAction?
+        let measurer = TextMeasurer()
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
@@ -471,17 +476,37 @@ struct ProseText: NSViewRepresentable {
 
 /// The text view behind `ProseText`: lays out at the width SwiftUI gives it and lets go of its
 /// selection when another one takes focus, so only one block shows a selection at a time.
-final class ProseTextView: NSTextView {
-    /// Lays the text out at `width` and returns the space it uses.
-    func layout(width: CGFloat) -> CGSize {
-        guard let container = textContainer, let manager = layoutManager else { return .zero }
-        if container.containerSize.width != width {
-            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        }
-        manager.ensureLayout(for: container)
-        return manager.usedRect(for: container).size
+/// Lays a copy of the text out at any width, apart from the view showing it, and remembers the last
+/// few answers (SwiftUI asks the same widths again and again).
+final class TextMeasurer {
+    private let storage = NSTextStorage()
+    private let manager = NSLayoutManager()
+    private let container = NSTextContainer()
+    private var cache: [CGFloat: CGSize] = [:]
+
+    init() {
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
     }
 
+    func set(_ text: NSAttributedString) {
+        storage.setAttributedString(text)
+        cache = [:]
+    }
+
+    func size(width: CGFloat) -> CGSize {
+        if let hit = cache[width] { return hit }
+        container.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+        manager.ensureLayout(for: container)
+        let used = manager.usedRect(for: container).size
+        if cache.count > 8 { cache = [:] }
+        cache[width] = used
+        return used
+    }
+}
+
+final class ProseTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         textContainer?.containerSize = NSSize(width: newSize.width, height: .greatestFiniteMagnitude)
