@@ -146,6 +146,7 @@ final class ChatModel: ObservableObject {
     @Published var page: PageLibrary.Entry?
     @Published var drafts: [String: String] = [:]
     @Published private(set) var pending: [String: Pending] = [:]
+    private var modelHint: [String: (model: String, at: Date)] = [:]
     @Published var errors: [String: String] = [:]
     @Published var completionIndex = 0
     @Published var search = ""
@@ -628,6 +629,12 @@ final class ChatModel: ObservableObject {
             let fresh = ConversationReader.read(path)
             DispatchQueue.main.async {
                 guard let self, self.selection == agent.id else { return }
+                var fresh = fresh
+                // A model you just picked shows at once; the transcript catches up a few seconds later.
+                if let hint = self.modelHint[agent.id] {
+                    if fresh.facts.model == hint.model || Date().timeIntervalSince(hint.at) > 30 { self.modelHint[agent.id] = nil }
+                    else { fresh.facts.model = hint.model }
+                }
                 if fresh != self.conversation { self.conversation = fresh }
                 self.dropDelivered(agent.id)
             }
@@ -685,6 +692,10 @@ final class ChatModel: ObservableObject {
         }
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
+        if text.hasPrefix("/model "), let picked = text.split(separator: " ").last.map(String.init), picked.hasPrefix("claude-") {
+            modelHint[id] = (picked, Date())
+            conversation.facts.model = picked
+        }
         pending[id] = Pending(text: text, at: Date(), sending: true)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: Error?
@@ -692,6 +703,7 @@ final class ChatModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let failure {
+                    self.modelHint[id] = nil
                     self.pending[id] = nil
                     self.errors[id] = failure.localizedDescription
                     if preset == nil, (self.drafts[id] ?? "").isEmpty { self.drafts[id] = text }

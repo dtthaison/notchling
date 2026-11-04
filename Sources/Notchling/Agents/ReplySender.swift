@@ -87,13 +87,13 @@ enum ReplySender {
         defer { if process.isRunning { process.terminate() } }
 
         // Wait for the session UI to draw and then go quiet before typing.
-        guard waitForQuiet(master, quiet: 1.2, timeout: 15) else { throw Failure.timeout }
+        guard waitForQuiet(master, quiet: 0.5, timeout: 15) else { throw Failure.timeout }
 
         for chunk in chunks {
             write(master, chunk)
-            Thread.sleep(forTimeInterval: 0.4)
+            Thread.sleep(forTimeInterval: 0.15)
         }
-        _ = waitForQuiet(master, quiet: 1.0, timeout: 4)
+        _ = waitForQuiet(master, quiet: 0.4, timeout: 3)
     }
 
     private static func write(_ fd: Int32, _ s: String) {
