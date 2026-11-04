@@ -1644,7 +1644,7 @@ private struct Composer: View {
                     }
                 }
                 HStack(alignment: .bottom, spacing: 10) {
-                    TextField(showsChip || model.suggestion(for: agent) == nil ? "Reply to \(agent.name), or / for commands…"
+                    TextField(showsChip || model.suggestion(for: agent) == nil ? "Reply to \(agent.name), or / for commands…   ⌥ Return new line"
                               : "\(model.suggestion(for: agent) ?? "")   ⇥ Tab",
                               text: draft, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -1698,12 +1698,13 @@ private struct Composer: View {
             } else {
                 HStack(spacing: 8) {
                     ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
-                    Text(shell ? "Return runs it like ! in the terminal · delete the ! to send a message instead"
-                         : "Return sends · ⌥Return new line · typed into the session with claude attach")
-                        .kitType(.meta).foregroundColor(KitInk.textFaint)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity)
-                        .part("Composer Hint", .trailing)
+                    if shell {
+                        Text("Return runs it like ! in the terminal · delete the ! to send a message instead")
+                            .kitType(.meta).foregroundColor(KitInk.textFaint)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .part("Composer Hint", .trailing)
+                    }
                 }
                 .padding(.leading, 6)
             }
