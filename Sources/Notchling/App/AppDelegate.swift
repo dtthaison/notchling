@@ -1,4 +1,5 @@
 import AppKit
+import ConsoleCore
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -63,6 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         HookBridge.beat()
+        // The phone bridge, the session host connection and the sessions a phone can reach.
+        Task { @MainActor [weak self] in
+            PhoneService.shared.limitsSource = { [weak self] in self?.phoneLimits() ?? [] }
+            PhoneService.shared.start()
+        }
         // First launch with this version: turn on answering prompts from the notch.
         if UserDefaults.standard.object(forKey: "answerFromNotch") == nil {
             setAnswerFromNotch(true)
@@ -157,6 +163,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             chatWindow.show()
         }
         return false
+    }
+
+    /// `agentconsole://open[?phones=1]`: bring Chat forward; with `phones=1`, paired phones are told to open too.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard case .open(let phones)? = AppURL.parse(url) else {
+                NSLog("application(open:): not an agentconsole://open URL, ignored: %@", url.absoluteString)
+                continue
+            }
+            chatWindow.show()
+            if phones { Task { @MainActor in PhoneService.shared.notifyPhonesToOpen() } }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -358,10 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
-        // Only once Agent Console is installed; it is a separate app in Console/.
-        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: "local.agentconsole") != nil {
-            menu.addItem(action("Open Agent Console", #selector(openAgentConsole)))
-        }
+        menu.addItem(action("Open Chat and Phones", #selector(openChatAndPhones)))
         let settingsItem = action("Settings…", #selector(showSettings))
         settingsItem.keyEquivalent = ","
         menu.addItem(settingsItem)
@@ -642,12 +657,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accountsWindow.show(.cost)
     }
 
-    /// Agent Console brings its window up and, with `phones=1`, tells paired phones to open too.
-    @objc private func openAgentConsole() {
-        guard let url = URL(string: "agentconsole://open?phones=1"), NSWorkspace.shared.open(url) else {
-            NSLog("openAgentConsole: Agent Console did not open")
-            return
-        }
+    /// Opens Chat and, with the phone bridge on, tells paired phones to open too.
+    @objc private func openChatAndPhones() {
+        chatWindow.show()
+        Task { @MainActor in PhoneService.shared.notifyPhonesToOpen() }
     }
 
     @objc private func showSettings() {
@@ -786,6 +799,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openPage(_ sender: NSMenuItem) {
         guard let folder = sender.representedObject as? String else { return }
         chatWindow.showPage(folder: folder)
+    }
+
+    /// The active account's 5-hour and weekly limits, for the phone's chat header.
+    private func phoneLimits() -> [LimitInfo] {
+        guard let id = accounts.activeID, let usage = accounts.usage[id] else { return [] }
+        return [usage.session.map { LimitInfo(label: "5h", percent: $0.percent, resetsAt: $0.resetsAt) },
+                usage.week.map { LimitInfo(label: "Week", percent: $0.percent, resetsAt: $0.resetsAt) }].compactMap { $0 }
     }
 
     @objc private func openChat() {

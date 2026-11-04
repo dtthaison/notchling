@@ -132,9 +132,10 @@ final class NotchModel: ObservableObject {
         return r
     }
 
-    /// Hook questions can be answered for any session; otherwise only background ones, by typing.
-    func canAnswer(_ agent: Agent, _ q: PendingQuestion) -> Bool {
-        q.answerable && (q.toolUseID.hasPrefix("hook:") || agent.canReply)
+    /// Hook questions can be answered for any session; otherwise only background jobs and host-owned terminals, by
+    /// typing. Multi-select needs toggles, so only callers that draw them (Chat) pass `multiSelect: true`.
+    func canAnswer(_ agent: Agent, _ q: PendingQuestion, multiSelect: Bool = false) -> Bool {
+        !q.items.isEmpty && (multiSelect || q.answerable) && (q.toolUseID.hasPrefix("hook:") || agent.canType)
     }
 
     func question(_ id: String) -> PendingQuestion? {
@@ -426,7 +427,7 @@ final class NotchModel: ObservableObject {
 
     /// Records one answer; once every item has one, types them all into the session.
     func choose(_ choice: ReplySender.Choice, for id: String) {
-        guard let agent = agent(id), let q = question(id), canAnswer(agent, q), !sending else { return }
+        guard let agent = agent(id), let q = question(id), canAnswer(agent, q, multiSelect: true), !sending else { return }
         resetChoices(for: id)
         withAnimation(.easeOut(duration: 0.2)) { choices.append(choice) }
         guard choices.count >= q.items.count else { return }
@@ -434,13 +435,7 @@ final class NotchModel: ObservableObject {
 
         if let request = requests[id], request.question?.toolUseID == q.toolUseID {
             // The hook is holding the question open: hand it the answers directly.
-            var answers: [String: String] = [:]
-            for (item, choice) in zip(q.items, picked) {
-                switch choice {
-                case .option(let n): answers[item.question] = item.options[n - 1]
-                case .text(let t): answers[item.question] = t
-                }
-            }
+            let answers = ReplySender.hookAnswers(picked, for: q)
             answered.insert(request.id)
             HookBridge.respond(to: request, ["action": "answer", "answers": answers])
         } else if case .job(let jobID) = agent.target {
@@ -450,6 +445,14 @@ final class NotchModel: ObservableObject {
                 self?.choices = []
             }) {
                 try ReplySender.answer(picked, to: q, toJob: jobID)
+            }
+        } else if case .process(let pid) = agent.target, agent.repliesViaHost {
+            answered.insert(q.toolUseID)
+            run(id: id, restoreDraft: nil, onFailure: { [weak self] in
+                self?.answered.remove(q.toolUseID)
+                self?.choices = []
+            }) {
+                try HostTerminals.keys(ReplySender.answerKeys(picked, to: q), pid)
             }
         }
         foldPeek()
