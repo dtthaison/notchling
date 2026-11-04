@@ -1468,6 +1468,45 @@ private struct CappedWidth: Layout {
     }
 }
 
+/// The session's model, and a menu to change it: picking one types `/model <alias>` into the session,
+/// as you would in the terminal. Aliases follow the newest model of each family.
+private struct ModelPicker: View {
+    @ObservedObject var model: ChatModel
+    let current: String?
+
+    static let choices: [(alias: String, name: String)] = [
+        ("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"),
+    ]
+
+    var body: some View {
+        Button { popUp() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu").font(.system(size: 9, weight: .semibold))
+                Text(current.map(ChatFormat.modelName) ?? "Model")
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .kitType(.meta).foregroundColor(KitInk.textMuted)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .help("The model this session uses. Pick another to switch it (like /model in the terminal).")
+    }
+
+    private func popUp() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let family = current.map { ChatFormat.modelName($0).split(separator: " ").first.map(String.init) ?? "" }
+        for choice in Self.choices {
+            let item = ActionMenuItem(choice.name) { [model] in model.send("/model \(choice.alias)") }
+            item.state = family == choice.name ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+}
+
 private struct Composer: View {
     @ObservedObject var model: ChatModel
     let agent: Agent
@@ -1611,11 +1650,16 @@ private struct Composer: View {
                 .foregroundColor(.red)
                 .padding(.leading, 6)
             } else {
-                Text(shell ? "Return runs it like ! in the terminal · delete the ! to send a message instead"
-                     : "Return sends · ⌥Return new line · typed into the session with claude attach")
-                    .kitType(.meta).foregroundColor(KitInk.textFaint)
-                    .frame(maxWidth: .infinity)
-                    .part("Composer Hint", .trailing)
+                HStack(spacing: 8) {
+                    ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
+                    Text(shell ? "Return runs it like ! in the terminal · delete the ! to send a message instead"
+                         : "Return sends · ⌥Return new line · typed into the session with claude attach")
+                        .kitType(.meta).foregroundColor(KitInk.textFaint)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                        .part("Composer Hint", .trailing)
+                }
+                .padding(.leading, 6)
             }
         }
         .onChange(of: focused) { model.composerFocused = $0 }

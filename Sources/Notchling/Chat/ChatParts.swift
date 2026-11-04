@@ -477,6 +477,8 @@ struct NoticeRow: View {
 struct SessionInspector: View {
     let agent: Agent
     let conversation: Conversation
+    /// The folder's working copy, read every few seconds while the panel is open.
+    @State private var git: GitInfo?
 
     var body: some View {
         let facts = conversation.facts
@@ -484,10 +486,11 @@ struct SessionInspector: View {
             VStack(alignment: .leading, spacing: 18) {
                 section("Session") {
                     fact("folder", agent.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    if let branch = facts.branch { fact("arrow.triangle.branch", branch) }
+                    if git == nil, let branch = facts.branch { fact("arrow.triangle.branch", branch) }
                     if let model = facts.model { fact("cpu", ChatFormat.modelName(model)) }
                     fact(agent.canReply ? "moon.stars" : "terminal", agent.host)
                 }
+                if let git { gitSection(git).part("Git Status", .leading) }
                 section("Activity") {
                     fact("arrow.left.arrow.right", facts.turns == 1 ? "1 turn" : "\(facts.turns) turns")
                     fact("terminal", facts.commands == 1 ? "1 command" : "\(facts.commands) commands")
@@ -508,7 +511,7 @@ struct SessionInspector: View {
                     }
                 }
                 if !facts.files.isEmpty {
-                    section("Files Changed · \(facts.files.count)") {
+                    section("Edited in This Session · \(facts.files.count)") {
                         ForEach(facts.files.suffix(40), id: \.self) { path in
                             Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
                                 HStack(spacing: 6) {
@@ -528,6 +531,99 @@ struct SessionInspector: View {
             .padding(16)
         }
         .background(KitInk.sidebar)
+        .task(id: agent.cwd) {
+            let folder = agent.cwd
+            while !Task.isCancelled {
+                let fresh = await Task.detached(priority: .utility) { GitInfo.read(folder) }.value
+                if fresh != git { git = fresh }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+    }
+
+    @ViewBuilder private func gitSection(_ git: GitInfo) -> some View {
+        section(git.changes.isEmpty ? "Git" : "Git · \(git.changes.count) uncommitted") {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .medium))
+                    .foregroundColor(KitInk.textFaint).frame(width: 14)
+                Text(git.branch ?? "unknown branch").kitType(.meta).foregroundColor(KitInk.text)
+                    .lineLimit(2).textSelection(.enabled)
+                if git.ahead > 0 { Text("↑\(git.ahead)").kitType(.meta).foregroundColor(KitInk.working).monospacedDigit() }
+                if git.behind > 0 { Text("↓\(git.behind)").kitType(.meta).foregroundColor(KitInk.needs).monospacedDigit() }
+            }
+            .help(git.upstream.map { "Tracks \($0)" + (git.ahead + git.behind > 0 ? ": \(git.ahead) to push, \(git.behind) to pull" : ", up to date") }
+                  ?? "No upstream branch")
+            if let commit = git.lastCommit {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "smallcircle.filled.circle").font(.system(size: 10, weight: .medium))
+                        .foregroundColor(KitInk.textFaint).frame(width: 14)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(commit).kitType(.meta).foregroundColor(KitInk.text).lineLimit(2).textSelection(.enabled)
+                        if let age = git.lastCommitAge { Text(age).kitType(.meta).foregroundColor(KitInk.textFaint) }
+                    }
+                }
+            }
+            if git.changes.isEmpty {
+                fact("checkmark.circle", "No uncommitted changes")
+            } else {
+                ForEach(git.changes.prefix(60)) { change in gitRow(change) }
+                if git.changes.count > 60 {
+                    Text("and \(git.changes.count - 60) more").kitType(.meta).foregroundColor(KitInk.textFaint)
+                }
+            }
+        }
+    }
+
+    private func gitRow(_ change: GitInfo.Change) -> some View {
+        let full = (agent.cwd as NSString).appendingPathComponent(change.path)
+        let folder = (change.path as NSString).deletingLastPathComponent
+        return Button {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: full)])
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(change.status).font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(Self.statusColor(change.status)).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text((change.path as NSString).lastPathComponent).kitType(.meta)
+                        .foregroundColor(change.status == "D" ? KitInk.textFaint : KitInk.text)
+                        .strikethrough(change.status == "D").lineLimit(1).truncationMode(.middle)
+                    if !folder.isEmpty {
+                        Text(folder).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1).truncationMode(.head)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let added = change.added, let removed = change.removed, added + removed > 0 {
+                    HStack(spacing: 4) {
+                        if added > 0 { Text("+\(added)").foregroundColor(KitInk.working) }
+                        if removed > 0 { Text("−\(removed)").foregroundColor(KitInk.needs) }
+                    }
+                    .kitType(.meta).monospacedDigit()
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .help(Self.statusName(change.status) + ": " + change.path)
+    }
+
+    private static func statusColor(_ status: String) -> Color {
+        switch status {
+        case "A", "?": return KitInk.working
+        case "D", "U": return KitInk.needs
+        default: return KitInk.textMuted
+        }
+    }
+
+    private static func statusName(_ status: String) -> String {
+        switch status {
+        case "A": return "Added"
+        case "D": return "Deleted"
+        case "R": return "Renamed"
+        case "?": return "New, not tracked yet"
+        case "U": return "Conflict"
+        default: return "Modified"
+        }
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
