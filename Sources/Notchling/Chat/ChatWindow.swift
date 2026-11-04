@@ -1469,14 +1469,12 @@ private struct CappedWidth: Layout {
 }
 
 /// The session's model, and a menu to change it: picking one types `/model <alias>` into the session,
-/// as you would in the terminal. Aliases follow the newest model of each family.
+/// as you would in the terminal. Full model ids, so the menu names exactly what you get.
 private struct ModelPicker: View {
     @ObservedObject var model: ChatModel
     let current: String?
 
-    static let choices: [(alias: String, name: String)] = [
-        ("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"),
-    ]
+    static let choices = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
 
     var body: some View {
         Button { popUp() } label: {
@@ -1497,10 +1495,11 @@ private struct ModelPicker: View {
     private func popUp() {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let family = current.map { ChatFormat.modelName($0).split(separator: " ").first.map(String.init) ?? "" }
-        for choice in Self.choices {
-            let item = ActionMenuItem(choice.name) { [model] in model.send("/model \(choice.alias)") }
-            item.state = family == choice.name ? .on : .off
+        let shown = current.map(ChatFormat.modelName)
+        for id in Self.choices {
+            let name = ChatFormat.modelName(id)
+            let item = ActionMenuItem(name) { [model] in model.send("/model \(id)") }
+            item.state = shown == name ? .on : .off
             menu.addItem(item)
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
