@@ -75,13 +75,22 @@ final class AgentMonitor {
         })
     }
 
-    /// The folders of one job's copies, the most recently created first.
+    /// The folders of one job's copies, the current one first.
     static func newestFirst(_ copies: [(dir: String?, job: [String: Any])]) -> [String?] {
-        copies.map { ($0.dir, created($0.job)) }.sorted { $0.1 > $1.1 }.map { $0.0 }
+        copies.map { ($0.dir, rank($0.job)) }.sorted { $0.1 > $1.1 }.map { $0.0 }
     }
 
-    static func created(_ job: [String: Any]) -> Date {
-        (job["createdAt"] as? String).flatMap(parseISO) ?? .distantPast
+    /// How current a copy of a job is: one that isn't stopped beats one that is, then the most recently
+    /// updated. Not `createdAt`: waking an old copy (a session moved back) keeps its first creation date.
+    static func rank(_ job: [String: Any]) -> Rank {
+        Rank(live: (job["state"] as? String) != "stopped",
+             updated: (job["updatedAt"] as? String).flatMap(parseISO) ?? .distantPast)
+    }
+
+    struct Rank: Comparable {
+        let live: Bool
+        let updated: Date
+        static func < (a: Rank, b: Rank) -> Bool { a.live != b.live ? !a.live : a.updated < b.updated }
     }
 
     /// The environment to run `claude` in for a job: the lane's `CLAUDE_CONFIG_DIR` when it has one.
@@ -107,7 +116,7 @@ final class AgentMonitor {
         var lanes: [String: String] = [:]
         var mainIDs: [String] = []
         // One row per conversation: a moved session's stopped copy in the folder it left is hidden.
-        var jobCreated: [String: Date] = [:]
+        var jobRank: [String: Rank] = [:]
         for (dir, lane) in LaneStore.configDirs() {
             let sessions = readSessions(in: dir)
             let jobs = readJobs(in: dir)
@@ -120,14 +129,14 @@ final class AgentMonitor {
             for (shortID, job) in jobs {
                 var a = agent(fromJob: job, shortID: shortID, live: sessionByJob[shortID])
                 a.configDir = lane?.path
-                let created = Self.created(job)
+                let rank = Self.rank(job)
                 if let index = result.firstIndex(where: { $0.id == a.id }) {
-                    guard created > jobCreated[a.id] ?? .distantPast else { continue }
+                    guard let best = jobRank[a.id], rank > best else { continue }
                     result[index] = a
                 } else {
                     result.append(a)
                 }
-                jobCreated[a.id] = created
+                jobRank[a.id] = rank
                 if let lane { lanes[a.id] = lane.path } else { lanes[a.id] = nil; mainIDs.append(a.id) }
             }
 
@@ -180,8 +189,11 @@ final class AgentMonitor {
             (group, label) = (.working, "Working")
         } else if state == "blocked" || tempo == "blocked" || status == "waiting" {
             (group, label) = (.needsInput, "Needs input")
-        } else if state == "working" {
+        } else if state == "working" || tempo == "active" {
             (group, label) = (.working, "Working")
+        } else if state == "running" {
+            // A session woken with `--bg --resume` (2.1.318): up, waiting for a prompt.
+            (group, label) = (.completed, "Idle")
         } else {
             (group, label) = (.completed, state.isEmpty ? "Idle" : state.capitalized)
         }
