@@ -109,7 +109,7 @@ extension ChatModel {
                 let conversation = URL(fileURLWithPath: job.transcript).deletingPathExtension().lastPathComponent
                 let cwd = job.cwd.isEmpty ? home : job.cwd
                 if case .failure(let error) = Self.startBackground(in: cwd, configDir: nil,
-                                                                   arguments: flags + ["--bg", "--resume", conversation]) {
+                                                                   arguments: Self.resumeArguments(conversation, job: job.jobID, in: nil, flags: flags)) {
                     errors[job.agentID] = "Stopped, but couldn't resume it on the main login: \(error.localizedDescription)"
                 }
             }

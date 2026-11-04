@@ -25,3 +25,17 @@ final class CommandJobTests: XCTestCase {
         XCTAssertEqual(tail, "line 298\nline 299\nline 300")
     }
 }
+
+/// Reading the new job's id from `claude --bg` output, across Claude Code versions.
+final class LaunchOutputTests: XCTestCase {
+    func testJobID() {
+        XCTAssertEqual(ChatModel.jobID(inLaunchOutput: "backgrounded · 6ce4c19c · fix-hook (idle — send a prompt to start)"), "6ce4c19c")
+        let v318 = """
+        note: background session 8f985af0 keeps its own saved options, so the flags you passed started a copy as 6220cc2b.
+        backgrounded · 6220cc2b (idle — send a prompt to start)
+          claude agents          list sessions
+        """
+        XCTAssertEqual(ChatModel.jobID(inLaunchOutput: v318), "6220cc2b")
+        XCTAssertNil(ChatModel.jobID(inLaunchOutput: "error: no such session"))
+    }
+}

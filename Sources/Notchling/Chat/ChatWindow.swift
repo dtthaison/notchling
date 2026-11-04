@@ -443,7 +443,8 @@ final class ChatModel: ObservableObject {
         let move: (Lane?) -> Void = { [weak self] lane in
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = Self.stopJob(shortID).flatMap {
-                    Self.startBackground(in: cwd, configDir: lane?.path, arguments: flags + ["--bg", "--resume", conversation])
+                    Self.startBackground(in: cwd, configDir: lane?.path,
+                                         arguments: Self.resumeArguments(conversation, job: shortID, in: lane?.path, flags: flags))
                 }
                 DispatchQueue.main.async {
                     switch result {
@@ -461,6 +462,28 @@ final class ChatModel: ObservableObject {
             case .failure(let error): self?.accountErrors[id] = error.localizedDescription
             }
         }
+    }
+
+    /// The new job's short id from `claude --bg` output: "backgrounded · 6ce4c19c · name (idle — …)", or
+    /// since 2.1.318 "backgrounded · 6220cc2b (idle — …)", maybe after a note line.
+    static func jobID(inLaunchOutput text: String) -> String? {
+        for line in text.split(separator: "\n") {
+            let parts = line.components(separatedBy: " · ")
+            guard parts.count > 1,
+                  let id = parts[1].split(whereSeparator: \.isWhitespace).first.map(String.init) else { continue }
+            if id.count == 8, id.allSatisfy(\.isHexDigit) { return id }
+        }
+        return nil
+    }
+
+    /// `--resume` for a session moving into `configDir`. Where that folder already has a background job
+    /// for the conversation (the copy left there by an earlier move), Claude Code continues that job with
+    /// its own saved options, and since 2.1.318 any flags passed start a separate copy instead; so flags
+    /// go along only when there's no job to continue.
+    static func resumeArguments(_ conversation: String, job shortID: String, in configDir: String?, flags: [String]) -> [String] {
+        let dir = configDir.map { URL(fileURLWithPath: $0) } ?? LaneStore.mainDir
+        let existing = FileManager.default.fileExists(atPath: dir.appendingPathComponent("jobs/\(shortID)/state.json").path)
+        return (existing ? [] : flags) + ["--bg", "--resume", conversation]
     }
 
     /// The flags the job was started with (name, model, permission mode), so the moved session keeps them.
@@ -520,14 +543,7 @@ final class ChatModel: ObservableObject {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self)
-        // "backgrounded · 6ce4c19c · name (idle — send a prompt to start)"; a resume may word the first
-        // part differently, so take the first line whose second part is a short job id.
-        for line in text.split(separator: "\n") {
-            let parts = line.components(separatedBy: " · ")
-            guard parts.count > 1 else { continue }
-            let id = parts[1].trimmingCharacters(in: .whitespaces)
-            if id.count == 8, id.allSatisfy(\.isHexDigit) { return .success(id) }
-        }
+        if let id = jobID(inLaunchOutput: text) { return .success(id) }
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return .failure(AccountError(message.isEmpty ? "claude --bg exited with code \(p.terminationStatus)." : message))
     }
