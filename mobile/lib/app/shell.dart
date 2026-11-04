@@ -160,16 +160,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint;
     final Kit kit = Kit.of(context);
 
+    // Read the padding from inside the Scaffold body: out here it is only the status bar, and the content would sit
+    // under the glass app bar (the Visualize sub-tab selector was hidden that way).
     Widget inset(Widget child, {bool bottom = false}) {
-      final EdgeInsets p = MediaQuery.paddingOf(context);
-      return MediaQuery.removePadding(
-        context: context,
-        removeTop: true,
-        removeBottom: bottom,
-        child: Padding(
-          padding: EdgeInsets.only(top: p.top, bottom: bottom ? p.bottom : 0),
-          child: child,
-        ),
+      return Builder(
+        builder: (BuildContext inner) {
+          final EdgeInsets p = MediaQuery.paddingOf(inner);
+          return MediaQuery.removePadding(
+            context: inner,
+            removeTop: true,
+            removeBottom: bottom,
+            child: Padding(
+              padding: EdgeInsets.only(top: p.top, bottom: bottom ? p.bottom : 0),
+              child: child,
+            ),
+          );
+        },
       );
     }
 
@@ -527,7 +533,12 @@ class _KeyboardLiftState extends State<KeyboardLift> {
   @override
   Widget build(BuildContext context) {
     final double inset = MediaQuery.viewInsetsOf(context).bottom;
-    final double lift = math.max(0, inset - _below);
+    // The composer rests above the space the tab bar and the gesture bar take: its own safe-area padding (this
+    // MediaQuery's bottom padding, which stays while the tab bar is merely covered) plus whatever lies below this box.
+    // The card must end up on the keyboard, so that space is not lifted twice: the band between card and keyboard
+    // was that padding.
+    final double reserved = _below + MediaQuery.paddingOf(context).bottom;
+    final double lift = math.max(0, inset - reserved);
     if (inset == 0) {
       WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
     }
