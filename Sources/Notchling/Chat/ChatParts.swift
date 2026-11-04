@@ -479,6 +479,8 @@ struct SessionInspector: View {
     let conversation: Conversation
     /// The folder's working copy, read every few seconds while the panel is open.
     @State private var git: GitInfo?
+    @State private var showRemote = false
+    @State private var showAllLocal = false
 
     var body: some View {
         let facts = conversation.facts
@@ -491,6 +493,7 @@ struct SessionInspector: View {
                     fact(agent.canReply ? "moon.stars" : "terminal", agent.host)
                 }
                 if let git { gitSection(git).part("Git Status", .leading) }
+                if let git, git.branches.count > 1 { branchesSection(git).part("Git Branches", .leading) }
                 section("Activity") {
                     fact("arrow.left.arrow.right", facts.turns == 1 ? "1 turn" : "\(facts.turns) turns")
                     fact("terminal", facts.commands == 1 ? "1 command" : "\(facts.commands) commands")
@@ -572,6 +575,52 @@ struct SessionInspector: View {
                 }
             }
         }
+    }
+
+    /// Every local branch, then (folded) the remote branches nobody has locally. Read-only: switching
+    /// the branch under a running session is the session's call, not ours.
+    @ViewBuilder private func branchesSection(_ git: GitInfo) -> some View {
+        let local = git.branches.filter { !$0.isRemote }
+        let remote = git.branches.filter(\.isRemote)
+        let shown = showAllLocal ? local : Array(local.prefix(12))
+        section("Branches · \(local.count) local" + (remote.isEmpty ? "" : " · \(remote.count) remote only")) {
+            ForEach(shown) { branchRow($0) }
+            if local.count > shown.count {
+                foldButton("Show \(local.count - shown.count) more") { showAllLocal = true }
+            }
+            if !remote.isEmpty {
+                foldButton(showRemote ? "Hide remote-only branches" : "Show \(remote.count) remote-only") { showRemote.toggle() }
+                if showRemote { ForEach(remote) { branchRow($0) } }
+            }
+        }
+    }
+
+    private func foldButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).kitType(.meta).foregroundColor(KitInk.accent)
+        }
+        .buttonStyle(.plain).pointerCursor()
+    }
+
+    private func branchRow(_ b: GitInfo.Branch) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: b.isCurrent ? "checkmark" : b.isRemote ? "cloud" : "arrow.triangle.branch")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(b.isCurrent ? KitInk.working : KitInk.textFaint).frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(b.name).kitType(.meta)
+                    .foregroundColor(b.isCurrent ? KitInk.text : KitInk.textMuted)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                let note = [b.worktree.map { "open in " + ($0 as NSString).lastPathComponent },
+                            b.gone ? "gone from remote" : (!b.isRemote && !b.hasUpstream ? "local only" : nil),
+                            b.age.isEmpty ? nil : b.age].compactMap { $0 }.joined(separator: " · ")
+                if !note.isEmpty { Text(note).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1) }
+            }
+            Spacer(minLength: 4)
+            if b.ahead > 0 { Text("↑\(b.ahead)").kitType(.meta).foregroundColor(KitInk.working).monospacedDigit() }
+            if b.behind > 0 { Text("↓\(b.behind)").kitType(.meta).foregroundColor(KitInk.needs).monospacedDigit() }
+        }
+        .help(b.name)
     }
 
     private func gitRow(_ change: GitInfo.Change) -> some View {

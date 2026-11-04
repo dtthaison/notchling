@@ -12,6 +12,22 @@ struct GitInfo: Equatable {
         var id: String { path }
     }
 
+    /// A local branch, or a remote branch that has no local copy.
+    struct Branch: Equatable, Identifiable {
+        let name: String
+        var isRemote = false
+        var isCurrent = false
+        var ahead = 0
+        var behind = 0
+        /// The branch's upstream is gone from the remote.
+        var gone = false
+        var hasUpstream = false
+        var age = ""
+        /// Folder of another working copy that has this branch checked out.
+        var worktree: String?
+        var id: String { (isRemote ? "r/" : "l/") + name }
+    }
+
     var branch: String?
     var upstream: String?
     var ahead = 0
@@ -19,6 +35,40 @@ struct GitInfo: Equatable {
     var lastCommit: String?
     var lastCommitAge: String?
     var changes: [Change] = []
+    var branches: [Branch] = []
+
+    /// `git for-each-ref` output in the format `branchFormat` names, newest commit first. Local
+    /// branches all show; a remote branch shows only when no local branch has its name.
+    static func parseBranches(_ text: String, folder: String = "") -> [Branch] {
+        var local: [Branch] = [], remote: [Branch] = []
+        for line in text.split(separator: "\n") {
+            let c = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard c.count >= 6 else { continue }
+            let ref = c[1]
+            if ref.hasPrefix("refs/heads/") {
+                var b = Branch(name: String(ref.dropFirst("refs/heads/".count)), isCurrent: c[0] == "*", age: c[4])
+                b.hasUpstream = !c[2].isEmpty
+                b.gone = c[3] == "[gone]"
+                for part in c[3].trimmingCharacters(in: CharacterSet(charactersIn: "[]")).components(separatedBy: ", ") {
+                    let w = part.split(separator: " ")
+                    guard w.count == 2, let n = Int(w[1]) else { continue }
+                    if w[0] == "ahead" { b.ahead = n } else if w[0] == "behind" { b.behind = n }
+                }
+                let wt = c[5]
+                if !wt.isEmpty, !b.isCurrent, wt != folder { b.worktree = wt }
+                local.append(b)
+            } else if ref.hasPrefix("refs/remotes/") {
+                let short = String(ref.dropFirst("refs/remotes/".count))
+                guard !short.hasSuffix("/HEAD"), short.contains("/") else { continue }
+                remote.append(Branch(name: short, isRemote: true, age: c[4]))
+            }
+        }
+        let names = Set(local.map(\.name))
+        remote.removeAll { names.contains(String($0.name.drop { $0 != "/" }.dropFirst())) }
+        return local + remote
+    }
+
+    static let branchFormat = "%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track)%09%(committerdate:relative)%09%(worktreepath)"
 
     /// `git status --porcelain=v1 --branch` output.
     static func parseStatus(_ text: String) -> GitInfo {
@@ -100,6 +150,9 @@ struct GitInfo: Equatable {
             let cols = log.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\t")
             info.lastCommit = cols.first.flatMap { $0.isEmpty ? nil : $0 }
             info.lastCommitAge = cols.count > 1 ? cols[1] : nil
+        }
+        if let refs = git(["for-each-ref", "--sort=-committerdate", "--format=" + branchFormat, "refs/heads", "refs/remotes"], in: folder) {
+            info.branches = parseBranches(refs, folder: (folder as NSString).standardizingPath)
         }
         return info
     }

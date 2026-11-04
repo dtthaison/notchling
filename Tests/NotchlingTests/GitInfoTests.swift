@@ -37,4 +37,23 @@ final class GitInfoTests: XCTestCase {
         XCTAssertEqual(info.changes[1].added, 4)
         XCTAssertNil(info.changes[2].added)
     }
+
+    func testBranches() {
+        let text = [
+            "*\trefs/heads/feat\torigin/feat\t[ahead 1]\t5 minutes ago\t/r/wt",
+            " \trefs/heads/main\torigin/main\t\t4 days ago\t/r",
+            " \trefs/heads/old\t\t\t8 days ago\t",
+            " \trefs/heads/dead\torigin/dead\t[gone]\t9 days ago\t/r/other",
+            " \trefs/remotes/origin/HEAD\t\t\t4 days ago\t",
+            " \trefs/remotes/origin/main\t\t\t4 days ago\t",
+            " \trefs/remotes/origin/idea\t\t\t8 days ago\t",
+        ].joined(separator: "\n")
+        let b = GitInfo.parseBranches(text, folder: "/r")
+        XCTAssertEqual(b.map(\.name), ["feat", "main", "old", "dead", "origin/idea"])
+        XCTAssertTrue(b[0].isCurrent); XCTAssertEqual(b[0].ahead, 1)
+        XCTAssertNil(b[1].worktree)
+        XCTAssertFalse(b[2].hasUpstream)
+        XCTAssertTrue(b[3].gone); XCTAssertEqual(b[3].worktree, "/r/other")
+        XCTAssertTrue(b[4].isRemote)
+    }
 }
