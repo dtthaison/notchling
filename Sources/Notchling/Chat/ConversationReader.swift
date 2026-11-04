@@ -248,6 +248,8 @@ enum ConversationReader {
                 }
                 let result = obj["toolUseResult"] as? [String: Any]
                 if let text = message["content"] as? String {
+                    // Older builds, and /model with an argument, log a command's output as a user line.
+                    if let id = Self.modelID(inConfirmation: text) { c.facts.model = id }
                     if let kind = userItem(text, images: 0) {
                         append(kind, date)
                         if case .user = kind { c.turnStart = date; turnOutput = [:] }
