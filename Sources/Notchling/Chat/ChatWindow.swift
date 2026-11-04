@@ -1137,6 +1137,8 @@ private struct ConversationView: View, Equatable {
     @State private var atBottom = true
     /// While our own animated jump runs, don't also snap to the end.
     @State private var jumpingUntil = Date.distantPast
+    /// Spaces out the follow-the-end corrections. A class, so setting it doesn't redraw.
+    @State private var corrections = CorrectionClock()
 
     static func == (a: Self, b: Self) -> Bool {
         a.conversation == b.conversation && a.pending == b.pending && a.live == b.live
@@ -1240,8 +1242,10 @@ private struct ConversationView: View, Equatable {
                         // Off screen (a lazy row not drawn), the end counts as far below.
                         let near = (edges.end ?? .infinity) < outer.size.height + 4
                         // A message or step grew below while following: stay on the newest.
+                        // At most one correction per 0.3 s: lazy rows are measured as they appear, so each scroll
+                        // can move the end again, and an unbounded chain pins the main thread (the hangs of 4 Nov).
                         if atBottom && !near && Date() >= jumpingUntil {
-                            DispatchQueue.main.async { if atBottom { proxy.scrollTo("end", anchor: .bottom) } }
+                            corrections.run { if atBottom { proxy.scrollTo("end", anchor: .bottom) } }
                         }
                     }
                     if !atBottom {
@@ -1301,6 +1305,28 @@ private struct ConversationView: View, Equatable {
             NoticeRow(text: text, symbol: symbol).part("Notice", .leading)
         case .commandOutput(let text):
             CommandOutputView(text: text).part("Command Output", .topTrailing)
+        }
+    }
+}
+
+/// Runs at most one scroll correction per interval; a request that comes too soon waits for the
+/// next slot (one waiting at a time), so the view still ends at the newest message.
+private final class CorrectionClock {
+    private var next = Date.distantPast
+    private var waiting = false
+
+    func run(_ action: @escaping () -> Void) {
+        let now = Date()
+        if now >= next {
+            next = now.addingTimeInterval(0.3)
+            DispatchQueue.main.async(execute: action)
+        } else if !waiting {
+            waiting = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now)) { [self] in
+                waiting = false
+                next = Date().addingTimeInterval(0.3)
+                action()
+            }
         }
     }
 }
