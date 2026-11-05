@@ -66,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         HookBridge.beat()
+        // Rewrites the vault skill if the app moved since it was written.
+        DispatchQueue.global(qos: .utility).async { VaultSkill.update() }
         // The phone bridge, the session host connection and the sessions a phone can reach.
         Task { @MainActor [weak self] in
             PhoneService.shared.limitsSource = { [weak self] in self?.phoneLimits() ?? [] }

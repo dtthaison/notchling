@@ -159,6 +159,8 @@ final class ChatModel: ObservableObject {
         didSet { if !accountSheet { closeAccounts() } }
     }
     @Published var accountTab = AccountTab.claude
+    /// The Secret Vault sheet (`VaultSheet`): credentials agents use by name, never through the chat.
+    @Published var vaultSheet = false
     /// The New Session sheet (`NewSessionSheet`): account, folder, Start.
     @Published var newSessionSheet = false {
         didSet { if !newSessionSheet { closeAccounts() } }
@@ -1272,7 +1274,7 @@ final class ChatModel: ObservableObject {
             return true
         }
         // Then it stops a working session's turn, as in the terminal (not while a command list is open).
-        if keyCode == 53, terminal == nil, !accountSheet, !newSessionSheet, let agent = selected, canStop(agent),
+        if keyCode == 53, terminal == nil, !accountSheet, !newSessionSheet, !vaultSheet, let agent = selected, canStop(agent),
            completions(for: agent).isEmpty {
             stopTurn()
             return true
@@ -1357,6 +1359,9 @@ struct ChatView: View {
         })
         .background(EmptyView().sheet(isPresented: $model.newSessionSheet) {
             NewSessionSheet(model: model)
+        })
+        .background(EmptyView().sheet(isPresented: $model.vaultSheet) {
+            VaultSheet { model.vaultSheet = false }
         })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
@@ -1473,7 +1478,17 @@ private struct SessionSidebar: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             // The ? button: names every part on screen, here and in the notch.
-            HStack { KitPartsButton(); Spacer() }
+            HStack {
+                KitPartsButton()
+                Spacer()
+                Button { model.vaultSheet = true } label: {
+                    Image(systemName: "key").font(.system(size: 13, weight: .medium)).foregroundColor(KitInk.textMuted)
+                }
+                .buttonStyle(.kit(.ghost))
+                .help("Secret Vault: passwords and tokens agents can use without seeing them")
+                .accessibilityLabel("Secret Vault")
+                .part("Secret Vault Button", .top)
+            }
                 .padding(.horizontal, 10).padding(.vertical, 8)
         }
         .onChange(of: model.sidebarFocusRequest) { _ in listFocused = true }
