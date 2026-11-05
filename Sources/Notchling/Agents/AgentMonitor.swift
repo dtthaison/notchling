@@ -20,6 +20,9 @@ enum AgentTarget {
     /// A Codex CLI session, shown only in Chat; turns run through `CodexRunner`. Empty id: a new
     /// session not started yet (its first message starts it).
     case codex(sessionID: String)
+    /// An Antigravity CLI conversation, shown only in Chat; `AntigravityRunner` loads it and runs its
+    /// turns over ACP. Empty id: a new session not started yet.
+    case antigravity(sessionID: String)
 }
 
 struct Agent {
@@ -46,6 +49,7 @@ struct Agent {
     var canReply: Bool {
         if case .job = target { return command == nil }
         if case .codex = target { return true }
+        if case .antigravity = target { return true }
         return false
     }
 }

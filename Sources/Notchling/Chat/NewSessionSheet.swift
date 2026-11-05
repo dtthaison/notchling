@@ -1,18 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// What a new session runs on: a Claude Code account (nil is the main login; another gets a lane)
-/// or a Codex account (Codex has one login, so a non-active one switches Codex first). Add a case
-/// per tool (Antigravity next).
+/// What a new session runs on: a Claude Code account (nil is the main login; another gets a lane),
+/// a Codex account (Codex has one login, so a non-active one switches Codex first), or Antigravity
+/// CLI (`agy`, on whatever login it has). Add a case per tool.
 enum SessionChoice: Hashable {
     case claude(accountID: String?)
     case codex(accountID: String)
+    case antigravity
 
     /// Remembered between sheets.
     var key: String {
         switch self {
         case .claude(let id): return "claude:" + (id ?? "")
         case .codex(let id): return "codex:" + id
+        case .antigravity: return "antigravity:"
         }
     }
 
@@ -22,6 +24,8 @@ enum SessionChoice: Hashable {
             self = .claude(accountID: id.isEmpty ? nil : id)
         } else if key.hasPrefix("codex:") {
             self = .codex(accountID: String(key.dropFirst(6)))
+        } else if key == "antigravity:" {
+            self = .antigravity
         } else {
             return nil
         }
@@ -129,6 +133,11 @@ struct NewSessionSheet: View {
                         if CodexStore.binary() != nil {
                             addRow("Add Codex Account") { enterAdding(.codex) }
                         }
+                    }
+                }
+                if AntigravityRunner.binary() != nil {
+                    group("Antigravity CLI", icon: "paperplane") {
+                        option(.antigravity, title: "Antigravity CLI", detail: "Uses agy's own sign-in")
                     }
                 }
             }
@@ -280,6 +289,7 @@ struct NewSessionSheet: View {
         switch choice {
         case .claude: return "A background Claude Code session in \(name). It opens here, ready for your first message."
         case .codex: return "A Codex session in \(name). Your first message starts it."
+        case .antigravity: return "An Antigravity CLI session in \(name). Your first message starts it."
         }
     }
 
@@ -298,6 +308,7 @@ struct NewSessionSheet: View {
         switch choice {
         case .claude(let id): return model.sessionTargets.contains { $0.accountID == id }
         case .codex(let id): return model.codex?.accounts.contains { $0.id == id } == true
+        case .antigravity: return AntigravityRunner.binary() != nil
         }
     }
 
@@ -371,6 +382,9 @@ struct NewSessionSheet: View {
                     }
                 }
             }
+        case .antigravity:
+            model.newSessionSheet = false
+            model.newAntigravitySession(in: folder)
         }
     }
 }

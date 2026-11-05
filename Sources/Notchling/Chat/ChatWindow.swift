@@ -258,8 +258,12 @@ final class ChatModel: ObservableObject {
         codexWatch = codex?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
         }
+        agyWatch = AntigravityRunner.shared.$version.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.antigravityChanged() }
+        }
     }
     private var codexWatch: AnyCancellable?
+    private var agyWatch: AnyCancellable?
 
     // MARK: Accounts (lanes)
 
@@ -286,6 +290,7 @@ final class ChatModel: ObservableObject {
 
     func account(for agent: Agent) -> SessionAccount? {
         if case .codex = agent.target { return nil }
+        if case .antigravity = agent.target { return nil }
         if let lane = lanes[agent.id] { return SessionAccount(email: lane.email, lane: lane) }
         // In a lane folder the lanes list doesn't name (yet): don't guess.
         if agent.configDir != nil { return nil }
@@ -296,6 +301,7 @@ final class ChatModel: ObservableObject {
     func usage(for agent: Agent) -> AccountUsage? {
         guard let accounts else { return nil }
         if case .codex = agent.target { return nil }
+        if case .antigravity = agent.target { return nil }
         if let lane = lanes[agent.id] { return accounts.usage[lane.accountID] }
         if agent.configDir != nil { return nil }
         return accounts.activeID.flatMap { accounts.usage[$0] }
@@ -716,8 +722,8 @@ final class ChatModel: ObservableObject {
         return allAgents.first { $0.id == id } ?? seen[id]
     }
 
-    /// Claude Code's sessions (the notch's), then Codex's, which only Chat shows.
-    var allAgents: [Agent] { notch.agents + codexDrafts + codexAgents }
+    /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which only Chat shows.
+    var allAgents: [Agent] { notch.agents + codexDrafts + codexAgents + agyDrafts + agyAgents }
 
     // MARK: Codex sessions
 
@@ -890,6 +896,142 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    // MARK: Antigravity CLI sessions
+
+    /// Recent Antigravity CLI conversations (`AntigravitySessions`), re-read every few seconds.
+    @Published private(set) var agyAgents: [Agent] = []
+    /// New Antigravity sessions picked in New Session that wait for their first message.
+    @Published private(set) var agyDrafts: [Agent] = []
+    private var agyListedAt = Date.distantPast
+    private var agyListing = false
+
+    func refreshAntigravity(force: Bool = false) {
+        guard AntigravityRunner.binary() != nil, !agyListing, force || Date().timeIntervalSince(agyListedAt) > 3 else { return }
+        agyListing = true
+        let working = AntigravityRunner.shared.working
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let list = AntigravitySessions.list(live: working)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.agyListing = false
+                self.agyListedAt = Date()
+                // A session started here that the summaries don't list yet stays as it was.
+                let listed = Set(list.map(\.id))
+                let extra = self.agyStarted.filter { !listed.contains($0.id) }
+                let merged = list.map { self.withLiveTitle($0) } + extra
+                if merged.map(\.id) != self.agyAgents.map(\.id) || zip(merged, self.agyAgents).contains(where: {
+                    $0.group != $1.group || $0.name != $1.name || $0.since != $1.since
+                }) {
+                    self.agyAgents = merged
+                }
+            }
+        }
+    }
+
+    /// Sessions started from Chat, kept until Antigravity's summaries list them.
+    private var agyStarted: [Agent] = []
+
+    /// A row with the live state the runner knows: working, and the title Antigravity gave it.
+    private func withLiveTitle(_ agent: Agent) -> Agent {
+        guard case .antigravity(let session) = agent.target else { return agent }
+        let runner = AntigravityRunner.shared
+        let working = runner.isWorking(session)
+        let title = runner.title(session) ?? agent.name
+        guard working != (agent.group == .working) || title != agent.name else { return agent }
+        return Agent(id: agent.id, name: title, project: agent.project, cwd: agent.cwd,
+                     group: working ? .working : .completed, label: working ? "Working" : "Antigravity",
+                     detail: nil, since: working ? Date() : agent.since, target: agent.target, host: "Antigravity")
+    }
+
+    /// The runner changed (a chunk, a tool call, a permission, a turn's end).
+    private func antigravityChanged() {
+        if let agent = selected, case .antigravity(let session) = agent.target, !session.isEmpty,
+           let fresh = AntigravityRunner.shared.conversation(session), fresh != conversation {
+            conversation = fresh
+            dropDelivered(agent.id)
+        }
+        let updated = agyAgents.map { withLiveTitle($0) }
+        if updated.map(\.name) != agyAgents.map(\.name) || updated.map(\.group) != agyAgents.map(\.group) { agyAgents = updated }
+        objectWillChange.send()
+    }
+
+    /// A new Antigravity session in `folder`: listed and selected at once, started by its first message.
+    func newAntigravitySession(in folder: String) {
+        addProjectFolder(folder)
+        let agent = Agent(id: "agy-new:" + UUID().uuidString, name: "New Antigravity Session",
+                          project: (folder as NSString).lastPathComponent, cwd: folder, group: .completed, label: "New",
+                          detail: nil, since: Date(), target: .antigravity(sessionID: ""), host: "Antigravity")
+        agyDrafts.insert(agent, at: 0)
+        selection = agent.id
+        focusRequest += 1
+    }
+
+    /// Closes a draft, or the session's Antigravity process (the conversation stays in Antigravity).
+    func closeAntigravity(_ agent: Agent) {
+        guard case .antigravity(let session) = agent.target else { return }
+        if session.isEmpty {
+            agyDrafts.removeAll { $0.id == agent.id }
+            if selection == agent.id { selection = nil }
+        } else {
+            AntigravityRunner.shared.close(session)
+        }
+    }
+
+    private func sendAntigravity(_ agent: Agent, sessionID: String, text: String) {
+        let id = agent.id
+        errors[id] = nil
+        let runner = AntigravityRunner.shared
+        // One turn at a time: what's typed meanwhile goes out when this turn ends.
+        if pending[id]?.sending == true || (!sessionID.isEmpty && runner.isWorking(sessionID)) {
+            outbox[id, default: []].append(text)
+            return
+        }
+        pending[id] = Pending(text: text, at: Date(), sending: true, exact: false)
+        let ended: (String, String) -> (String?) -> Void = { [weak self] key, session in { failure in
+            guard let self else { return }
+            if let failure { self.errors[key] = failure }
+            self.pending[key] = nil
+            self.refreshAntigravity(force: true)
+            if var waiting = self.outbox[key], !waiting.isEmpty {
+                let next = waiting.removeFirst()
+                self.outbox[key] = waiting.isEmpty ? nil : waiting
+                let current = self.allAgents.first { $0.id == key } ?? self.seen[key] ?? agent
+                self.sendAntigravity(current, sessionID: session, text: next)
+            }
+        } }
+        guard sessionID.isEmpty else {
+            pending[id]?.sending = false
+            runner.prompt(sessionID, text: text, folder: agent.cwd, ended: ended(id, sessionID))
+            return
+        }
+        runner.start(in: agent.cwd) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let session):
+                // The draft becomes the real session: carry its reply, box and selection over.
+                let key = AntigravitySessions.agentID(session)
+                self.pending[key] = self.pending.removeValue(forKey: id)
+                self.pending[key]?.sending = false
+                self.drafts[key] = self.drafts.removeValue(forKey: id)
+                self.outbox[key] = self.outbox.removeValue(forKey: id)
+                self.agyDrafts.removeAll { $0.id == id }
+                let row = Agent(id: key, name: AntigravitySessions.title(text), project: agent.project, cwd: agent.cwd,
+                                group: .working, label: "Working", detail: nil, since: Date(),
+                                target: .antigravity(sessionID: session), host: "Antigravity")
+                self.seen[key] = row
+                self.agyStarted.append(row)
+                self.agyAgents.insert(row, at: 0)
+                if self.selection == id { self.selection = key }
+                runner.prompt(session, text: text, folder: agent.cwd, ended: ended(key, session))
+            case .failure(let error):
+                self.pending[id] = nil
+                self.errors[id] = error.localizedDescription
+                let draft = self.drafts[id] ?? ""
+                self.drafts[id] = ([text] + (draft.isEmpty ? [] : [draft])).joined(separator: "\n\n")
+            }
+        }
+    }
+
     /// Sessions a Stop was sent to, until they stop working (or 20 s pass).
     @Published private(set) var stopping: [String: Date] = [:]
 
@@ -900,6 +1042,7 @@ final class ChatModel: ObservableObject {
         switch agent.target {
         case .job: return agent.command == nil
         case .codex(let session): return !session.isEmpty && CodexRunner.shared.isRunning(session)
+        case .antigravity(let session): return !session.isEmpty && AntigravityRunner.shared.isWorking(session)
         default: return false
         }
     }
@@ -967,6 +1110,8 @@ final class ChatModel: ObservableObject {
         switch agent.target {
         case .codex(let session):
             CodexRunner.shared.stop(session)
+        case .antigravity(let session):
+            AntigravityRunner.shared.cancel(session)
         case .job(let jobID):
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 var failure: Error?
@@ -1002,7 +1147,19 @@ final class ChatModel: ObservableObject {
         refreshPage()
         if accounts != nil { refreshLanes() }
         refreshCodex()
+        refreshAntigravity()
         guard let agent = selected else { return }
+        if case .antigravity(let session) = agent.target {
+            if session.isEmpty {
+                if conversation != Conversation() { conversation = Conversation() }
+            } else {
+                AntigravityRunner.shared.open(session, folder: agent.cwd)
+                let fresh = AntigravityRunner.shared.conversation(session) ?? Conversation()
+                if fresh != conversation { conversation = fresh }
+                dropDelivered(agent.id)
+            }
+            return
+        }
         let viewing = subagentID
         let isCodex: Bool = { if case .codex = agent.target { return true }; return false }()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1092,6 +1249,13 @@ final class ChatModel: ObservableObject {
     // MARK: Replying
 
     func send(_ preset: String? = nil) {
+        if let agent = selected, case .antigravity(let session) = agent.target {
+            let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, AntigravityRunner.shared.permission(session) == nil else { return }
+            if preset == nil { drafts[agent.id] = "" }
+            sendAntigravity(agent, sessionID: session, text: text)
+            return
+        }
         if let agent = selected, case .codex(let session) = agent.target {
             let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
@@ -1246,6 +1410,9 @@ final class ChatModel: ObservableObject {
         guard draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
         if case .codex = agent.target {
             return Array(SlashCommands.matches(String(draft.dropFirst()), in: CodexCommands.available()).prefix(8))
+        }
+        if case .antigravity(let session) = agent.target {
+            return Array(SlashCommands.matches(String(draft.dropFirst()), in: AntigravityRunner.shared.commands(session)).prefix(8))
         }
         return Array(SlashCommands.matches(String(draft.dropFirst()), in: SlashCommands.all(for: agent.cwd)).prefix(8))
     }
@@ -1509,6 +1676,10 @@ private struct SessionSidebar: View {
             Divider()
             Button("Delete Codex Session…") { model.removeCodex(agent) }
         }
+        if case .antigravity(let session) = agent.target {
+            Divider()
+            Button(session.isEmpty ? "Discard New Session" : "Close Antigravity Process") { model.closeAntigravity(agent) }
+        }
     }
 
     /// What the row says under the name: what it's doing, or what it waits for.
@@ -1691,7 +1862,9 @@ private struct SessionDetail: View {
             AccountBanner(text: note.text, isError: false) { model.dismissAccountNote(for: agent) }.part("Account Banner", .trailing)
         }
         Group {
-            if let request = notch.permission(agent.id) {
+            if case .antigravity(let session) = agent.target, let request = AntigravityRunner.shared.permission(session) {
+                AntigravityPermissionCard(session: session, request: request).part("Permission Card", .topTrailing)
+            } else if let request = notch.permission(agent.id) {
                 ChatPermissionCard(notch: notch, agent: agent, request: request).part("Permission Card", .topTrailing)
             } else if let question = notch.question(agent.id) {
                 ChatQuestionCard(notch: notch, agent: agent, question: question).part("Question Card", .topTrailing)
@@ -1700,7 +1873,7 @@ private struct SessionDetail: View {
                 case .job where agent.command != nil:
                     Notice(text: "This background job runs a command, not a conversation, so it can't take replies.")
                         .part("Read-Only Notice", .trailing)
-                case .job, .codex:
+                case .job, .codex, .antigravity:
                     Composer(model: model, agent: agent, dropping: dropping)
                 case .process where agent.repliesViaHost:
                     Composer(model: model, agent: agent, dropping: dropping)
@@ -2497,6 +2670,8 @@ private struct Composer: View {
                 HStack(spacing: 8) {
                     if case .codex = agent.target {
                         CodexModelPicker(model: model, agent: agent).part("Codex Model Picker", .top)
+                    } else if case .antigravity(let session) = agent.target {
+                        AntigravityOptionsPicker(model: model, agent: agent, session: session).part("Antigravity Options", .top)
                     } else {
                         ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
                         EffortPicker(model: model, current: model.conversation.facts.effort).part("Effort Picker", .top)
@@ -2816,7 +2991,7 @@ enum ChatFormat {
         case .job: return "Open in Terminal"
         case .process: return "Open in \(agent.host.isEmpty || agent.host == "claude -p" ? "Terminal" : agent.host)"
         case .resume: return "Resume in Terminal"
-        case .codex: return "Open in Terminal"
+        case .codex, .antigravity: return "Open in Terminal"
         }
     }
 
@@ -2831,6 +3006,7 @@ enum ChatFormat {
         case .process: return "Bring the session's terminal window forward"
         case .resume: return "Start this session again in a terminal with claude --resume"
         case .codex: return "Continue this Codex session in a terminal with codex resume"
+        case .antigravity: return "Continue this Antigravity session in a terminal with agy --conversation"
         }
     }
 
