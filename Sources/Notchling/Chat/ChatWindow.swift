@@ -138,6 +138,8 @@ final class ChatModel: ObservableObject {
         didSet {
             guard selection != oldValue else { return }
             conversation = Conversation()
+            subagents = []
+            subagentID = nil
             completionIndex = 0
             refresh()
         }
@@ -160,6 +162,21 @@ final class ChatModel: ObservableObject {
         didSet { if file != nil { page = nil } }
     }
     var panelOpen: Bool { page != nil || file != nil }
+
+    /// The selected session's subagents (`Subagents`), newest last.
+    @Published private(set) var subagents: [Subagent] = []
+    /// The subagent being read in place of its session's conversation; nil shows the session.
+    @Published var subagentID: String? {
+        didSet {
+            guard subagentID != oldValue else { return }
+            subConversation = nil
+            refresh()
+        }
+    }
+    @Published private(set) var subConversation: Conversation?
+    var viewedSubagent: Subagent? { subagentID.flatMap { id in subagents.first { $0.id == id } } }
+    /// The subagent an Agent call started, for the call's Open button.
+    func subagent(forCall toolUseID: String) -> Subagent? { subagents.first { $0.toolUseID == toolUseID } }
     /// The selected background session attached in a terminal sheet, for a command that opens a menu.
     @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
@@ -184,6 +201,7 @@ final class ChatModel: ObservableObject {
     init(notch: NotchModel, accounts: AccountStore? = nil) {
         self.notch = notch
         self.accounts = accounts
+        expansion.openCall = { [weak self] call in self?.subagentID = self?.expansion.subagentCalls[call] }
         watch = notch.$agents.sink { [weak self] list in
             for agent in list { self?.seen[agent.id] = agent }
         }
@@ -645,11 +663,20 @@ final class ChatModel: ObservableObject {
         refreshPage()
         if accounts != nil { refreshLanes() }
         guard let agent = selected else { return }
+        let viewing = subagentID
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let path = TranscriptReader.path(for: agent) else { return }
             let fresh = ConversationReader.read(path)
+            let subs = Subagents.list(forTranscript: path, finished: fresh.finishedAgents)
+            let sub = viewing.flatMap { id in subs.first { $0.id == id } }.map { ConversationReader.readSubagent($0.path) }
             DispatchQueue.main.async {
                 guard let self, self.selection == agent.id else { return }
+                if subs != self.subagents {
+                    self.subagents = subs
+                    let calls = Dictionary(subs.compactMap { s in s.toolUseID.map { ($0, s.id) } }, uniquingKeysWith: { a, _ in a })
+                    if calls != self.expansion.subagentCalls { self.expansion.subagentCalls = calls }
+                }
+                if self.subagentID == viewing, sub != self.subConversation { self.subConversation = sub }
                 var fresh = fresh
                 // A model you just picked shows at once; the transcript catches up a few seconds later.
                 if let hint = self.modelHint[agent.id] {
@@ -845,6 +872,11 @@ final class ChatModel: ObservableObject {
         // Escape closes the page panel, unless a command list is open in the reply box.
         if keyCode == 53, panelOpen, !(composerFocused && selected.map { !completions(for: $0).isEmpty } == true) {
             withAnimation(KitMotion.appear) { page = nil; file = nil }
+            return true
+        }
+        // Then it leaves a subagent for its session.
+        if keyCode == 53, subagentID != nil, !composerFocused {
+            subagentID = nil
             return true
         }
         guard composerFocused, let agent = selected, agent.canReply else { return false }
@@ -1118,7 +1150,18 @@ private struct SessionDetail: View {
             GeometryReader { geo in
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if let command = agent.command {
+                    if let sub = model.viewedSubagent {
+                        SubagentBanner(subagent: sub) { model.subagentID = nil }.part("Subagent Banner", .bottom)
+                        if let conversation = model.subConversation {
+                            ConversationView(conversation: conversation, pending: nil, live: sub.isRunning,
+                                             expansion: model.expansion, pageOpen: model.panelOpen)
+                                .equatable()
+                                .id(sub.id)
+                                .part("Subagent Conversation", .bottom)
+                        } else {
+                            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    } else if let command = agent.command {
                         CommandJobView(agent: agent, command: command).part("Command Job", .top)
                     } else if model.conversation.items.isEmpty && model.pending[agent.id] == nil {
                         EmptyState(pose: agent.group == .working ? "look-2" : "sit-1", title: "No Messages Yet",
@@ -1135,7 +1178,7 @@ private struct SessionDetail: View {
                             .id(agent.id)
                             .part("Conversation", .bottom)
                     }
-                    bottom
+                    if model.viewedSubagent == nil { bottom }
                 }
                 // Files and images dropped anywhere on the conversation go into the reply as paths, as in
                 // Claude Code's terminal; Claude reads them from there.
@@ -1150,7 +1193,10 @@ private struct SessionDetail: View {
                         .transition(.move(edge: .trailing))
                 } else if model.showInspector {
                     Rectangle().fill(KitInk.hairline).frame(width: 1)
-                    SessionInspector(agent: agent, conversation: model.conversation).part("Details Panel", .topTrailing)
+                    SessionInspector(agent: agent, conversation: model.conversation,
+                                     subagents: model.subagents, viewing: model.subagentID,
+                                     openSubagent: { id in model.subagentID = id })
+                        .part("Details Panel", .topTrailing)
                         .frame(width: 250)
                         .transition(.move(edge: .trailing))
                 }

@@ -8,6 +8,10 @@ import SwiftUI
 /// back on screen) doesn't fold them.
 final class ChatExpansion: ObservableObject {
     @Published var open: Set<String> = []
+    /// Agent calls whose subagent has a transcript (tool use id → agent id), for their Open button.
+    /// Here rather than in `ConversationView`'s inputs, so it reaches the rows without re-laying them out.
+    @Published var subagentCalls: [String: String] = [:]
+    var openCall: ((String) -> Void)?
 
     func toggle(_ id: String) {
         withAnimation(KitMotion.appear) {
@@ -143,6 +147,7 @@ struct ToolCallRow: View {
     var body: some View {
         let open = expansion.open.contains(call.id)
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
             Button { if hasDetail { expansion.toggle(call.id) } } label: {
                 HStack(spacing: 8) {
                     Image(systemName: call.kind.symbol)
@@ -176,6 +181,20 @@ struct ToolCallRow: View {
             .disabled(!hasDetail)
             .onHover { hovering = $0 }
             .help(call.input.isEmpty ? call.title : String(call.input.prefix(300)))
+            // An Agent call: read the subagent's own conversation.
+            if call.kind == .agent, expansion.subagentCalls[call.id] != nil {
+                Button { expansion.openCall?(call.id) } label: {
+                    HStack(spacing: 4) {
+                        Text("Open")
+                        Image(systemName: "arrow.right").font(.system(size: 9, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.kit(.ghost))
+                .controlSize(.small)
+                .help("Read what this subagent did")
+                .part("Open Subagent Button", .bottom)
+            }
+            }
 
             if open {
                 VStack(alignment: .leading, spacing: 6) {
@@ -479,6 +498,10 @@ struct NoticeRow: View {
 struct SessionInspector: View {
     let agent: Agent
     let conversation: Conversation
+    var subagents: [Subagent] = []
+    /// The subagent shown in place of the conversation, highlighted in the list.
+    var viewing: String?
+    var openSubagent: (String) -> Void = { _ in }
     /// The folder's working copy, read every few seconds while the panel is open.
     @State private var git: GitInfo?
     @State private var showRemote = false
@@ -494,6 +517,7 @@ struct SessionInspector: View {
                     if let model = facts.model { fact("cpu", ChatFormat.modelName(model)) }
                     fact(agent.canReply ? "moon.stars" : "terminal", agent.host)
                 }
+                if !subagents.isEmpty { subagentsSection.part("Subagents", .leading) }
                 if let git { gitSection(git).part("Git Status", .leading) }
                 if let git, git.branches.count > 1 { branchesSection(git).part("Git Branches", .leading) }
                 section("Activity") {
@@ -542,6 +566,31 @@ struct SessionInspector: View {
                 let fresh = await Task.detached(priority: .utility) { GitInfo.read(folder) }.value
                 if fresh != git { git = fresh }
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+    }
+
+    /// Newest first: the ones still running are usually the latest.
+    @ViewBuilder private var subagentsSection: some View {
+        let running = subagents.filter(\.isRunning).count
+        section("Subagents · " + (running > 0 ? "\(running) running" : "\(subagents.count)")) {
+            ForEach(subagents.reversed()) { sub in
+                Button { openSubagent(sub.id) } label: {
+                    HStack(alignment: .top, spacing: 7) {
+                        SubagentStatusIcon(status: sub.status).frame(width: 14, height: 14)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sub.description).kitType(.meta).foregroundColor(KitInk.text).lineLimit(2)
+                            Text(SubagentFormat.line(sub)).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 3).padding(.horizontal, 4)
+                    .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous)
+                        .fill(viewing == sub.id ? KitInk.selection : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.kitPlain)
+                .help("Read what \(sub.description) did")
             }
         }
     }

@@ -1106,6 +1106,18 @@ struct AgentRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(agent.name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    // Subagents at work, which can go on after the session's own turn ended.
+                    if snapshot.subagentsActive > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "person.2.fill").font(.system(size: 8.5))
+                            Text("\(snapshot.subagentsActive)").font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
+                        }
+                        .foregroundColor(.asks)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.asks.opacity(0.18)))
+                        .help(snapshot.subagentsActive == 1 ? "1 subagent working" : "\(snapshot.subagentsActive) subagents working")
+                        .part("Subagent Badge", .bottom)
+                    }
                     Spacer(minLength: 4)
                     Text("\(agent.shortHost) · \(trailing ?? agent.ago)")
                         .font(.system(size: 10.5)).foregroundColor(.secondary).lineLimit(1)

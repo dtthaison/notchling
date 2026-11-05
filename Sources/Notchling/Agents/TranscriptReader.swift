@@ -36,6 +36,8 @@ struct Snapshot: Equatable {
     var lastPrompt: String?
     var activity: String?
     var question: PendingQuestion?
+    /// Subagents that wrote to their transcripts in the last minute and a half (`Subagents.activeCount`).
+    var subagentsActive = 0
 
     var lastReply: String? { lines.last { $0.kind == .assistant }?.text }
 }
@@ -61,7 +63,10 @@ enum TranscriptReader {
 
     /// The first call parses the last 2 MB; later calls parse only the lines appended since.
     static func snapshot(atPath path: String) -> Snapshot {
-        cursors.read(path) ?? Snapshot()
+        var snapshot = cursors.read(path) ?? Snapshot()
+        // Outside the cursor: they run on while the session's own transcript stays still.
+        snapshot.subagentsActive = Subagents.activeCount(forTranscript: path)
+        return snapshot
     }
 
     static func path(for agent: Agent) -> String? {

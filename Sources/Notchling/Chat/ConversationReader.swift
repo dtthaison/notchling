@@ -78,6 +78,9 @@ struct Conversation: Equatable {
     var turnTokens = 0
     /// Your messages typed while it worked, waiting for the turn to end (or to be taken in mid-turn).
     var queued: [String] = []
+    /// How subagents ended, by agent id (a background agent's task notification) or by the Agent call's
+    /// tool use id (a foreground agent's result). For `Subagents.list`.
+    var finishedAgents: [String: String] = [:]
 
     var lastUserText: [String] {
         items.suffix(8).compactMap { if case .user(let t, _) = $0.kind { return t } else { return nil } }
@@ -93,6 +96,21 @@ enum ConversationReader {
     /// Reads only what was appended since the last call.
     static func read(_ path: String) -> Conversation {
         cursors.read(path) ?? Conversation()
+    }
+
+    private static let subagentCursors = TranscriptCursors<SubagentParser, Conversation>(tailBytes: 4_000_000, limit: 30) {
+        $0.inner.conversation()
+    }
+
+    /// A subagent's own transcript (`Subagents`), whose every line is a sidechain line.
+    static func readSubagent(_ path: String) -> Conversation {
+        subagentCursors.read(path) ?? Conversation()
+    }
+
+    struct SubagentParser: TranscriptLineParser {
+        var inner = ConversationParser()
+        init() { inner.includeSidechain = true }
+        mutating func consume(_ line: Data) { inner.consume(line) }
     }
 
     // MARK: Parsing
@@ -114,6 +132,8 @@ enum ConversationReader {
         private var thinkingSeconds: [String: Double] = [:]
         /// Claude Code's input queue (its queue-operation lines), task notifications included, oldest first.
         private var queue: [String] = []
+        /// Reading a subagent's transcript: its lines are all marked sidechain.
+        var includeSidechain = false
 
         init() {}
 
@@ -148,7 +168,15 @@ enum ConversationReader {
             if line.count > 400_000 { return }
             guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
                   let type = obj["type"] as? String,
-                  obj["isSidechain"] as? Bool != true else { return }
+                  includeSidechain || obj["isSidechain"] as? Bool != true else { return }
+            // A background subagent's end arrives as a task notification, queued and then as a user line.
+            if line.range(of: Data("<task-notification>".utf8)) != nil,
+               let text = String(data: line, encoding: .utf8) {
+                // JSON escapes the tags' slashes and newlines; unescaping the slash is enough to find them.
+                for (id, status) in Subagents.notificationStatuses(in: text.replacingOccurrences(of: "\\/", with: "/")) {
+                    c.finishedAgents[id] = status
+                }
+            }
             let date = (obj["timestamp"] as? String).flatMap(parseDate)
             if let branch = obj["gitBranch"] as? String, !branch.isEmpty, branch != "HEAD" { c.facts.branch = branch }
 
@@ -266,6 +294,14 @@ enum ConversationReader {
                 for block in blocks {
                     switch block["type"] as? String {
                     case "tool_result":
+                        // A foreground subagent ends with its Agent call's result (a background one's
+                        // result only says it launched; `Subagents.status` ignores it for those).
+                        if let id = block["tool_use_id"] as? String, let agent = result?["agentId"] as? String,
+                           result?["status"] as? String != "async_launched" {
+                            let ended = block["is_error"] as? Bool == true ? "failed" : "completed"
+                            c.finishedAgents[id] = ended
+                            c.finishedAgents[agent] = ended
+                        }
                         guard let id = block["tool_use_id"] as? String, let at = callIndex[id],
                               case .tools(var calls) = c.items[at.item].kind else { continue }
                         var call = calls[at.call]
