@@ -68,6 +68,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  # app_settings ships only as a Swift package; this turns SwiftPM on for this app without the global flag.
+  config:
+    enable-swift-package-manager: true
   assets:
     - assets/fonts/OFL.txt
     - assets/pet/
