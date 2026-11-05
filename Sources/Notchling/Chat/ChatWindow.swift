@@ -152,7 +152,14 @@ final class ChatModel: ObservableObject {
     /// Opens a saved Artifact in the Artifacts window; false when there's no local copy.
     var onOpenArtifact: ((String) -> Bool)?
     /// The Artifact open in the panel beside the chat.
-    @Published var page: PageLibrary.Entry?
+    @Published var page: PageLibrary.Entry? {
+        didSet { if page != nil { file = nil } }
+    }
+    /// A file opened from a link in a message, shown in the same place as a page (`FilePanel`).
+    @Published var file: URL? {
+        didSet { if file != nil { page = nil } }
+    }
+    var panelOpen: Bool { page != nil || file != nil }
     /// The selected background session attached in a terminal sheet, for a command that opens a menu.
     @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
@@ -674,12 +681,12 @@ final class ChatModel: ObservableObject {
     /// A link in the conversation: a saved Artifact opens in the panel beside the chat (readable from
     /// any account), anything else in the browser.
     func open(_ url: URL) -> OpenURLAction.Result {
-        // A path from a message (`ChatPaths`): a folder opens in Finder, a file shows selected in it.
+        // A path from a message (`ChatPaths`): a folder opens in Finder, a file beside the chat.
         if url.isFileURL {
             if url.hasDirectoryPath || ChatPaths.isFolder(url.path) {
                 NSWorkspace.shared.open(url)
             } else {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+                withAnimation(KitMotion.appear) { file = url.standardizedFileURL }
             }
             return .handled
         }
@@ -836,8 +843,8 @@ final class ChatModel: ObservableObject {
     /// Tab, arrows and Return while the reply box has focus. True when the key was used.
     func handleKey(_ keyCode: UInt16) -> Bool {
         // Escape closes the page panel, unless a command list is open in the reply box.
-        if keyCode == 53, page != nil, !(composerFocused && selected.map { !completions(for: $0).isEmpty } == true) {
-            withAnimation(KitMotion.appear) { page = nil }
+        if keyCode == 53, panelOpen, !(composerFocused && selected.map { !completions(for: $0).isEmpty } == true) {
+            withAnimation(KitMotion.appear) { page = nil; file = nil }
             return true
         }
         guard composerFocused, let agent = selected, agent.canReply else { return false }
@@ -898,6 +905,9 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             if let page = model.page {
                                 PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 280)).part("Page Panel", .topTrailing)
+                                    .transition(.move(edge: .trailing))
+                            } else if let file = model.file {
+                                FilePanel(model: model, url: file, maxWidth: max(320, geo.size.width - 280)).part("File Panel", .topTrailing)
                                     .transition(.move(edge: .trailing))
                             }
                         }
@@ -1119,7 +1129,7 @@ private struct SessionDetail: View {
                                          outbox: model.outbox[agent.id] ?? [],
                                          live: agent.group == .working,
                                          expansion: model.expansion,
-                                         pageOpen: model.page != nil)
+                                         pageOpen: model.panelOpen)
                             .equatable()
                             // A fresh view per session, so switching back opens at the newest message.
                             .id(agent.id)
@@ -1134,6 +1144,9 @@ private struct SessionDetail: View {
                 }
                 if let page = model.page {
                     PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 380)).part("Page Panel", .topTrailing)
+                        .transition(.move(edge: .trailing))
+                } else if let file = model.file {
+                    FilePanel(model: model, url: file, maxWidth: max(320, geo.size.width - 380)).part("File Panel", .topTrailing)
                         .transition(.move(edge: .trailing))
                 } else if model.showInspector {
                     Rectangle().fill(KitInk.hairline).frame(width: 1)
@@ -2205,23 +2218,9 @@ private struct PagePanel: View {
     @ObservedObject var model: ChatModel
     let page: PageLibrary.Entry
     let maxWidth: CGFloat
-    @AppStorage("chatPageWidth") private var width: Double = 520
-    @State private var dragStart: Double?
 
     var body: some View {
-        let shown = min(max(320, width), maxWidth)
-        HStack(spacing: 0) {
-            Rectangle().fill(KitInk.hairline).frame(width: 1)
-                .overlay(Color.clear.frame(width: 9).contentShape(Rectangle())
-                    .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                        .onChanged { drag in
-                            let start = dragStart ?? shown
-                            dragStart = start
-                            width = min(max(320, start - drag.translation.width), maxWidth)
-                        }
-                        .onEnded { _ in dragStart = nil }))
-            VStack(spacing: 0) {
+        SidePanel(maxWidth: maxWidth) {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.richtext").font(.system(size: 12, weight: .medium)).foregroundColor(KitInk.accentText)
                     VStack(alignment: .leading, spacing: 1) {
@@ -2245,11 +2244,9 @@ private struct PagePanel: View {
                     .buttonStyle(.kit(.ghost)).help("Close (Esc)")
                 }
                 .padding(.leading, 14).padding(.trailing, 8).frame(height: 48)
-                Rectangle().fill(KitInk.hairline).frame(height: 1)
-                PagePreview(page: page)
-            }
+        } content: {
+            PagePreview(page: page)
         }
-        .frame(width: shown)
     }
 }
 
