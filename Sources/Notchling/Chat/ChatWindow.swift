@@ -14,8 +14,8 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
     private var watch: AnyCancellable?
     private var pageWatch: AnyCancellable?
 
-    init(notch: NotchModel, accounts: AccountStore? = nil) {
-        model = ChatModel(notch: notch, accounts: accounts)
+    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil) {
+        model = ChatModel(notch: notch, accounts: accounts, codex: codex)
     }
 
     /// A usage-limit switch, shown in the sessions it moved.
@@ -153,21 +153,39 @@ final class ChatModel: ObservableObject {
     }
     /// Opens a saved Artifact in the Artifacts window; false when there's no local copy.
     var onOpenArtifact: ((String) -> Bool)?
-    /// The Add Account sheet's sign-in while it's open: the browser OAuth, saved next to the other
-    /// accounts without touching the login sessions use.
+    /// Which accounts the Accounts sheet shows: Claude Code's or the Codex CLI's.
+    enum AccountTab: String, CaseIterable { case claude = "Claude Code", codex = "Codex" }
+    @Published var accountSheet = false {
+        didSet { if !accountSheet { closeAccounts() } }
+    }
+    @Published var accountTab = AccountTab.claude
+    /// The Claude sign-in while it runs: the browser OAuth, saved next to the other accounts without
+    /// touching the login sessions use.
     @Published var signIn: SignInModel? {
-        // However the sheet closes (Esc, Done), stop listening for the browser.
         didSet { if oldValue !== signIn { oldValue?.cancel() } }
     }
+    let codex: CodexStore?
 
-    func addAccount() {
+    /// Opens the Accounts sheet; Claude Code starts its browser sign-in at once, Codex shows its
+    /// accounts with Add Account and Switch.
+    func addAccount(_ tab: AccountTab = .claude) {
+        accountTab = tab
+        accountSheet = true
+        if tab == .claude { startClaudeSignIn() } else { codex?.sync(force: true) }
+    }
+
+    func startClaudeSignIn() {
         guard let accounts else { return }
         let signIn = SignInModel(store: accounts)
         self.signIn = signIn
         signIn.start()
     }
 
-    func closeAddAccount() { signIn = nil }
+    /// However the sheet closes (Esc, Done), stop waiting for the browser.
+    private func closeAccounts() {
+        signIn = nil
+        codex?.cancelAdd()
+    }
     /// The Artifact open in the panel beside the chat.
     @Published var page: PageLibrary.Entry? {
         didSet { if page != nil { file = nil } }
@@ -213,9 +231,10 @@ final class ChatModel: ObservableObject {
     private var watch: AnyCancellable?
     private var removedWatch: AnyCancellable?
 
-    init(notch: NotchModel, accounts: AccountStore? = nil) {
+    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil) {
         self.notch = notch
         self.accounts = accounts
+        self.codex = codex
         expansion.openCall = { [weak self] call in self?.subagentID = self?.expansion.subagentCalls[call] }
         watch = notch.$agents.sink { [weak self] list in
             for agent in list { self?.seen[agent.id] = agent }
@@ -969,8 +988,8 @@ struct ChatView: View {
         .sheet(item: $model.terminal) { session in
             TerminalSheet(session: session) { model.closeTerminal() }
         }
-        .background(EmptyView().sheet(item: $model.signIn, onDismiss: { model.closeAddAccount() }) { signIn in
-            AddAccountSheet(signIn: signIn) { model.closeAddAccount() }
+        .background(EmptyView().sheet(isPresented: $model.accountSheet) {
+            AccountsSheet(model: model)
         })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
@@ -1026,6 +1045,9 @@ enum NewSessionMenu {
         if model.accounts != nil {
             menu.addItem(.separator())
             menu.addItem(ActionMenuItem("Add Account…") { [model] in model.addAccount() })
+            if model.codex?.isAvailable == true {
+                menu.addItem(ActionMenuItem("Codex Accounts…") { [model] in model.addAccount(.codex) })
+            }
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
@@ -2484,6 +2506,9 @@ private struct AccountMenu: View {
         if model.accounts != nil {
             menu.addItem(.separator())
             menu.addItem(ActionMenuItem("Add Account…") { [model] in model.addAccount() })
+            if model.codex?.isAvailable == true {
+                menu.addItem(ActionMenuItem("Codex Accounts…") { [model] in model.addAccount(.codex) })
+            }
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
