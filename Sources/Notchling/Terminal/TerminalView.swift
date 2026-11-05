@@ -302,14 +302,22 @@ struct TerminalSheet: View {
     @ObservedObject var session: TerminalSession
     let close: () -> Void
 
+    private var status: String {
+        guard session.script != nil else { return session.ended ? "Detached" : "Terminal" }
+        guard session.ended else { return "Running" }
+        return session.exitStatus == 0 ? "Finished" : "Exited with \(session.exitStatus ?? -1)"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: KitIcon.terminal.symbol).foregroundColor(KitInk.textMuted)
                 Text(session.title).kitType(.heading).foregroundColor(KitInk.text).lineLimit(1)
-                Text(session.ended ? "Detached" : "Terminal").kitType(.meta).foregroundColor(KitInk.textMuted)
+                Text(status).kitType(.meta).foregroundColor(KitInk.textMuted)
                 Spacer()
-                Text("Keys go to the session. Done leaves it running.").kitType(.meta).foregroundColor(KitInk.textFaint)
+                Text(session.script == nil ? "Keys go to the session. Done leaves it running."
+                     : session.ended ? "" : "Ctrl+C or Done stops it.")
+                    .kitType(.meta).foregroundColor(KitInk.textFaint)
                 Button("Done", action: close)
                     .buttonStyle(.kit(.secondary))
                     .keyboardShortcut("w", modifiers: .command)

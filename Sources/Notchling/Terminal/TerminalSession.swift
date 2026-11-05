@@ -44,6 +44,17 @@ final class TerminalSession: ObservableObject, Identifiable {
         pendingCommand = command
     }
 
+    /// A shell command from a message, run in `folder` by the user's interactive zsh (so its PATH,
+    /// nvm and the like are there), instead of attaching to the session.
+    private(set) var script: (text: String, folder: String)?
+    /// The command's exit status once it ends.
+    @Published private(set) var exitStatus: Int32?
+
+    convenience init(run text: String, in folder: String, jobID: String) {
+        self.init(jobID: jobID, title: (folder as NSString).abbreviatingWithTildeInPath)
+        script = (text, folder)
+    }
+
     deinit { close() }
 
     /// Starts on the view's first layout, at the size it measured.
@@ -51,20 +62,28 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard !begun else { return resize(rows: rows, cols: cols) }
         begun = true
         screen.resize(rows: rows, cols: cols)
+        // zsh -c doesn't echo what it runs; show it like a prompt line.
+        if let script {
+            let shown = script.text.replacingOccurrences(of: "\n", with: "\r\n  ")
+            screen.feed(Array("\u{1b}[2m$ \(shown)\u{1b}[0m\r\n".utf8))
+        }
         do { try start(typing: pendingCommand) } catch { failure = error.localizedDescription; ended = true }
     }
 
     /// Starts the attach. `typing` is sent (after clearing the input box) once the session has drawn.
     func start(typing: String? = nil) throws {
-        var env = AgentMonitor.environment(forJob: jobID)
+        var env = script == nil ? AgentMonitor.environment(forJob: jobID) : ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         // This view draws color; an inherited NO_COLOR left Claude Code's menus all one gray.
         env["NO_COLOR"] = nil
-        let path = strdup(ReplySender.claudePath)
-        let cArgs = [ReplySender.claudePath, "attach", jobID].map { strdup($0) } + [nil]
+        let program = script == nil ? ReplySender.claudePath : "/bin/zsh"
+        let args = script.map { ["/bin/zsh", "-ilc", $0.text] } ?? [ReplySender.claudePath, "attach", jobID]
+        let path = strdup(program)
+        let folder = strdup(script?.folder ?? FileManager.default.homeDirectoryForCurrentUser.path)
+        let cArgs = args.map { strdup($0) } + [nil]
         let cEnv = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer { ([path] + cArgs + cEnv).forEach { free($0) } }
+        defer { ([path, folder] + cArgs + cEnv).forEach { free($0) } }
         var noSignals = sigset_t()
         sigemptyset(&noSignals)
         let maxFD = min(getdtablesize(), 4096)
@@ -80,6 +99,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             sigprocmask(SIG_SETMASK, &noSignals, nil)
             var other: Int32 = 3
             while other < maxFD { Darwin.close(other); other += 1 }
+            if let folder { _ = chdir(folder) }
             execve(path, cArgs, cEnv)
             _exit(127)
         }
@@ -110,7 +130,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var status: Int32 = 0
             waitpid(child, &status, 0)
-            DispatchQueue.main.async { self?.finish() }
+            // WEXITSTATUS / WTERMSIG by hand: Swift doesn't import the macros.
+            let code = status & 0x7f == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
+            DispatchQueue.main.async { self?.exitStatus = code; self?.finish() }
         }
         quietTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.typeWhenQuiet() }
     }
@@ -177,7 +199,8 @@ final class TerminalSession: ObservableObject, Identifiable {
     func close() {
         quietTimer?.invalidate()
         quietTimer = nil
-        if pid > 0, !ended { kill(pid, SIGTERM) }
+        // A command's whole process group (zsh and what it started, like node); an attach just detaches.
+        if pid > 0, !ended { kill(script == nil ? pid : -pid, SIGTERM) }
         // The reader's cancel handler closes the pty once no read is running.
         if let reader { reader.cancel() } else if master >= 0 { Darwin.close(master) }
         reader = nil

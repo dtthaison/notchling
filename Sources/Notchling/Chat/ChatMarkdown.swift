@@ -169,6 +169,11 @@ enum MarkdownParser {
 /// Renders markdown blocks with the kit's type and colors.
 struct MarkdownView: View {
     let text: String
+    @Environment(\.chatFolder) private var folder
+    @Environment(\.runCommand) private var runCommand
+
+    /// Folders named in this message, then the session's: relative paths and commands are read there.
+    private var bases: [String] { ChatPaths.bases(in: text, cwd: folder) }
 
     /// Runs of headings, paragraphs and lists share one text view, so a drag selects across them;
     /// quotes, code and tables are their own parts.
@@ -196,7 +201,7 @@ struct MarkdownView: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
-                case .prose(let blocks): ProseText(blocks: blocks)
+                case .prose(let blocks): ProseText(blocks: blocks, bases: bases)
                 case .block(let block): blockView(block)
                 }
             }
@@ -240,7 +245,12 @@ struct MarkdownView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         case .code(let language, let text):
-            CodeBlockView(language: language, text: text)
+            let command = runCommand == nil ? nil : ChatPaths.command(language: language, text: text)
+            CodeBlockView(language: language, text: text,
+                          run: command.map { script in
+                              let dir = ChatPaths.directory(for: script, bases: bases)
+                              return CodeBlockView.Run(directory: dir) { runCommand?(script, dir) }
+                          })
         case .table(let header, let rows):
             TableBlockView(header: header, rows: rows)
         case .rule:
@@ -249,17 +259,35 @@ struct MarkdownView: View {
     }
 }
 
-/// Fenced code with its language and a Copy button.
+/// Fenced code with its language and a Copy button; a shell command also gets Run.
 struct CodeBlockView: View {
+    struct Run {
+        let directory: String?
+        let action: () -> Void
+    }
+
     let language: String
     let text: String
-    @State private var copied = false
+    var run: Run? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language).kitType(.meta).foregroundColor(KitInk.textMuted)
                 Spacer()
+                if let run {
+                    Button(action: run.action) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill").font(.system(size: 9, weight: .medium))
+                            Text("Run")
+                        }
+                    }
+                    .buttonStyle(.kit(.ghost))
+                    .controlSize(.small)
+                    .pointerCursor()
+                    .help("Run in " + ((run.directory as NSString?)?.abbreviatingWithTildeInPath ?? "the session's folder"))
+                    .part("Run Command Button", .bottom)
+                }
                 CopyButton(text: text)
             }
             .padding(.leading, 12).padding(.trailing, 6).frame(height: 28)
@@ -348,6 +376,8 @@ struct CopyButton: View {
 struct ProseText: NSViewRepresentable {
     let blocks: [MarkdownBlock]
     var muted = false
+    /// Folders relative paths are read against; paths that exist become links (`ChatPaths`).
+    var bases: [String] = []
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -370,10 +400,12 @@ struct ProseText: NSViewRepresentable {
     func updateNSView(_ view: ProseTextView, context: Context) {
         context.coordinator.openURL = context.environment.openURL
         // Only new text replaces the old: a refresh mustn't drop what you've selected.
-        guard context.coordinator.shown != blocks || context.coordinator.muted != muted else { return }
+        guard context.coordinator.shown != blocks || context.coordinator.muted != muted
+                || context.coordinator.bases != bases else { return }
         context.coordinator.shown = blocks
         context.coordinator.muted = muted
-        let text = Self.text(blocks, muted: muted)
+        context.coordinator.bases = bases
+        let text = Self.text(blocks, muted: muted, bases: bases)
         view.textStorage?.setAttributedString(text)
         context.coordinator.measurer.set(text)
     }
@@ -391,6 +423,7 @@ struct ProseText: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var shown: [MarkdownBlock]?
         var muted = false
+        var bases: [String] = []
         var openURL: OpenURLAction?
         let measurer = TextMeasurer()
 
@@ -404,7 +437,7 @@ struct ProseText: NSViewRepresentable {
 
     // MARK: Building the text
 
-    private static func text(_ blocks: [MarkdownBlock], muted: Bool) -> NSAttributedString {
+    private static func text(_ blocks: [MarkdownBlock], muted: Bool, bases: [String]) -> NSAttributedString {
         let out = NSMutableAttributedString()
         let color = NSColor(muted ? KitInk.textMuted : KitInk.text)
         for (index, block) in blocks.enumerated() {
@@ -416,12 +449,12 @@ struct ProseText: NSViewRepresentable {
                 let style = NSMutableParagraphStyle()
                 style.paragraphSpacingBefore = index == 0 ? 0 : (level <= 2 ? 8 : 4)
                 style.paragraphSpacing = 6
-                out.append(inline(text, font: font, color: color, style: style))
+                out.append(inline(text, font: font, color: color, style: style, bases: bases))
             case .paragraph(let text):
                 let style = NSMutableParagraphStyle()
                 style.lineSpacing = 3
                 style.paragraphSpacing = 10
-                out.append(inline(text, font: .systemFont(ofSize: 13), color: color, style: style))
+                out.append(inline(text, font: .systemFont(ofSize: 13), color: color, style: style, bases: bases))
             case .list(let items):
                 for (i, item) in items.enumerated() {
                     let indent = CGFloat(item.depth) * 18
@@ -437,7 +470,7 @@ struct ProseText: NSViewRepresentable {
                         .foregroundColor: NSColor(bullet ? KitInk.accent : KitInk.textMuted),
                         .paragraphStyle: style,
                     ]))
-                    out.append(inline(item.text, font: .systemFont(ofSize: 13), color: color, style: style))
+                    out.append(inline(item.text, font: .systemFont(ofSize: 13), color: color, style: style, bases: bases))
                     if i < items.count - 1 { out.append(NSAttributedString(string: "\n", attributes: [.paragraphStyle: style])) }
                 }
             default:
@@ -449,7 +482,7 @@ struct ProseText: NSViewRepresentable {
     }
 
     /// Bold, italics, `code`, strikethrough and links from Foundation's inline markdown parser.
-    private static func inline(_ text: String, font: NSFont, color: NSColor, style: NSParagraphStyle) -> NSAttributedString {
+    private static func inline(_ text: String, font: NSFont, color: NSColor, style: NSParagraphStyle, bases: [String]) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let parsed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
         let out = NSMutableAttributedString()
@@ -468,7 +501,19 @@ struct ProseText: NSViewRepresentable {
             }
             if let link = run.link { attrs[.link] = link }
             attrs[.font] = runFont
+            let start = out.length
             out.append(NSAttributedString(string: piece, attributes: attrs))
+            // A command in inline code runs when clicked; a path that exists opens in Finder (`ChatModel.open`).
+            if run.link == nil, run.inlinePresentationIntent?.contains(.code) == true,
+               let command = ChatPaths.inlineCommand(piece),
+               let link = ChatPaths.runLink(command, folder: ChatPaths.directory(for: command, bases: bases)) {
+                out.addAttribute(.link, value: link, range: NSRange(location: start, length: out.length - start))
+            } else if run.link == nil {
+                for (range, path) in ChatPaths.links(in: piece, bases: bases) {
+                    out.addAttribute(.link, value: URL(fileURLWithPath: path),
+                                     range: NSRange(location: start + range.location, length: range.length))
+                }
+            }
         }
         return out
     }

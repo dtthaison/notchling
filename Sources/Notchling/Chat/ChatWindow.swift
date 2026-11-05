@@ -674,6 +674,26 @@ final class ChatModel: ObservableObject {
     /// A link in the conversation: a saved Artifact opens in the panel beside the chat (readable from
     /// any account), anything else in the browser.
     func open(_ url: URL) -> OpenURLAction.Result {
+        // A path from a message (`ChatPaths`): a folder opens in Finder, a file shows selected in it.
+        if url.isFileURL {
+            if url.hasDirectoryPath || ChatPaths.isFolder(url.path) {
+                NSWorkspace.shared.open(url)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+            return .handled
+        }
+        // A command in inline code: one click is easy to make by accident, so ask first.
+        if let (command, folder) = ChatPaths.parseRunLink(url) {
+            let alert = NSAlert()
+            alert.messageText = "Run This Command?"
+            let dir = folder ?? selected?.cwd ?? ""
+            alert.informativeText = command + "\n\nIn " + (dir as NSString).abbreviatingWithTildeInPath
+            alert.addButton(withTitle: "Run")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn { runCommand(command, in: folder) }
+            return .handled
+        }
         if PageLibrary.artifactID(in: url.absoluteString) != nil,
            let found = PageLibrary.find(url.absoluteString).first {
             withAnimation(KitMotion.appear) { page = found }
@@ -770,6 +790,16 @@ final class ChatModel: ObservableObject {
         guard let agent = selected, case .job(let jobID) = agent.target else { return }
         terminal?.close()
         terminal = TerminalSession(jobID: jobID, title: agent.name, command: command)
+    }
+
+    /// Runs a command from a message (a code block's Run) in the terminal sheet, in `folder` or the
+    /// session's folder. Ours, not the session's: a long render outlasts a `!` command's time limit.
+    func runCommand(_ script: String, in folder: String?) {
+        guard let agent = selected else { return }
+        let dir = folder ?? (agent.cwd.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : agent.cwd)
+        let jobID: String = { if case .job(let id) = agent.target { return id }; return "" }()
+        terminal?.close()
+        terminal = TerminalSession(run: script, in: dir, jobID: jobID)
     }
 
     func closeTerminal() {
@@ -883,6 +913,8 @@ struct ChatView: View {
             TerminalSheet(session: session) { model.closeTerminal() }
         }
         .environment(\.openURL, OpenURLAction { model.open($0) })
+        .environment(\.chatFolder, model.selected?.cwd)
+        .environment(\.runCommand, { [weak model] script, folder in model?.runCommand(script, in: folder) })
         .kitNoFocusRing()
         .frame(minWidth: 720, minHeight: 460)
     }
