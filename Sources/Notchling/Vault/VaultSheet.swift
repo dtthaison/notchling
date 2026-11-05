@@ -168,7 +168,8 @@ final class VaultForm: ObservableObject {
     @Published var error: String?
     /// The entry as saved, for an agent's request.
     private(set) var saved: VaultEntry?
-    private var customVars: Bool
+    /// The variable names were changed from the ones made from the name; the form then opens Advanced.
+    private(set) var customVars: Bool
 
     init(_ entry: VaultEntry?, reason: String? = nil) {
         original = entry
@@ -203,6 +204,13 @@ final class VaultForm: ObservableObject {
     }
 
     func editedVars() { customVars = true }
+
+    /// `$NPM_TOKEN $NPM_URL`, shown next to the closed Advanced toggle.
+    var variablesSummary: String {
+        let vars = (kind == .login ? [userVar, secretVar] : [secretVar])
+            + (url.trimmingCharacters(in: .whitespaces).isEmpty ? [] : ["\(VaultEntry.prefix(for: name))_URL"])
+        return vars.filter { !$0.isEmpty }.map { "$" + $0 }.joined(separator: " ")
+    }
 
     private func followName() {
         guard !customVars else { return }
@@ -241,6 +249,8 @@ private struct VaultFormView: View {
     @ObservedObject var form: VaultForm
     let close: (_ saved: Bool) -> Void
     @FocusState private var focus: Field?
+    /// Variable names are made from the name; most people never change them, so they sit behind this.
+    @State private var advanced = false
 
     private enum Field { case name, url, username, secret, userVar, secretVar, note }
 
@@ -286,18 +296,6 @@ private struct VaultFormView: View {
                     .focused($focus, equals: .secret)
                     .modifier(KitField(focused: focus == .secret))
             }
-            row("Variables") {
-                HStack(spacing: 8) {
-                    if form.kind == .login {
-                        TextField("", text: Binding(get: { form.userVar }, set: { form.userVar = $0; form.editedVars() }))
-                            .focused($focus, equals: .userVar)
-                            .modifier(KitField(focused: focus == .userVar))
-                    }
-                    TextField("", text: Binding(get: { form.secretVar }, set: { form.secretVar = $0; form.editedVars() }))
-                        .focused($focus, equals: .secretVar)
-                        .modifier(KitField(focused: focus == .secretVar))
-                }
-            }
             row("Note") {
                 TextField("What it's for, e.g. GitHub API for my repos", text: $form.note)
                     .focused($focus, equals: .note)
@@ -307,6 +305,35 @@ private struct VaultFormView: View {
                 Toggle("Ask me before an agent uses it", isOn: $form.ask)
                     .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
                     .part("Ask First Toggle")
+            }
+            row("") {
+                Button { withAnimation(KitMotion.appear) { advanced.toggle() } } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: advanced ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold))
+                        Text("Advanced").kitType(.label)
+                        if !advanced {
+                            Text(form.variablesSummary).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1)
+                        }
+                    }
+                    .foregroundColor(KitInk.textMuted)
+                }
+                .buttonStyle(.kitPlain)
+                .help("The environment variable names a command gets. Made from the name; change them only when a tool expects another name.")
+                .part("Advanced Toggle")
+            }
+            if advanced {
+                row("Variables") {
+                    HStack(spacing: 8) {
+                        if form.kind == .login {
+                            TextField("", text: Binding(get: { form.userVar }, set: { form.userVar = $0; form.editedVars() }))
+                                .focused($focus, equals: .userVar)
+                                .modifier(KitField(focused: focus == .userVar))
+                        }
+                        TextField("", text: Binding(get: { form.secretVar }, set: { form.secretVar = $0; form.editedVars() }))
+                            .focused($focus, equals: .secretVar)
+                            .modifier(KitField(focused: focus == .secretVar))
+                    }
+                }
             }
             Text("Agents see the name, URL, variables and note. Only Notchling can read the value.")
                 .kitType(.meta).foregroundColor(KitInk.textMuted)
@@ -330,7 +357,7 @@ private struct VaultFormView: View {
             }
         }
         .padding(20)
-        .onAppear { focus = form.original == nil && form.name.isEmpty ? .name : (form.kind == .login && form.username.isEmpty ? .username : .secret) }
+        .onAppear { advanced = form.customVars; focus = form.original == nil && form.name.isEmpty ? .name : (form.kind == .login && form.username.isEmpty ? .username : .secret) }
         .part("Secret Form")
     }
 

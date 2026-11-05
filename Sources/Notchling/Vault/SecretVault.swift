@@ -263,18 +263,63 @@ final class Redactor {
 
 // MARK: - Skill
 
-/// `~/.claude/skills/notchling-vault`: tells agents the vault exists, which names it holds, how to pick
-/// one, how to use it without reading it, and how to ask the user for a missing one.
+/// The `notchling-vault` skill: tells agents the vault exists, which names it holds, how to pick one, how
+/// to use it without reading it, and how to ask the user for a missing one. Written for each tool that
+/// reads global skills (Claude Code, Codex, Antigravity CLI), with a note on that tool's sandbox.
 enum VaultSkill {
-    static let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/skills/notchling-vault")
-    static let file = dir.appendingPathComponent("SKILL.md")
+    enum Tool: CaseIterable {
+        case claude, codex, antigravity
+
+        var dir: URL {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            switch self {
+            case .claude: return home.appendingPathComponent(".claude/skills/notchling-vault")
+            case .codex: return home.appendingPathComponent(".codex/skills/notchling-vault")
+            case .antigravity: return home.appendingPathComponent(".gemini/config/skills/notchling-vault")
+            }
+        }
+
+        /// The tool's own folder must exist; a skill isn't a reason to create `~/.codex` for someone without Codex.
+        var installed: Bool {
+            FileManager.default.fileExists(atPath: dir.deletingLastPathComponent().deletingLastPathComponent().path)
+        }
+
+        /// What the agent must know about running Notchling from inside this tool's sandbox.
+        var sandboxNote: String {
+            switch self {
+            case .claude:
+                return ""
+            case .codex:
+                return """
+
+                ## In Codex's sandbox
+
+                Notchling's command talks to the Notchling app over a local socket, and the commands that use a secret usually need the network, so neither works inside Codex's workspace-write sandbox without network ("Notchling isn't running" means the sandbox blocked it). Run `--secrets`, `--secret` and `--secret-request` with escalated permissions (outside the sandbox) and give the user a one-line reason; if this session can't escalate, tell the user it needs network access.
+
+                """
+            case .antigravity:
+                return """
+
+                ## In Antigravity
+
+                Run these through the terminal tool. If the session runs with `--sandbox` and the call says "Notchling isn't running", the sandbox blocked the local socket; ask the user to allow the command.
+
+                """
+            }
+        }
+    }
 
     static func update(_ entries: [VaultEntry]? = nil) {
         let entries = entries ?? SecretVault.all()
-        let text = content(binary: Bundle.main.bundlePath + "/Contents/MacOS/Notchling", names: entries.map(label).sorted())
-        if (try? String(contentsOf: file, encoding: .utf8)) == text { return }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? text.write(to: file, atomically: true, encoding: .utf8)
+        let names = entries.map(label).sorted()
+        let binary = Bundle.main.bundlePath + "/Contents/MacOS/Notchling"
+        for tool in Tool.allCases where tool.installed {
+            let file = tool.dir.appendingPathComponent("SKILL.md")
+            let text = content(binary: binary, names: names, tool: tool)
+            if (try? String(contentsOf: file, encoding: .utf8)) == text { continue }
+            try? FileManager.default.createDirectory(at: tool.dir, withIntermediateDirectories: true)
+            try? text.write(to: file, atomically: true, encoding: .utf8)
+        }
     }
 
     /// `github (api.github.com)`: the name with its URL's host, so the description matches a task by site.
@@ -283,7 +328,7 @@ enum VaultSkill {
         return "\(e.name) (\(host))"
     }
 
-    static func content(binary: String, names: [String]) -> String {
+    static func content(binary: String, names: [String], tool: Tool = .claude) -> String {
         let saved = names.isEmpty ? "none yet" : names.joined(separator: ", ")
         return """
         ---
@@ -309,7 +354,7 @@ enum VaultSkill {
         '\(binary)' --secret-request <name> --kind token|login --url '<url>' --note '<what it is for>' --reason '<why you need it now>'
         ```
 
-        Opens Notchling's form with those fields filled in; the user types the value there. For a name that exists (an expired token, a changed password) it opens that secret for editing. It waits for the user, so run it with the Bash tool's longest timeout (600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
+        Opens Notchling's form with those fields filled in; the user types the value there. For a name that exists (an expired token, a changed password) it opens that secret for editing. It waits for the user, so give it the longest timeout your shell tool allows (Claude Code's Bash: 600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
 
         ## 3. Use it
 
@@ -330,7 +375,7 @@ enum VaultSkill {
         - Never echo, print, encode, log or write a value to a file, a commit, a URL you show, or your reply. Don't put a value on a command line where `ps` would see it when a tool takes it from the environment or stdin.
         - Don't try to read the vault's Keychain item or work around Notchling. A command whose purpose is to reveal a value is misuse even if its output is hidden.
         - Notchling must be running; if it isn't, tell the user.
-
+        \(tool.sandboxNote)
         """
     }
 }
