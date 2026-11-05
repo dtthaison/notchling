@@ -42,6 +42,12 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         withAnimation(KitMotion.appear) { model.page = entry }
     }
 
+    /// Opens Chat on the session with the terminal sheet running the command (from the notch).
+    func showTerminal(select id: String, command: String) {
+        show(select: id)
+        model.openTerminal(typing: command)
+    }
+
     func show(select id: String? = nil, activate: Bool = true) {
         UserDefaults.standard.set(true, forKey: Self.openKey)
         if let id { model.selection = id } else if model.selected == nil { model.selection = model.notch.agents.first?.id }
@@ -144,6 +150,8 @@ final class ChatModel: ObservableObject {
     var onOpenArtifact: ((String) -> Bool)?
     /// The Artifact open in the panel beside the chat.
     @Published var page: PageLibrary.Entry?
+    /// The selected background session attached in a terminal sheet, for a command that opens a menu.
+    @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
     @Published private(set) var pending: [String: Pending] = [:]
     private var modelHint: [String: (model: String, at: Date)] = [:]
@@ -693,14 +701,7 @@ final class ChatModel: ObservableObject {
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
         if SlashCommands.opensMenu(text) {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                do { try AgentActions.openWithCommand(text, job: jobID) } catch {
-                    DispatchQueue.main.async {
-                        self?.errors[id] = error.localizedDescription
-                        if preset == nil, (self?.drafts[id] ?? "").isEmpty { self?.drafts[id] = text }
-                    }
-                }
-            }
+            openTerminal(typing: text)
             return
         }
         if text.hasPrefix("/model "), let picked = text.split(separator: " ").last.map(String.init), picked.hasPrefix("claude-") {
@@ -724,6 +725,20 @@ final class ChatModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Attaches the selected background session in the terminal sheet and runs the command there,
+    /// where its menu can show (a hidden attach closes before the menu draws).
+    func openTerminal(typing command: String?) {
+        guard let agent = selected, case .job(let jobID) = agent.target else { return }
+        terminal?.close()
+        terminal = TerminalSession(jobID: jobID, title: agent.name, command: command)
+    }
+
+    func closeTerminal() {
+        terminal?.close()
+        terminal = nil
+        refresh()
     }
 
     func isSending(_ id: String) -> Bool { pending[id]?.sending == true }
@@ -822,6 +837,9 @@ struct ChatView: View {
         }
         .ignoresSafeArea()
         .background(KitWindowChrome())
+        .sheet(item: $model.terminal) { session in
+            TerminalSheet(session: session) { model.closeTerminal() }
+        }
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .kitNoFocusRing()
         .frame(minWidth: 720, minHeight: 460)

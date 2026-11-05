@@ -65,6 +65,8 @@ final class NotchModel: ObservableObject {
     var onRemove: ((Agent) -> Void)?
     /// Opens the session in the Chat window.
     var onOpenChat: ((String) -> Void)?
+    /// Opens Chat on a session with its terminal sheet running a command: agent id, command.
+    var onOpenTerminal: ((String, String) -> Void)?
     /// While a menu is open the pointer can leave the shape without the notch folding away.
     var menuOpen = false
 
@@ -360,12 +362,10 @@ final class NotchModel: ObservableObject {
         let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if preset == nil { draft = "" }
+        // A menu (/plugin…) needs a terminal: Chat attaches the session in its terminal sheet.
         if SlashCommands.opensMenu(text) {
-            run(id: id, restoreDraft: preset == nil ? text : nil, onSuccess: { [weak self] in
-                self?.go(.collapsed)
-            }) {
-                try AgentActions.openWithCommand(text, job: jobID)
-            }
+            go(.collapsed)
+            onOpenTerminal?(id, text)
             return
         }
         run(id: id, restoreDraft: preset == nil ? text : nil, onSuccess: { [weak self] in

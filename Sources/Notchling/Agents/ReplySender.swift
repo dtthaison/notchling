@@ -29,12 +29,6 @@ enum ReplySender {
         try type([clearInput, "\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID)
     }
 
-    /// Leaves the text in the session's input box without pressing Enter. The box keeps it across
-    /// attaches, so a Terminal attached next shows it ready to run.
-    static func prefill(_ text: String, toJob jobID: String) throws {
-        try type([clearInput, "\u{1b}[200~" + text + "\u{1b}[201~"], toJob: jobID)
-    }
-
     /// Empties the session's input box first. It keeps a draft across attaches, so text left there
     /// ("/rename", half a message) would join the reply: "/renamethe padding…" ran as an unknown
     /// command and the session did nothing. Per line: Ctrl+E (end), Ctrl+U (delete to start), Backspace

@@ -80,10 +80,10 @@ enum SlashCommands {
         ("login", "Sign in"),
         ("logout", "Sign out"),
         ("help", "Show help"),
-    ].map { SlashCommand(name: $0.0, description: menuCommands.contains($0.0) ? appendTerminalNote($0.1) : $0.1, argumentHint: nil) }
+    ].map { SlashCommand(name: $0.0, description: menuCommands.contains($0.0) ? appendMenuNote($0.1) : $0.1, argumentHint: nil) }
 
     /// Commands that open a menu in the session's terminal and write nothing to the transcript, so a
-    /// hidden attach shows nothing (`/plugin` logged "(no content)"). They go to a real Terminal instead.
+    /// hidden attach shows nothing (`/plugin` logged "(no content)"). Chat runs them in its terminal sheet.
     static let menuCommands: Set<String> = [
         "plugin", "mcp", "agents", "config", "hooks", "permissions", "resume", "rewind", "memory",
         "output-style", "add-dir", "status", "help", "doctor", "export", "login", "logout",
@@ -91,11 +91,11 @@ enum SlashCommands {
     /// These take a value; only the bare command opens a menu. (Chat answers a bare /model itself.)
     private static let menuWhenBare: Set<String> = ["model", "effort"]
 
-    private static func appendTerminalNote(_ description: String) -> String {
-        description.isEmpty ? "Opens in Terminal" : description + " · Opens in Terminal"
+    private static func appendMenuNote(_ description: String) -> String {
+        description.isEmpty ? "Opens a menu" : description + " · Opens a menu"
     }
 
-    /// True when the text is a command that only works in a terminal, like "/plugin" or a bare "/effort".
+    /// True when the text is a command that needs a terminal, like "/plugin" or a bare "/effort".
     static func opensMenu(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return false }

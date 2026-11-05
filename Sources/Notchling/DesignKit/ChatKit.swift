@@ -71,6 +71,9 @@ enum KitInk {
     /// Part labels (the ? button): blue, so they read as a guide over the UI, not part of it.
     static let guide = Color(light: KitPalette.blue600, dark: KitPalette.blue400)
     static let onGuide = Color(light: KitPalette.paper0, dark: KitPalette.night0)
+    /// The terminal sheet is dark in both appearances: Claude Code picks its colors for a dark terminal.
+    static let terminal = KitPalette.night0
+    static let terminalText = KitPalette.snow
 
     static func status(_ group: AgentGroup) -> Color {
         switch group {
@@ -100,6 +103,8 @@ enum KitMetric {
     static let radiusMd: CGFloat = 10
     static let radiusCard: CGFloat = 14
     static let radiusComposer: CGFloat = 18
+    static let terminalFont: CGFloat = 12.5
+    static let terminalSheet = CGSize(width: 900, height: 600)
 }
 
 enum KitMotion {

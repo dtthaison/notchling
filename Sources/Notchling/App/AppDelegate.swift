@@ -194,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notch.model.onHide = { [weak self] in self?.hide($0) }
         notch.model.onRemove = { [weak self] in self?.remove($0) }
         notch.model.onOpenChat = { [weak self] in self?.chatWindow.show(select: $0) }
+        notch.model.onOpenTerminal = { [weak self] in self?.chatWindow.showTerminal(select: $0, command: $1) }
         if let request = fresh.first, let agent = agents.first(where: { $0.id == request.sessionID }), notch.isVisible {
             NSSound(named: "Tink")?.play()
             notch.model.peek(agent)
