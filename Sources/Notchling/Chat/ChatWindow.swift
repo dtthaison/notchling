@@ -14,8 +14,8 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
     private var watch: AnyCancellable?
     private var pageWatch: AnyCancellable?
 
-    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil) {
-        model = ChatModel(notch: notch, accounts: accounts, codex: codex)
+    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil, antigravity: AntigravityStore? = nil) {
+        model = ChatModel(notch: notch, accounts: accounts, codex: codex, antigravity: antigravity)
     }
 
     /// A usage-limit switch, shown in the sessions it moved.
@@ -153,8 +153,9 @@ final class ChatModel: ObservableObject {
     }
     /// Opens a saved Artifact in the Artifacts window; false when there's no local copy.
     var onOpenArtifact: ((String) -> Bool)?
-    /// Which accounts the Accounts sheet shows: Claude Code's or the Codex CLI's.
-    enum AccountTab: String, CaseIterable { case claude = "Claude Code", codex = "Codex" }
+    /// Which accounts the Accounts sheet shows: Claude Code's, the Codex CLI's, or Antigravity's (whose
+    /// login Antigravity CLI uses too).
+    enum AccountTab: String, CaseIterable { case claude = "Claude Code", codex = "Codex", antigravity = "Antigravity" }
     @Published var accountSheet = false {
         didSet { if !accountSheet { closeAccounts() } }
     }
@@ -171,13 +172,20 @@ final class ChatModel: ObservableObject {
         didSet { if oldValue !== signIn { oldValue?.cancel() } }
     }
     let codex: CodexStore?
+    /// Antigravity's saved Google logins. `agy` signs in through the same Keychain item (its log says
+    /// "authenticated via keyring" as the app's account), so switching one switches both.
+    let antigravity: AntigravityStore?
 
     /// Opens the Accounts sheet; Claude Code starts its browser sign-in at once, Codex shows its
     /// accounts with Add Account and Switch.
     func addAccount(_ tab: AccountTab = .claude) {
         accountTab = tab
         accountSheet = true
-        if tab == .claude { startClaudeSignIn() } else { codex?.sync(force: true) }
+        switch tab {
+        case .claude: startClaudeSignIn()
+        case .codex: codex?.sync(force: true)
+        case .antigravity: antigravity?.sync()
+        }
     }
 
     func startClaudeSignIn() {
@@ -238,10 +246,11 @@ final class ChatModel: ObservableObject {
     private var watch: AnyCancellable?
     private var removedWatch: AnyCancellable?
 
-    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil) {
+    init(notch: NotchModel, accounts: AccountStore? = nil, codex: CodexStore? = nil, antigravity: AntigravityStore? = nil) {
         self.notch = notch
         self.accounts = accounts
         self.codex = codex
+        self.antigravity = antigravity
         expansion.openCall = { [weak self] call in self?.subagentID = self?.expansion.subagentCalls[call] }
         watch = notch.$agents.sink { [weak self] list in
             for agent in list { self?.seen[agent.id] = agent }
@@ -258,12 +267,16 @@ final class ChatModel: ObservableObject {
         codexWatch = codex?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
         }
+        antigravityWatch = antigravity?.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.objectWillChange.send() }
+        }
         agyWatch = AntigravityRunner.shared.$version.sink { [weak self] _ in
             DispatchQueue.main.async { self?.antigravityChanged() }
         }
     }
     private var codexWatch: AnyCancellable?
     private var agyWatch: AnyCancellable?
+    private var antigravityWatch: AnyCancellable?
 
     // MARK: Accounts (lanes)
 

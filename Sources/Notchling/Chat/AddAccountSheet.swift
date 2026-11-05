@@ -8,18 +8,29 @@ import SwiftUI
 struct AccountsSheet: View {
     @ObservedObject var model: ChatModel
 
+    /// The tools with a store here.
+    private var tabs: [ChatModel.AccountTab] {
+        ChatModel.AccountTab.allCases.filter { tab in
+            switch tab {
+            case .claude: return true
+            case .codex: return model.codex != nil
+            case .antigravity: return model.antigravity != nil
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "person.crop.circle.badge.plus").foregroundColor(KitInk.textMuted)
                 Text("Accounts").kitType(.heading).foregroundColor(KitInk.text)
-                if model.codex != nil {
+                if model.codex != nil || model.antigravity != nil {
                     Picker("", selection: $model.accountTab) {
-                        ForEach(ChatModel.AccountTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        ForEach(tabs, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 190)
+                    .frame(width: CGFloat(tabs.count) * 100)
                     .part("Accounts Tabs", .bottom)
                 }
                 Spacer()
@@ -36,11 +47,12 @@ struct AccountsSheet: View {
                 switch model.accountTab {
                 case .claude: ClaudeSignInPane(model: model)
                 case .codex: if let codex = model.codex { CodexAccountsPane(store: codex) }
+                case .antigravity: if let store = model.antigravity { AntigravityPage(store: store) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 520, height: 400)
         .background(KitInk.window)
         .part("Accounts Sheet")
     }

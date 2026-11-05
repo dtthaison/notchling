@@ -2,19 +2,20 @@ import AppKit
 import SwiftUI
 
 /// What a new session runs on: a Claude Code account (nil is the main login; another gets a lane),
-/// a Codex account (Codex has one login, so a non-active one switches Codex first), or Antigravity
-/// CLI (`agy`, on whatever login it has). Add a case per tool.
+/// a Codex account (Codex has one login, so a non-active one switches Codex first), or an Antigravity
+/// account for Antigravity CLI (the app's login, which `agy` shares; nil: whatever `agy` is signed in
+/// to, when Notchling has none saved). Add a case per tool.
 enum SessionChoice: Hashable {
     case claude(accountID: String?)
     case codex(accountID: String)
-    case antigravity
+    case antigravity(accountID: String?)
 
     /// Remembered between sheets.
     var key: String {
         switch self {
         case .claude(let id): return "claude:" + (id ?? "")
         case .codex(let id): return "codex:" + id
-        case .antigravity: return "antigravity:"
+        case .antigravity(let id): return "antigravity:" + (id ?? "")
         }
     }
 
@@ -24,8 +25,9 @@ enum SessionChoice: Hashable {
             self = .claude(accountID: id.isEmpty ? nil : id)
         } else if key.hasPrefix("codex:") {
             self = .codex(accountID: String(key.dropFirst(6)))
-        } else if key == "antigravity:" {
-            self = .antigravity
+        } else if key.hasPrefix("antigravity:") {
+            let id = String(key.dropFirst(12))
+            self = .antigravity(accountID: id.isEmpty ? nil : id)
         } else {
             return nil
         }
@@ -42,6 +44,7 @@ struct NewSessionSheet: View {
     /// Adding an account in place of the lists.
     @State private var adding: ChatModel.AccountTab?
     @State private var confirmSwitch: CodexAccount?
+    @State private var confirmAntigravity: AntigravityAccount?
     @State private var working = false
     @State private var error: String?
     /// Claude Code refused the folder until it's trusted: Start becomes Trust Folder and Start.
@@ -70,6 +73,12 @@ struct NewSessionSheet: View {
         .onAppear(perform: pickDefaults)
         .onChange(of: folder) { _ in untrusted = false; error = nil }
         .onChange(of: choice) { _ in untrusted = false; error = nil }
+        .background(EmptyView().alert(item: $confirmAntigravity) { account in
+            Alert(title: Text("Switch Antigravity to \(account.email)?"),
+                  message: Text("Antigravity CLI and the Antigravity app share one login. The app quits and opens again on this account, and Antigravity sessions open in Chat restart. agy running in a terminal keeps the old login until you restart it."),
+                  primaryButton: .default(Text("Switch and Start")) { start(switchingCodex: false, switchingAntigravity: true) },
+                  secondaryButton: .cancel())
+        })
         .alert(item: $confirmSwitch) { account in
             Alert(title: Text("Switch Codex to \(account.email)?"),
                   message: Text(CodexStore.switchWarning(CodexStore.runningWork())
@@ -93,7 +102,7 @@ struct NewSessionSheet: View {
                 }
                 .buttonStyle(.kit(.ghost))
                 .part("Back to New Session Button", .bottom)
-                Text(adding == .codex ? "Add Codex Account" : "Add Claude Code Account")
+                Text(adding == .codex ? "Add Codex Account" : adding == .antigravity ? "Add Antigravity Account" : "Add Claude Code Account")
                     .kitType(.heading).foregroundColor(KitInk.text)
             } else {
                 Image(systemName: "plus.bubble").foregroundColor(KitInk.textMuted)
@@ -137,7 +146,17 @@ struct NewSessionSheet: View {
                 }
                 if AntigravityRunner.binary() != nil {
                     group("Antigravity CLI", icon: "paperplane") {
-                        option(.antigravity, title: "Antigravity CLI", detail: "Uses agy's own sign-in")
+                        if let store = model.antigravity, !store.accounts.isEmpty {
+                            ForEach(store.accounts) { account in
+                                option(.antigravity(accountID: account.id), title: account.email,
+                                       detail: antigravityDetail(account, active: account.id == store.activeID))
+                            }
+                        } else {
+                            option(.antigravity(accountID: nil), title: "Antigravity CLI", detail: "Uses agy's current sign-in")
+                        }
+                        if model.antigravity != nil {
+                            addRow("Add Antigravity Account") { enterAdding(.antigravity) }
+                        }
                     }
                 }
             }
@@ -204,6 +223,7 @@ struct NewSessionSheet: View {
         switch tab {
         case .claude: ClaudeSignInPane(model: model)
         case .codex: if let codex = model.codex { CodexAccountsPane(store: codex) }
+        case .antigravity: if let store = model.antigravity { AntigravityPage(store: store) }
         }
     }
 
@@ -277,6 +297,15 @@ struct NewSessionSheet: View {
         return parts.joined(separator: " · ")
     }
 
+    private func antigravityDetail(_ account: AntigravityAccount, active: Bool) -> String {
+        var parts = [account.plan ?? "Google Account"]
+        if let bars = model.antigravity?.usage[account.id]?.groups.first?.bars {
+            parts += bars.map { "\($0.label) \(Int($0.window.percent.rounded()))%" }
+        }
+        parts.append(active ? "In use" : "Switches Antigravity")
+        return parts.joined(separator: " · ")
+    }
+
     private var allFolders: [String] {
         var out = extraFolders
         for f in model.projectFolders where !out.contains(f) { out.append(f) }
@@ -297,6 +326,7 @@ struct NewSessionSheet: View {
 
     private func pickDefaults() {
         model.codex?.sync()
+        model.antigravity?.sync()
         if choice == nil {
             let saved = UserDefaults.standard.string(forKey: Self.lastChoiceKey).flatMap(SessionChoice.init(key:))
             if let saved, isAvailable(saved) { choice = saved } else if !model.sessionTargets.isEmpty { choice = .claude(accountID: nil) }
@@ -308,13 +338,19 @@ struct NewSessionSheet: View {
         switch choice {
         case .claude(let id): return model.sessionTargets.contains { $0.accountID == id }
         case .codex(let id): return model.codex?.accounts.contains { $0.id == id } == true
-        case .antigravity: return AntigravityRunner.binary() != nil
+        case .antigravity(let id):
+            guard AntigravityRunner.binary() != nil else { return false }
+            return id == nil ? (model.antigravity?.accounts.isEmpty ?? true) : model.antigravity?.accounts.contains { $0.id == id } == true
         }
     }
 
     private func enterAdding(_ tab: ChatModel.AccountTab) {
         adding = tab
-        if tab == .claude { model.startClaudeSignIn() } else { model.codex?.sync(force: true) }
+        switch tab {
+        case .claude: model.startClaudeSignIn()
+        case .codex: model.codex?.sync(force: true)
+        case .antigravity: model.antigravity?.sync()
+        }
     }
 
     private func leaveAdding() {
@@ -324,6 +360,10 @@ struct NewSessionSheet: View {
         // Pick what was just added.
         if tab == .codex, let codex = model.codex, let newest = codex.accounts.last, !isPicked(.codex(accountID: newest.id)) {
             choice = .codex(accountID: newest.id)
+        }
+        if tab == .antigravity, let store = model.antigravity, let newest = store.accounts.last,
+           !isPicked(.antigravity(accountID: newest.id)) {
+            choice = .antigravity(accountID: newest.id)
         }
     }
 
@@ -342,7 +382,7 @@ struct NewSessionSheet: View {
         folder = path
     }
 
-    private func start(switchingCodex: Bool) {
+    private func start(switchingCodex: Bool, switchingAntigravity: Bool = false) {
         guard let choice, let folder else { return }
         error = nil
         UserDefaults.standard.set(choice.key, forKey: Self.lastChoiceKey)
@@ -382,9 +422,28 @@ struct NewSessionSheet: View {
                     }
                 }
             }
-        case .antigravity:
-            model.newSessionSheet = false
-            model.newAntigravitySession(in: folder)
+        case .antigravity(let accountID):
+            guard let store = model.antigravity, let accountID, accountID != store.activeID else {
+                model.newSessionSheet = false
+                model.newAntigravitySession(in: folder)
+                return
+            }
+            guard switchingAntigravity else {
+                confirmAntigravity = store.accounts.first { $0.id == accountID }
+                return
+            }
+            // agy may renew its login while it runs and write it back; none may run across the switch.
+            AntigravityRunner.shared.closeAll()
+            working = true
+            store.switchTo(accountID) { failure in
+                working = false
+                if let failure {
+                    error = failure.localizedDescription
+                } else {
+                    model.newSessionSheet = false
+                    model.newAntigravitySession(in: folder)
+                }
+            }
         }
     }
 }

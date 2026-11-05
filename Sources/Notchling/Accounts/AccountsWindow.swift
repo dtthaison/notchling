@@ -814,7 +814,7 @@ private struct SettingsPage: View {
 
 /// Antigravity's saved Google accounts. Switching and adding restart Antigravity, so both ask first
 /// while it's open.
-private struct AntigravityPage: View {
+struct AntigravityPage: View {
     @ObservedObject var store: AntigravityStore
     @State private var removing: AntigravityAccount?
     @State private var confirming: Pending?

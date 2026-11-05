@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ⌘⇧P was free when Notchling started (another app may hold it).
     private var searchShortcut = false
     private lazy var chatWindow: ChatWindowController = {
-        let chat = ChatWindowController(notch: notch.model, accounts: accounts, codex: codex)
+        let chat = ChatWindowController(notch: notch.model, accounts: accounts, codex: codex, antigravity: antigravity)
         // An artifact link in a conversation opens Notchling's saved copy, readable from any account.
         chat.onOpenArtifact = { [weak self] folder in
             self?.pagesWindow.show(select: folder)
