@@ -1168,6 +1168,12 @@ private struct ConversationView: View, Equatable {
     @State private var jumpingUntil = Date.distantPast
     /// Spaces out the follow-the-end corrections. A class, so setting it doesn't redraw.
     @State private var corrections = CorrectionClock()
+    /// How many of the newest rows are drawn; Show Earlier Messages adds a page.
+    @State private var shown = ConversationView.page
+    /// Rows per page. A plain VStack, not a LazyVStack: lazy rows are measured as they scroll in, so
+    /// their estimated heights kept changing under the follow-the-end scroll and SwiftUI re-measured
+    /// forever inside one update (Notchling at 100% CPU, 5 Nov). Drawn rows have exact heights.
+    static let page = 80
 
     static func == (a: Self, b: Self) -> Bool {
         a.conversation == b.conversation && a.pending == b.pending && a.live == b.live
@@ -1196,7 +1202,9 @@ private struct ConversationView: View, Equatable {
     }
 
     var body: some View {
-        let rows = self.rows
+        let allRows = self.rows
+        let rows = Array(allRows.suffix(shown))
+        let hidden = allRows.count - rows.count
         let lastToolID = conversation.items.last(where: { if case .tools = $0.kind { return true } else { return false } })?.id
         let lastID = conversation.items.last?.id
         // "Working" can outlast the turn: a background command (status "shell") keeps a session busy
@@ -1212,7 +1220,19 @@ private struct ConversationView: View, Equatable {
             GeometryReader { outer in
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if hidden > 0 {
+                                Button("Show Earlier Messages") {
+                                    // Keep the row you were reading in place as the page above it appears.
+                                    let anchor = rows.first?.id
+                                    shown += ConversationView.page
+                                    if let anchor { DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) } }
+                                }
+                                .buttonStyle(.kit(.secondary))
+                                .help("\(hidden) earlier")
+                                .frame(maxWidth: .infinity)
+                                .part("Show Earlier Button", .trailing)
+                            }
                             ForEach(rows) { row in
                                 Group {
                                     if let day = row.day {
