@@ -786,6 +786,38 @@ final class ChatModel: ObservableObject {
         focusRequest += 1
     }
 
+    /// A Codex slash command: the model picker, a new session or delete here; the rest in Codex's own
+    /// interface in the terminal sheet (`codex exec`, which Chat's turns use, has no slash commands).
+    private func runCodexCommand(_ name: String, text: String, agent: Agent, session: String, clearDraft: Bool) {
+        let id = agent.id
+        let done = { [weak self] in if clearDraft { self?.drafts[id] = "" } }
+        switch CodexCommands.route(name) {
+        case .modelPicker:
+            done()
+            CodexModelPicker(model: self, agent: agent).popUp()
+        case .newSession:
+            done()
+            newCodexSession(in: agent.cwd)
+        case .delete:
+            done()
+            removeCodex(agent)
+        case .ignore:
+            done()
+        case .terminal:
+            // Two Codex processes on one session would both write its file.
+            if !session.isEmpty, CodexRunner.shared.isRunning(session) {
+                errors[id] = "Wait for this turn to end, or stop it, then run \(text)."
+                return
+            }
+            done()
+            errors[id] = nil
+            terminal?.close()
+            terminal = TerminalSession(program: CodexCommands.script(session: session),
+                                       in: agent.cwd.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : agent.cwd,
+                                       title: "Codex · \(agent.name)", typing: text)
+        }
+    }
+
     private func sendCodex(_ agent: Agent, sessionID: String, text: String) {
         let id = agent.id
         errors[id] = nil
@@ -1061,6 +1093,10 @@ final class ChatModel: ObservableObject {
         if let agent = selected, case .codex(let session) = agent.target {
             let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
+            if let name = CodexCommands.command(in: text) {
+                runCodexCommand(name, text: text, agent: agent, session: session, clearDraft: preset == nil)
+                return
+            }
             if preset == nil { drafts[agent.id] = "" }
             sendCodex(agent, sessionID: session, text: text)
             return
@@ -1181,9 +1217,11 @@ final class ChatModel: ObservableObject {
 
     /// Commands matching a draft like "/sd:ap"; empty once there's a space after the command.
     func completions(for agent: Agent) -> [SlashCommand] {
-        if case .codex = agent.target { return [] }
         let draft = drafts[agent.id] ?? ""
         guard draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
+        if case .codex = agent.target {
+            return Array(SlashCommands.matches(String(draft.dropFirst()), in: CodexCommands.available()).prefix(8))
+        }
         return Array(SlashCommands.matches(String(draft.dropFirst()), in: SlashCommands.all(for: agent.cwd)).prefix(8))
     }
 
@@ -2185,7 +2223,7 @@ struct CodexModelPicker: View {
         .help("The model and reasoning effort for this session's next turns.")
     }
 
-    private func popUp() {
+    func popUp() {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let current = pick
@@ -2903,7 +2941,7 @@ private struct AccountMenu: View {
     /// where it then runs (the main login, a lane, a new lane) is Notchling's business, not a choice.
     /// Moving everything is one submenu below. Switching the main login or a whole lane lives in the
     /// menu bar (accounts list, Lanes), and new sessions start from the sidebar's +.
-    private func popUp() {
+    func popUp() {
         let menu = NSMenu()
         menu.autoenablesItems = false
         func note(_ title: String) {

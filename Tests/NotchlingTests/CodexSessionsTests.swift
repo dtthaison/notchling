@@ -116,6 +116,21 @@ final class CodexSessionsTests: XCTestCase {
         XCTAssertEqual(CodexReader.read(file.path).facts.effort, "xhigh")
     }
 
+    func testCodexCommands() {
+        let commands = CodexCommands.all + [SlashCommand(name: "prompts:fix", description: "", argumentHint: nil)]
+        XCTAssertEqual(CodexCommands.command(in: "/review focus on auth", among: commands), "review")
+        XCTAssertEqual(CodexCommands.command(in: "/prompts:fix", among: commands), "prompts:fix")
+        XCTAssertNil(CodexCommands.command(in: "/notacommand", among: commands), "sent as a message")
+        XCTAssertNil(CodexCommands.command(in: "review this", among: commands))
+        XCTAssertEqual(CodexCommands.route("model"), .modelPicker)
+        XCTAssertEqual(CodexCommands.route("new"), .newSession)
+        XCTAssertEqual(CodexCommands.route("review"), .terminal)
+        XCTAssertEqual(CodexCommands.script(session: "abc"), "codex resume abc")
+        XCTAssertEqual(CodexCommands.script(session: ""), "codex")
+        XCTAssertEqual(CodexCommands.promptDescription("---\ndescription: \"Fix the bug\"\n---\nDo it"), "Fix the bug")
+        XCTAssertEqual(CodexCommands.promptDescription("Review the PR\nmore"), "Review the PR")
+    }
+
     func testSessionChoiceKeys() {
         for choice in [SessionChoice.claude(accountID: nil), .claude(accountID: "a1"), .codex(accountID: "u:w")] {
             XCTAssertEqual(SessionChoice(key: choice.key), choice)

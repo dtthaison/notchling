@@ -55,6 +55,18 @@ final class TerminalSession: ObservableObject, Identifiable {
         script = (text, folder)
     }
 
+    /// Typed key by key instead of pasted: an interactive program that isn't Claude Code (Codex) gets
+    /// a slash command the way its command popup expects one, into an input box that starts empty.
+    private var typeKeys = false
+
+    /// An interactive program (`codex resume <id>`) run in `folder`, with `typing` entered once it has drawn.
+    convenience init(program text: String, in folder: String, title: String, typing: String?) {
+        self.init(jobID: "", title: title)
+        script = (text, folder)
+        pendingCommand = typing
+        typeKeys = true
+    }
+
     deinit { close() }
 
     /// Starts on the view's first layout, at the size it measured.
@@ -150,6 +162,15 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard let last = lastOutput, Date().timeIntervalSince(last) >= 0.5 else { return }
         pendingInput = nil
         quietTimer?.invalidate()
+        if typeKeys {
+            let keys = Array(input).map(String.init) + ["\r"]
+            for (i, key) in keys.enumerated() {
+                // A longer pause before Enter, so the popup has filtered to the command.
+                let at = Double(i) * 0.04 + (key == "\r" ? 0.4 : 0)
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in self?.send(key) }
+            }
+            return
+        }
         // Same keys as a reply, with the same pauses: sent in one burst, the clear keys read as part of
         // the paste ("Removed 22 invisible characters") and Enter didn't run it.
         send(ReplySender.clearInput)
