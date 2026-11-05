@@ -152,7 +152,7 @@ extension View {
 // MARK: - Icons
 
 enum KitIcon {
-    case needs, working, done, terminal, resume, send, tools, question, permission, claude, search, info, back, sessions
+    case needs, working, done, terminal, resume, send, tools, question, permission, claude, search, info, back, sessions, phone, check, more
 
     var symbol: String {
         switch self {
@@ -170,6 +170,9 @@ enum KitIcon {
         case .info: return "info.circle"
         case .back: return "arrow.uturn.backward"
         case .sessions: return "bubble.left.and.bubble.right"
+        case .phone: return "iphone"
+        case .check: return "checkmark"
+        case .more: return "ellipsis"
         }
     }
 
@@ -350,14 +353,17 @@ struct KitSessionRowStyle: ButtonStyle {
 
 struct KitOptionStyle: ButtonStyle {
     let number: Int
+    /// A multi-select row that is ticked: the badge shows a check and the row is outlined.
+    var selected: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
-        OptionBody(configuration: configuration, number: number)
+        OptionBody(configuration: configuration, number: number, selected: selected)
     }
 
     private struct OptionBody: View {
         let configuration: Configuration
         let number: Int
+        let selected: Bool
         @Environment(\.kitForcedState) private var forced
         @Environment(\.isEnabled) private var isEnabled
         @State private var hovering = false
@@ -366,17 +372,18 @@ struct KitOptionStyle: ButtonStyle {
             let state = forced ?? (!isEnabled ? .disabled : configuration.isPressed ? .pressed : hovering ? .hover : .rest)
             let shape = RoundedRectangle(cornerRadius: KitMetric.radiusMd, style: .continuous)
             HStack(alignment: .top, spacing: 10) {
-                Text("\(number)")
-                    .kitType(.label)
-                    .foregroundColor(state == .hover || state == .pressed ? KitInk.onAccent : KitInk.accentText)
+                Group {
+                    if selected { KitIconView(icon: .check, size: 11) } else { Text("\(number)").kitType(.label) }
+                }
+                    .foregroundColor(selected || state == .hover || state == .pressed ? KitInk.onAccent : KitInk.accentText)
                     .frame(width: 22, height: 22)
-                    .background(Circle().fill(state == .hover || state == .pressed ? KitInk.accent : KitInk.selection))
+                    .background(Circle().fill(selected || state == .hover || state == .pressed ? KitInk.accent : KitInk.selection))
                 configuration.label
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(10)
             .background(shape.fill(state == .hover || state == .pressed ? KitInk.raised : KitInk.card))
-            .overlay(shape.strokeBorder(state == .pressed ? KitInk.accent : KitInk.hairline, lineWidth: 1))
+            .overlay(shape.strokeBorder(selected || state == .pressed ? KitInk.accent : KitInk.hairline, lineWidth: 1))
             .opacity(state == .disabled ? 0.4 : 1)
             .contentShape(shape)
             .onHover { hovering = $0 }

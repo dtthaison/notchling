@@ -33,6 +33,16 @@ enum ReplySender {
         return FileManager.default.isExecutableFile(atPath: local) ? local : "/usr/local/bin/claude"
     }()
 
+    /// Blocking; call off the main thread. A background job goes through `claude attach`; a terminal session whose
+    /// pty lives in the session host (hostd) is typed into through the host, so the Mac and the phone share one terminal.
+    static func send(_ text: String, to agent: Agent) throws {
+        switch agent.target {
+        case .job(let jobID): try send(text, toJob: jobID)
+        case .process(let pid) where HostTerminals.owns(pid): try HostTerminals.send(ShellCommand.normalize(text), pid)
+        default: throw Failure.launch("this session takes no replies")
+        }
+    }
+
     /// Blocking; call off the main thread.
     static func send(_ text: String, toJob jobID: String) throws {
         // A "!" command copied from a terminal is put back together first (wrapped lines, prompts, quotes).
@@ -53,12 +63,19 @@ enum ReplySender {
     enum Choice: Equatable {
         case option(Int)   // 1-based
         case text(String)
+        case options([Int])  // 1-based, multi-select
     }
 
-    /// Answers an AskUserQuestion prompt. The terminal shows one question at a time: a digit picks an
-    /// option, the number after the last option is "Type something", and with several questions a
-    /// final review screen needs "1" to submit.
+    /// Answers an AskUserQuestion prompt in a background job's terminal.
     static func answer(_ choices: [Choice], to question: PendingQuestion, toJob jobID: String) throws {
+        try type(answerKeys(choices, to: question), toJob: jobID)
+    }
+
+    /// The keystrokes for an AskUserQuestion prompt, one chunk per key press. The terminal shows one question at a
+    /// time: a digit picks an option (single select) or toggles it (multi select), the number after the last option is
+    /// "Type something". A multi-select list ends with an "Other" row, so Tab count+1 times lands on Submit/Next and
+    /// Enter confirms. A final review screen (several questions, or any multi-select) needs "1" to submit.
+    static func answerKeys(_ choices: [Choice], to question: PendingQuestion) -> [String] {
         var chunks: [String] = []
         for (item, choice) in zip(question.items, choices) {
             switch choice {
@@ -66,10 +83,34 @@ enum ReplySender {
                 chunks.append("\(n)")
             case .text(let t):
                 chunks += ["\(item.options.count + 1)", t.replacingOccurrences(of: "\n", with: " "), "\r"]
+            case .options(let numbers):
+                chunks += numbers.map(String.init)
+                chunks += Array(repeating: "\t", count: item.options.count + 1)
+                chunks.append("\r")
             }
         }
-        if question.items.count > 1 { chunks.append("1") }
-        try type(chunks, toJob: jobID)
+        if question.items.count > 1 || question.items.contains(where: \.multiSelect) { chunks.append("1") }
+        return chunks
+    }
+
+    /// The answers a hook-held question is released with, keyed by question text. Claude Code joins multi-select
+    /// answers with ", " itself.
+    static func hookAnswers(_ choices: [Choice], for question: PendingQuestion) -> [String: String] {
+        var answers: [String: String] = [:]
+        for (item, choice) in zip(question.items, choices) {
+            switch choice {
+            case .option(let n):
+                guard item.options.indices.contains(n - 1) else { continue }
+                answers[item.question] = item.options[n - 1]
+            case .text(let t):
+                answers[item.question] = t
+            case .options(let numbers):
+                let labels = numbers.compactMap { item.options.indices.contains($0 - 1) ? item.options[$0 - 1] : nil }
+                guard !labels.isEmpty else { continue }
+                answers[item.question] = labels.joined(separator: ", ")
+            }
+        }
+        return answers
     }
 
     /// Stops the turn a background session is working on: Esc, as in its terminal. Only for a session
@@ -253,4 +294,24 @@ enum ReplySender {
         }
         return lastOutput != nil
     }
+}
+
+/// Terminal sessions that live in the session host (hostd), set by the phone bridge at launch. Nothing is owned
+/// until then, so a build without the bridge behaves as before.
+enum HostTerminals {
+    nonisolated(unsafe) static var owns: (pid_t) -> Bool = { _ in false }
+    nonisolated(unsafe) static var send: (String, pid_t) throws -> Void = { _, _ in }
+    /// Raw keystrokes (no bracketed paste) for answering prompts.
+    nonisolated(unsafe) static var keys: ([String], pid_t) throws -> Void = { _, _ in }
+}
+
+extension Agent {
+    /// A terminal session whose pty the host owns: replies can be typed into it from Chat.
+    var repliesViaHost: Bool {
+        if case .process(let pid) = target { return HostTerminals.owns(pid) }
+        return false
+    }
+
+    /// Chat's reply box is available.
+    var canType: Bool { canReply || repliesViaHost }
 }

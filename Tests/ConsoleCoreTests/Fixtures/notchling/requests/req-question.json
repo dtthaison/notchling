@@ -1,0 +1,1 @@
+{"id":"req-question","session_id":"sess-idle","pid":4243,"created":1793541461.0,"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"header":"Branch","question":"Which branch should I use?","multiSelect":false,"options":[{"label":"main","description":"default"},{"label":"develop","description":"integration"}]}]}}

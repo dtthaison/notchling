@@ -1,0 +1,11 @@
+{"type":"user","uuid":"m01","timestamp":"2026-11-01T13:00:00.000Z","message":{"role":"user","content":"Please add a unit test"}}
+{"type":"user","uuid":"m02","isMeta":true,"timestamp":"2026-11-01T13:00:01.000Z","message":{"role":"user","content":"meta line that must be skipped"}}
+{"type":"assistant","uuid":"m03","isSidechain":true,"timestamp":"2026-11-01T13:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"sidechain line that must be skipped"}]}}
+{"type":"user","uuid":"m04","timestamp":"2026-11-01T13:00:03.000Z","message":{"role":"user","content":"<system-reminder>injected wrapper, skipped</system-reminder>"}}
+{"type":"assistant","uuid":"m05","timestamp":"2026-11-01T13:00:04.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/work/a.swift"}}]}}
+{"type":"user","uuid":"m06","timestamp":"2026-11-01T13:00:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file body"}]}}
+{"type":"assistant","uuid":"m07","timestamp":"2026-11-01T13:00:06.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/work/b.swift"}},{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"swift test"}}]}}
+{"type":"assistant","uuid":"m08","timestamp":"2026-11-01T13:00:07.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Added the test."}]}}
+{this line is not json at all
+{"type":"system","uuid":"m09","timestamp":"2026-11-01T13:00:08.000Z","message":{"role":"system","content":"ignored type"}}
+{"type":"user","uuid":"m10","timestamp":"2026-11-01T13:00:09.000Z","message":{"role":"user","content":"Thanks"}}

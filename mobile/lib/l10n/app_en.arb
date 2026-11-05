@@ -1,0 +1,312 @@
+{
+  "@@locale": "en",
+  "appName": "Agent Console",
+  "tabSessions": "Sessions",
+  "tabChat": "Chat",
+  "tabVisualize": "Visualize",
+  "connecting": "Connecting",
+  "connectionLostRetry": "Connection lost, retrying in {seconds}s",
+  "@connectionLostRetry": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "connected": "Connected",
+  "retryNow": "Retry now",
+  "retry": "Retry",
+  "cancel": "Cancel",
+  "close": "Close",
+  "stateNeedsInput": "Needs Input",
+  "stateRunning": "Working",
+  "stateDone": "Done",
+  "stateExited": "Ended",
+  "sessionsEmptyTitle": "No sessions yet",
+  "sessionsEmptyBody": "Claude Code sessions on your Mac show up here.",
+  "searchHint": "Search sessions",
+  "searchNoMatch": "No sessions match “{query}”.",
+  "@searchNoMatch": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "loadFailed": "Couldn't load data. Please try again.",
+  "newSession": "New session",
+  "newSessionFolder": "Folder",
+  "newSessionModel": "Model",
+  "modelDefault": "Default",
+  "newSessionNoProjects": "No recent folders on the Mac.",
+  "newSessionConfirmTitle": "Start a new session?",
+  "newSessionConfirmBody": "Claude will run in {folder} on the Mac.",
+  "@newSessionConfirmBody": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "newSessionOpen": "Start",
+  "newSessionStarted": "The Mac started a new session.",
+  "newSessionFailed": "Couldn't start a new session. Please try again.",
+  "runningSubagents": "{count} subagents running",
+  "@runningSubagents": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "subagentsShow": "Show {count} subagents",
+  "@subagentsShow": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "subagentsHide": "Hide {count} subagents",
+  "@subagentsHide": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "justNow": "Just now",
+  "minutesShort": "{n} min",
+  "@minutesShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "hoursShort": "{n} h",
+  "@hoursShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "daysShort": "{n} d",
+  "@daysShort": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "viewOnly": "View only",
+  "viewOnlyReason": "Opened outside Console, view only",
+  "controlConsole": "Console",
+  "controlJob": "Background job",
+  "chatSelectSession": "Select a session to see its chat.",
+  "chatEmpty": "No messages yet.",
+  "chatLoadOlder": "Load older messages",
+  "chatNewMessages": "New messages",
+  "composerHint": "Message this session",
+  "send": "Send",
+  "sending": "Sending",
+  "sendFailed": "Couldn't send the message. Please try again.",
+  "pendingPermission": "Permission needed: {tool}",
+  "@pendingPermission": {
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
+  "pendingQuestion": "Question from Claude",
+  "allow": "Allow",
+  "deny": "Deny",
+  "answerOnMac": "Answer on the Mac",
+  "multiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
+  "answerFailed": "Couldn't send the answer. Please try again.",
+  "toolsExpand": "Expand",
+  "toolsCollapse": "Collapse",
+  "pairTitle": "Pair with a Mac",
+  "pairIntro": "On the Mac, open Agent Console, choose Phone, then Pair a phone.",
+  "pairScan": "Scan QR",
+  "pairManual": "Enter manually",
+  "pairPasteJson": "Paste the QR content (JSON)",
+  "pairHost": "Mac address (IP or .local name)",
+  "pairPort": "Port",
+  "pairFingerprint": "Certificate fingerprint (SHA-256)",
+  "pairCode": "Pairing code (8 characters)",
+  "pairDeviceName": "Device name",
+  "pairConnect": "Pair",
+  "pairWaiting": "Waiting for the Mac to allow…",
+  "pairFailed": "Couldn't pair. Please try again.",
+  "pairInvalid": "The pairing code isn't valid.",
+  "pairFingerprintMismatch": "The Mac's certificate doesn't match the pinned fingerprint. Connection refused.",
+  "pairDenied": "The Mac refused this device, or the code expired.",
+  "pairUnreachable": "Couldn't reach the Mac. Check the network and address.",
+  "pairCameraDenied": "Camera access is off. Use manual entry.",
+  "macsTitle": "Paired Macs",
+  "macsAdd": "Add a Mac",
+  "macsActive": "In use",
+  "macsUse": "Use this Mac",
+  "macsRemove": "Remove Mac",
+  "macsRemoveConfirm": "Remove “{name}” from this phone?",
+  "@macsRemoveConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "vizSuggested": "Suggested",
+  "vizPhoneNoPermission": "The Mac hasn't granted Screen Recording to Agent Console.",
+  "vizPhoneNoWindow": "No device window is showing on the Mac.",
+  "vizPhoneStarting": "Waiting for frames from the Mac…",
+  "vizPhoneError": "Couldn't show the device: {message}",
+  "@vizPhoneError": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "vizWebUrl": "Page address (localhost on the Mac)",
+  "vizWebRefresh": "Capture again",
+  "vizWebNoUrl": "This session has no web address yet. Enter one above.",
+  "vizWebHint": "Start the dev server on the Mac and refresh, or pick another address below.",
+  "vizWebCandidates": "Running on the Mac",
+  "vizWebFailed": "Couldn't capture the page. Please try again.",
+  "vizLoadFailed": "Couldn't load the visualization. Please try again.",
+  "vizSelectSession": "Select a session to see its visualization.",
+  "vizBundleMissing": "The viz bundle is missing. Run tool/sync_viz.sh and rebuild.",
+  "notifNeedsInputTitle": "Session needs input",
+  "notifNeedsInputBody": "{name} is waiting.",
+  "@notifNeedsInputBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pullToRefresh": "Pull to refresh",
+  "connectionRevoked": "The Mac revoked this device. Pair again.",
+  "openMacs": "Paired Macs",
+  "routeHome": "Home Wi-Fi",
+  "routeInternet": "Internet",
+  "connectedVia": "Connected · {route}",
+  "@connectedVia": {
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "noRouteToMac": "Can't reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.",
+  "takeover": "Take over",
+  "takeoverHint": "Opened outside Console, view only. Take it over to message it from your phone.",
+  "takeoverTitle": "Take over this session?",
+  "takeoverBody": "The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.",
+  "takeoverRunning": "Taking over…",
+  "takeoverFailed": "Could not take over: {reason}",
+  "@takeoverFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "micStart": "Dictate",
+  "micStop": "Stop and transcribe",
+  "micCancel": "Cancel transcription",
+  "transcribing": "Transcribing…",
+  "voicePermissionDenied": "Microphone access is off.",
+  "voiceOpenSettings": "Open settings",
+  "voiceNoSpeech": "No speech heard. Try speaking closer to the mic.",
+  "voiceTooLong": "Stopped at 60 seconds.",
+  "voiceEngineError": "Transcription failed. Try again.",
+  "voiceRecorderError": "Could not record.",
+  "keepAliveTitle": "Keep the connection in the background?",
+  "keepAliveBody": "To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.",
+  "keepAliveEnable": "Turn on",
+  "notNow": "Not now",
+  "keepAliveSetting": "Keep connection in the background",
+  "keepAliveHint": "Get notifications while the app is in the background. Shows a small permanent notification.",
+  "muteSession": "Mute notifications for this session",
+  "unmuteSession": "Unmute this session",
+  "takeoverStopBody": "Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?",
+  "takeoverStopConfirm": "Stop and take over",
+  "takeoverBusyTitle": "Session is running",
+  "takeoverBusyBody": "The session is running; the current turn will be cut off.",
+  "takeoverBusyConfirm": "Stop anyway",
+  "chatQueued": "waiting",
+  "chatSendNow": "Send now",
+  "chatSendNowTitle": "Interrupt the running turn to send now?",
+  "chatSendNowBody": "Claude stops the current turn and runs this waiting message right away.",
+  "chatSendNowFailed": "Could not interrupt",
+  "chatSending": "sending",
+  "chatSendFailed": "Not sent",
+  "chatUpdating": "Updating",
+  "pictureFailed": "Could not load the picture",
+  "pictureClose": "Close picture",
+  "pictureOpen": "Open picture",
+  "allProjects": "All projects",
+  "archive": "Archive",
+  "archivedToast": "Archived {name}",
+  "@archivedToast": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "undo": "Undo",
+  "sessionsFilteredEmpty": "No sessions in this project.",
+  "chatContext": "Context",
+  "limit5h": "5h",
+  "limitWeek": "Week",
+  "shellHeader": "Shell command",
+  "shellRunsIn": "runs in {folder} · Claude sees the output",
+  "@shellRunsIn": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "shellHint": "Send runs it like ! in the terminal · delete the ! to send a message instead",
+  "shellWillRun": "Will run",
+  "slashHeader": "Commands",
+  "toolStepsCount": "{count} tool steps",
+  "@toolStepsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "toolStepOne": "1 tool step",
+  "compactionTitle": "Conversation compacted",
+  "showOutput": "Show output",
+  "copyCode": "Copy",
+  "copied": "Copied",
+  "takeoverShort": "Take over",
+  "activityIdle": "Idle",
+  "viewOnlyChip": "View only",
+  "newMessagesBelow": "New messages",
+  "attachPhoto": "Attach a photo",
+  "photoCamera": "Take a photo",
+  "photoGallery": "Choose from library",
+  "photoPickFailed": "Could not open the camera or library.",
+  "photoSent": "Photo sent",
+  "photoTitle": "Send a photo",
+  "photoCaptionHint": "Add a caption (optional)",
+  "settingsTitle": "Settings",
+  "settingsTheme": "Appearance",
+  "themeSystem": "System",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "settingsNotifications": "Notifications",
+  "settingsSound": "Notification sounds",
+  "settingsSoundHint": "A soft sound for new messages and sessions that need you while the app is open."
+}

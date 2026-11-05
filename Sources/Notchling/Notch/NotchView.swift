@@ -163,8 +163,8 @@ struct NotchView: View {
 /// middle and fades. Positions are kept relative to the camera, so the black shape growing for a
 /// peek doesn't move it along the bar. It is drawn from frame sequences: the swing frame follows
 /// the swing angle, running, waving and dozing loop on a clock, and the web shot is paced over the
-/// time the strand takes to stick. Neighbouring drawings blend into each other by how far along the
-/// motion is, and a different sequence fades in over the last one.
+/// time the strand takes to stick. Only one drawing shows at a time: two drawn over each other,
+/// even mid-blend, read as a blurred double of the character.
 /// It is drawn by Core Animation layers (see `PetLayer.swift`) on a 60 Hz display link that runs only
 /// while it moves, so a tick moves layers instead of laying out and redrawing views.
 struct PetView: View {
@@ -180,8 +180,6 @@ struct PetView: View {
     static let reach = 22.0, shortest = 14.0, longest = 100.0
     /// How fast a shot strand flies, and how long after letting go it shoots.
     static let shotSpeed = 420.0, shotDelay = 0.07
-    /// How long one pose takes to fade into the next.
-    static let fadeTime = 0.12
     static let silk = Color(white: 0.93)
 
     static let flightPoses = ["fly-superhero", "fly-flip", "fly-star"]
@@ -382,10 +380,8 @@ struct PetView: View {
         /// The sequence playing, when it started, and the frame showing, so loops start at frame 1.
         var sequence = ""
         var sequenceStart = 0.0
-        /// The layers of the sequence playing now, and of the one fading out under it.
+        /// The drawing of the sequence playing now.
         var layers: [Layer] = []
-        var outgoing: [Layer] = []
-        var fadeIn = 1.0
         /// How long the shot in flight is expected to take, which paces the shoot frames.
         var shotTime = 0.3
 
@@ -468,9 +464,9 @@ struct PetView: View {
         return t * t * (3 - 2 * t)
     }
 
-    /// The swing drawings for how far out it is, measured in the direction it's heading: -0.8 (legs
-    /// tucked back) to +0.6 (kicked forward) maps onto the arc, and the two drawings either side of
-    /// that spot in `swingPositions` blend by how close it is to each. It lets go at 0.45–0.8
+    /// The swing drawing for how far out it is, measured in the direction it's heading: -0.8 (legs
+    /// tucked back) to +0.6 (kicked forward) maps onto the arc, and the drawing nearest that spot in
+    /// `swingPositions` shows. It lets go at 0.45–0.8
     /// forward, so the front end is short of that, or the full kick would never show. The pendulum
     /// already lingers at the ends and rushes through the bottom, so the drawings bunch where they
     /// should.
@@ -485,18 +481,13 @@ struct PetView: View {
         return ("swing", Self.between("swing-\(lower + 1)", "swing-\(upper + 1)", mix))
     }
 
-    /// One drawing turning into the next, `mix` of the way there. The new one comes up over the
-    /// first half and the old one goes over the second, so one of them is always fully opaque (the
-    /// body never turns see-through) and the parts of the old drawing that stick out fade away
-    /// instead of vanishing at the next pair.
+    /// Whichever of two neighbouring drawings is nearer, `mix` of the way from one to the other.
+    /// They cut rather than blend, since two half-opaque drawings overlap as a blurred double.
     static func between(_ from: String, _ to: String, _ mix: Double) -> [Layer] {
-        let mix = min(max(mix, 0), 1)
-        if from == to || mix < 0.01 { return [Layer(name: from, opacity: 1)] }
-        if mix > 0.99 { return [Layer(name: to, opacity: 1)] }
-        return [Layer(name: from, opacity: min(1, 2 * (1 - mix))), Layer(name: to, opacity: min(1, 2 * mix))]
+        [Layer(name: mix < 0.5 ? from : to, opacity: 1)]
     }
 
-    /// A looping sequence at `rate` drawings a second, blending each into the next.
+    /// A looping sequence at `rate` drawings a second.
     static func loop(_ frames: [String], rate: Double, time: Double) -> [Layer] {
         let place = time * rate
         let index = Int(place) % frames.count
@@ -528,7 +519,9 @@ struct PetView: View {
                 let index = min(Int(place), 8)
                 return ("shoot", Self.between("shoot-\(index + 1)", "shoot-\(index + 2)", place - Double(index)))
             }
-            return ("flight", [Layer(name: s.flightPose, opacity: 1)])
+            // Before the shot leaves (0.07 s) it already shows the shot's first drawing: a flight pose
+            // there flashed for a few frames and read as a jerk.
+            return ("flight", [Layer(name: "shoot-1", opacity: 1)])
         }
         if s.reaching > 0 { return ("reach", [Layer(name: "shoot-11", opacity: 1)]) }
         if s.restLeft > 0 {
@@ -544,25 +537,16 @@ struct PetView: View {
         return swingFrame(angle)
     }
 
-    /// Within a sequence the drawings blend straight into each other; when a different sequence
-    /// starts, it fades in over the last look of the old one.
+    /// A different sequence cuts straight in; fading it over the old one showed two poses at once.
     private func show(_ s: Swing, _ wanted: (sequence: String, layers: [Layer]), at t: Double, by dt: Double) {
         if wanted.sequence != s.sequence {
-            // What is on screen now, so a change mid-fade doesn't drop the half-faded drawing.
-            s.outgoing = shownLayers(s)
-            s.fadeIn = s.layers.isEmpty ? 1 : 0
             s.sequence = wanted.sequence
             s.sequenceStart = t
         }
-        s.fadeIn = min(1, s.fadeIn + dt / Self.fadeTime)
         s.layers = wanted.layers
     }
 
-    /// What to draw: the incoming sequence over the outgoing one while it fades in.
-    private func shownLayers(_ s: Swing) -> [Layer] {
-        guard s.fadeIn < 1 else { return s.layers }
-        return s.outgoing + s.layers.map { Layer(name: $0.name, opacity: $0.opacity * s.fadeIn) }
-    }
+    private func shownLayers(_ s: Swing) -> [Layer] { s.layers }
 
     /// Rolls the look of the next strand. Far from where it's heading it takes long, high swings
     /// to cover ground; near it, short ones to land precisely, and sometimes a rest.

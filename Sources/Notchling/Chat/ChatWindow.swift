@@ -90,7 +90,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         // arrow keys work at once. Never the search field.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self else { return }
-            if self.model.selected?.canReply == true { self.model.focusRequest += 1 } else { self.model.sidebarFocusRequest += 1 }
+            if self.model.selected?.canType == true { self.model.focusRequest += 1 } else { self.model.sidebarFocusRequest += 1 }
         }
     }
 
@@ -1101,11 +1101,34 @@ final class ChatModel: ObservableObject {
             sendCodex(agent, sessionID: session, text: text)
             return
         }
-        guard let agent = selected, case .job(let jobID) = agent.target,
+        guard let agent = selected, agent.canType,
               notch.question(agent.id) == nil, notch.permission(agent.id) == nil else { return }
         let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty, text != "!" else { return }
         let id = agent.id
+        // A terminal session the session host owns: typed into its pty, one reply at a time.
+        guard case .job(let jobID) = agent.target else {
+            guard pending[id]?.sending != true else { return }
+            if preset == nil { drafts[id] = "" }
+            errors[id] = nil
+            pending[id] = Pending(text: text, at: Date(), sending: true)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                var failure: Error?
+                do { try ReplySender.send(text, to: agent) } catch { failure = error }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let failure {
+                        self.pending[id] = nil
+                        self.errors[id] = failure.localizedDescription
+                        if preset == nil, (self.drafts[id] ?? "").isEmpty { self.drafts[id] = text }
+                    } else {
+                        self.pending[id]?.sending = false
+                        self.refresh()
+                    }
+                }
+            }
+            return
+        }
         // A bare /model wants a picker, which a background session can't show: show ours.
         if text == "/model" {
             if preset == nil { drafts[id] = "" }
@@ -1254,7 +1277,7 @@ final class ChatModel: ObservableObject {
             stopTurn()
             return true
         }
-        guard composerFocused, let agent = selected, agent.canReply else { return false }
+        guard composerFocused, let agent = selected, agent.canType else { return false }
         let list = completions(for: agent)
         let pick = list.isEmpty ? nil : list[min(completionIndex, list.count - 1)]
         switch keyCode {
@@ -1356,6 +1379,7 @@ private struct SessionSidebar: View {
     @ObservedObject var model: ChatModel
     @ObservedObject var notch: NotchModel
     @FocusState private var listFocused: Bool
+    @State private var hoveredRow: String?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -1397,26 +1421,37 @@ private struct SessionSidebar: View {
                                 .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
                                 .part("Group Heading", .trailing)
                             ForEach(agents, id: \.id) { agent in
+                                let selected = model.selection == agent.id
+                                let showsMenu = hoveredRow == agent.id || selected
                                 Button { model.selection = agent.id; listFocused = true } label: {
                                     SessionRowLabel(agent: agent, line: statusLine(agent),
-                                                    account: model.account(for: agent))
+                                                    account: model.account(for: agent),
+                                                    showsMenu: showsMenu)
                                 }
-                                .buttonStyle(KitSessionRowStyle(selected: model.selection == agent.id, focused: listFocused))
-                                .accessibilityAddTraits(model.selection == agent.id ? .isSelected : [])
+                                .buttonStyle(KitSessionRowStyle(selected: selected, focused: listFocused))
+                                .accessibilityAddTraits(selected ? .isSelected : [])
                                 .part("Session Row", .trailing)
+                                .onHover { inside in
+                                    if inside { hoveredRow = agent.id } else if hoveredRow == agent.id { hoveredRow = nil }
+                                }
+                                .overlay(alignment: .trailing) {
+                                    if showsMenu {
+                                        Menu { rowActions(agent) } label: {
+                                            KitIconView(icon: .more, size: 13).foregroundColor(KitInk.textMuted)
+                                        }
+                                        .menuStyle(.borderlessButton)
+                                        .menuIndicator(.hidden)
+                                        .fixedSize()
+                                        .padding(.trailing, 10)
+                                        .help("Session Actions")
+                                        .accessibilityLabel("Session Actions")
+                                        .pointerCursor()
+                                        .part("Session Menu", .trailing)
+                                    }
+                                }
                                 // The notch's actions: Hide drops it from the lists until it changes state;
                                 // Remove stops a background session and deletes it (`claude rm`), after asking.
-                                .contextMenu {
-                                    Button("Hide") { notch.onHide?(agent) }
-                                    if case .job = agent.target {
-                                        Divider()
-                                        Button("Remove Background Session…") { notch.onRemove?(agent) }
-                                    }
-                                    if case .codex = agent.target {
-                                        Divider()
-                                        Button("Delete Codex Session…") { model.removeCodex(agent) }
-                                    }
-                                }
+                                .contextMenu { rowActions(agent) }
                             }
                         }
                     }
@@ -1444,6 +1479,23 @@ private struct SessionSidebar: View {
         .onChange(of: model.sidebarFocusRequest) { _ in listFocused = true }
     }
 
+    /// One list for the right-click menu and the ⋯ menu, so they never differ.
+    @ViewBuilder private func rowActions(_ agent: Agent) -> some View {
+        if ChatTakeover.offersTakeover(agent) {
+            Button("Take Over…") { ChatTakeover.run(agent) { model.selection = $0 } }
+            Divider()
+        }
+        Button("Hide") { notch.onHide?(agent) }
+        if case .job = agent.target {
+            Divider()
+            Button("Remove Background Session…") { notch.onRemove?(agent) }
+        }
+        if case .codex = agent.target {
+            Divider()
+            Button("Delete Codex Session…") { model.removeCodex(agent) }
+        }
+    }
+
     /// What the row says under the name: what it's doing, or what it waits for.
     private func statusLine(_ agent: Agent) -> String {
         switch agent.group {
@@ -1458,6 +1510,8 @@ private struct SessionRowLabel: View {
     let agent: Agent
     let line: String
     var account: ChatModel.SessionAccount?
+    /// The ⋯ menu sits where the age is, so the age hides but keeps its space and the row doesn't jump.
+    var showsMenu = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1477,6 +1531,7 @@ private struct SessionRowLabel: View {
             }
             Spacer(minLength: 4)
             Text(ChatFormat.age(agent.since)).kitType(.meta).foregroundColor(KitInk.textFaint)
+                .opacity(showsMenu ? 0 : 1)
         }
         .help("\(agent.label) · \(agent.cwd)")
         .accessibilityElement(children: .combine)
@@ -1531,7 +1586,7 @@ private struct SessionDetail: View {
                 // Files and images dropped anywhere on the conversation go into the reply as paths, as in
                 // Claude Code's terminal; Claude reads them from there.
                 .onDrop(of: ChatModel.dropTypes, isTargeted: $dropping) { providers in
-                    agent.canReply && model.receiveDrop(providers, for: agent.id)
+                    agent.canType && model.receiveDrop(providers, for: agent.id)
                 }
                 if let page = model.page {
                     PagePanel(model: model, page: page, maxWidth: max(320, geo.size.width - 380)).part("Page Panel", .topTrailing)
@@ -1605,6 +1660,7 @@ private struct SessionDetail: View {
             .buttonStyle(.kit(model.showInspector ? .secondary : .ghost))
             .help(model.showInspector ? "Hide the session details" : "Show the session details: branch, model, tokens, tasks, files changed")
             .part("Details Button", .bottomTrailing)
+            PhoneButton(bridge: PhoneService.shared.bridge)
         }
         .padding(.horizontal, 16)
         .padding(.top, 14).padding(.bottom, 12)
@@ -1630,6 +1686,8 @@ private struct SessionDetail: View {
                     Notice(text: "This background job runs a command, not a conversation, so it can't take replies.")
                         .part("Read-Only Notice", .trailing)
                 case .job, .codex:
+                    Composer(model: model, agent: agent, dropping: dropping)
+                case .process where agent.repliesViaHost:
                     Composer(model: model, agent: agent, dropping: dropping)
                 case .process:
                     Notice(text: agent.host == "claude -p"
@@ -2478,12 +2536,13 @@ private struct ChatQuestionCard: View {
     let agent: Agent
     let question: PendingQuestion
     @State private var typed = ""
+    @State private var picked: Set<Int> = []
     @FocusState private var typing: Bool
 
     var body: some View {
         let index = min(notch.choices.count, max(question.items.count - 1, 0))
         let item = question.items.isEmpty ? nil : question.items[index]
-        let canAnswer = notch.canAnswer(agent, question)
+        let canAnswer = notch.canAnswer(agent, question, multiSelect: true)
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 KitClaudeMark(size: 20)
@@ -2500,7 +2559,33 @@ private struct ChatQuestionCard: View {
             }
             if let item {
                 Text(item.question).kitType(.heading).foregroundColor(KitInk.text).textSelection(.enabled)
-                if canAnswer {
+                if canAnswer, item.multiSelect {
+                    Text("Select all that apply").kitType(.meta).foregroundColor(KitInk.textMuted)
+                    ForEach(Array(item.options.enumerated()), id: \.offset) { i, option in
+                        Button {
+                            if picked.contains(i + 1) { picked.remove(i + 1) } else { picked.insert(i + 1) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option).kitType(.heading).foregroundColor(KitInk.text)
+                                if i < item.details.count, !item.details[i].isEmpty {
+                                    Text(item.details[i]).kitType(.meta).foregroundColor(KitInk.textMuted)
+                                }
+                            }
+                        }
+                        .buttonStyle(KitOptionStyle(number: i + 1, selected: picked.contains(i + 1)))
+                        .disabled(notch.sending)
+                    }
+                    HStack {
+                        Spacer()
+                        Button(index == question.items.count - 1 ? "Submit" : "Next") {
+                            let numbers = picked.sorted()
+                            picked = []
+                            notch.choose(.options(numbers), for: agent.id)
+                        }
+                        .buttonStyle(.kit(.primary))
+                        .disabled(picked.isEmpty || notch.sending)
+                    }
+                } else if canAnswer {
                     ForEach(Array(item.options.enumerated()), id: \.offset) { i, option in
                         Button { notch.choose(.option(i + 1), for: agent.id) } label: {
                             VStack(alignment: .leading, spacing: 2) {
@@ -2524,7 +2609,7 @@ private struct ChatQuestionCard: View {
                         }
                 } else {
                     HStack {
-                        Text("This one takes more than one choice; answer it in the terminal.")
+                        Text("Answer this one in the session's terminal.")
                             .kitType(.meta).foregroundColor(KitInk.textMuted)
                         Spacer()
                         Button("Answer in Terminal") { notch.answerInTerminal(agent.id) }.buttonStyle(.kit(.secondary))
@@ -2542,6 +2627,9 @@ private struct ChatQuestionCard: View {
         .overlay(RoundedRectangle(cornerRadius: KitMetric.radiusComposer, style: .continuous)
             .strokeBorder(KitInk.accent.opacity(0.45), lineWidth: 1))
         .shadow(color: KitInk.shadow, radius: 14, y: 6)
+        .onChange(of: index) { _ in picked = [] }
+        // SwiftUI can keep this card's state when another session's question takes its place.
+        .onChange(of: question.toolUseID) { _ in picked = [] }
     }
 }
 
