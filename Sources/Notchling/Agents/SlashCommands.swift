@@ -80,7 +80,29 @@ enum SlashCommands {
         ("login", "Sign in"),
         ("logout", "Sign out"),
         ("help", "Show help"),
-    ].map { SlashCommand(name: $0.0, description: $0.1, argumentHint: nil) }
+    ].map { SlashCommand(name: $0.0, description: menuCommands.contains($0.0) ? appendTerminalNote($0.1) : $0.1, argumentHint: nil) }
+
+    /// Commands that open a menu in the session's terminal and write nothing to the transcript, so a
+    /// hidden attach shows nothing (`/plugin` logged "(no content)"). They go to a real Terminal instead.
+    static let menuCommands: Set<String> = [
+        "plugin", "mcp", "agents", "config", "hooks", "permissions", "resume", "rewind", "memory",
+        "output-style", "add-dir", "status", "help", "doctor", "export", "login", "logout",
+    ]
+    /// These take a value; only the bare command opens a menu. (Chat answers a bare /model itself.)
+    private static let menuWhenBare: Set<String> = ["model", "effort"]
+
+    private static func appendTerminalNote(_ description: String) -> String {
+        description.isEmpty ? "Opens in Terminal" : description + " · Opens in Terminal"
+    }
+
+    /// True when the text is a command that only works in a terminal, like "/plugin" or a bare "/effort".
+    static func opensMenu(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return false }
+        let parts = trimmed.dropFirst().split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        guard let name = parts.first.map({ $0.lowercased() }) else { return false }
+        return menuCommands.contains(name) || (menuWhenBare.contains(name) && parts.count == 1)
+    }
 
     static func all(for cwd: String) -> [SlashCommand] {
         lock.lock()

@@ -692,6 +692,17 @@ final class ChatModel: ObservableObject {
         }
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
+        if SlashCommands.opensMenu(text) {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do { try AgentActions.openWithCommand(text, job: jobID) } catch {
+                    DispatchQueue.main.async {
+                        self?.errors[id] = error.localizedDescription
+                        if preset == nil, (self?.drafts[id] ?? "").isEmpty { self?.drafts[id] = text }
+                    }
+                }
+            }
+            return
+        }
         if text.hasPrefix("/model "), let picked = text.split(separator: " ").last.map(String.init), picked.hasPrefix("claude-") {
             modelHint[id] = (picked, Date())
             conversation.facts.model = picked

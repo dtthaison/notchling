@@ -360,6 +360,14 @@ final class NotchModel: ObservableObject {
         let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if preset == nil { draft = "" }
+        if SlashCommands.opensMenu(text) {
+            run(id: id, restoreDraft: preset == nil ? text : nil, onSuccess: { [weak self] in
+                self?.go(.collapsed)
+            }) {
+                try AgentActions.openWithCommand(text, job: jobID)
+            }
+            return
+        }
         run(id: id, restoreDraft: preset == nil ? text : nil, onSuccess: { [weak self] in
             // Sent from a peek: it's done its job.
             if self?.state == .peek(id) { self?.go(.collapsed) }

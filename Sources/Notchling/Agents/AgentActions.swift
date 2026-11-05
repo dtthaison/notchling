@@ -14,6 +14,13 @@ enum AgentActions {
         }
     }
 
+    /// For a command that opens a menu (`/plugin`): puts it in the session's input box, then opens a
+    /// Terminal attached to the session, where the menu can show. Blocking; call off the main thread.
+    static func openWithCommand(_ text: String, job jobID: String) throws {
+        try ReplySender.prefill(text, toJob: jobID)
+        DispatchQueue.main.async { open(.job(jobID)) }
+    }
+
     /// Brings forward the exact place the session runs: its Terminal or iTerm tab, or the editor
     /// window that has its folder open. Falls back to just activating the app.
     private static func jump(to pid: pid_t, cwd: String) -> Bool {
