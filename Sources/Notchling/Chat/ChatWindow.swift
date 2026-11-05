@@ -26,11 +26,6 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         set { model.onOpenArtifact = newValue }
     }
 
-    var onAddAccount: (() -> Void)? {
-        get { model.onAddAccount }
-        set { model.onAddAccount = newValue }
-    }
-
     /// Chat was open when Notchling last quit (an install relaunches it), and the session it showed.
     private static let openKey = "chatOpen", selectionKey = "chatSelection"
 
@@ -158,8 +153,21 @@ final class ChatModel: ObservableObject {
     }
     /// Opens a saved Artifact in the Artifacts window; false when there's no local copy.
     var onOpenArtifact: ((String) -> Bool)?
-    /// Starts signing in to another Claude account (the Accounts window's sign-in, in the browser).
-    var onAddAccount: (() -> Void)?
+    /// The Add Account sheet's sign-in while it's open: the browser OAuth, saved next to the other
+    /// accounts without touching the login sessions use.
+    @Published var signIn: SignInModel? {
+        // However the sheet closes (Esc, Done), stop listening for the browser.
+        didSet { if oldValue !== signIn { oldValue?.cancel() } }
+    }
+
+    func addAccount() {
+        guard let accounts else { return }
+        let signIn = SignInModel(store: accounts)
+        self.signIn = signIn
+        signIn.start()
+    }
+
+    func closeAddAccount() { signIn = nil }
     /// The Artifact open in the panel beside the chat.
     @Published var page: PageLibrary.Entry? {
         didSet { if page != nil { file = nil } }
@@ -961,6 +969,9 @@ struct ChatView: View {
         .sheet(item: $model.terminal) { session in
             TerminalSheet(session: session) { model.closeTerminal() }
         }
+        .background(EmptyView().sheet(item: $model.signIn, onDismiss: { model.closeAddAccount() }) { signIn in
+            AddAccountSheet(signIn: signIn) { model.closeAddAccount() }
+        })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
         .environment(\.runCommand, { [weak model] script, folder in model?.runCommand(script, in: folder) })
@@ -1011,6 +1022,10 @@ enum NewSessionMenu {
             })
             item.submenu = projects
             menu.addItem(item)
+        }
+        if model.accounts != nil {
+            menu.addItem(.separator())
+            menu.addItem(ActionMenuItem("Add Account…") { [model] in model.addAccount() })
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
@@ -2466,9 +2481,9 @@ private struct AccountMenu: View {
                 menu.addItem(item)
             }
         }
-        if let add = model.onAddAccount {
+        if model.accounts != nil {
             menu.addItem(.separator())
-            menu.addItem(ActionMenuItem("Add Account…", run: add))
+            menu.addItem(ActionMenuItem("Add Account…") { [model] in model.addAccount() })
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
