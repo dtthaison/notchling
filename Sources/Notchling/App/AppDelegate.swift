@@ -9,11 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let accounts = AccountStore()
     private let antigravity = AntigravityStore()
     private let claudeDesktop = ClaudeDesktopStore()
+    private let codex = CodexStore()
     private let cost = CostTracker()
     private let settings = SettingsModel()
     private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
     private lazy var lanesMenu = LanesMenu(accounts: accounts)
-    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, cost: cost, settings: settings)
+    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, codex: codex, cost: cost, settings: settings)
     private lazy var pagesWindow = PagesWindowController(accounts: accounts)
     private lazy var search: SearchPanelController = {
         let search = SearchPanelController()
@@ -86,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         antigravity.sync()
         claudeDesktop.changed = { [weak self] in self?.updateButton() }
         claudeDesktop.sync()
+        codex.changed = { [weak self] in self?.updateButton() }
+        codex.sync()
         cost.changed = { [weak self] in self?.updateUsageViews() }
         accounts.sync()
         cost.refresh()
@@ -93,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.accounts.sync()
             self?.antigravity.sync()
             self?.claudeDesktop.sync()
+            self?.codex.sync()
             self?.cost.refresh()
         }
         // An install relaunches Notchling: bring Chat back if it was open, once sessions are listed.
@@ -142,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "limitMode", "limitSwitchAt"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -356,6 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(limitItem())
 
         addDesktopItems(to: menu)
+        addCodexItems(to: menu)
         addAntigravityItems(to: menu)
 
         menu.addItem(.separator())
@@ -434,6 +439,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func cancelDesktopAdd() { claudeDesktop.cancelAdd() }
 
+    /// The ChatGPT account the Codex CLI is on, and the others to switch to.
+    private func addCodexItems(to menu: NSMenu) {
+        guard codex.isAvailable else { return }
+        menu.addItem(.separator())
+        menu.addItem(header("Codex"))
+        if let account = codex.active {
+            let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? "ChatGPT", usage: codex.usage[account.id],
+                                          placeholder: "Reading limits…")
+            row.onClick = { [weak self] in self?.manageCodex() }
+            let item = action(account.email, #selector(manageCodex))
+            item.view = row
+            menu.addItem(item)
+        } else {
+            menu.addItem(disabled("Not signed in to Codex"))
+        }
+        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        for account in codex.accounts {
+            let item = action(account.email, #selector(switchCodexItem(_:)))
+            item.representedObject = account.id
+            item.state = account.id == codex.activeID ? .on : .off
+            if let plan = account.plan { item.attributedTitle = accountTitle(account.email, detail: [plan]) }
+            submenu.addItem(item)
+        }
+        if !codex.accounts.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(action("Add Account…", #selector(manageCodex)))
+        switchItem.submenu = submenu
+        menu.addItem(switchItem)
+    }
+
+    @objc private func manageCodex() {
+        accountsWindow.show(.accounts, provider: .codex)
+    }
+
+    @objc private func switchCodexItem(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, id != codex.activeID else { return }
+        if let warning = CodexStore.switchWarning(CodexStore.runningWork()) {
+            let alert = NSAlert()
+            alert.messageText = "Switch Codex Account?"
+            alert.informativeText = warning
+            alert.addButton(withTitle: "Switch")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        codex.switchTo(id) { error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Couldn't switch Codex accounts"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
     /// The Google account Antigravity is on, and the others to switch to.
     private func addAntigravityItems(to menu: NSMenu) {
         guard antigravity.isAvailable else { return }
@@ -446,7 +506,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if let account = antigravity.active {
-            let row = AntigravityRowView(account: account, usage: antigravity.usage[account.id])
+            let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? "Google", usage: antigravity.usage[account.id],
+                                          placeholder: "Open Antigravity to read its limits.")
             row.onClick = { [weak self] in self?.manageAntigravity() }
             let item = action(account.email, #selector(manageAntigravity))
             item.view = row

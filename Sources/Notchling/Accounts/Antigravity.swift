@@ -11,7 +11,7 @@ struct AntigravityAccount: Codable, Equatable, Identifiable {
 
 /// Antigravity's usage limits, as its own View Usage panel shows them: a few model groups, each with
 /// a weekly and a five-hour bar. Percent is how much is used, so it reads like the Claude bars.
-struct AntigravityUsage: Equatable {
+struct GroupedUsage: Equatable {
     struct Group: Equatable {
         var name: String
         var bars: [(label: String, window: UsageWindow)]
@@ -22,7 +22,7 @@ struct AntigravityUsage: Equatable {
     var groups: [Group]
     var fetched = Date()
 
-    static func == (a: AntigravityUsage, b: AntigravityUsage) -> Bool { a.groups == b.groups }
+    static func == (a: GroupedUsage, b: GroupedUsage) -> Bool { a.groups == b.groups }
 }
 
 /// Keeps a copy of every Antigravity login it has seen and swaps them in on request.
@@ -36,7 +36,7 @@ final class AntigravityStore: ObservableObject {
     @Published private(set) var activeID: String?
     /// Limits for the account in use, read from Antigravity's local server while it runs. Kept per
     /// account so closing Antigravity doesn't blank the last numbers.
-    @Published private(set) var usage: [String: AntigravityUsage] = [:]
+    @Published private(set) var usage: [String: GroupedUsage] = [:]
     /// Switching or adding is under way; buttons wait for it.
     @Published private(set) var busy = false
     /// Antigravity was restarted at its sign-in screen; the next login it saves gets added.
@@ -192,7 +192,7 @@ final class AntigravityStore: ObservableObject {
     private struct State {
         var accounts: [AntigravityAccount]
         var activeID: String?
-        var usage: [String: AntigravityUsage]
+        var usage: [String: GroupedUsage]
     }
 
     /// Runs on the queue: saves the login in the file, if any, and says whose it is.
@@ -332,7 +332,7 @@ enum AntigravityQuota {
     /// The account's plan and limits, read together from the local server.
     struct Snapshot {
         var plan: String?
-        var usage: AntigravityUsage?
+        var usage: GroupedUsage?
     }
 
     /// `expectedEmail` guards against reading while Antigravity is still loading another account:
@@ -416,11 +416,11 @@ enum AntigravityQuota {
         return (email, plan)
     }
 
-    private static func parse(_ data: Data) -> AntigravityUsage? {
+    private static func parse(_ data: Data) -> GroupedUsage? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let response = root["response"] as? [String: Any],
               let groups = response["groups"] as? [[String: Any]] else { return nil }
-        let out = groups.compactMap { group -> AntigravityUsage.Group? in
+        let out = groups.compactMap { group -> GroupedUsage.Group? in
             guard let name = group["displayName"] as? String,
                   let buckets = group["buckets"] as? [[String: Any]] else { return nil }
             let bars: [(String, UsageWindow)] = buckets.map { bucket in
@@ -429,9 +429,9 @@ enum AntigravityQuota {
                 let label = (bucket["window"] as? String) == "weekly" ? "Week" : "5h"
                 return (label, UsageWindow(percent: percent, resetsAt: date(bucket["resetTime"] as? String)))
             }
-            return AntigravityUsage.Group(name: name, bars: bars)
+            return GroupedUsage.Group(name: name, bars: bars)
         }
-        return out.isEmpty ? nil : AntigravityUsage(groups: out)
+        return out.isEmpty ? nil : GroupedUsage(groups: out)
     }
 
     private static func date(_ string: String?) -> Date? {

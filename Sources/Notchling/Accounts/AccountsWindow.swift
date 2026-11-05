@@ -8,16 +8,19 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
     private let accounts: AccountStore
     private let antigravity: AntigravityStore
     private let desktop: ClaudeDesktopStore
+    private let codex: CodexStore
     private let cost: CostTracker
     private let settings: SettingsModel
     private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, antigravity: AntigravityStore, desktop: ClaudeDesktopStore, cost: CostTracker, settings: SettingsModel) {
+    init(accounts: AccountStore, antigravity: AntigravityStore, desktop: ClaudeDesktopStore, codex: CodexStore,
+         cost: CostTracker, settings: SettingsModel) {
         self.accounts = accounts
         self.antigravity = antigravity
         self.desktop = desktop
+        self.codex = codex
         self.cost = cost
         self.settings = settings
         signIn = SignInModel(store: accounts)
@@ -27,7 +30,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         tab.page = page
         if let provider { tab.provider = provider }
         if window == nil {
-            let view = AccountsView(accounts: accounts, antigravity: antigravity, desktop: desktop, cost: cost,
+            let view = AccountsView(accounts: accounts, antigravity: antigravity, desktop: desktop, codex: codex, cost: cost,
                                     settings: settings, signIn: signIn, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Notchling"
@@ -40,6 +43,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         accounts.sync()
         antigravity.sync()
         desktop.sync()
+        codex.sync()
         cost.refresh()
         settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
@@ -101,7 +105,7 @@ final class SettingsModel: ObservableObject {
 }
 
 enum Provider: String, CaseIterable {
-    case claudeCode = "Claude Code", claudeDesktop = "Claude Desktop", antigravity = "Antigravity"
+    case claudeCode = "Claude Code", claudeDesktop = "Claude Desktop", codex = "Codex", antigravity = "Antigravity"
 }
 
 final class TabModel: ObservableObject {
@@ -170,6 +174,7 @@ struct AccountsView: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var antigravity: AntigravityStore
     @ObservedObject var desktop: ClaudeDesktopStore
+    @ObservedObject var codex: CodexStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
     @ObservedObject var signIn: SignInModel
@@ -204,11 +209,12 @@ struct AccountsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 340)
+                .frame(width: 420)
                 .padding(.top, 12)
                 switch tab.provider {
                 case .claudeCode: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
                 case .claudeDesktop: DesktopPage(accounts: accounts, desktop: desktop)
+                case .codex: CodexPage(store: codex)
                 case .antigravity: AntigravityPage(store: antigravity)
                 }
             case .cost: CostPage(cost: cost, accounts: accounts)
@@ -222,6 +228,7 @@ struct AccountsView: View {
     private func refresh() {
         accounts.sync(force: true)
         antigravity.sync()
+        codex.sync(force: true)
         cost.refresh()
         settings.reload?()
     }
@@ -900,7 +907,7 @@ private struct AntigravityPage: View {
 
 private struct AntigravityCard: View {
     let account: AntigravityAccount
-    let usage: AntigravityUsage?
+    let usage: GroupedUsage?
     let isActive: Bool
     let busy: Bool
     let onSwitch: () -> Void
@@ -910,22 +917,137 @@ private struct AntigravityCard: View {
         AccountRow(email: account.email, subtitle: account.plan ?? "Google Account", isActive: isActive,
                    busy: busy, onSwitch: onSwitch, menuItems: [("Remove…", onRemove)]) {
             if let usage {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(usage.groups.indices, id: \.self) { i in
-                        let group = usage.groups[i]
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.name).font(.caption.weight(.medium)).foregroundColor(.secondary)
-                            ForEach(group.bars.indices, id: \.self) { j in
-                                let short = group.bars[j].label == "5h"
-                                LimitRow(label: short ? "5 hours" : group.bars[j].label,
-                                         window: group.bars[j].window, short: short)
-                            }
-                        }
-                    }
-                }
+                GroupedLimits(usage: usage)
             } else if isActive {
                 Text("Open Antigravity to read its limits.").font(.caption).foregroundColor(.secondary)
             }
         }
+    }
+}
+
+/// Each group's name over its bars (Antigravity's model groups, Codex's limits).
+private struct GroupedLimits: View {
+    let usage: GroupedUsage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(usage.groups.indices, id: \.self) { i in
+                let group = usage.groups[i]
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(group.name).font(.caption.weight(.medium)).foregroundColor(.secondary)
+                    ForEach(group.bars.indices, id: \.self) { j in
+                        let short = group.bars[j].label == "5h"
+                        LimitRow(label: short ? "5 hours" : group.bars[j].label,
+                                 window: group.bars[j].window, short: short)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Codex
+
+/// The Codex CLI's saved ChatGPT accounts. Adding signs in through `codex login` in the browser and
+/// leaves the account in use alone; switching asks first when it would interrupt something.
+private struct CodexPage: View {
+    @ObservedObject var store: CodexStore
+    @State private var removing: CodexAccount?
+    @State private var confirming: Confirm?
+    @State private var error: String?
+
+    struct Confirm: Identifiable {
+        let account: CodexAccount
+        let message: String
+        var id: String { account.id }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    if store.accounts.isEmpty {
+                        Text("Sign in to Codex and Notchling saves the account here.")
+                            .foregroundColor(.secondary)
+                            .padding(.top, 40)
+                    }
+                    ForEach(store.accounts) { account in
+                        let isActive = account.id == store.activeID
+                        AccountRow(email: account.email, subtitle: account.plan ?? "ChatGPT", isActive: isActive,
+                                   busy: store.busy || store.adding, onSwitch: { ask(account) },
+                                   menuItems: [("Remove…", { removing = account })]) {
+                            if let usage = store.usage[account.id] {
+                                GroupedLimits(usage: usage)
+                            } else if !isActive {
+                                Text("Limits show again once you switch to it.").font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(16)
+            }
+            Divider()
+            addPanel.padding(16)
+        }
+        .alert(item: $confirming) { pending in
+            Alert(title: Text("Switch Codex to \(pending.account.email)?"),
+                  message: Text(pending.message),
+                  primaryButton: .default(Text("Switch")) { run(pending.account) },
+                  secondaryButton: .cancel())
+        }
+        .background(EmptyView().alert(item: $removing) { account in
+            Alert(title: Text("Remove \(account.email)?"),
+                  message: Text(account.id == store.activeID
+                                ? "Notchling forgets its saved login. Codex stays signed in to it."
+                                : "Notchling forgets its saved login. Add it again to use it."),
+                  primaryButton: .destructive(Text("Remove")) { store.remove(account.id) },
+                  secondaryButton: .cancel())
+        })
+    }
+
+    @ViewBuilder private var addPanel: some View {
+        if store.adding {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign in to the other account in your browser…").font(.callout.weight(.medium))
+                    Text("Codex keeps using the current account.").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if let url = store.signInURL {
+                    Button("Open Page") { NSWorkspace.shared.open(url) }.pointerCursor()
+                }
+                Button("Cancel") { store.cancelAdd() }.pointerCursor()
+            }
+        } else {
+            HStack {
+                Text("Signs in with codex login in your browser. Codex keeps using the current account.")
+                    .font(.callout).foregroundColor(.secondary)
+                Spacer()
+                Button("Add Account") {
+                    error = nil
+                    store.beginAdd { error = $0?.localizedDescription }
+                }
+                .keyboardShortcut(.defaultAction).disabled(store.busy).pointerCursor()
+            }
+        }
+    }
+
+    private func ask(_ account: CodexAccount) {
+        if let warning = CodexStore.switchWarning(CodexStore.runningWork()) {
+            confirming = Confirm(account: account, message: warning)
+        } else {
+            run(account)
+        }
+    }
+
+    private func run(_ account: CodexAccount) {
+        error = nil
+        store.switchTo(account.id) { error = $0?.localizedDescription }
     }
 }

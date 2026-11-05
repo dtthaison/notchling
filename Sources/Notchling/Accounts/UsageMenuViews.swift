@@ -134,17 +134,22 @@ final class AccountRowView: NSView {
     }
 }
 
-/// Antigravity's account in the menu, drawn like the Claude row: email and plan, then each model
-/// group's name followed by its weekly and five-hour bars.
-final class AntigravityRowView: NSView {
-    var account: AntigravityAccount { didSet { needsDisplay = true } }
-    var usage: AntigravityUsage? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+/// Antigravity's or Codex's account in the menu, drawn like the Claude row: email and plan, then
+/// each group's name followed by its bars.
+final class GroupedUsageRowView: NSView {
+    var email: String { didSet { needsDisplay = true } }
+    var plan: String { didSet { needsDisplay = true } }
+    var usage: GroupedUsage? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    /// Shown in place of the bars while there are none.
+    var placeholder: String
     var onClick: (() -> Void)?
 
     static let width: CGFloat = 330
 
-    init(account: AntigravityAccount, usage: AntigravityUsage?) {
-        self.account = account
+    init(email: String, plan: String, usage: GroupedUsage?, placeholder: String) {
+        self.email = email
+        self.plan = plan
+        self.placeholder = placeholder
         self.usage = usage
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 0))
         setFrameSize(NSSize(width: Self.width, height: height))
@@ -181,15 +186,15 @@ final class AntigravityRowView: NSView {
         let right = bounds.width - 14
 
         text("✓", x: 10, y: 5, font: .systemFont(ofSize: 13, weight: .semibold), color: primary)
-        let plan = attributed(account.plan ?? "Google", font: .systemFont(ofSize: 11), color: secondary)
-        plan.draw(at: NSPoint(x: right - plan.size().width, y: 7))
-        let email = attributed(account.email, font: .systemFont(ofSize: 13, weight: .medium), color: primary)
-        email.draw(with: NSRect(x: 26, y: 5, width: right - plan.size().width - 34, height: 18),
-                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        let planText = attributed(plan, font: .systemFont(ofSize: 11), color: secondary)
+        planText.draw(at: NSPoint(x: right - planText.size().width, y: 7))
+        let emailText = attributed(email, font: .systemFont(ofSize: 13, weight: .medium), color: primary)
+        emailText.draw(with: NSRect(x: 26, y: 5, width: right - planText.size().width - 34, height: 18),
+                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
 
         var y: CGFloat = 26
         guard !lines.isEmpty else {
-            text("Open Antigravity to read its limits.", x: 26, y: y, font: .systemFont(ofSize: 11), color: secondary)
+            text(placeholder, x: 26, y: y, font: .systemFont(ofSize: 11), color: secondary)
             return
         }
         let small = NSFont.systemFont(ofSize: 11)
