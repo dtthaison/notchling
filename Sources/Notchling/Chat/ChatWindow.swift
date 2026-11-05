@@ -111,6 +111,9 @@ final class ChatModel: ObservableObject {
         let text: String
         let at: Date
         var sending: Bool
+        /// Sent right after another reply: only the same words count as landed, since the earlier
+        /// reply's line also shows up after this one was sent.
+        var exact = false
 
         /// The transcript already shows this reply: the same words, or any message of yours written
         /// since it was sent (a long paste lands in another shape). Until then it shows as pending.
@@ -120,7 +123,7 @@ final class ChatModel: ObservableObject {
             if conversation.queued.contains(where: { Self.words($0) == want }) { return true }
             return conversation.items.suffix(12).contains { item in
                 guard case .user(let said, _) = item.kind else { return false }
-                guard let date = item.date else { return Self.words(said) == want }
+                guard let date = item.date, !exact else { return Self.words(said) == want }
                 return date >= at.addingTimeInterval(-2) || (Self.words(said) == want && date >= at.addingTimeInterval(-60))
             }
         }
@@ -154,6 +157,9 @@ final class ChatModel: ObservableObject {
     @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
     @Published private(set) var pending: [String: Pending] = [:]
+    /// Replies typed while the one before is still going out, sent in order after it. Before this,
+    /// Return did nothing while a reply was being typed into the session.
+    @Published private(set) var outbox: [String: [String]] = [:]
     private var modelHint: [String: (model: String, at: Date)] = [:]
     @Published var errors: [String: String] = [:]
     @Published var completionIndex = 0
@@ -687,7 +693,7 @@ final class ChatModel: ObservableObject {
     // MARK: Replying
 
     func send(_ preset: String? = nil) {
-        guard let agent = selected, case .job(let jobID) = agent.target, pending[agent.id]?.sending != true,
+        guard let agent = selected, case .job(let jobID) = agent.target,
               notch.question(agent.id) == nil, notch.permission(agent.id) == nil else { return }
         let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty, text != "!" else { return }
@@ -700,30 +706,61 @@ final class ChatModel: ObservableObject {
         }
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
+        // One attach at a time: two would type into the same box. The next waits its turn.
+        if pending[id]?.sending == true {
+            outbox[id, default: []].append(text)
+            return
+        }
         if SlashCommands.opensMenu(text) {
             openTerminal(typing: text)
             return
         }
+        deliver(text, to: id, job: jobID, exact: false)
+    }
+
+    private func deliver(_ text: String, to id: String, job jobID: String, exact: Bool) {
         if text.hasPrefix("/model "), let picked = text.split(separator: " ").last.map(String.init), picked.hasPrefix("claude-") {
             modelHint[id] = (picked, Date())
-            conversation.facts.model = picked
+            if selection == id { conversation.facts.model = picked }
         }
-        pending[id] = Pending(text: text, at: Date(), sending: true)
+        pending[id] = Pending(text: text, at: Date(), sending: true, exact: exact)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: Error?
             do { try ReplySender.send(text, toJob: jobID) } catch { failure = error }
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let failure {
+                    // Nothing typed after it goes out either: all of it comes back to the box, in order.
+                    let unsent = [text] + (self.outbox[id] ?? [])
+                    self.outbox[id] = nil
                     self.modelHint[id] = nil
                     self.pending[id] = nil
                     self.errors[id] = failure.localizedDescription
-                    if preset == nil, (self.drafts[id] ?? "").isEmpty { self.drafts[id] = text }
-                } else {
-                    self.pending[id]?.sending = false
-                    self.refresh()
+                    let draft = self.drafts[id] ?? ""
+                    self.drafts[id] = (unsent + (draft.isEmpty ? [] : [draft])).joined(separator: "\n\n")
+                    // A question or permission Chat can't show is open there: show it where it can be answered.
+                    if case ReplySender.Failure.dialog = failure, self.selection == id, self.terminal == nil {
+                        self.openTerminal(typing: nil)
+                    }
+                    return
                 }
+                self.pending[id]?.sending = false
+                self.refresh()
+                self.sendNext(id, job: jobID)
             }
+        }
+    }
+
+    /// Sends the oldest waiting reply. A menu command opens the terminal sheet instead (if its session
+    /// is still the one shown), and the rest wait until the sheet closes.
+    private func sendNext(_ id: String, job jobID: String) {
+        guard terminal == nil, pending[id]?.sending != true, var waiting = outbox[id], !waiting.isEmpty else { return }
+        let next = waiting.removeFirst()
+        outbox[id] = waiting.isEmpty ? nil : waiting
+        if SlashCommands.opensMenu(next), selection == id {
+            openTerminal(typing: next)
+        } else {
+            deliver(next, to: id, job: jobID, exact: true)
         }
     }
 
@@ -736,9 +773,14 @@ final class ChatModel: ObservableObject {
     }
 
     func closeTerminal() {
+        let jobID = terminal?.jobID
         terminal?.close()
         terminal = nil
         refresh()
+        // Replies typed while the sheet was up go out now.
+        if let jobID, let id = notch.agents.first(where: { if case .job(jobID) = $0.target { return true }; return false })?.id {
+            sendNext(id, job: jobID)
+        }
     }
 
     func isSending(_ id: String) -> Bool { pending[id]?.sending == true }
@@ -1042,6 +1084,7 @@ private struct SessionDetail: View {
                     } else {
                         ConversationView(conversation: model.conversation,
                                          pending: model.pending[agent.id],
+                                         outbox: model.outbox[agent.id] ?? [],
                                          live: agent.group == .working,
                                          expansion: model.expansion,
                                          pageOpen: model.page != nil)
@@ -1156,6 +1199,8 @@ private struct SessionDetail: View {
 private struct ConversationView: View, Equatable {
     let conversation: Conversation
     let pending: ChatModel.Pending?
+    /// Replies waiting for the one before to go out.
+    var outbox: [String] = []
     /// The session is working: its newest tool step stays open and a live row shows what it's doing.
     let live: Bool
     let expansion: ChatExpansion
@@ -1176,7 +1221,7 @@ private struct ConversationView: View, Equatable {
     static let page = 80
 
     static func == (a: Self, b: Self) -> Bool {
-        a.conversation == b.conversation && a.pending == b.pending && a.live == b.live
+        a.conversation == b.conversation && a.pending == b.pending && a.outbox == b.outbox && a.live == b.live
             && a.expansion === b.expansion && a.pageOpen == b.pageOpen
     }
 
@@ -1255,6 +1300,10 @@ private struct ConversationView: View, Equatable {
                                     .part("Sending Bubble", .topTrailing)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
+                            ForEach(Array(outbox.enumerated()), id: \.offset) { _, text in
+                                UserBubble(text: text, images: 0, date: nil, note: "Waiting to send")
+                                    .part("Waiting Bubble", .topTrailing)
+                            }
                             if live && turnOver {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
@@ -1327,6 +1376,7 @@ private struct ConversationView: View, Equatable {
                 if atBottom { jump(proxy) }
             }
             .onChange(of: pending) { _ in jump(proxy) }
+            .onChange(of: outbox.count) { _ in jump(proxy) }
         }
         }
     }
@@ -1732,7 +1782,7 @@ private struct Composer: View {
                     Button { model.send() } label: {
                         ZStack {
                             Circle().fill(empty ? KitInk.raised : shell ? KitInk.shell : KitInk.accent)
-                            if sending {
+                            if sending && empty {
                                 ProgressView().controlSize(.small)
                             } else {
                                 KitIconView(icon: .send, size: 13)
@@ -1742,7 +1792,8 @@ private struct Composer: View {
                         .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.plain)
-                    .disabled(empty || sending)
+                    // Still works while one goes out: the next waits its turn.
+                    .disabled(empty)
                     .help(shell ? "Run the command in the session (Return)" : "Send the reply (Return)")
                     .accessibilityLabel(shell ? "Run" : "Send")
                     .pointerCursor()

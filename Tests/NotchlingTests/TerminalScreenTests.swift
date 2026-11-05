@@ -70,6 +70,14 @@ final class TerminalScreenTests: XCTestCase {
         XCTAssertTrue(s.takeReplies().isEmpty, "an answer here cost Claude Code its colors and landed in its input box")
     }
 
+    /// A reply must not be typed into an open question: it would become the answer.
+    func testSeesAnOpenQuestion() throws {
+        let asking = TerminalScreen(rows: 50, cols: 200)
+        asking.feed(try bytes("question-open"))
+        XCTAssertTrue(ReplySender.dialogOpen(asking), asking.lines.joined(separator: "\n"))
+        XCTAssertFalse(ReplySender.dialogOpen(try screen(after: ["plugin-0-attach"])), "the plain prompt takes replies")
+    }
+
     func testResizeKeepsRowsInPlace() {
         let s = TerminalScreen(rows: 4, cols: 6)
         s.feed(Array("a\r\nb\r\nc\r\nd".utf8))

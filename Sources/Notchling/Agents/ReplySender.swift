@@ -4,15 +4,28 @@ import Foundation
 /// typing the text and Enter, then detaching. The session keeps running after the client exits.
 enum ReplySender {
     enum Failure: Error, LocalizedError {
-        case pty, launch(String), timeout
+        case pty, launch(String), timeout, dialog
 
         var errorDescription: String? {
             switch self {
             case .pty: return "Couldn't open a terminal for the reply."
             case .launch(let why): return "Couldn't run claude attach: \(why)"
             case .timeout: return "The session didn't open in time."
+            case .dialog: return "The session is asking you something. Answer it in the terminal, then send again."
             }
         }
+    }
+
+    /// Words only a question or permission dialog shows, looked for near the bottom of the screen.
+    /// A reply typed into one of those answers it: "create artifact for me see" went in as the answer to
+    /// all three questions of an AskUserQuestion that Chat couldn't show (5 Nov). Checked on 2.1.318.
+    static let dialogMarkers = ["Enter to select", "Esc to cancel", "Chat about this", "Do you want to proceed?",
+                                "Do you want to allow", "Submit answers"]
+
+    static func dialogOpen(_ screen: TerminalScreen) -> Bool {
+        // The last drawn lines: a short session leaves blank rows under its prompt or dialog.
+        let drawn = screen.lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return drawn.suffix(6).contains { line in dialogMarkers.contains { line.contains($0) } }
     }
 
     static let claudePath: String = {
@@ -26,7 +39,7 @@ enum ReplySender {
         let text = ShellCommand.normalize(text)
         // Bracketed paste keeps newlines in the reply from submitting early.
         let flat = text.replacingOccurrences(of: "\r\n", with: "\n")
-        try type([clearInput, "\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID)
+        try type([clearInput, "\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID, refuseDialog: true)
     }
 
     /// Empties the session's input box first. It keeps a draft across attaches, so text left there
@@ -60,7 +73,7 @@ enum ReplySender {
     }
 
     /// Attaches, sends each chunk of keystrokes with a pause between them, then detaches.
-    private static func type(_ chunks: [String], toJob jobID: String) throws {
+    private static func type(_ chunks: [String], toJob jobID: String, refuseDialog: Bool = false) throws {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else {
             throw Failure.pty
@@ -87,7 +100,9 @@ enum ReplySender {
         defer { if process.isRunning { process.terminate() } }
 
         // Wait for the session UI to draw and then go quiet before typing.
-        guard waitForQuiet(master, quiet: 0.5, timeout: 15) else { throw Failure.timeout }
+        let screen = TerminalScreen(rows: Int(size.ws_row), cols: Int(size.ws_col))
+        guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
+        if refuseDialog, dialogOpen(screen) { throw Failure.dialog }
 
         for chunk in chunks {
             write(master, chunk)
@@ -107,14 +122,16 @@ enum ReplySender {
     }
 
     /// Drains output until nothing arrives for `quiet` seconds. False if no output arrived before `timeout`.
-    private static func waitForQuiet(_ fd: Int32, quiet: TimeInterval, timeout: TimeInterval) -> Bool {
+    private static func waitForQuiet(_ fd: Int32, quiet: TimeInterval, timeout: TimeInterval, into screen: TerminalScreen? = nil) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var lastOutput: Date?
         var buffer = [UInt8](repeating: 0, count: 65536)
         while Date() < deadline {
             var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             if poll(&pfd, 1, 100) > 0 {
-                if read(fd, &buffer, buffer.count) <= 0 { return lastOutput != nil }
+                let n = read(fd, &buffer, buffer.count)
+                if n <= 0 { return lastOutput != nil }
+                screen?.feed(Array(buffer[0..<n]))
                 lastOutput = Date()
             } else if let last = lastOutput, Date().timeIntervalSince(last) >= quiet {
                 return true
