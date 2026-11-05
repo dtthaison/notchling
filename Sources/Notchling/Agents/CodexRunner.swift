@@ -126,6 +126,29 @@ final class CodexRunner {
         process?.interrupt()
     }
 
+    /// Deletes a session the way `codex delete` does (its file and Codex's index entry). Blocking; nil
+    /// when it worked, else what went wrong.
+    static func delete(_ sessionID: String) -> String? {
+        guard let codex = CodexStore.binary() else { return "Couldn't find the codex command." }
+        shared.stop(sessionID)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: codex)
+        process.arguments = ["delete", "--force", sessionID]
+        process.environment = environment()
+        let err = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = err
+        process.standardInput = FileHandle.nullDevice
+        do { try process.run() } catch { return error.localizedDescription }
+        let message = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let line = message.split(whereSeparator: \.isNewline).last.map(String.init)
+            return line ?? "codex delete exited with code \(process.terminationStatus)."
+        }
+        return nil
+    }
+
     private func register(_ id: String, _ process: Process) {
         lock.lock(); processes[id] = process; lock.unlock()
     }

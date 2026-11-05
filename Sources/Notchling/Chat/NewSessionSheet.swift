@@ -40,6 +40,8 @@ struct NewSessionSheet: View {
     @State private var confirmSwitch: CodexAccount?
     @State private var working = false
     @State private var error: String?
+    /// Claude Code refused the folder until it's trusted: Start becomes Trust Folder and Start.
+    @State private var untrusted = false
 
     private static let lastChoiceKey = "newSessionChoice"
 
@@ -62,6 +64,8 @@ struct NewSessionSheet: View {
         .frame(width: 660, height: 480)
         .background(KitInk.window)
         .onAppear(perform: pickDefaults)
+        .onChange(of: folder) { _ in untrusted = false; error = nil }
+        .onChange(of: choice) { _ in untrusted = false; error = nil }
         .alert(item: $confirmSwitch) { account in
             Alert(title: Text("Switch Codex to \(account.email)?"),
                   message: Text(CodexStore.switchWarning(CodexStore.runningWork())
@@ -177,10 +181,11 @@ struct NewSessionSheet: View {
             }
             Spacer()
             if working { ProgressView().controlSize(.small) }
-            Button("Start Session") { start(switchingCodex: false) }
+            Button(untrusted ? "Trust Folder and Start" : "Start Session") { start(switchingCodex: false) }
                 .buttonStyle(.kit(.primary))
                 .keyboardShortcut(.defaultAction)
                 .disabled(choice == nil || folder == nil || working)
+                .help(untrusted ? "Accepts Claude Code's “Do you trust this folder?” prompt for it, as running claude there would, then starts the session." : "")
                 .part("Start Session Button", .top)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -333,8 +338,20 @@ struct NewSessionSheet: View {
         model.addProjectFolder(folder)
         switch choice {
         case .claude(let accountID):
-            model.newSessionSheet = false
-            model.newBackgroundSession(in: folder, on: accountID)
+            // Stays open until it has started, so a failure shows here instead of behind it.
+            working = true
+            let trusting = untrusted
+            untrusted = false
+            model.newBackgroundSession(in: folder, on: accountID, trust: trusting) { failure in
+                working = false
+                guard let failure else { model.newSessionSheet = false; return }
+                if ReplySender.isUntrusted(failure) {
+                    untrusted = true
+                    error = "Claude Code hasn't trusted this folder yet."
+                } else {
+                    error = failure
+                }
+            }
         case .codex(let accountID):
             guard let codex = model.codex else { return }
             if accountID == codex.activeID {

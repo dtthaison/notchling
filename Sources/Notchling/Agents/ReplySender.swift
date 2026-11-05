@@ -79,6 +79,50 @@ enum ReplySender {
         try type(["\u{1b}"], toJob: jobID, settle: 1.2)
     }
 
+    /// `claude --bg` refuses a folder Claude Code hasn't trusted yet ("Workspace not trusted").
+    static func isUntrusted(_ message: String) -> Bool { message.contains("not trusted") }
+
+    /// Trusts `folder` the way you would: runs `claude` there in a hidden terminal, accepts its trust
+    /// prompt (the first option, already selected) and quits, so Claude Code records it itself.
+    /// `configDir` is a lane's folder, whose trust list is its own. Blocking; true when it was accepted.
+    static func trustFolder(_ folder: String, configDir: String?) -> Bool {
+        let master = posix_openpt(O_RDWR | O_NOCTTY)
+        guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else { return false }
+        defer { close(master) }
+        var size = winsize(ws_row: 50, ws_col: 200, ws_xpixel: 0, ws_ypixel: 0)
+        _ = ioctl(master, TIOCSWINSZ, &size)
+        guard let slave = FileHandle(forUpdatingAtPath: String(cString: name)) else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: claudePath)
+        process.currentDirectoryURL = URL(fileURLWithPath: folder)
+        process.standardInput = slave
+        process.standardOutput = slave
+        process.standardError = slave
+        var env = ProcessInfo.processInfo.environment
+        env["TERM"] = "xterm-256color"
+        env.removeValue(forKey: "NO_COLOR")
+        if let configDir { env[LaneStore.variable] = configDir }
+        process.environment = env
+        do { try process.run() } catch { return false }
+        try? slave.close()
+        defer { if process.isRunning { process.terminate() } }
+
+        let screen = TerminalScreen(rows: Int(size.ws_row), cols: Int(size.ws_col))
+        func asking() -> Bool { screen.lines.contains { $0.contains("Yes, I trust this folder") } }
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline, !asking() { _ = waitForQuiet(master, quiet: 0.5, timeout: 2, into: screen) }
+        guard asking() else { return false }
+        // "No, exit" comes first and is selected (2.1.318): move down to Yes, then confirm.
+        write(master, "\u{1b}[B")
+        Thread.sleep(forTimeInterval: 0.3)
+        write(master, "\r")
+        // Wait for the session screen it opens once trusted, then quit it.
+        _ = waitForQuiet(master, quiet: 1, timeout: 8, into: screen)
+        for _ in 0..<2 { write(master, "\u{03}"); Thread.sleep(forTimeInterval: 0.3) }
+        _ = waitForQuiet(master, quiet: 0.5, timeout: 3)
+        return true
+    }
+
     /// Attaches, sends each chunk of keystrokes with a pause between them, then detaches. `settle`:
     /// send after the screen has drawn for this long even if it never goes quiet (a working session).
     private static func type(_ chunks: [String], toJob jobID: String, refuseDialog: Bool = false, settle: TimeInterval? = nil) throws {

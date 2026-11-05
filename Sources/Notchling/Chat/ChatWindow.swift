@@ -222,6 +222,7 @@ final class ChatModel: ObservableObject {
     /// Return did nothing while a reply was being typed into the session.
     @Published private(set) var outbox: [String: [String]] = [:]
     private var modelHint: [String: (model: String, at: Date)] = [:]
+    private var effortHint: [String: (effort: String, at: Date)] = [:]
     @Published var errors: [String: String] = [:]
     @Published var completionIndex = 0
     @Published var search = ""
@@ -252,7 +253,11 @@ final class ChatModel: ObservableObject {
         accountsWatch = accounts?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
         }
+        codexWatch = codex?.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.objectWillChange.send() }
+        }
     }
+    private var codexWatch: AnyCancellable?
 
     // MARK: Accounts (lanes)
 
@@ -292,6 +297,19 @@ final class ChatModel: ObservableObject {
         if let lane = lanes[agent.id] { return accounts.usage[lane.accountID] }
         if agent.configDir != nil { return nil }
         return accounts.activeID.flatMap { accounts.usage[$0] }
+    }
+
+    /// The limit bars the header shows: the Claude account's 5-hour and weekly limits, or for a Codex
+    /// session the Codex login's (its first group, "Codex": 5h and week on Plus and Pro).
+    func limits(for agent: Agent) -> [SessionLimit] {
+        if case .codex = agent.target {
+            guard let codex, let id = codex.activeID, let usage = codex.usage[id] else { return [] }
+            let group = usage.groups.first { $0.name == "Codex" } ?? usage.groups.first
+            return (group?.bars ?? []).map { SessionLimit(label: $0.label, name: SessionLimit.name($0.label), window: $0.window) }
+        }
+        guard let usage = usage(for: agent) else { return [] }
+        return [usage.session.map { SessionLimit(label: "5h", name: "5-hour limit", window: $0) },
+                usage.week.map { SessionLimit(label: "Week", name: "Weekly limit", window: $0) }].compactMap { $0 }
     }
 
     /// Saved accounts no session uses: not signed out, not the main login, not in a lane.
@@ -470,8 +488,12 @@ final class ChatModel: ObservableObject {
 
     /// Starts an idle background session (`claude --bg`) in `folder` on the target's account, in its lane,
     /// and selects it once it shows up. Errors go to `errorKey`'s banner, or an alert without one.
-    func newBackgroundSession(in folder: String, on accountID: String?, errorKey: String? = nil) {
+    /// `done` (with nil on success, else what went wrong) replaces the alert: New Session shows it in the
+    /// sheet. `trust` first accepts Claude Code's trust prompt for the folder.
+    func newBackgroundSession(in folder: String, on accountID: String?, errorKey: String? = nil,
+                              trust: Bool = false, done: ((String?) -> Void)? = nil) {
         let fail: (String) -> Void = { [weak self] text in
+            if let done { done(text); return }
             if let errorKey { self?.accountErrors[errorKey] = text; return }
             let alert = NSAlert()
             alert.messageText = "Couldn't start the session"
@@ -479,13 +501,17 @@ final class ChatModel: ObservableObject {
             alert.runModal()
         }
         if let errorKey { accountErrors[errorKey] = nil }
-        guard let accounts else { return }
+        guard let accounts else { return fail("Claude Code accounts aren't loaded yet.") }
         let start: (Lane?) -> Void = { [weak self] lane in
             DispatchQueue.global(qos: .userInitiated).async {
+                if trust, !ReplySender.trustFolder(folder, configDir: lane?.path) {
+                    DispatchQueue.main.async { fail("Couldn't trust the folder. Run claude there once and accept its prompt.") }
+                    return
+                }
                 let result = Self.startBackground(in: folder, configDir: lane?.path)
                 DispatchQueue.main.async {
                     switch result {
-                    case .success(let shortID): self?.selectWhenListed(shortID)
+                    case .success(let shortID): done?(nil); self?.selectWhenListed(shortID)
                     case .failure(let error): fail(error.localizedDescription)
                     }
                     self?.refreshLanes(force: true)
@@ -719,6 +745,36 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    /// Deletes a Codex session after asking (`codex delete`); a draft just goes.
+    func removeCodex(_ agent: Agent) {
+        guard case .codex(let session) = agent.target else { return }
+        if session.isEmpty {
+            codexDrafts.removeAll { $0.id == agent.id }
+            if selection == agent.id { selection = nil }
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(agent.name)”?"
+        alert.informativeText = "Codex deletes the session and its history. Files it changed stay as they are."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let failure = CodexRunner.delete(session)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let failure {
+                    self.errors[agent.id] = "Couldn't delete it: \(failure)"
+                    return
+                }
+                self.codexAgents.removeAll { $0.id == agent.id }
+                if self.selection == agent.id { self.selection = nil }
+                self.refreshCodex(force: true)
+            }
+        }
+    }
+
     /// A new Codex session in `folder`: listed and selected at once, started by its first message.
     func newCodexSession(in folder: String) {
         addProjectFolder(folder)
@@ -885,6 +941,10 @@ final class ChatModel: ObservableObject {
                     if fresh.facts.model == hint.model || Date().timeIntervalSince(hint.at) > 30 { self.modelHint[agent.id] = nil }
                     else { fresh.facts.model = hint.model }
                 }
+                if let hint = self.effortHint[agent.id] {
+                    if fresh.facts.effort == hint.effort || Date().timeIntervalSince(hint.at) > 30 { self.effortHint[agent.id] = nil }
+                    else { fresh.facts.effort = hint.effort }
+                }
                 if fresh != self.conversation { self.conversation = fresh }
                 self.dropDelivered(agent.id)
             }
@@ -967,6 +1027,11 @@ final class ChatModel: ObservableObject {
             ModelPicker.popUp(model: self, current: conversation.facts.model)
             return
         }
+        if text == "/effort" {
+            if preset == nil { drafts[id] = "" }
+            EffortPicker.popUp(model: self, current: conversation.facts.effort)
+            return
+        }
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
         // One attach at a time: two would type into the same box. The next waits its turn.
@@ -986,6 +1051,11 @@ final class ChatModel: ObservableObject {
             modelHint[id] = (picked, Date())
             if selection == id { conversation.facts.model = picked }
         }
+        if text.hasPrefix("/effort "), let picked = text.split(separator: " ").last.map(String.init),
+           EffortPicker.levels.contains(picked) {
+            effortHint[id] = (picked, Date())
+            if selection == id { conversation.facts.effort = picked }
+        }
         pending[id] = Pending(text: text, at: Date(), sending: true, exact: exact)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: Error?
@@ -997,6 +1067,7 @@ final class ChatModel: ObservableObject {
                     let unsent = [text] + (self.outbox[id] ?? [])
                     self.outbox[id] = nil
                     self.modelHint[id] = nil
+                    self.effortHint[id] = nil
                     self.pending[id] = nil
                     self.errors[id] = failure.localizedDescription
                     let draft = self.drafts[id] ?? ""
@@ -1253,6 +1324,10 @@ private struct SessionSidebar: View {
                                         Divider()
                                         Button("Remove Background Session…") { notch.onRemove?(agent) }
                                     }
+                                    if case .codex = agent.target {
+                                        Divider()
+                                        Button("Delete Codex Session…") { model.removeCodex(agent) }
+                                    }
                                 }
                             }
                         }
@@ -1426,7 +1501,7 @@ private struct SessionDetail: View {
             Spacer(minLength: 8)
             SessionMeters(context: model.conversation.facts.contextTokens,
                           window: ChatFormat.contextWindow(model: model.conversation.facts.model),
-                          usage: model.usage(for: agent))
+                          limits: model.limits(for: agent))
             // Icon only, so the line under the title has the room.
             Button { AgentActions.open(agent.target, cwd: agent.cwd) } label: {
                 KitIconView(icon: ChatFormat.openIcon(agent), size: 13)
@@ -1918,6 +1993,47 @@ private struct CappedWidth: Layout {
 
 /// The session's model, and a menu to change it: picking one types `/model <alias>` into the session,
 /// as you would in the terminal. Full model ids, so the menu names exactly what you get.
+/// The session's effort, switched by sending `/effort <level>` as in the terminal (Claude Code also
+/// keeps it as the default for new sessions). The current level is the one on its latest reply.
+struct EffortPicker: View {
+    @ObservedObject var model: ChatModel
+    let current: String?
+
+    static let levels = ["low", "medium", "high", "xhigh", "max"]
+
+    static func title(_ level: String) -> String {
+        level == "xhigh" ? "Extra High" : level.prefix(1).uppercased() + level.dropFirst()
+    }
+
+    var body: some View {
+        Button { Self.popUp(model: model, current: current) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.50percent").font(.system(size: 9, weight: .semibold))
+                Text(current.map(Self.title) ?? "Effort")
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .kitType(.meta).foregroundColor(KitInk.textMuted)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.kitPlain)
+        .pointerCursor()
+        .help("How hard the model thinks. Pick another to switch it (like /effort in the terminal, which also makes it the default for new sessions).")
+    }
+
+    static func popUp(model: ChatModel, current: String?) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for level in levels {
+            let row = ActionMenuItem(title(level)) { [model] in model.send("/effort \(level)") }
+            row.state = current == level ? .on : .off
+            menu.addItem(row)
+        }
+        let at = NSEvent.mouseLocation
+        menu.popUp(positioning: nil, at: at, in: nil)
+    }
+}
+
 struct ModelPicker: View {
     @ObservedObject var model: ChatModel
     let current: String?
@@ -2202,6 +2318,7 @@ private struct Composer: View {
                         CodexModelPicker(model: model, agent: agent).part("Codex Model Picker", .top)
                     } else {
                         ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
+                        EffortPicker(model: model, current: model.conversation.facts.effort).part("Effort Picker", .top)
                     }
                     if model.canStop(agent) {
                         Spacer(minLength: 0)
@@ -2607,10 +2724,25 @@ private struct PagePanel: View {
 /// macOS 13 a SwiftUI borderless Menu drops a custom label.
 /// How full the session's context is and how much of its account's limits is used: what /context and
 /// /usage would say, without typing them.
+/// One limit bar in the session header.
+struct SessionLimit {
+    let label: String
+    let name: String
+    let window: UsageWindow
+
+    static func name(_ label: String) -> String {
+        switch label {
+        case "5h": return "5-hour limit"
+        case "Week": return "Weekly limit"
+        default: return "\(label) limit"
+        }
+    }
+}
+
 private struct SessionMeters: View {
     let context: Int
     let window: Int?
-    let usage: AccountUsage?
+    let limits: [SessionLimit]
 
     var body: some View {
         // Top-aligned so the bars line up when only the limits have a reset line under them.
@@ -2624,12 +2756,13 @@ private struct SessionMeters: View {
                         + (window.map { " of \($0.formatted()) (\(Int((fraction ?? 0) * 100))%). Claude Code compacts the conversation near the limit." } ?? "."))
                     .part("Context Meter", .bottom)
             }
-            if let usage, usage.session != nil || usage.week != nil {
+            if !limits.isEmpty {
                 // Redrawn each minute so "in 2h 13m" counts down without a new usage fetch.
                 TimelineView(.everyMinute) { _ in
                     HStack(alignment: .top, spacing: 10) {
-                        if let session = usage.session { limit("5h", session, short: true, name: "5-hour limit") }
-                        if let week = usage.week { limit("Week", week, short: false, name: "Weekly limit") }
+                        ForEach(limits, id: \.label) { l in
+                            limit(l.label, l.window, short: l.label.hasSuffix("h"), name: l.name)
+                        }
                     }
                 }
                 .part("Limit Meters", .bottom)

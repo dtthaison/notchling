@@ -208,6 +208,7 @@ enum ConversationReader {
                 guard let message = obj["message"] as? [String: Any],
                       let blocks = message["content"] as? [[String: Any]] else { return }
                 if let model = message["model"] as? String, model != "<synthetic>" { c.facts.model = model }
+                if let effort = obj["effort"] as? String { c.facts.effort = effort }
                 if let id = message["id"] as? String, let out = ((message["usage"] as? [String: Any])?["output_tokens"] as? NSNumber)?.intValue {
                     turnOutput[id] = max(turnOutput[id] ?? 0, out)
                 }

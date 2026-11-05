@@ -12,6 +12,16 @@ final class QueuedMessageTests: XCTestCase {
 
     private let user = #"{"type":"user","message":{"role":"user","content":"Write a story."},"timestamp":"2026-11-04T04:26:51.000Z"}"#
 
+    /// The effort on the latest reply is the session's (Claude Code 2.1.318 writes it on assistant lines).
+    func testEffortFromTheLatestReply() throws {
+        let c = try read([
+            user,
+            #"{"type":"assistant","effort":"medium","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Once"}]},"timestamp":"2026-11-04T04:26:52.000Z"}"#,
+            #"{"type":"assistant","effort":"xhigh","message":{"id":"m2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"upon"}]},"timestamp":"2026-11-04T04:26:53.000Z"}"#,
+        ])
+        XCTAssertEqual(c.facts.effort, "xhigh")
+    }
+
     /// Waiting behind the turn: queued, not yet a message.
     func testEnqueuedIsQueued() throws {
         let c = try read([
