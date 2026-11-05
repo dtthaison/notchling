@@ -276,7 +276,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                         ),
                         _TabSlot(
                           active: tab == 1,
-                          child: inset(const ChatScreen()),
+                          child: hideBar
+                              ? inset(
+                                  const Column(
+                                    children: <Widget>[
+                                      ConnectionBanner(),
+                                      Expanded(child: ChatScreen()),
+                                    ],
+                                  ),
+                                )
+                              : inset(const ChatScreen()),
                         ),
                         // Only built while shown, so the Phone stream and viz loads stop when you leave.
                         if (tab == 2)
@@ -287,12 +296,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     ),
                   ),
                 ),
-                Positioned(
-                  top: MediaQuery.paddingOf(context).top,
-                  left: 0,
-                  right: 0,
-                  child: const ConnectionBanner(),
-                ),
+                if (!hideBar)
+                  Positioned(
+                    top: MediaQuery.paddingOf(context).top,
+                    left: 0,
+                    right: 0,
+                    child: const ConnectionBanner(),
+                  ),
                 Positioned(
                   top: MediaQuery.paddingOf(context).top,
                   left: 0,

@@ -119,7 +119,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
   }
 
   /// Tap to start, tap to stop; a tap while transcribing cancels. The text goes into the composer, never out.
-  Future<void> _toggleMic(Session? session, ChatState chat) async {
+  Future<void> _toggleMic() async {
+    final Session? session = ref.read(sessionsProvider).byId(widget.sessionId);
+    final ChatState chat = ref.read(chatProvider(widget.sessionId));
     final VoiceController voice = ref.read(voiceProvider.notifier);
     switch (ref.read(voiceProvider)) {
       case VoiceRecording():
@@ -151,9 +153,9 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
   Widget build(BuildContext context) {
     final AppL10n l10n = AppL10n.of(context);
     final String id = widget.sessionId;
-    final Session? session = ref.watch(
-      sessionsProvider.select((SessionsState s) => s.byId(id)),
-    );
+    // Only whether the session exists: the Mac pushes new Session objects often and the screen must not rebuild
+    // for each. Parts that show session fields watch their own slice below.
+    ref.watch(sessionsProvider.select((SessionsState s) => s.byId(id) != null));
     // Only what the list shows. The send state, takeover progress and dictation tick on their own (the voice
     // timer fires every 100 ms) and belong to the composer, so they must not rebuild the messages.
     final _ListData data = ref.watch(
@@ -176,10 +178,6 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
         unawaited(ref.read(chatProvider(id).notifier).refreshNewest());
       }
     });
-    final String? answerError = ref.watch(
-      chatProvider(id).select((ChatState c) => c.answerError),
-    );
-
     ref.listen<int>(
       chatProvider(id).select((ChatState c) => c.messages.length),
       (int? previous, int count) {
@@ -193,26 +191,36 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
       },
     );
 
-    final PendingPrompt? pending = session?.pending;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (session != null) _ChatHeader(session: session),
+        _ChatHeader(sessionId: id),
         _UpdatingLine(sessionId: id),
         Expanded(
           child: KbTracePointer(
             child: KeyboardLift(
               controller: _lift,
-              list: _body(l10n, data, running: session?.state == SessionState.running, activity: session?.activity),
+              list: _body(l10n, data),
               composer: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   SmoothSize(
-                  alignment: Alignment.bottomCenter,
-                  child: pending == null
-                      ? const SizedBox(width: double.infinity)
-                      : Entrance(
+                    alignment: Alignment.bottomCenter,
+                    child: Consumer(
+                      builder: (BuildContext context, WidgetRef ref, Widget? _) {
+                        final PendingPrompt? pending = ref.watch(
+                          sessionsProvider.select(
+                            (SessionsState s) => s.byId(id)?.pending,
+                          ),
+                        );
+                        final String? answerError = ref.watch(
+                          chatProvider(id).select((ChatState c) => c.answerError),
+                        );
+                        if (pending == null) {
+                          return const SizedBox(width: double.infinity);
+                        }
+                        return Entrance(
                           key: ValueKey<String>(pending.requestId),
                           rise: 16,
                           child: PendingCard(
@@ -225,8 +233,10 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                               ref.read(chatProvider(id).notifier).choose(pending, choices),
                             ),
                           ),
-                        ),
-                ),
+                        );
+                      },
+                    ),
+                  ),
                   Consumer(
                     builder: (BuildContext context, WidgetRef ref, Widget? _) {
                       final SendState send = ref.watch(
@@ -235,11 +245,33 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                       final TakeoverProgress takeoverProgress = ref.watch(
                         chatProvider(id).select((ChatState c) => c.takeover),
                       );
+                      // A record compares by value, so a push with the same values does not rebuild the composer.
+                      final ({
+                        bool? canMessage,
+                        String? cwd,
+                        bool? takeoverAvailable,
+                        bool? takeoverStoppable,
+                        bool? takeoverBusy,
+                        String? takeoverReason,
+                      }) view = ref.watch(
+                        sessionsProvider.select((SessionsState s) {
+                          final Session? session = s.byId(id);
+                          return (
+                            canMessage: session?.canMessage,
+                            cwd: session?.cwd,
+                            takeoverAvailable: session?.takeover?.available,
+                            takeoverStoppable: session?.takeover?.stoppable,
+                            takeoverBusy: session?.takeover?.busy,
+                            takeoverReason: session?.takeover?.reason,
+                          );
+                        }),
+                      );
+                      final bool hasSession = view.canMessage != null;
                       return Composer(
                         controller: _controller,
                         send: send,
                         viewOnly:
-                            session != null && !session.canMessage ||
+                            hasSession && view.canMessage == false ||
                             send is SendFailed && send.viewOnly,
                         onSend: () => unawaited(_send()),
                         onRetry: () {
@@ -258,17 +290,17 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             .read(chatProvider(id).notifier)
                             .dismissSendError(),
                         voice: ref.watch(voiceProvider),
-                        onMic: () => unawaited(
-                          _toggleMic(session, ref.read(chatProvider(id))),
-                        ),
+                        onMic: () => unawaited(_toggleMic()),
                         onOpenSettings: () =>
                             unawaited(AppSettings.openAppSettings()),
                         onDismissVoice: () =>
                             ref.read(voiceProvider.notifier).dismissProblem(),
                         commands: ref.watch(slashCommandsProvider(id)),
-                        folder: session?.cwd,
-                    onAttach: session != null && session.canMessage ? () => unawaited(pickAndSendPhoto(context, ref, id)) : null,
-                        takeover: session?.takeover,
+                        folder: view.cwd,
+                    onAttach: view.canMessage == true ? () => unawaited(pickAndSendPhoto(context, ref, id)) : null,
+                        takeover: view.takeoverAvailable == null
+                            ? null
+                            : ref.read(sessionsProvider).byId(id)?.takeover,
                         takeoverProgress: takeoverProgress,
                         onTakeover: () => unawaited(_takeOver()),
                       );
@@ -295,7 +327,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
     return _entries;
   }
 
-  Widget _body(AppL10n l10n, _ListData chat, {required bool running, String? activity}) {
+  Widget _body(AppL10n l10n, _ListData chat) {
     if (chat.phase == LoadPhase.loading && chat.messages.isEmpty) {
       return const _ChatSkeleton();
     }
@@ -352,11 +384,15 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
 }
 
 class _ChatHeader extends ConsumerWidget {
-  const _ChatHeader({required this.session});
-  final Session session;
+  const _ChatHeader({required this.sessionId});
+  final String sessionId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final Session? session = ref.watch(
+      sessionsProvider.select((SessionsState s) => s.byId(sessionId)),
+    );
+    if (session == null) return const SizedBox.shrink();
     final bool muted = ref.watch(
       alertPrefsProvider.select((AlertPrefs p) => p.muted.contains(session.id)),
     );
