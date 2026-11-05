@@ -72,8 +72,16 @@ enum ReplySender {
         try type(chunks, toJob: jobID)
     }
 
-    /// Attaches, sends each chunk of keystrokes with a pause between them, then detaches.
-    private static func type(_ chunks: [String], toJob jobID: String, refuseDialog: Bool = false) throws {
+    /// Stops the turn a background session is working on: Esc, as in its terminal. Only for a session
+    /// that is working (Esc twice on an idle one opens the rewind menu). A busy screen keeps redrawing,
+    /// so it doesn't wait for quiet as long as a reply does.
+    static func interrupt(job jobID: String) throws {
+        try type(["\u{1b}"], toJob: jobID, settle: 1.2)
+    }
+
+    /// Attaches, sends each chunk of keystrokes with a pause between them, then detaches. `settle`:
+    /// send after the screen has drawn for this long even if it never goes quiet (a working session).
+    private static func type(_ chunks: [String], toJob jobID: String, refuseDialog: Bool = false, settle: TimeInterval? = nil) throws {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else {
             throw Failure.pty
@@ -101,7 +109,11 @@ enum ReplySender {
 
         // Wait for the session UI to draw and then go quiet before typing.
         let screen = TerminalScreen(rows: Int(size.ws_row), cols: Int(size.ws_col))
-        guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
+        if let settle {
+            _ = waitForQuiet(master, quiet: 0.5, timeout: settle + 1, into: screen)
+        } else {
+            guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
+        }
         if refuseDialog, dialogOpen(screen) { throw Failure.dialog }
 
         for chunk in chunks {

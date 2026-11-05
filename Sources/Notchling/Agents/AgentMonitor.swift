@@ -193,6 +193,10 @@ final class AgentMonitor {
             (group, label) = (.working, "Working")
         } else if state == "blocked" || tempo == "blocked" || status == "waiting" {
             (group, label) = (.needsInput, "Needs input")
+        } else if status == "idle" {
+            // The live status wins: a turn stopped with Esc leaves `state: "working"` in state.json
+            // until the next turn (2.1.318).
+            (group, label) = (.completed, "Idle")
         } else if state == "working" || tempo == "active" {
             (group, label) = (.working, "Working")
         } else if state == "running" {

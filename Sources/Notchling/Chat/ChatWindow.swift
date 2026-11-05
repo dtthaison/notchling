@@ -800,10 +800,52 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    /// Stops the selected Codex session's turn.
-    func stopCodex() {
-        guard let agent = selected, case .codex(let session) = agent.target, !session.isEmpty else { return }
-        CodexRunner.shared.stop(session)
+    /// Sessions a Stop was sent to, until they stop working (or 20 s pass).
+    @Published private(set) var stopping: [String: Date] = [:]
+
+    /// The selected session's turn can be stopped from here: a working background Claude session (Esc
+    /// through `claude attach`) or a Codex turn Chat runs. Terminal sessions belong to their window.
+    func canStop(_ agent: Agent) -> Bool {
+        guard agent.group == .working else { return false }
+        switch agent.target {
+        case .job: return agent.command == nil
+        case .codex(let session): return !session.isEmpty && CodexRunner.shared.isRunning(session)
+        default: return false
+        }
+    }
+
+    func isStopping(_ agent: Agent) -> Bool {
+        guard let at = stopping[agent.id] else { return false }
+        return agent.group == .working && Date().timeIntervalSince(at) < 20
+    }
+
+    /// Stops the turn, like Esc in the terminal. What was said so far stays.
+    func stopTurn() {
+        guard let agent = selected, canStop(agent), !isStopping(agent) else { return }
+        let id = agent.id
+        stopping[id] = Date()
+        errors[id] = nil
+        switch agent.target {
+        case .codex(let session):
+            CodexRunner.shared.stop(session)
+        case .job(let jobID):
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                var failure: Error?
+                do { try ReplySender.interrupt(job: jobID) } catch { failure = error }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let failure {
+                        self.stopping[id] = nil
+                        self.errors[id] = "Couldn't stop it: \(failure.localizedDescription)"
+                    }
+                    self.refresh()
+                }
+            }
+        default:
+            break
+        }
+        // Clear the mark once it's done, so a later turn can be stopped too.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.stopping[id] = nil }
     }
 
     /// The sidebar list: the notch's sessions, filtered by the search words.
@@ -1045,6 +1087,12 @@ final class ChatModel: ObservableObject {
         // Then it leaves a subagent for its session.
         if keyCode == 53, subagentID != nil, !composerFocused {
             subagentID = nil
+            return true
+        }
+        // Then it stops a working session's turn, as in the terminal (not while a command list is open).
+        if keyCode == 53, terminal == nil, !accountSheet, !newSessionSheet, let agent = selected, canStop(agent),
+           completions(for: agent).isEmpty {
+            stopTurn()
             return true
         }
         guard composerFocused, let agent = selected, agent.canReply else { return false }
@@ -2150,17 +2198,26 @@ private struct Composer: View {
                 .padding(.leading, 6)
             } else {
                 HStack(spacing: 8) {
-                    if case .codex(let session) = agent.target {
+                    if case .codex = agent.target {
                         CodexModelPicker(model: model, agent: agent).part("Codex Model Picker", .top)
-                        Spacer(minLength: 0)
-                        if !session.isEmpty, agent.group == .working {
-                            Button("Stop") { model.stopCodex() }
-                                .buttonStyle(.kit(.ghost))
-                                .help("Stop this turn")
-                                .part("Stop Button", .top)
-                        }
                     } else {
                         ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
+                    }
+                    if model.canStop(agent) {
+                        Spacer(minLength: 0)
+                        let stopping = model.isStopping(agent)
+                        Button { model.stopTurn() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "stop.fill").font(.system(size: 8))
+                                Text(stopping ? "Stopping…" : "Stop")
+                                if !stopping { Text("esc").foregroundColor(KitInk.textFaint) }
+                            }
+                            .kitType(.meta)
+                        }
+                        .buttonStyle(.kit(.ghost))
+                        .disabled(stopping)
+                        .help("Stop this turn, like Esc in the terminal. What it did so far stays.")
+                        .part("Stop Button", .top)
                     }
                     if shell {
                         Text("Return runs it like ! in the terminal · delete the ! to send a message instead")
