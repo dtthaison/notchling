@@ -12,6 +12,9 @@ struct VaultEntry: Codable, Identifiable, Equatable {
     var kind: Kind
     /// Shown to agents by `--secrets`: what it's for, which host or tool.
     var note: String = ""
+    /// Where it's used (a site, an API, a registry), so an agent can tell which secret a task needs.
+    /// Optional for lists saved before it existed.
+    var url: String?
     /// Variable for the username (logins only).
     var userVar: String = ""
     /// Variable for the password or token.
@@ -21,6 +24,12 @@ struct VaultEntry: Codable, Identifiable, Equatable {
     var id: String { name.lowercased() }
 
     var variables: [String] { kind == .login ? [userVar, secretVar] : [secretVar] }
+
+    /// `$<NAME>_URL`, set when the entry has a URL.
+    var urlVar: String? { (url ?? "").isEmpty ? nil : "\(Self.prefix(for: name))_URL" }
+
+    /// Every variable a command gets, URL included.
+    var allVariables: [String] { variables + (urlVar.map { [$0] } ?? []) }
 
     /// `my-api` → `MY_API`, the prefix of the default variable names.
     static func prefix(for name: String) -> String {
@@ -78,15 +87,15 @@ enum SecretVault {
         for v in entry.variables where !VaultEntry.validVar(v) {
             throw AccountError("\"\(v)\" isn't a valid variable name.")
         }
-        if entry.kind == .login, entry.userVar == entry.secretVar {
-            throw AccountError("The username and password need different variables.")
+        if Set(entry.allVariables).count != entry.allVariables.count {
+            throw AccountError("Each value needs its own variable (\(entry.urlVar ?? "none") is the URL's).")
         }
         var list = all()
         if list.contains(where: { $0.id == entry.id && $0.id != old?.id }) {
             throw AccountError("There's already a secret named \(entry.name).")
         }
-        let taken = Set(list.filter { $0.id != old?.id }.flatMap(\.variables))
-        if let clash = entry.variables.first(where: taken.contains) {
+        let taken = Set(list.filter { $0.id != old?.id }.flatMap(\.allVariables))
+        if let clash = entry.allVariables.first(where: taken.contains) {
             throw AccountError("Another secret already uses \(clash).")
         }
         var stored = value
@@ -118,7 +127,7 @@ enum SecretVault {
         try FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(list.sorted { $0.id < $1.id }).write(to: indexURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
-        VaultSkill.update(names: list.map(\.name))
+        VaultSkill.update(list)
     }
 
     /// The environment a command gets for these entries, and the strings to hide in its output.
@@ -126,6 +135,7 @@ enum SecretVault {
         var env: [String: String] = [:], hide: [String: String] = [:]
         for (entry, value) in entries {
             env[entry.secretVar] = value.secret
+            if let urlVar = entry.urlVar, let url = entry.url { env[urlVar] = url }
             hide[value.secret] = "[secret:\(entry.name)]"
             if entry.kind == .login {
                 env[entry.userVar] = value.username
@@ -147,7 +157,8 @@ extension SecretVault {
             exit(1)
         }
         for e in list {
-            print("\(e.name)  (\(e.kind.rawValue))  \(e.variables.map { "$" + $0 }.joined(separator: " "))")
+            print("\(e.name)  (\(e.kind.rawValue))  \(e.allVariables.map { "$" + $0 }.joined(separator: " "))")
+            if let url = e.url, !url.isEmpty { print("    \(url)") }
             if !e.note.isEmpty { print("    \(e.note)") }
         }
         exit(0)
@@ -286,18 +297,25 @@ enum VaultSkill {
     static let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/skills/notchling-vault")
     static let file = dir.appendingPathComponent("SKILL.md")
 
-    static func update(names: [String]? = nil) {
-        let names = names ?? SecretVault.all().map(\.name)
-        guard !names.isEmpty else {
+    static func update(_ entries: [VaultEntry]? = nil) {
+        let entries = entries ?? SecretVault.all()
+        guard !entries.isEmpty else {
             if (try? String(contentsOf: file, encoding: .utf8))?.contains("name: notchling-vault") == true {
                 try? FileManager.default.removeItem(at: dir)
             }
             return
         }
-        let text = content(binary: Bundle.main.bundlePath + "/Contents/MacOS/Notchling", names: names.sorted())
+        let text = content(binary: Bundle.main.bundlePath + "/Contents/MacOS/Notchling", names: entries.map(label).sorted())
         if (try? String(contentsOf: file, encoding: .utf8)) == text { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? text.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    /// `github (api.github.com)`: the name with its URL's host, so the description matches a task by site.
+    static func label(_ e: VaultEntry) -> String {
+        guard let url = e.url, !url.isEmpty else { return e.name }
+        let host = URL(string: url.contains("://") ? url : "https://" + url)?.host ?? url
+        return "\(e.name) (\(host))"
     }
 
     static func content(binary: String, names: [String]) -> String {
@@ -317,7 +335,7 @@ enum VaultSkill {
         '\(binary)' --secrets
         ```
 
-        Each line is a name, its kind (login or token) and the environment variables it sets, then the user's note on what it's for. Values are never printed.
+        Each line is a name, its kind (login or token) and the environment variables it sets, then the URL it's for (also in `$<NAME>_URL`) and the user's note. Pick the secret whose URL matches the site or API the task talks to. Values are never printed.
 
         ## Use one
 
@@ -328,8 +346,8 @@ enum VaultSkill {
         The command runs with the secret's variables set. With a single argument after `--` it runs through `sh -c`, so single-quote it and let that shell expand the variables:
 
         ```sh
-        '\(binary)' --secret github -- 'curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user'
-        '\(binary)' --secret registry -- 'printf %s "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USERNAME" --password-stdin registry.example.com'
+        '\(binary)' --secret github -- 'curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" "$GITHUB_URL/user"'
+        '\(binary)' --secret registry -- 'printf %s "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USERNAME" --password-stdin "$REGISTRY_URL"'
         ```
 
         Its output comes back with every saved value replaced by `[secret:<name>]`, and its exit code is the command's.

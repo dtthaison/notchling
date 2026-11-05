@@ -112,7 +112,11 @@ private struct VaultRow: View {
                     Text(entry.name).kitType(.heading).foregroundColor(KitInk.text)
                     Text(entry.kind == .login ? "Login" : "Token").kitType(.meta).foregroundColor(KitInk.textMuted)
                 }
-                Text(entry.variables.map { "$" + $0 }.joined(separator: "  "))
+                if let url = entry.url, !url.isEmpty {
+                    Text(url).kitType(.label).foregroundColor(KitInk.accentText).lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Text(entry.allVariables.map { "$" + $0 }.joined(separator: "  "))
                     .kitType(.mono).foregroundColor(KitInk.textMuted).textSelection(.enabled)
                 if !entry.note.isEmpty {
                     Text(entry.note).kitType(.meta).foregroundColor(KitInk.textMuted).fixedSize(horizontal: false, vertical: true)
@@ -139,6 +143,7 @@ final class VaultForm: ObservableObject {
     @Published var username = ""
     @Published var secret = ""
     @Published var note: String
+    @Published var url: String
     @Published var userVar: String
     @Published var secretVar: String
     @Published var error: String?
@@ -149,6 +154,7 @@ final class VaultForm: ObservableObject {
         name = entry?.name ?? ""
         kind = entry?.kind ?? .token
         note = entry?.note ?? ""
+        url = entry?.url ?? ""
         let vars = VaultEntry.defaultVars(name: entry?.name ?? "", kind: entry?.kind ?? .token)
         userVar = entry?.kind == .login ? entry?.userVar ?? vars.user : vars.user
         secretVar = entry?.secretVar ?? vars.secret
@@ -172,7 +178,9 @@ final class VaultForm: ObservableObject {
 
     func save() -> Bool {
         let name = name.trimmingCharacters(in: .whitespaces)
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
         var entry = VaultEntry(name: name, kind: kind, note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                               url: url.isEmpty ? nil : url,
                                userVar: kind == .login ? userVar.trimmingCharacters(in: .whitespaces) : "",
                                secretVar: secretVar.trimmingCharacters(in: .whitespaces))
         entry.updated = Date()
@@ -197,7 +205,7 @@ private struct VaultFormView: View {
     let close: (_ saved: Bool) -> Void
     @FocusState private var focus: Field?
 
-    private enum Field { case name, username, secret, userVar, secretVar, note }
+    private enum Field { case name, url, username, secret, userVar, secretVar, note }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -205,6 +213,11 @@ private struct VaultFormView: View {
                 TextField("github", text: $form.name)
                     .focused($focus, equals: .name)
                     .modifier(KitField(focused: focus == .name))
+            }
+            row("URL") {
+                TextField("https://api.github.com", text: $form.url)
+                    .focused($focus, equals: .url)
+                    .modifier(KitField(focused: focus == .url))
             }
             row("Kind") {
                 Picker("", selection: $form.kind) {
@@ -243,7 +256,7 @@ private struct VaultFormView: View {
                     .focused($focus, equals: .note)
                     .modifier(KitField(focused: focus == .note))
             }
-            Text("Agents see the name, variables and note. The value stays in Keychain.")
+            Text("Agents see the name, URL, variables and note. The value stays in Keychain.")
                 .kitType(.meta).foregroundColor(KitInk.textMuted)
                 .padding(.leading, 92)
             if let error = form.error {

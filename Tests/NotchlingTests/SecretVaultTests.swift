@@ -43,4 +43,16 @@ final class SecretVaultTests: XCTestCase {
         XCTAssertEqual(env, ["REG_USERNAME": "alice", "REG_PASSWORD": "hunter22"])
         XCTAssertEqual(hide["hunter22"], "[secret:reg]")
     }
+
+    func testURL() {
+        let e = VaultEntry(name: "github", kind: .token, url: "https://api.github.com", secretVar: "GH_TOKEN")
+        XCTAssertEqual(e.allVariables, ["GH_TOKEN", "GITHUB_URL"])
+        XCTAssertEqual(SecretVault.environment(for: [(e, VaultValue(secret: "tok-1234"))]).env["GITHUB_URL"], "https://api.github.com")
+        XCTAssertEqual(VaultSkill.label(e), "github (api.github.com)")
+        XCTAssertEqual(VaultSkill.label(VaultEntry(name: "npm", kind: .token, url: "registry.npmjs.org")), "npm (registry.npmjs.org)")
+        // Lists saved before URLs existed still load.
+        let old = #"[{"name":"a","kind":"token","note":"","userVar":"","secretVar":"A_TOKEN","updated":"2026-11-05T00:00:00Z"}]"#
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        XCTAssertNil(try d.decode([VaultEntry].self, from: Data(old.utf8)).first?.urlVar)
+    }
 }
