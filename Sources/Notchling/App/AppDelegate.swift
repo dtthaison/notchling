@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.pagesWindow.show(select: folder)
             return self != nil
         }
+        chat.onAddAccount = { [weak self] in self?.addAccount() }
         return chat
     }()
     private var statusItem: NSStatusItem!

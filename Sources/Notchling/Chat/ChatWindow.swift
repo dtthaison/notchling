@@ -26,6 +26,11 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         set { model.onOpenArtifact = newValue }
     }
 
+    var onAddAccount: (() -> Void)? {
+        get { model.onAddAccount }
+        set { model.onAddAccount = newValue }
+    }
+
     /// Chat was open when Notchling last quit (an install relaunches it), and the session it showed.
     private static let openKey = "chatOpen", selectionKey = "chatSelection"
 
@@ -153,6 +158,8 @@ final class ChatModel: ObservableObject {
     }
     /// Opens a saved Artifact in the Artifacts window; false when there's no local copy.
     var onOpenArtifact: ((String) -> Bool)?
+    /// Starts signing in to another Claude account (the Accounts window's sign-in, in the browser).
+    var onAddAccount: (() -> Void)?
     /// The Artifact open in the panel beside the chat.
     @Published var page: PageLibrary.Entry? {
         didSet { if page != nil { file = nil } }
@@ -2458,6 +2465,10 @@ private struct AccountMenu: View {
                 item.submenu = sub
                 menu.addItem(item)
             }
+        }
+        if let add = model.onAddAccount {
+            menu.addItem(.separator())
+            menu.addItem(ActionMenuItem("Add Account…", run: add))
         }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
