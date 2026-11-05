@@ -13,6 +13,9 @@ enum SlashCommands {
     private static var cache: [String: (at: Date, commands: [SlashCommand])] = [:]
     private static let lock = NSLock()
 
+    /// Commands built into Claude Code, with no file on disk to scan. Most names come from the
+    /// `slash_commands` list `claude -p --output-format stream-json` printed on 2.1.318; the rest are
+    /// interactive-only and missing from that list. Update it when Claude Code adds commands.
     private static let builtIns: [SlashCommand] = [
         ("clear", "Clear the conversation and start fresh"),
         ("compact", "Summarise the conversation to free up context"),
@@ -21,14 +24,61 @@ enum SlashCommands {
         ("usage", "Show plan usage limits"),
         ("model", "Change the model"),
         ("effort", "Change the effort level"),
+        ("fast", "Turn fast mode on or off"),
         ("review", "Review a pull request"),
+        ("code-review", "Review the current diff or a pull request"),
         ("security-review", "Security review of pending changes"),
+        ("ultrareview", "Deep multi-agent review in the cloud"),
+        ("simplify", "Clean up the changed code"),
         ("init", "Write a CLAUDE.md for this project"),
         ("memory", "Edit memory files"),
         ("rewind", "Go back to an earlier point"),
         ("rename", "Rename this session"),
+        ("resume", "Resume an earlier session"),
+        ("export", "Export this conversation"),
         ("status", "Show version, model and account"),
         ("todos", "Show the current task list"),
+        ("agents", "Manage subagents"),
+        ("mcp", "Manage MCP servers"),
+        ("plugin", "Manage plugins"),
+        ("reload-plugins", "Reload plugins"),
+        ("reload-skills", "Reload skills"),
+        ("hooks", "Manage hooks"),
+        ("permissions", "Manage tool permissions"),
+        ("config", "Open settings"),
+        ("update-config", "Change settings.json"),
+        ("output-style", "Change the output style"),
+        ("add-dir", "Add a working directory"),
+        ("loop", "Run a prompt on a repeating interval"),
+        ("schedule", "Schedule a cloud agent"),
+        ("run", "Run the app to check a change"),
+        ("fewer-permission-prompts", "Allow common read-only commands"),
+        ("claude-api", "Claude API reference"),
+        ("plugin-authoring", "Make or change a plugin"),
+        ("workflow-authoring", "Write a workflow script"),
+        ("skill-doctor", "Check a skill for problems"),
+        ("doctor", "Check the Claude Code install"),
+        ("debug", "Debug this session"),
+        ("insights", "Show usage insights"),
+        ("recap", "Recap this session"),
+        ("goal", ""),
+        ("focus", ""),
+        ("advisor", ""),
+        ("batch", ""),
+        ("color", ""),
+        ("import", ""),
+        ("autocompact", ""),
+        ("auto-mode-setup", ""),
+        ("design", ""),
+        ("design-sync", ""),
+        ("deep-research", ""),
+        ("list-agents", ""),
+        ("team-onboarding", ""),
+        ("verify", ""),
+        ("extra-usage", ""),
+        ("usage-credits", ""),
+        ("login", "Sign in"),
+        ("logout", "Sign out"),
         ("help", "Show help"),
     ].map { SlashCommand(name: $0.0, description: $0.1, argumentHint: nil) }
 
@@ -44,7 +94,7 @@ enum SlashCommands {
         let user = home.appendingPathComponent(".claude")
         found += scan(user, prefix: nil)
         if !cwd.isEmpty { found += scan(URL(fileURLWithPath: cwd).appendingPathComponent(".claude"), prefix: nil) }
-        for (name, path) in enabledPlugins() { found += scan(URL(fileURLWithPath: path), prefix: name) }
+        for (name, path) in enabledPlugins(home: home, cwd: cwd) { found += scan(URL(fileURLWithPath: path), prefix: name) }
 
         // Later sources don't override earlier ones with the same name; built-ins come first.
         var seen = Set<String>()
@@ -114,15 +164,29 @@ enum SlashCommands {
         return meta
     }
 
-    /// Plugin name → install path, for plugins turned on in settings.
-    private static func enabledPlugins() -> [(String, String)] {
+    /// Plugin name → install path, for plugins turned on in settings. Like Claude Code, the
+    /// project's `.claude/settings.json` overrides the user's, and `settings.local.json` overrides both,
+    /// so a plugin installed with `--scope project` shows up in that folder's sessions.
+    static func enabledPlugins(home: URL, cwd: String) -> [(String, String)] {
         let claude = home.appendingPathComponent(".claude")
-        guard let settings = HookBridge.readJSON(claude.appendingPathComponent("settings.json")),
-              let enabled = settings["enabledPlugins"] as? [String: Bool],
-              let installed = HookBridge.readJSON(claude.appendingPathComponent("plugins/installed_plugins.json"))?["plugins"]
+        var files = [claude.appendingPathComponent("settings.json")]
+        if !cwd.isEmpty {
+            let project = URL(fileURLWithPath: cwd).appendingPathComponent(".claude")
+            files += [project.appendingPathComponent("settings.json"), project.appendingPathComponent("settings.local.json")]
+        }
+        var enabled: [String: Bool] = [:]
+        for file in files {
+            for (key, on) in HookBridge.readJSON(file)?["enabledPlugins"] as? [String: Bool] ?? [:] { enabled[key] = on }
+        }
+        guard let installed = HookBridge.readJSON(claude.appendingPathComponent("plugins/installed_plugins.json"))?["plugins"]
                 as? [String: [[String: Any]]] else { return [] }
-        return enabled.compactMap { key, on in
-            guard on, let path = installed[key]?.first?["installPath"] as? String else { return nil }
+        return enabled.sorted { $0.key < $1.key }.compactMap { key, on in
+            guard on, let entries = installed[key] else { return nil }
+            // A project or local install records its folder; prefer this folder's, then a user install.
+            let entry = entries.first { $0["projectPath"] as? String == cwd }
+                ?? entries.first { $0["projectPath"] == nil }
+                ?? entries.first
+            guard let path = entry?["installPath"] as? String else { return nil }
             return (String(key.split(separator: "@").first ?? Substring(key)), path)
         }
     }
