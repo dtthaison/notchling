@@ -159,6 +159,10 @@ final class ChatModel: ObservableObject {
         didSet { if !accountSheet { closeAccounts() } }
     }
     @Published var accountTab = AccountTab.claude
+    /// The New Session sheet (`NewSessionSheet`): account, folder, Start.
+    @Published var newSessionSheet = false {
+        didSet { if !newSessionSheet { closeAccounts() } }
+    }
     /// The Claude sign-in while it runs: the browser OAuth, saved next to the other accounts without
     /// touching the login sessions use.
     @Published var signIn: SignInModel? {
@@ -274,6 +278,7 @@ final class ChatModel: ObservableObject {
     }
 
     func account(for agent: Agent) -> SessionAccount? {
+        if case .codex = agent.target { return nil }
         if let lane = lanes[agent.id] { return SessionAccount(email: lane.email, lane: lane) }
         // In a lane folder the lanes list doesn't name (yet): don't guess.
         if agent.configDir != nil { return nil }
@@ -283,6 +288,7 @@ final class ChatModel: ObservableObject {
     /// The limits of the account the session runs on, as last fetched.
     func usage(for agent: Agent) -> AccountUsage? {
         guard let accounts else { return nil }
+        if case .codex = agent.target { return nil }
         if let lane = lanes[agent.id] { return accounts.usage[lane.accountID] }
         if agent.configDir != nil { return nil }
         return accounts.activeID.flatMap { accounts.usage[$0] }
@@ -679,13 +685,111 @@ final class ChatModel: ObservableObject {
 
     var selected: Agent? {
         guard let id = selection else { return nil }
-        return notch.agents.first { $0.id == id } ?? seen[id]
+        return allAgents.first { $0.id == id } ?? seen[id]
+    }
+
+    /// Claude Code's sessions (the notch's), then Codex's, which only Chat shows.
+    var allAgents: [Agent] { notch.agents + codexDrafts + codexAgents }
+
+    // MARK: Codex sessions
+
+    /// Recent Codex CLI sessions (`CodexSessions`), re-read every couple of seconds.
+    @Published private(set) var codexAgents: [Agent] = []
+    /// New Codex sessions picked in New Session that wait for their first message, which starts them.
+    @Published private(set) var codexDrafts: [Agent] = []
+    private var codexListedAt = Date.distantPast
+    private var codexListing = false
+
+    func refreshCodex(force: Bool = false) {
+        guard codex != nil, !codexListing, force || Date().timeIntervalSince(codexListedAt) > 2 else { return }
+        codexListing = true
+        let running = CodexRunner.shared.running
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let list = CodexSessions.list(running: running)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.codexListing = false
+                self.codexListedAt = Date()
+                if list.map(\.id) != self.codexAgents.map(\.id) || zip(list, self.codexAgents).contains(where: {
+                    $0.group != $1.group || $0.since != $1.since || $0.name != $1.name
+                }) {
+                    self.codexAgents = list
+                }
+            }
+        }
+    }
+
+    /// A new Codex session in `folder`: listed and selected at once, started by its first message.
+    func newCodexSession(in folder: String) {
+        addProjectFolder(folder)
+        let agent = Agent(id: "codex-new:" + UUID().uuidString, name: "New Codex Session",
+                          project: (folder as NSString).lastPathComponent, cwd: folder, group: .completed, label: "New",
+                          detail: nil, since: Date(), target: .codex(sessionID: ""), host: "Codex")
+        codexDrafts.insert(agent, at: 0)
+        selection = agent.id
+        focusRequest += 1
+    }
+
+    private func sendCodex(_ agent: Agent, sessionID: String, text: String) {
+        let id = agent.id
+        errors[id] = nil
+        // One turn at a time: exec can't take a message mid-turn, so the next waits for this one.
+        if pending[id]?.sending == true || (!sessionID.isEmpty && CodexRunner.shared.isRunning(sessionID)) {
+            outbox[id, default: []].append(text)
+            return
+        }
+        pending[id] = Pending(text: text, at: Date(), sending: true, exact: false)
+        CodexRunner.shared.run(text, session: sessionID.isEmpty ? nil : sessionID, folder: agent.cwd, started: { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let session):
+                var key = id
+                if sessionID.isEmpty {
+                    // The draft becomes the real session: carry its reply, box and selection over.
+                    key = CodexSessions.agentID(session)
+                    self.pending[key] = self.pending.removeValue(forKey: id)
+                    self.drafts[key] = self.drafts.removeValue(forKey: id)
+                    self.outbox[key] = self.outbox.removeValue(forKey: id)
+                    self.codexDrafts.removeAll { $0.id == id }
+                    self.seen[key] = Agent(id: key, name: CodexSessions.title(text), project: agent.project, cwd: agent.cwd,
+                                           group: .working, label: "Working", detail: nil, since: Date(),
+                                           target: .codex(sessionID: session), host: "Codex")
+                    if self.selection == id { self.selection = key }
+                }
+                self.pending[key]?.sending = false
+                self.refreshCodex(force: true)
+            case .failure(let error):
+                self.pending[id] = nil
+                self.errors[id] = error.localizedDescription
+                let draft = self.drafts[id] ?? ""
+                self.drafts[id] = ([text] + (draft.isEmpty ? [] : [draft])).joined(separator: "\n\n")
+            }
+        }, ended: { [weak self] session, failure in
+            guard let self else { return }
+            let key = session.map(CodexSessions.agentID) ?? id
+            if let failure { self.errors[key] = failure }
+            self.refreshCodex(force: true)
+            self.refresh()
+            // Messages typed during the turn go out now, one turn each.
+            if var waiting = self.outbox[key], !waiting.isEmpty, let session {
+                let next = waiting.removeFirst()
+                self.outbox[key] = waiting.isEmpty ? nil : waiting
+                let current = self.allAgents.first { $0.id == key } ?? self.seen[key] ?? agent
+                self.sendCodex(current, sessionID: session, text: next)
+            }
+        })
+    }
+
+    /// Stops the selected Codex session's turn.
+    func stopCodex() {
+        guard let agent = selected, case .codex(let session) = agent.target, !session.isEmpty else { return }
+        CodexRunner.shared.stop(session)
     }
 
     /// The sidebar list: the notch's sessions, filtered by the search words.
     var shown: [Agent] {
         let words = search.lowercased().split(separator: " ")
-        var list = notch.agents.filter { agent in
+        var list = allAgents.filter { agent in
             let text = "\(agent.name) \(agent.project) \(agent.host)".lowercased()
             return words.allSatisfy { text.contains($0) }
         }
@@ -696,12 +800,14 @@ final class ChatModel: ObservableObject {
     func refresh() {
         refreshPage()
         if accounts != nil { refreshLanes() }
+        refreshCodex()
         guard let agent = selected else { return }
         let viewing = subagentID
+        let isCodex: Bool = { if case .codex = agent.target { return true }; return false }()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let path = TranscriptReader.path(for: agent) else { return }
-            let fresh = ConversationReader.read(path)
-            let subs = Subagents.list(forTranscript: path, finished: fresh.finishedAgents)
+            let fresh = isCodex ? CodexReader.read(path) : ConversationReader.read(path)
+            let subs = isCodex ? [] : Subagents.list(forTranscript: path, finished: fresh.finishedAgents)
             let sub = viewing.flatMap { id in subs.first { $0.id == id } }.map { ConversationReader.readSubagent($0.path) }
             DispatchQueue.main.async {
                 guard let self, self.selection == agent.id else { return }
@@ -781,6 +887,13 @@ final class ChatModel: ObservableObject {
     // MARK: Replying
 
     func send(_ preset: String? = nil) {
+        if let agent = selected, case .codex(let session) = agent.target {
+            let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            if preset == nil { drafts[agent.id] = "" }
+            sendCodex(agent, sessionID: session, text: text)
+            return
+        }
         guard let agent = selected, case .job(let jobID) = agent.target,
               notch.question(agent.id) == nil, notch.permission(agent.id) == nil else { return }
         let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
@@ -885,6 +998,7 @@ final class ChatModel: ObservableObject {
 
     /// Commands matching a draft like "/sd:ap"; empty once there's a space after the command.
     func completions(for agent: Agent) -> [SlashCommand] {
+        if case .codex = agent.target { return [] }
         let draft = drafts[agent.id] ?? ""
         guard draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
         return Array(SlashCommands.matches(String(draft.dropFirst()), in: SlashCommands.all(for: agent.cwd)).prefix(8))
@@ -991,6 +1105,9 @@ struct ChatView: View {
         .background(EmptyView().sheet(isPresented: $model.accountSheet) {
             AccountsSheet(model: model)
         })
+        .background(EmptyView().sheet(isPresented: $model.newSessionSheet) {
+            NewSessionSheet(model: model)
+        })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
         .environment(\.runCommand, { [weak model] script, folder in model?.runCommand(script, in: folder) })
@@ -999,57 +1116,12 @@ struct ChatView: View {
     }
 
     private var newSessionButton: AnyView {
-        AnyView(Button { NewSessionMenu.popUp(model: model) } label: {
+        AnyView(Button { model.newSessionSheet = true } label: {
             Label("New Session", systemImage: "plus")
         }
         .buttonStyle(.kit(.primary))
-        .help("New background session: pick an account (a free one gets a lane) and a folder")
+        .help("New session: pick a Claude Code or Codex account and a folder")
         .part("New Session Button", .bottom))
-    }
-}
-
-/// Account first, then the project: folders your sessions work in, folders added before, or a new one.
-/// The session starts idle and opens in Chat. From the sidebar's + and the empty screen.
-enum NewSessionMenu {
-    static func popUp(model: ChatModel) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        if #available(macOS 14, *) { menu.addItem(.sectionHeader(title: "New Background Session On")) }
-        let folders = model.projectFolders
-        for target in model.sessionTargets {
-            let item = NSMenuItem(title: target.title, action: nil, keyEquivalent: "")
-            let projects = NSMenu()
-            projects.autoenablesItems = false
-            for folder in folders {
-                let row = ActionMenuItem(ChatModel.folderTitle(folder, among: folders)) { [model] in
-                    model.newBackgroundSession(in: folder, on: target.accountID)
-                }
-                row.toolTip = folder
-                projects.addItem(row)
-            }
-            if !folders.isEmpty { projects.addItem(.separator()) }
-            projects.addItem(ActionMenuItem("Add Project Folder…") { [model] in
-                NSApp.activate(ignoringOtherApps: true)
-                let panel = NSOpenPanel()
-                panel.canChooseDirectories = true
-                panel.canChooseFiles = false
-                panel.prompt = "Start Here"
-                panel.message = "The project folder for the new session, on \(target.title)."
-                guard panel.runModal() == .OK, let folder = panel.url?.path else { return }
-                model.addProjectFolder(folder)
-                model.newBackgroundSession(in: folder, on: target.accountID)
-            })
-            item.submenu = projects
-            menu.addItem(item)
-        }
-        if model.accounts != nil {
-            menu.addItem(.separator())
-            menu.addItem(ActionMenuItem("Add Account…") { [model] in model.addAccount() })
-            if model.codex?.isAvailable == true {
-                menu.addItem(ActionMenuItem("Codex Accounts…") { [model] in model.addAccount(.codex) })
-            }
-        }
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 }
 
@@ -1067,11 +1139,11 @@ private struct SessionSidebar: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Sessions").kitType(.title).foregroundColor(KitInk.text)
                 Spacer()
-                Button { NewSessionMenu.popUp(model: model) } label: {
+                Button { model.newSessionSheet = true } label: {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
                 }
                 .buttonStyle(.kit(.ghost))
-                .help("New background session: pick an account (a free one gets a lane) and a folder")
+                .help("New session: pick a Claude Code or Codex account and a folder")
                 .part("New Session Button", .bottomTrailing)
                 if notch.needsCount > 0 {
                     KitStatusPill(group: .needsInput, text: notch.needsCount == 1 ? "1 needs you" : "\(notch.needsCount) need you")
@@ -1267,6 +1339,19 @@ private struct SessionDetail: View {
                     if let account = model.account(for: agent) {
                         AccountMenu(model: model, agent: agent, account: account)
                             .part("Account Menu", .bottomLeading)
+                    } else if case .codex = agent.target, let email = model.codex?.active?.email {
+                        // Codex has one login: every Codex session runs on it.
+                        Button { model.addAccount(.codex) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "person.crop.circle").font(.system(size: 10, weight: .semibold))
+                                Text(email).lineLimit(1).truncationMode(.middle)
+                                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                            }
+                            .kitType(.meta).foregroundColor(KitInk.textMuted)
+                        }
+                        .buttonStyle(.kitPlain)
+                        .help("The Codex account. Click to switch or add one.")
+                        .part("Codex Account Button", .bottomLeading)
                     }
                 }
             }
@@ -1312,7 +1397,7 @@ private struct SessionDetail: View {
                 case .job where agent.command != nil:
                     Notice(text: "This background job runs a command, not a conversation, so it can't take replies.")
                         .part("Read-Only Notice", .trailing)
-                case .job:
+                case .job, .codex:
                     Composer(model: model, agent: agent, dropping: dropping)
                 case .process:
                     Notice(text: agent.host == "claude -p"
@@ -1821,6 +1906,13 @@ private struct Composer: View {
     @FocusState private var focused: Bool
     @State private var focusedBeforeDrag = false
 
+    private var placeholder: String {
+        if case .codex(let session) = agent.target {
+            return (session.isEmpty ? "What should Codex do in \(agent.project)?" : "Reply to \(agent.name)") + "   ⌥ Return new line"
+        }
+        return "Reply to \(agent.name), or / for commands…   ⌥ Return new line"
+    }
+
     var body: some View {
         let draft = Binding(get: { model.drafts[agent.id] ?? "" },
                             set: { model.drafts[agent.id] = $0; model.completionIndex = 0 })
@@ -1904,7 +1996,7 @@ private struct Composer: View {
                     }
                 }
                 HStack(alignment: .bottom, spacing: 10) {
-                    TextField(showsChip || model.suggestion(for: agent) == nil ? "Reply to \(agent.name), or / for commands…   ⌥ Return new line"
+                    TextField(showsChip || model.suggestion(for: agent) == nil ? placeholder
                               : "\(model.suggestion(for: agent) ?? "")   ⇥ Tab",
                               text: draft, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -1958,7 +2050,20 @@ private struct Composer: View {
                 .padding(.leading, 6)
             } else {
                 HStack(spacing: 8) {
-                    ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
+                    if case .codex(let session) = agent.target {
+                        Text(["Codex", model.conversation.facts.model].compactMap { $0 }.joined(separator: " · "))
+                            .kitType(.meta).foregroundColor(KitInk.textFaint)
+                            .part("Codex Model", .top)
+                        Spacer(minLength: 0)
+                        if !session.isEmpty, agent.group == .working {
+                            Button("Stop") { model.stopCodex() }
+                                .buttonStyle(.kit(.ghost))
+                                .help("Stop this turn")
+                                .part("Stop Button", .top)
+                        }
+                    } else {
+                        ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
+                    }
                     if shell {
                         Text("Return runs it like ! in the terminal · delete the ! to send a message instead")
                             .kitType(.meta).foregroundColor(KitInk.textFaint)
@@ -2228,6 +2333,7 @@ enum ChatFormat {
         case .job: return "Open in Terminal"
         case .process: return "Open in \(agent.host.isEmpty || agent.host == "claude -p" ? "Terminal" : agent.host)"
         case .resume: return "Resume in Terminal"
+        case .codex: return "Open in Terminal"
         }
     }
 
@@ -2241,6 +2347,7 @@ enum ChatFormat {
         case .job: return "Attach to this background session in a terminal"
         case .process: return "Bring the session's terminal window forward"
         case .resume: return "Start this session again in a terminal with claude --resume"
+        case .codex: return "Continue this Codex session in a terminal with codex resume"
         }
     }
 

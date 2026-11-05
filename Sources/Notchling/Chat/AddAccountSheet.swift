@@ -48,7 +48,7 @@ struct AccountsSheet: View {
 
 // MARK: - Claude Code
 
-private struct ClaudeSignInPane: View {
+struct ClaudeSignInPane: View {
     @ObservedObject var model: ChatModel
 
     var body: some View {
@@ -123,7 +123,7 @@ private struct ClaudeSignInSteps: View {
 
 // MARK: - Codex
 
-private struct CodexAccountsPane: View {
+struct CodexAccountsPane: View {
     @ObservedObject var store: CodexStore
     @State private var confirming: Confirm?
     @State private var removing: CodexAccount?

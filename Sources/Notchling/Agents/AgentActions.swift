@@ -11,6 +11,9 @@ enum AgentActions {
                           + "\(shellQuote(ReplySender.claudePath)) --resume \(sessionID)")
         case .process(let pid):
             if !jump(to: pid, cwd: cwd) { NSSound.beep() }
+        case .codex(let sessionID):
+            guard !sessionID.isEmpty, let codex = CodexStore.binary() else { NSSound.beep(); return }
+            runInTerminal((cwd.isEmpty ? "" : "cd \(shellQuote(cwd)) && ") + "\(shellQuote(codex)) resume \(sessionID)")
         }
     }
 

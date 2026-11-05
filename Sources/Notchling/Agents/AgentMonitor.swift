@@ -17,6 +17,9 @@ enum AgentTarget {
     case job(String)                             // background job: `claude attach <id>`
     case process(pid_t)                          // live terminal session: bring its window forward
     case resume(sessionID: String, cwd: String)  // exited session: `claude --resume <id>`
+    /// A Codex CLI session, shown only in Chat; turns run through `CodexRunner`. Empty id: a new
+    /// session not started yet (its first message starts it).
+    case codex(sessionID: String)
 }
 
 struct Agent {
@@ -42,6 +45,7 @@ struct Agent {
     /// Replies can be typed in only for background conversations; terminal sessions belong to their window.
     var canReply: Bool {
         if case .job = target { return command == nil }
+        if case .codex = target { return true }
         return false
     }
 }
