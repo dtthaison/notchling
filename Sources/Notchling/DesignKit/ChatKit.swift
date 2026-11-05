@@ -211,6 +211,46 @@ extension EnvironmentValues {
 
 // MARK: - Buttons
 
+/// The pointing hand over anything clickable while it's enabled. Pushes once and pops only what it
+/// pushed: the old per-style `onHover` push/pop popped without a push when a button turned disabled
+/// under the mouse, and left the hand stuck when a hovered button went away.
+struct PointerCursor: ViewModifier {
+    var active = true
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in set(inside && active && isEnabled) }
+            .onChange(of: isEnabled) { enabled in if !enabled { set(false) } }
+            .onDisappear { set(false) }
+    }
+
+    private func set(_ on: Bool) {
+        guard on != pushed else { return }
+        pushed = on
+        if on { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+    }
+}
+
+extension View {
+    /// The pointing hand while the mouse is over this view (and it's enabled).
+    func pointerCursor(_ active: Bool = true) -> some View { modifier(PointerCursor(active: active)) }
+}
+
+/// SwiftUI's plain button with the pointing hand: use instead of `.plain` for anything clickable.
+struct KitPlainButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .pointerCursor()
+    }
+}
+
+extension ButtonStyle where Self == KitPlainButtonStyle {
+    static var kitPlain: KitPlainButtonStyle { KitPlainButtonStyle() }
+}
+
 struct KitButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, ghost }
     var kind: Kind = .secondary
@@ -249,10 +289,8 @@ private struct KitButtonBody: View {
             .scaleEffect(state == .pressed ? 0.97 : 1)
             .animation(KitMotion.press, value: state)
             .contentShape(shape)
-            .onHover { inside in
-                hovering = inside
-                if isEnabled { if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
-            }
+            .onHover { hovering = $0 }
+            .pointerCursor()
     }
 
     private var fill: Color {
@@ -293,6 +331,7 @@ struct KitSessionRowStyle: ButtonStyle {
                 .overlay(shape.strokeBorder(KitInk.accent, lineWidth: focused && selected ? 2 : 0))
                 .contentShape(shape)
                 .onHover { hovering = $0 }
+                .pointerCursor()
                 .animation(KitMotion.hover, value: hovering)
         }
 
@@ -340,10 +379,8 @@ struct KitOptionStyle: ButtonStyle {
             .overlay(shape.strokeBorder(state == .pressed ? KitInk.accent : KitInk.hairline, lineWidth: 1))
             .opacity(state == .disabled ? 0.4 : 1)
             .contentShape(shape)
-            .onHover { inside in
-                hovering = inside
-                if isEnabled { if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
-            }
+            .onHover { hovering = $0 }
+            .pointerCursor()
             .animation(KitMotion.hover, value: hovering)
         }
     }

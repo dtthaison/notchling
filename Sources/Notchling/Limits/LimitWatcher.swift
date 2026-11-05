@@ -447,5 +447,6 @@ struct NoticeBannerView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture(perform: onClose)
+        .pointerCursor()
     }
 }

@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        PointerCursors.install()
         DockPresence.start()
         searchShortcut = search.start()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

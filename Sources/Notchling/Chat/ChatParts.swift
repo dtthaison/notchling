@@ -106,7 +106,7 @@ struct ToolStepView: View {
                 .background(Capsule().fill(KitInk.raised.opacity(0.7)))
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.kitPlain)
             .pointerCursor()
             .help(open ? "Hide the tool calls" : "Show each tool call")
 
@@ -171,7 +171,9 @@ struct ToolCallRow: View {
                     .fill(hovering && hasDetail ? KitInk.raised.opacity(0.6) : .clear))
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.kitPlain)
+            // Nothing to open: not clickable, so no pointing hand.
+            .disabled(!hasDetail)
             .onHover { hovering = $0 }
             .help(call.input.isEmpty ? call.title : String(call.input.prefix(300)))
 
@@ -314,7 +316,7 @@ struct ThinkingRow: View {
                 .foregroundColor(KitInk.textFaint)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.kitPlain)
             if open {
                 HStack(alignment: .top, spacing: 10) {
                     Rectangle().fill(KitInk.hairline).frame(width: 2)
@@ -353,7 +355,7 @@ struct TaskPanel: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.kitPlain)
             .pointerCursor()
             if open {
                 VStack(alignment: .leading, spacing: 6) {
@@ -524,7 +526,7 @@ struct SessionInspector: View {
                                 }
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.kitPlain)
                             .pointerCursor()
                             .help(path)
                         }
@@ -599,7 +601,7 @@ struct SessionInspector: View {
         Button(action: action) {
             Text(title).kitType(.meta).foregroundColor(KitInk.accent)
         }
-        .buttonStyle(.plain).pointerCursor()
+        .buttonStyle(.kitPlain).pointerCursor()
     }
 
     private func branchRow(_ b: GitInfo.Branch) -> some View {
@@ -651,7 +653,7 @@ struct SessionInspector: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.kitPlain)
         .pointerCursor()
         .help(Self.statusName(change.status) + ": " + change.path)
     }

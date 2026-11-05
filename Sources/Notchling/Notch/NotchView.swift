@@ -1077,7 +1077,7 @@ struct TabBar: View {
                     .background(Capsule().fill(Color.white.opacity(selected ? 0.14 : 0)))
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
             }
         }
         .padding(.horizontal, 4)
@@ -1158,6 +1158,7 @@ struct AgentListView: View {
                         ForEach(members, id: \.id) { agent in
                             AgentRow(model: model, agent: agent).part("Notch Session Row", .trailing)
                                 .onTapGesture { model.open(agent.id) }
+                                .pointerCursor()
                                 .contextMenu {
                                     Button("Open in Chat") { model.go(.collapsed); model.onOpenChat?(agent.id) }
                                     Button("Hide") { model.onHide?(agent) }
@@ -1169,7 +1170,7 @@ struct AgentListView: View {
                         }
                         if model.tab == .completed {
                             Button("Clear all") { model.onClearCompleted?() }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.kitPlain)
                                 .font(.system(size: 11)).foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 24)
@@ -1300,6 +1301,7 @@ struct PeekView: View {
                 .padding(.top, 6)
                 .contentShape(Rectangle())
                 .onTapGesture { model.open(agent.id) }
+                .pointerCursor()
             }
         }
         .onExitCommand { model.go(.collapsed) }
@@ -1328,7 +1330,7 @@ struct ReplyPeek: View {
                 Spacer()
                 Tag(text: agent.host)
                 Button("Open ›") { model.open(agent.id) }
-                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                    .buttonStyle(.kitPlain).font(.system(size: 11)).foregroundColor(.secondary)
                     .pointerCursor()
                 HideButton(model: model).part("Hide Button", .bottom)
             }
@@ -1355,7 +1357,7 @@ struct ReplyPeek: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.15)))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
                 .pointerCursor()
                 .help("Click, or press Tab, to put it in the box")
             }
@@ -1373,7 +1375,7 @@ struct HideButton: View {
         Button { model.go(.collapsed) } label: {
             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
         }
-        .buttonStyle(.plain).foregroundColor(.secondary)
+        .buttonStyle(.kitPlain).foregroundColor(.secondary)
         .pointerCursor()
         .help("Hide; it stays in the list (Esc)")
     }
@@ -1404,7 +1406,7 @@ struct PeekReplyBox: View {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 24))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
                 .pointerCursor()
                 .foregroundColor(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .orange)
                 .disabled(model.sending)
@@ -1452,7 +1454,7 @@ struct QuestionCard: View {
                     HideButton(model: model).part("Hide Button", .bottom)
                 }
                 if step > 0 {
-                    Button("Back") { model.undoChoice() }.buttonStyle(.plain)
+                    Button("Back") { model.undoChoice() }.buttonStyle(.kitPlain)
                         .font(.system(size: 11)).foregroundColor(.secondary)
                 }
             }
@@ -1490,7 +1492,7 @@ struct QuestionCard: View {
                             .background(RoundedRectangle(cornerRadius: 10).fill(Color.optionFill))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.kitPlain)
                         .keyboardShortcut(KeyEquivalent(Character("\(min(index + 1, 9))")), modifiers: .command)
                         .disabled(!canAnswer)
                     }
@@ -1514,7 +1516,7 @@ struct QuestionCard: View {
                     .disabled(model.sending)
             } else {
                 Button("Answer in \(agent.host) ›") { model.answerInTerminal(agent.id) }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundColor(.asks)
+                    .buttonStyle(.kitPlain).font(.system(size: 12)).foregroundColor(.asks)
             }
 
             if let error = model.sendError {
@@ -1579,7 +1581,7 @@ struct PermissionCard: View {
                 .background(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12)))
 
             Button("Answer in \(agent.host) ›") { model.decide(.terminal, for: agent.id) }
-                .buttonStyle(.plain).font(.system(size: 12)).foregroundColor(.asks)
+                .buttonStyle(.kitPlain).font(.system(size: 12)).foregroundColor(.asks)
                 .frame(height: 22)
         }
     }
@@ -1600,7 +1602,7 @@ struct PermissionCard: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.optionFill))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.kitPlain)
         .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
     }
 }
@@ -1652,7 +1654,7 @@ struct DetailView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Button { model.go(.list) } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(.kitPlain).foregroundColor(.secondary)
             Circle().fill(agent.color).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(agent.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
@@ -1666,13 +1668,13 @@ struct DetailView: View {
             } label: {
                 Image(systemName: "bubble.left.and.bubble.right")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary).help("Open in Chat window")
+            .buttonStyle(.kitPlain).foregroundColor(.secondary).help("Open in Chat window")
             Button { AgentActions.open(agent.target, cwd: agent.cwd) } label: {
                 Image(systemName: "arrow.up.forward.app")
             }
-            .buttonStyle(.plain).foregroundColor(.secondary).help("Open in terminal")
+            .buttonStyle(.kitPlain).foregroundColor(.secondary).help("Open in terminal")
             Button { model.go(.collapsed) } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).foregroundColor(.secondary)
+                .buttonStyle(.kitPlain).foregroundColor(.secondary)
         }
         .part("Notch Detail Header", .bottomTrailing)
     }
@@ -1721,7 +1723,7 @@ struct DetailView: View {
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Capsule().fill(Color.orange.opacity(0.25)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
                 .disabled(model.sending)
             }
             HStack(alignment: .bottom, spacing: 8) {
@@ -1740,7 +1742,7 @@ struct DetailView: View {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 24))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
                 .foregroundColor(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .orange)
                 .disabled(model.sending)
             }
@@ -1781,7 +1783,7 @@ struct CommandList: View {
                     .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(selected ? 0.12 : 0)))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kitPlain)
             }
         }
         .padding(4)

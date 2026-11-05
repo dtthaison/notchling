@@ -273,14 +273,6 @@ private struct AccountsPage: View {
 
 extension ClaudeAccount: Identifiable {}
 
-extension View {
-    /// The pointing-hand cursor while hovering, so clickable things read as clickable.
-    func pointerCursor() -> some View {
-        onHover { inside in
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
-}
 
 /// One account row, shared by Claude Code, Claude Desktop and Antigravity: avatar, email and a
 /// subtitle, an In Use badge or a Switch button, a ⋯ menu, and whatever limits/cost the provider

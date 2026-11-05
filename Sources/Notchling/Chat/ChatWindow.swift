@@ -1682,7 +1682,7 @@ struct ModelPicker: View {
             .fixedSize()
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.kitPlain)
         .pointerCursor()
         .help("The model this session uses. Pick another to switch it (like /model in the terminal).")
     }
@@ -1763,7 +1763,7 @@ private struct Composer: View {
                                     .fill(picked ? KitInk.selection : .clear))
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.kitPlain)
                             .pointerCursor()
                         }
                     }
@@ -1823,7 +1823,7 @@ private struct Composer: View {
                         }
                         .frame(width: 30, height: 30)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.kitPlain)
                     // Still works while one goes out: the next waits its turn.
                     .disabled(empty)
                     .help(shell ? "Run the command in the session (Return)" : "Send the reply (Return)")
@@ -2341,7 +2341,7 @@ private struct AccountMenu: View {
             .kitType(.meta).foregroundColor(KitInk.textMuted)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.kitPlain)
         .pointerCursor()
         .help(account.lane.map { "This session runs in the \($0.name) lane, on \($0.email). Click to switch it." }
               ?? "This session runs on the main login. Click to switch it.")

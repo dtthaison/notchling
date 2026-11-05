@@ -306,6 +306,7 @@ private struct SearchView: View {
                             .contentShape(Rectangle())
                             .onHover { if $0 { model.selected = index } }
                             .onTapGesture { open(page) }
+                            .pointerCursor()
                     }
                 }
                 .padding(SearchLayout.listPadding)
