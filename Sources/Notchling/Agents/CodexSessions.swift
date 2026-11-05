@@ -156,6 +156,8 @@ enum CodexReader {
             switch obj["type"] as? String {
             case "turn_context":
                 if let m = payload["model"] as? String { model = m; facts.model = m }
+                let settings = (payload["collaboration_mode"] as? [String: Any])?["settings"] as? [String: Any]
+                facts.effort = settings?["reasoning_effort"] as? String ?? payload["effort"] as? String
             case "response_item":
                 item(payload, date: date, ordinal: ordinal)
             case "event_msg":

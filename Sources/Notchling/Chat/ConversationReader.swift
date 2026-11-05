@@ -57,6 +57,8 @@ struct TaskEntry: Identifiable, Equatable {
 struct SessionFacts: Equatable {
     var branch: String?
     var model: String?
+    /// The reasoning effort the latest turn ran at, when the transcript says (Codex; nil is the default).
+    var effort: String?
     var inputTokens = 0
     var outputTokens = 0
     /// What the model holds after the latest reply (what /context counts): its last request's input and output.

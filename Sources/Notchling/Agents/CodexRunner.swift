@@ -20,8 +20,11 @@ final class CodexRunner {
 
     func isRunning(_ sessionID: String) -> Bool { running.contains(sessionID) }
 
-    static func arguments(prompt: String, session: String?, folder: String) -> [String] {
-        let common = ["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\""]
+    static func arguments(prompt: String, session: String?, folder: String, pick: CodexPick = CodexPick()) -> [String] {
+        var common = ["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\""]
+        // A picked model or effort holds from this turn on; Codex keeps its own default otherwise.
+        if let model = pick.model { common += ["-m", model] }
+        if let effort = pick.effort { common += ["-c", "model_reasoning_effort=\"\(effort)\""] }
         if let session {
             return ["exec", "resume"] + common + [session, prompt]
         }
@@ -31,7 +34,7 @@ final class CodexRunner {
     /// Starts a turn. `started` gets the session id once Codex names it (at once for a resume), or an
     /// error; `ended` runs on the main thread when the turn's process exits, with what it printed last
     /// when it failed.
-    func run(_ prompt: String, session: String?, folder: String,
+    func run(_ prompt: String, session: String?, folder: String, pick: CodexPick = CodexPick(),
              started: @escaping (Result<String, Error>) -> Void,
              ended: @escaping (_ sessionID: String?, _ failure: String?) -> Void) {
         guard let codex = CodexStore.binary() else {
@@ -40,7 +43,7 @@ final class CodexRunner {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codex)
-        process.arguments = Self.arguments(prompt: prompt, session: session, folder: folder)
+        process.arguments = Self.arguments(prompt: prompt, session: session, folder: folder, pick: pick)
         process.currentDirectoryURL = URL(fileURLWithPath: folder)
         process.environment = Self.environment()
         let out = Pipe(), err = Pipe()

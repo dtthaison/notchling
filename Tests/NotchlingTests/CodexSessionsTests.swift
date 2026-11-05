@@ -85,6 +85,37 @@ final class CodexSessionsTests: XCTestCase {
                        ["exec", "resume", "--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\"", "abc", "more"])
     }
 
+    func testPickedModelAndEffortGoOnEveryTurn() {
+        let pick = CodexPick(model: "gpt-6.1-sol", effort: "high")
+        let args = CodexRunner.arguments(prompt: "more", session: "abc", folder: "/p", pick: pick)
+        XCTAssertEqual(Array(args.prefix(2)), ["exec", "resume"])
+        XCTAssertTrue(args.contains("-m") && args[args.firstIndex(of: "-m")! + 1] == "gpt-6.1-sol")
+        XCTAssertTrue(args.contains("model_reasoning_effort=\"high\""))
+        XCTAssertEqual(Array(args.suffix(2)), ["abc", "more"], "options before the session id and prompt")
+    }
+
+    func testModelListFromCodexsCache() {
+        let json = #"""
+        {"models":[
+          {"slug":"b","display_name":"B","priority":2,"visibility":"list","default_reasoning_level":"medium",
+           "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]},
+          {"slug":"hidden","display_name":"H","priority":0,"visibility":"hide"},
+          {"slug":"a","display_name":"A","priority":1,"visibility":"list","description":"Fast"}
+        ]}
+        """#
+        let models = CodexModels.parse(Data(json.utf8))
+        XCTAssertEqual(models.map(\.slug), ["a", "b"], "listed only, in Codex's order")
+        XCTAssertEqual(models[1].efforts, ["low", "medium"])
+        XCTAssertEqual(models[1].defaultEffort, "medium")
+    }
+
+    func testEffortFromTheTurnContext() throws {
+        var withEffort = lines
+        withEffort[4] = #"{"timestamp":"2026-11-05T08:44:12.003Z","ordinal":4,"type":"turn_context","payload":{"turn_id":"t1","model":"gpt-6-luna","collaboration_mode":{"mode":"default","settings":{"model":"gpt-6-luna","reasoning_effort":"xhigh"}}}}"#
+        try write(withEffort)
+        XCTAssertEqual(CodexReader.read(file.path).facts.effort, "xhigh")
+    }
+
     func testSessionChoiceKeys() {
         for choice in [SessionChoice.claude(accountID: nil), .claude(accountID: "a1"), .codex(accountID: "u:w")] {
             XCTAssertEqual(SessionChoice(key: choice.key), choice)

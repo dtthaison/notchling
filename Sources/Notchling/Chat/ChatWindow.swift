@@ -739,7 +739,8 @@ final class ChatModel: ObservableObject {
             return
         }
         pending[id] = Pending(text: text, at: Date(), sending: true, exact: false)
-        CodexRunner.shared.run(text, session: sessionID.isEmpty ? nil : sessionID, folder: agent.cwd, started: { [weak self] result in
+        CodexRunner.shared.run(text, session: sessionID.isEmpty ? nil : sessionID, folder: agent.cwd,
+                               pick: codexPicks[id] ?? CodexPick(), started: { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let session):
@@ -750,6 +751,10 @@ final class ChatModel: ObservableObject {
                     self.pending[key] = self.pending.removeValue(forKey: id)
                     self.drafts[key] = self.drafts.removeValue(forKey: id)
                     self.outbox[key] = self.outbox.removeValue(forKey: id)
+                    if let pick = self.codexPicks[id] {
+                        self.setCodexPick(CodexPick(), for: id)
+                        self.setCodexPick(pick, for: key)
+                    }
                     self.codexDrafts.removeAll { $0.id == id }
                     self.seen[key] = Agent(id: key, name: CodexSessions.title(text), project: agent.project, cwd: agent.cwd,
                                            group: .working, label: "Working", detail: nil, since: Date(),
@@ -778,6 +783,21 @@ final class ChatModel: ObservableObject {
                 self.sendCodex(current, sessionID: session, text: next)
             }
         })
+    }
+
+    /// The model and effort picked per Codex session (by row id), for its next turns. Kept across
+    /// launches, since nothing else remembers them: exec takes them per turn.
+    @Published private(set) var codexPicks: [String: CodexPick] = {
+        guard let data = UserDefaults.standard.data(forKey: "codexPicks"),
+              let saved = try? JSONDecoder().decode([String: CodexPick].self, from: data) else { return [:] }
+        return saved
+    }()
+
+    func setCodexPick(_ pick: CodexPick, for id: String) {
+        codexPicks[id] = pick == CodexPick() ? nil : pick
+        if let data = try? JSONEncoder().encode(codexPicks.filter { !$0.key.hasPrefix("codex-new:") }) {
+            UserDefaults.standard.set(data, forKey: "codexPicks")
+        }
     }
 
     /// Stops the selected Codex session's turn.
@@ -1898,6 +1918,86 @@ struct ModelPicker: View {
     }
 }
 
+/// A Codex session's model and effort, for its next turns: Codex's own list (`CodexModels`), each
+/// model's efforts in a submenu, and Default to go back to Codex's setting.
+struct CodexModelPicker: View {
+    @ObservedObject var model: ChatModel
+    let agent: Agent
+
+    private var pick: CodexPick { model.codexPicks[agent.id] ?? CodexPick() }
+    private var models: [CodexModel] { CodexModels.load() }
+
+    /// What the next turn uses: the pick, else what the last turn ran with.
+    private var label: String {
+        let slug = pick.model ?? model.conversation.facts.model
+        let name = slug.map { s in models.first { $0.slug == s }?.name ?? s } ?? "Default Model"
+        let effort = pick.effort ?? model.conversation.facts.effort
+        return ["Codex", name, effort].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Button(action: popUp) {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu").font(.system(size: 9, weight: .semibold))
+                Text(label)
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .kitType(.meta).foregroundColor(KitInk.textMuted)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.kitPlain)
+        .pointerCursor()
+        .help("The model and reasoning effort for this session's next turns.")
+    }
+
+    private func popUp() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let current = pick
+        let id = agent.id
+        let running = model.conversation.facts.model
+        for m in models {
+            let item = ActionMenuItem(m.name) { [model] in
+                // A new model starts at its own default effort unless one was picked.
+                model.setCodexPick(CodexPick(model: m.slug, effort: current.effort.flatMap { m.efforts.contains($0) ? $0 : nil }), for: id)
+            }
+            item.toolTip = m.summary
+            item.state = (current.model ?? running) == m.slug ? .on : .off
+            if !m.efforts.isEmpty {
+                let sub = NSMenu()
+                sub.autoenablesItems = false
+                for effort in m.efforts {
+                    let title = effort.prefix(1).uppercased() + effort.dropFirst() + (effort == m.defaultEffort ? " (Default)" : "")
+                    let row = ActionMenuItem(title) { [model] in model.setCodexPick(CodexPick(model: m.slug, effort: effort), for: id) }
+                    row.state = (current.model ?? running) == m.slug && (current.effort ?? m.defaultEffort) == effort ? .on : .off
+                    sub.addItem(row)
+                }
+                let pickModel = ActionMenuItem("Use \(m.name)") { [model] in
+                    model.setCodexPick(CodexPick(model: m.slug, effort: nil), for: id)
+                }
+                sub.insertItem(pickModel, at: 0)
+                sub.insertItem(.separator(), at: 1)
+                item.submenu = sub
+            }
+            menu.addItem(item)
+        }
+        if models.isEmpty {
+            let none = NSMenuItem(title: "Codex hasn't listed its models yet", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        menu.addItem(.separator())
+        let reset = ActionMenuItem("Codex Default") { [model] in model.setCodexPick(CodexPick(), for: id) }
+        reset.state = current == CodexPick() ? .on : .off
+        menu.addItem(reset)
+        let note = NSMenuItem(title: "Applies from the next turn.", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        menu.addItem(note)
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+}
+
 private struct Composer: View {
     @ObservedObject var model: ChatModel
     let agent: Agent
@@ -2051,9 +2151,7 @@ private struct Composer: View {
             } else {
                 HStack(spacing: 8) {
                     if case .codex(let session) = agent.target {
-                        Text(["Codex", model.conversation.facts.model].compactMap { $0 }.joined(separator: " · "))
-                            .kitType(.meta).foregroundColor(KitInk.textFaint)
-                            .part("Codex Model", .top)
+                        CodexModelPicker(model: model, agent: agent).part("Codex Model Picker", .top)
                         Spacer(minLength: 0)
                         if !session.isEmpty, agent.group == .working {
                             Button("Stop") { model.stopCodex() }
