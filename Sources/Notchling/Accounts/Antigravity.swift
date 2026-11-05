@@ -103,6 +103,8 @@ final class AntigravityStore: ObservableObject {
             var state = self.capture()
             var reopen: [String] = []
             let result = Result(catching: {
+                // Already in use: the live login may be newer than the saved copy (renewed), so keep it.
+                if state.activeID == id { return }
                 guard let login = Keychain.read(service: Self.service, account: id) else {
                     throw AccountError("Notchling has no saved login for this account. Add it again.")
                 }
@@ -112,7 +114,7 @@ final class AntigravityStore: ObservableObject {
                 state.activeID = id
             })
             // Always end with Antigravity open on the switched-to account, even if it wasn't running.
-            Self.open(reopen.isEmpty ? [Self.bundleIDs[0]] : reopen)
+            if state.activeID != id || !reopen.isEmpty { Self.open(reopen.isEmpty ? [Self.bundleIDs[0]] : reopen) }
             DispatchQueue.main.async {
                 self.busy = false
                 self.apply(state)
@@ -174,7 +176,7 @@ final class AntigravityStore: ObservableObject {
         adding = true
         addTimer?.invalidate()
         addTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self, FileManager.default.fileExists(atPath: Self.tokenURL.path) else { return }
+            guard let self, Self.readLogin() != nil else { return }
             self.stopWatching()
             self.sync()
         }
@@ -202,7 +204,12 @@ final class AntigravityStore: ObservableObject {
             state.activeID = nil
             return state
         }
-        guard let account = Self.account(in: login) else { return state }
+        guard var account = Self.account(in: login) else { return state }
+        // The newer format names only the email: it's the saved account with that email, if any.
+        if account.id.hasPrefix(Self.emailIDPrefix),
+           let known = state.accounts.first(where: { $0.email.caseInsensitiveCompare(account.email) == .orderedSame }) {
+            account = AntigravityAccount(id: known.id, email: known.email)
+        }
         if login != lastSaved, Keychain.write(service: Self.service, account: account.id, value: login) {
             lastSaved = login
         }
@@ -250,10 +257,21 @@ final class AntigravityStore: ObservableObject {
         guard Keychain.write(service: liveService, account: liveAccount, value: encoded) else {
             throw AccountError("Couldn't update Antigravity's saved login.")
         }
+        // The file mirror is the older format (with `id_token`). A newer-format login doesn't fit it, so
+        // drop the old account's file instead; Antigravity writes it again from the Keychain item.
+        guard hasIDToken(login) else {
+            try? FileManager.default.removeItem(at: tokenURL)
+            return
+        }
         let dir = tokenURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data(login.utf8).write(to: tokenURL, options: [.atomic])
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+    }
+
+    private static func hasIDToken(_ login: String) -> Bool {
+        let json = try? JSONSerialization.jsonObject(with: Data(login.utf8)) as? [String: Any]
+        return json?["id_token"] is String
     }
 
     /// Clears Antigravity's login so it starts at the sign-in screen.
@@ -269,10 +287,19 @@ final class AntigravityStore: ObservableObject {
         return String(data: data, encoding: .utf8)
     }
 
-    /// The account named by the id token's `sub` and `email`.
+    /// Id for an account known only by its email (the newer login format), until it matches a saved one.
+    static let emailIDPrefix = "email:"
+
+    /// The account a login belongs to. The older format (Antigravity's first releases, still in the file
+    /// mirror) carries an `id_token`, whose `sub` is the id. The newer one, which agy and current
+    /// Antigravity write to the Keychain item when they renew it (`{token, auth_method, id_token_email}`),
+    /// names only the email.
     static func account(in login: String) -> AntigravityAccount? {
-        guard let json = try? JSONSerialization.jsonObject(with: Data(login.utf8)) as? [String: Any],
-              let token = json["id_token"] as? String else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: Data(login.utf8)) as? [String: Any] else { return nil }
+        guard let token = json["id_token"] as? String else {
+            guard let email = json["id_token_email"] as? String, !email.isEmpty else { return nil }
+            return AntigravityAccount(id: emailIDPrefix + email.lowercased(), email: email)
+        }
         let parts = token.split(separator: ".")
         guard parts.count > 1 else { return nil }
         var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")

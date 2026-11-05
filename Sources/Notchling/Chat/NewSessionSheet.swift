@@ -44,7 +44,6 @@ struct NewSessionSheet: View {
     /// Adding an account in place of the lists.
     @State private var adding: ChatModel.AccountTab?
     @State private var confirmSwitch: CodexAccount?
-    @State private var confirmAntigravity: AntigravityAccount?
     @State private var working = false
     @State private var error: String?
     /// Claude Code refused the folder until it's trusted: Start becomes Trust Folder and Start.
@@ -73,12 +72,6 @@ struct NewSessionSheet: View {
         .onAppear(perform: pickDefaults)
         .onChange(of: folder) { _ in untrusted = false; error = nil }
         .onChange(of: choice) { _ in untrusted = false; error = nil }
-        .background(EmptyView().alert(item: $confirmAntigravity) { account in
-            Alert(title: Text("Switch Antigravity to \(account.email)?"),
-                  message: Text("Antigravity CLI and the Antigravity app share one login. The app quits and opens again on this account, and Antigravity sessions open in Chat restart. agy running in a terminal keeps the old login until you restart it."),
-                  primaryButton: .default(Text("Switch and Start")) { start(switchingCodex: false, switchingAntigravity: true) },
-                  secondaryButton: .cancel())
-        })
         .alert(item: $confirmSwitch) { account in
             Alert(title: Text("Switch Codex to \(account.email)?"),
                   message: Text(CodexStore.switchWarning(CodexStore.runningWork())
@@ -382,6 +375,15 @@ struct NewSessionSheet: View {
         folder = path
     }
 
+    private func confirmAntigravitySwitch(to account: AntigravityAccount?) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Switch Antigravity to \(account?.email ?? "This Account")?"
+        alert.informativeText = "Antigravity CLI and the Antigravity app share one login. The app quits and opens again on this account, and Antigravity sessions open in Chat restart. agy running in a terminal keeps the old login until you restart it."
+        alert.addButton(withTitle: "Switch and Start")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     private func start(switchingCodex: Bool, switchingAntigravity: Bool = false) {
         guard let choice, let folder else { return }
         error = nil
@@ -428,10 +430,8 @@ struct NewSessionSheet: View {
                 model.newAntigravitySession(in: folder)
                 return
             }
-            guard switchingAntigravity else {
-                confirmAntigravity = store.accounts.first { $0.id == accountID }
-                return
-            }
+            // An NSAlert, not a second SwiftUI .alert: one on an EmptyView never showed, so Start did nothing.
+            guard switchingAntigravity || confirmAntigravitySwitch(to: store.accounts.first { $0.id == accountID }) else { return }
             // agy may renew its login while it runs and write it back; none may run across the switch.
             AntigravityRunner.shared.closeAll()
             working = true
