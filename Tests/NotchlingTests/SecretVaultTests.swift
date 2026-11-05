@@ -44,6 +44,33 @@ final class SecretVaultTests: XCTestCase {
         XCTAssertEqual(hide["hunter22"], "[secret:reg]")
     }
 
+    func testFind() {
+        let list = [
+            VaultEntry(name: "github", kind: .token, note: "my repos", url: "https://api.github.com", secretVar: "GH_TOKEN"),
+            VaultEntry(name: "npm", kind: .token, url: "https://registry.npmjs.org", secretVar: "NPM_TOKEN"),
+            VaultEntry(name: "aws-prod", kind: .login, note: "AWS console", userVar: "A_U", secretVar: "A_P"),
+        ]
+        XCTAssertEqual(SecretVault.find("https://api.github.com/repos/x/y", in: list).first?.name, "github")
+        XCTAssertEqual(SecretVault.find("uploads.github.com", in: list).first?.name, "github")
+        XCTAssertEqual(SecretVault.find("publish to registry.npmjs.org", in: list).first?.name, "npm")
+        XCTAssertEqual(SecretVault.find("aws console", in: list).map(\.name), ["aws-prod"])
+        XCTAssertTrue(SecretVault.find("gitlab.com", in: list).isEmpty)
+        XCTAssertEqual(SecretVault.find("", in: list).count, 3)
+        XCTAssertEqual(VaultEntry.host(of: "https://www.Example.com/x"), "example.com")
+        XCTAssertNil(VaultEntry.host(of: "github"))
+    }
+
+    func testProblems() {
+        let a = VaultEntry(name: "a", kind: .token, secretVar: "A_TOKEN")
+        XCTAssertNil(SecretVault.problem(saving: a, in: [], replacing: nil))
+        XCTAssertNotNil(SecretVault.problem(saving: a, in: [a], replacing: nil))
+        XCTAssertNil(SecretVault.problem(saving: a, in: [a], replacing: a))
+        let b = VaultEntry(name: "b", kind: .token, secretVar: "A_TOKEN")
+        XCTAssertNotNil(SecretVault.problem(saving: b, in: [a], replacing: nil))
+        let c = VaultEntry(name: "c", kind: .token, url: "x.com", secretVar: "C_URL")
+        XCTAssertNotNil(SecretVault.problem(saving: c, in: [], replacing: nil))
+    }
+
     func testURL() {
         let e = VaultEntry(name: "github", kind: .token, url: "https://api.github.com", secretVar: "GH_TOKEN")
         XCTAssertEqual(e.allVariables, ["GH_TOKEN", "GITHUB_URL"])

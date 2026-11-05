@@ -1,10 +1,14 @@
 import Foundation
 
-/// Credentials the user saves for agents to use without typing them into a chat. The list (names, kind,
-/// variable names, a note for agents) is `vault.json`; the values are in Keychain (service
-/// `Notchling Vault`, base64 JSON, since `security -w` prints a value with newlines as hex). An agent runs
-/// `Notchling --secret <name> -- <command>`: the command gets the values as environment variables and its
-/// output comes back with every value replaced, so a value never lands in a transcript.
+/// Credentials the user saves for agents to use without typing them into a chat.
+///
+/// - The list (names, kind, URL, variable names, a note for agents) is `vault.json`; anyone may read it.
+/// - The values are one Keychain item that only the Notchling app may read (`VaultStore`).
+/// - An agent runs `Notchling --secret <name> -- <command>`. That process asks the running app over a
+///   socket the app answers only for its own binary (`VaultServer`); the app asks the user first when the
+///   entry says so, then hands over the values. The command gets them as environment variables and its
+///   output comes back with every value replaced, so a value never lands in a transcript.
+/// - `--secret-request` opens the form for the user to add or update one (`VaultPrompt`).
 struct VaultEntry: Codable, Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable { case login, token }
 
@@ -19,9 +23,13 @@ struct VaultEntry: Codable, Identifiable, Equatable {
     var userVar: String = ""
     /// Variable for the password or token.
     var secretVar: String = ""
+    /// Ask the user before each use. Optional for lists saved before it existed.
+    var ask: Bool?
     var updated: Date = Date()
 
     var id: String { name.lowercased() }
+
+    var asks: Bool { ask ?? false }
 
     var variables: [String] { kind == .login ? [userVar, secretVar] : [secretVar] }
 
@@ -30,6 +38,16 @@ struct VaultEntry: Codable, Identifiable, Equatable {
 
     /// Every variable a command gets, URL included.
     var allVariables: [String] { variables + (urlVar.map { [$0] } ?? []) }
+
+    /// `api.github.com` from `https://api.github.com/v3` or `api.github.com`, without `www.`.
+    var host: String? { url.flatMap(Self.host(of:)) }
+
+    static func host(of text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text.contains("://") || text.contains(".") else { return nil }
+        guard let host = URL(string: text.contains("://") ? text : "https://" + text)?.host?.lowercased(), !host.isEmpty else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
 
     /// `my-api` → `MY_API`, the prefix of the default variable names.
     static func prefix(for name: String) -> String {
@@ -58,8 +76,8 @@ struct VaultValue: Codable, Equatable {
     var secret: String = ""
 }
 
+/// The list in `vault.json`: no values, so the command line reads it directly.
 enum SecretVault {
-    static let service = "Notchling Vault"
     static let indexURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Notchling/vault.json")
 
@@ -72,55 +90,7 @@ enum SecretVault {
 
     static func entry(_ name: String) -> VaultEntry? { all().first { $0.id == name.lowercased() } }
 
-    static func value(for entry: VaultEntry) -> VaultValue? {
-        guard let text = Keychain.read(service: service, account: entry.id),
-              let data = Data(base64Encoded: text) else { return nil }
-        return try? JSONDecoder().decode(VaultValue.self, from: data)
-    }
-
-    /// Saves an entry; a nil value keeps the stored one (editing the note or variables only). Renaming
-    /// moves the stored value to the new name.
-    static func save(_ entry: VaultEntry, value: VaultValue?, replacing old: VaultEntry? = nil) throws {
-        guard VaultEntry.validName(entry.name) else {
-            throw AccountError("Use letters, digits, - _ or . for the name, starting with a letter.")
-        }
-        for v in entry.variables where !VaultEntry.validVar(v) {
-            throw AccountError("\"\(v)\" isn't a valid variable name.")
-        }
-        if Set(entry.allVariables).count != entry.allVariables.count {
-            throw AccountError("Each value needs its own variable (\(entry.urlVar ?? "none") is the URL's).")
-        }
-        var list = all()
-        if list.contains(where: { $0.id == entry.id && $0.id != old?.id }) {
-            throw AccountError("There's already a secret named \(entry.name).")
-        }
-        let taken = Set(list.filter { $0.id != old?.id }.flatMap(\.allVariables))
-        if let clash = entry.allVariables.first(where: taken.contains) {
-            throw AccountError("Another secret already uses \(clash).")
-        }
-        var stored = value
-        if stored == nil, let old { stored = Self.value(for: old) }
-        guard let stored, !stored.secret.isEmpty else {
-            throw AccountError(entry.kind == .login ? "Enter the password." : "Enter the token.")
-        }
-        let blob = try JSONEncoder().encode(stored).base64EncodedString()
-        guard Keychain.write(service: service, account: entry.id, value: blob) else {
-            throw AccountError("Couldn't save it to Keychain.")
-        }
-        if let old, old.id != entry.id { Keychain.delete(service: service, account: old.id) }
-        list.removeAll { $0.id == entry.id || $0.id == old?.id }
-        var saved = entry
-        saved.updated = Date()
-        list.append(saved)
-        try write(list)
-    }
-
-    static func remove(_ entry: VaultEntry) throws {
-        Keychain.delete(service: service, account: entry.id)
-        try write(all().filter { $0.id != entry.id })
-    }
-
-    private static func write(_ list: [VaultEntry]) throws {
+    static func write(_ list: [VaultEntry]) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -128,6 +98,49 @@ enum SecretVault {
         try encoder.encode(list.sorted { $0.id < $1.id }).write(to: indexURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
         VaultSkill.update(list)
+    }
+
+    /// Why `entry` can't be saved into `list` in place of `old`, or nil.
+    static func problem(saving entry: VaultEntry, in list: [VaultEntry], replacing old: VaultEntry?) -> String? {
+        guard VaultEntry.validName(entry.name) else {
+            return "Use letters, digits, - _ or . for the name, starting with a letter."
+        }
+        if let bad = entry.variables.first(where: { !VaultEntry.validVar($0) }) {
+            return "\"\(bad)\" isn't a valid variable name."
+        }
+        if Set(entry.allVariables).count != entry.allVariables.count {
+            return "Each value needs its own variable (\(entry.urlVar ?? "none") is the URL's)."
+        }
+        if list.contains(where: { $0.id == entry.id && $0.id != old?.id }) {
+            return "There's already a secret named \(entry.name)."
+        }
+        let taken = Set(list.filter { $0.id != old?.id }.flatMap(\.allVariables))
+        if let clash = entry.allVariables.first(where: taken.contains) {
+            return "Another secret already uses \(clash)."
+        }
+        return nil
+    }
+
+    /// Entries that fit a URL, a host or words (from the task), best first; empty when none does.
+    static func find(_ query: String, in list: [VaultEntry]) -> [VaultEntry] {
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return list }
+        let qHost = VaultEntry.host(of: q)
+        let words = q.split { !($0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_") }
+            .map(String.init).filter { $0.count >= 2 }
+        func score(_ e: VaultEntry) -> Int {
+            var s = 0
+            if let qHost, let h = e.host {
+                if h == qHost { s += 10 } else if qHost.hasSuffix("." + h) || h.hasSuffix("." + qHost) { s += 6 }
+                // api.github.com and uploads.github.com share github.com.
+                else if h.split(separator: ".").suffix(2) == qHost.split(separator: ".").suffix(2) { s += 3 }
+            }
+            if e.id == q { s += 8 }
+            let text = "\(e.name) \(e.url ?? "") \(e.note)".lowercased()
+            s += words.filter { text.contains($0) }.count
+            return s
+        }
+        return list.map { ($0, score($0)) }.filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.map(\.0)
     }
 
     /// The environment a command gets for these entries, and the strings to hide in its output.
@@ -144,54 +157,14 @@ enum SecretVault {
         }
         return (env, hide)
     }
-}
 
-// MARK: - Command line
-
-extension SecretVault {
-    /// `--secrets`: the saved names, variables and notes. Never values.
-    static func runList() -> Never {
-        let list = all()
-        guard !list.isEmpty else {
-            print("No secrets saved. The user adds them in Notchling: Chat > key button at the bottom of the sidebar.")
-            exit(1)
-        }
-        for e in list {
-            print("\(e.name)  (\(e.kind.rawValue))  \(e.allVariables.map { "$" + $0 }.joined(separator: " "))")
-            if let url = e.url, !url.isEmpty { print("    \(url)") }
-            if !e.note.isEmpty { print("    \(e.note)") }
-        }
-        exit(0)
-    }
-
-    /// `--secret a,b -- command…`: runs the command with those secrets in its environment and prints its
-    /// output with the values hidden. One argument after `--` runs through `/bin/sh -c`.
-    static func runCLI(_ args: [String]) -> Never {
-        guard let i = args.firstIndex(of: "--secret"), i + 1 < args.count else { usage() }
-        let names = args[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !names.isEmpty, let dash = args[(i + 1)...].firstIndex(of: "--"), dash + 1 < args.count else { usage() }
-        let command = Array(args[(dash + 1)...])
-        let list = all()
-        var picked: [(VaultEntry, VaultValue)] = []
-        for name in names {
-            guard let entry = list.first(where: { $0.id == name.lowercased() }) else {
-                fail("No secret named \(name). Saved: \(list.isEmpty ? "none" : list.map(\.name).joined(separator: ", ")).")
-            }
-            guard let value = value(for: entry) else { fail("\(entry.name) has no value in Keychain. Ask the user to save it again in Notchling.") }
-            picked.append((entry, value))
-        }
-        let (env, hide) = environment(for: picked)
-        let status = SecretRunner.run(command, extra: env, hide: hide)
-        exit(status)
-    }
-
-    private static func usage() -> Never {
-        fail("Usage: Notchling --secret <name>[,<name>…] -- <command> [args…]   (one argument runs through sh -c)\n       Notchling --secrets")
-    }
-
-    private static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data((message + "\n").utf8))
-        exit(2)
+    /// One entry as `--secrets` prints it.
+    static func describe(_ e: VaultEntry) -> String {
+        var lines = ["\(e.name)  (\(e.kind.rawValue))  \(e.allVariables.map { "$" + $0 }.joined(separator: " "))"]
+        if let url = e.url, !url.isEmpty { lines.append("    \(url)") }
+        if !e.note.isEmpty { lines.append("    \(e.note)") }
+        if e.asks { lines.append("    The user approves each use.") }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -235,8 +208,8 @@ enum SecretRunner {
     }
 }
 
-/// Replaces secret strings in a byte stream. It holds back the last (longest secret − 1) bytes of each
-/// chunk, so a value split across two reads is still caught. Strings shorter than 4 bytes aren't hidden:
+/// Replaces secret strings in a byte stream. A tail that could be the start of a secret waits for the next
+/// read, so a value split across two reads is still caught. Strings shorter than 4 bytes aren't hidden:
 /// they'd blank out ordinary output.
 final class Redactor {
     private let pairs: [(Data, Data)]
@@ -260,8 +233,7 @@ final class Redactor {
         return ready
     }
 
-    /// The longest tail of `data` (shorter than `hold + 1`) that could be the start of a secret; only that
-    /// waits for the next read, so ordinary output flows through at once.
+    /// The longest tail of `data` (shorter than `hold + 1`) that could be the start of a secret.
     private func partialTail(_ data: Data) -> Int {
         let bytes = [UInt8](data)
         for length in stride(from: min(hold, bytes.count), to: 0, by: -1) {
@@ -291,20 +263,14 @@ final class Redactor {
 
 // MARK: - Skill
 
-/// `~/.claude/skills/notchling-vault`: tells agents the vault exists, which names it holds, and how to use
-/// one without reading it. Present only while the vault has entries.
+/// `~/.claude/skills/notchling-vault`: tells agents the vault exists, which names it holds, how to pick
+/// one, how to use it without reading it, and how to ask the user for a missing one.
 enum VaultSkill {
     static let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/skills/notchling-vault")
     static let file = dir.appendingPathComponent("SKILL.md")
 
     static func update(_ entries: [VaultEntry]? = nil) {
         let entries = entries ?? SecretVault.all()
-        guard !entries.isEmpty else {
-            if (try? String(contentsOf: file, encoding: .utf8))?.contains("name: notchling-vault") == true {
-                try? FileManager.default.removeItem(at: dir)
-            }
-            return
-        }
         let text = content(binary: Bundle.main.bundlePath + "/Contents/MacOS/Notchling", names: entries.map(label).sorted())
         if (try? String(contentsOf: file, encoding: .utf8)) == text { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -313,31 +279,39 @@ enum VaultSkill {
 
     /// `github (api.github.com)`: the name with its URL's host, so the description matches a task by site.
     static func label(_ e: VaultEntry) -> String {
-        guard let url = e.url, !url.isEmpty else { return e.name }
-        let host = URL(string: url.contains("://") ? url : "https://" + url)?.host ?? url
+        guard let host = e.host else { return e.name }
         return "\(e.name) (\(host))"
     }
 
     static func content(binary: String, names: [String]) -> String {
-        """
+        let saved = names.isEmpty ? "none yet" : names.joined(separator: ", ")
+        return """
         ---
         name: notchling-vault
-        description: Use whenever a task needs a password, API token, username or other credential (logging in, calling an API, publishing a package, pushing to a registry) — before asking the user to paste one. The user keeps credentials in Notchling's Secret Vault; saved now: \(names.joined(separator: ", ")).
+        description: Use whenever a task needs a password, API token, username or other credential (logging in, calling an API, publishing a package, pushing to a registry, a .env value) — instead of asking the user to paste one into the chat. The user keeps credentials in Notchling's Secret Vault; saved now: \(saved).
         ---
 
         # Notchling Secret Vault
 
-        The user saves credentials in Notchling so they never go through the chat. Use them by name; never ask the user to paste a secret that the vault already has, and never try to read a value.
+        The user keeps credentials in Notchling so they never go through the chat. Only the Notchling app can read them. You use one by name and never see its value. Never ask the user to type a secret into the chat.
 
-        ## See what's saved
+        ## 1. Find the right one
 
         ```sh
-        '\(binary)' --secrets
+        '\(binary)' --secrets '<URL, host or words from the task>'
         ```
 
-        Each line is a name, its kind (login or token) and the environment variables it sets, then the URL it's for (also in `$<NAME>_URL`) and the user's note. Pick the secret whose URL matches the site or API the task talks to. Values are never printed.
+        Prints the saved secrets that fit, best first (exit code 1 when none does). Each is a name, its kind (login or token) and the environment variables it sets, then its URL (also in `$<NAME>_URL`), the user's note, and whether the user approves each use. `--secrets` alone lists them all. Values are never printed.
 
-        ## Use one
+        ## 2. Missing or wrong? Ask the user to add or update it
+
+        ```sh
+        '\(binary)' --secret-request <name> --kind token|login --url '<url>' --note '<what it is for>' --reason '<why you need it now>'
+        ```
+
+        Opens Notchling's form with those fields filled in; the user types the value there. For a name that exists (an expired token, a changed password) it opens that secret for editing. It waits for the user, so run it with the Bash tool's longest timeout (600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
+
+        ## 3. Use it
 
         ```sh
         '\(binary)' --secret <name>[,<name>…] -- <command> [args…]
@@ -350,12 +324,12 @@ enum VaultSkill {
         '\(binary)' --secret registry -- 'printf %s "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USERNAME" --password-stdin "$REGISTRY_URL"'
         ```
 
-        Its output comes back with every saved value replaced by `[secret:<name>]`, and its exit code is the command's.
+        Its output comes back with every value replaced by `[secret:<name>]`; its exit code is the command's. When the secret says the user approves each use, Notchling shows them the command first and the call waits (exit 3 when they deny it), so give it a long timeout too.
 
         Rules:
-        - Never echo, print, log or write a value to a file, a commit, a URL you show, or your reply. Don't pass a value on a command line where `ps` would see it when a tool takes it from the environment or stdin.
-        - Don't read the vault's Keychain items (`security find-generic-password -s "Notchling Vault"`) or `vault.json` yourself.
-        - If the credential the task needs isn't saved, tell the user its name and kind and ask them to add it in Notchling (Chat, the key button at the bottom of the sidebar), then continue.
+        - Never echo, print, encode, log or write a value to a file, a commit, a URL you show, or your reply. Don't put a value on a command line where `ps` would see it when a tool takes it from the environment or stdin.
+        - Don't try to read the vault's Keychain item or work around Notchling. A command whose purpose is to reveal a value is misuse even if its output is hidden.
+        - Notchling must be running; if it isn't, tell the user.
 
         """
     }

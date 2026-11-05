@@ -1,18 +1,23 @@
 import AppKit
 import SwiftUI
 
-/// Chat's Secret Vault sheet: the saved credentials, and a form to add or edit one. Values go straight to
-/// Keychain and are never shown again; agents reach them through `Notchling --secret` (see `SecretVault`).
+/// The Secret Vault: the saved credentials, and a form to add, edit or remove one. Values go straight to
+/// Keychain (`VaultStore`) and are never shown again; agents reach them through `Notchling --secret`.
+/// Chat shows it as a sheet; `VaultPrompt` shows the form alone in a panel when an agent asks for a secret
+/// (`finish` set: saving or cancelling ends it instead of going back to the list).
 struct VaultSheet: View {
     let done: () -> Void
+    var finish: ((VaultEntry?) -> Void)?
     @State private var entries: [VaultEntry]
     /// The form while adding (nil entry) or editing.
     @State private var form: VaultForm?
     @State private var confirmRemove: VaultEntry?
+    @State private var removeError: String?
 
-    /// `entries` and `form` are for probe renders; the app passes only `done`.
-    init(entries: [VaultEntry]? = nil, form: VaultForm? = nil, done: @escaping () -> Void) {
+    /// `entries` are for probe renders; the app passes `form` only for an agent's request.
+    init(entries: [VaultEntry]? = nil, form: VaultForm? = nil, finish: ((VaultEntry?) -> Void)? = nil, done: @escaping () -> Void) {
         self.done = done
+        self.finish = finish
         _entries = State(initialValue: entries ?? SecretVault.all())
         _form = State(initialValue: form)
     }
@@ -42,6 +47,7 @@ struct VaultSheet: View {
             Group {
                 if let form {
                     VaultFormView(form: form) { saved in
+                        if let finish { finish(saved ? form.saved : nil); return }
                         self.form = nil
                         if saved { entries = SecretVault.all() }
                     }
@@ -53,17 +59,24 @@ struct VaultSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 540, height: 520)
         .background(KitInk.window)
         .part("Secret Vault Sheet")
         .alert("Remove \(confirmRemove?.name ?? "")?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } })) {
             Button("Remove", role: .destructive) {
-                if let entry = confirmRemove { try? SecretVault.remove(entry) }
+                if let entry = confirmRemove {
+                    do { try VaultStore.shared.remove(entry) } catch { removeError = error.localizedDescription }
+                }
                 entries = SecretVault.all()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Its value is deleted from Keychain. Agents that use it will be told it's missing.")
+        }
+        .alert("Couldn't Remove It", isPresented: Binding(get: { removeError != nil }, set: { if !$0 { removeError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(removeError ?? "")
         }
     }
 
@@ -79,7 +92,7 @@ struct VaultSheet: View {
     }
 
     private var usage: some View {
-        Text("Agents run `Notchling --secret <name> -- <command>`: the command gets the values as environment variables, and its output comes back with them hidden.")
+        Text("Only Notchling can read the values. Agents run `Notchling --secret <name> -- <command>`: the command gets them as environment variables, and its output comes back with them hidden. An agent that needs one you haven't saved opens this form for you.")
             .kitType(.meta).foregroundColor(KitInk.textMuted).fixedSize(horizontal: false, vertical: true)
     }
 
@@ -111,6 +124,9 @@ private struct VaultRow: View {
                 HStack(spacing: 6) {
                     Text(entry.name).kitType(.heading).foregroundColor(KitInk.text)
                     Text(entry.kind == .login ? "Login" : "Token").kitType(.meta).foregroundColor(KitInk.textMuted)
+                    if entry.asks {
+                        Label("Asks First", systemImage: "hand.raised").kitType(.meta).foregroundColor(KitInk.textMuted)
+                    }
                 }
                 if let url = entry.url, !url.isEmpty {
                     Text(url).kitType(.label).foregroundColor(KitInk.accentText).lineLimit(1).truncationMode(.middle)
@@ -138,6 +154,8 @@ private struct VaultRow: View {
 /// What the form edits. Variable names follow the name until the user changes them.
 final class VaultForm: ObservableObject {
     let original: VaultEntry?
+    /// Why an agent asked for this secret, shown above the form.
+    let reason: String?
     @Published var name: String { didSet { followName() } }
     @Published var kind: VaultEntry.Kind { didSet { followName() } }
     @Published var username = ""
@@ -146,20 +164,37 @@ final class VaultForm: ObservableObject {
     @Published var url: String
     @Published var userVar: String
     @Published var secretVar: String
+    @Published var ask: Bool
     @Published var error: String?
+    /// The entry as saved, for an agent's request.
+    private(set) var saved: VaultEntry?
     private var customVars: Bool
 
-    init(_ entry: VaultEntry?) {
+    init(_ entry: VaultEntry?, reason: String? = nil) {
         original = entry
+        self.reason = reason
         name = entry?.name ?? ""
         kind = entry?.kind ?? .token
         note = entry?.note ?? ""
         url = entry?.url ?? ""
+        ask = entry?.asks ?? false
         let vars = VaultEntry.defaultVars(name: entry?.name ?? "", kind: entry?.kind ?? .token)
         userVar = entry?.kind == .login ? entry?.userVar ?? vars.user : vars.user
         secretVar = entry?.secretVar ?? vars.secret
         customVars = entry.map { $0.variables != Self.defaults($0.name, $0.kind) } ?? false
-        if let entry, let value = SecretVault.value(for: entry) { username = value.username }
+        if let entry, entry.kind == .login, let value = try? VaultStore.shared.value(for: entry) { username = value.username }
+    }
+
+    /// An agent's request: the saved secret by that name if there is one (to update), else a new one
+    /// filled in with what the agent said.
+    convenience init(request: VaultRequest) {
+        let existing = request.name.flatMap(SecretVault.entry)
+        self.init(existing, reason: request.reason)
+        guard existing == nil else { return }
+        name = request.name ?? ""
+        if let kind = request.kind.flatMap(VaultEntry.Kind.init(rawValue:)) { self.kind = kind }
+        url = request.url ?? ""
+        note = request.note ?? ""
     }
 
     private static func defaults(_ name: String, _ kind: VaultEntry.Kind) -> [String] {
@@ -182,16 +217,18 @@ final class VaultForm: ObservableObject {
         var entry = VaultEntry(name: name, kind: kind, note: note.trimmingCharacters(in: .whitespacesAndNewlines),
                                url: url.isEmpty ? nil : url,
                                userVar: kind == .login ? userVar.trimmingCharacters(in: .whitespaces) : "",
-                               secretVar: secretVar.trimmingCharacters(in: .whitespaces))
+                               secretVar: secretVar.trimmingCharacters(in: .whitespaces),
+                               ask: ask)
         entry.updated = Date()
-        // Editing with the secret left empty keeps the stored one (and the username, unless it changed).
-        var value: VaultValue? = VaultValue(username: kind == .login ? username : "", secret: secret)
-        if secret.isEmpty, let original, var stored = SecretVault.value(for: original) {
-            stored.username = kind == .login ? username : ""
-            value = stored
-        }
         do {
-            try SecretVault.save(entry, value: value, replacing: original)
+            // Editing with the secret left empty keeps the stored one (and the username, unless it changed).
+            var value: VaultValue? = VaultValue(username: kind == .login ? username : "", secret: secret)
+            if secret.isEmpty, let original, var stored = try VaultStore.shared.value(for: original) {
+                stored.username = kind == .login ? username : ""
+                value = stored
+            }
+            try VaultStore.shared.save(entry, value: value, replacing: original)
+            saved = entry
             return true
         } catch {
             self.error = error.localizedDescription
@@ -209,6 +246,17 @@ private struct VaultFormView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let reason = form.reason, !reason.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "sparkles").foregroundColor(KitInk.accentText)
+                    Text("An agent asks: \(reason)").kitType(.label).foregroundColor(KitInk.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.accentWash))
+                .part("Agent Reason")
+            }
             row("Name") {
                 TextField("github", text: $form.name)
                     .focused($focus, equals: .name)
@@ -249,14 +297,18 @@ private struct VaultFormView: View {
                         .focused($focus, equals: .secretVar)
                         .modifier(KitField(focused: focus == .secretVar))
                 }
-                .font(.system(size: 12, design: .monospaced))
             }
             row("Note") {
                 TextField("What it's for, e.g. GitHub API for my repos", text: $form.note)
                     .focused($focus, equals: .note)
                     .modifier(KitField(focused: focus == .note))
             }
-            Text("Agents see the name, URL, variables and note. The value stays in Keychain.")
+            row("") {
+                Toggle("Ask me before an agent uses it", isOn: $form.ask)
+                    .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
+                    .part("Ask First Toggle")
+            }
+            Text("Agents see the name, URL, variables and note. Only Notchling can read the value.")
                 .kitType(.meta).foregroundColor(KitInk.textMuted)
                 .padding(.leading, 92)
             if let error = form.error {
@@ -278,7 +330,7 @@ private struct VaultFormView: View {
             }
         }
         .padding(20)
-        .onAppear { focus = form.original == nil ? .name : .secret }
+        .onAppear { focus = form.original == nil && form.name.isEmpty ? .name : (form.kind == .login && form.username.isEmpty ? .username : .secret) }
         .part("Secret Form")
     }
 

@@ -4,8 +4,12 @@ import ServiceManagement
 // For agents: run a command with Secret Vault values in its environment, or list what's saved. First, so a
 // `--hook` or `--page` inside the wrapped command isn't taken for ours.
 if CommandLine.arguments.count > 1 {
-    if CommandLine.arguments[1] == "--secret" { SecretVault.runCLI(CommandLine.arguments) }
-    if CommandLine.arguments[1] == "--secrets" { SecretVault.runList() }
+    switch CommandLine.arguments[1] {
+    case "--secret": VaultCLI.use(CommandLine.arguments)
+    case "--secrets": VaultCLI.list(CommandLine.arguments)
+    case "--secret-request": VaultCLI.request(CommandLine.arguments)
+    default: break
+    }
 }
 
 // Run by Claude Code as a hook: hand the prompt to the running app and wait for a decision.
