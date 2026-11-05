@@ -875,6 +875,55 @@ final class ChatModel: ObservableObject {
         return agent.group == .working && Date().timeIntervalSince(at) < 20
     }
 
+    /// Sessions whose queue is being taken back to edit.
+    @Published private(set) var takingBack: Set<String> = []
+
+    /// Takes the newest message that hasn't reached the conversation yet back to the reply box: the last
+    /// one waiting in Chat's outbox, or the last one queued in the session (Up in its input box, as in the
+    /// terminal; older queued ones go back in the queue). Sending it again queues it as usual.
+    func editLatestQueued() {
+        guard let agent = selected else { return }
+        let id = agent.id
+        let restore: (String) -> Void = { [weak self] text in
+            guard let self else { return }
+            let draft = self.drafts[id] ?? ""
+            self.drafts[id] = draft.isEmpty ? text : text + "\n\n" + draft
+            self.focusRequest += 1
+        }
+        if var waiting = outbox[id], let last = waiting.popLast() {
+            outbox[id] = waiting.isEmpty ? nil : waiting
+            restore(last)
+            return
+        }
+        guard case .job(let jobID) = agent.target, let latest = conversation.queued.last,
+              let transcript = agent.transcriptPath,
+              pending[id]?.sending != true, !takingBack.contains(id) else { return }
+        let keep = Array(conversation.queued.dropLast())
+        errors[id] = nil
+        // Holds other replies back while it's attached; they'd type into the same box.
+        takingBack.insert(id)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var failure: Error?
+            var taken = false
+            do {
+                taken = try ReplySender.takeBackQueued(latest: latest, keep: keep, fromJob: jobID, transcript: transcript)
+            } catch { failure = error }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.takingBack.remove(id)
+                if let failure {
+                    self.errors[id] = "Couldn't take it back: \(failure.localizedDescription)"
+                } else if !taken {
+                    self.errors[id] = "It was already sent."
+                } else {
+                    restore(latest)
+                }
+                self.refresh()
+                self.sendNext(id, job: jobID)
+            }
+        }
+    }
+
     /// Stops the turn, like Esc in the terminal. What was said so far stays.
     func stopTurn() {
         guard let agent = selected, canStop(agent), !isStopping(agent) else { return }
@@ -1035,7 +1084,7 @@ final class ChatModel: ObservableObject {
         if preset == nil { drafts[id] = "" }
         errors[id] = nil
         // One attach at a time: two would type into the same box. The next waits its turn.
-        if pending[id]?.sending == true {
+        if pending[id]?.sending == true || takingBack.contains(id) {
             outbox[id, default: []].append(text)
             return
         }
@@ -1088,7 +1137,8 @@ final class ChatModel: ObservableObject {
     /// Sends the oldest waiting reply. A menu command opens the terminal sheet instead (if its session
     /// is still the one shown), and the rest wait until the sheet closes.
     private func sendNext(_ id: String, job jobID: String) {
-        guard terminal == nil, pending[id]?.sending != true, var waiting = outbox[id], !waiting.isEmpty else { return }
+        guard terminal == nil, pending[id]?.sending != true, !takingBack.contains(id),
+              var waiting = outbox[id], !waiting.isEmpty else { return }
         let next = waiting.removeFirst()
         outbox[id] = waiting.isEmpty ? nil : waiting
         if SlashCommands.opensMenu(next), selection == id {
@@ -1431,7 +1481,8 @@ private struct SessionDetail: View {
                                          outbox: model.outbox[agent.id] ?? [],
                                          live: agent.group == .working,
                                          expansion: model.expansion,
-                                         pageOpen: model.panelOpen)
+                                         pageOpen: model.panelOpen,
+                                         onEditLatest: { [weak model] in model?.editLatestQueued() })
                             .equatable()
                             // A fresh view per session, so switching back opens at the newest message.
                             .id(agent.id)
@@ -1568,6 +1619,8 @@ private struct ConversationView: View, Equatable {
     let live: Bool
     let expansion: ChatExpansion
     var pageOpen = false
+    /// Takes the newest queued or waiting message back to the reply box (not part of ==).
+    var onEditLatest: (() -> Void)?
     /// Following the newest message: true until you scroll up, and again once you're back at the bottom.
     /// Only your own scrolling changes it (`UserScrollWatcher`), so content growing below can't be
     /// mistaken for a scroll and pull you back down while you read.
@@ -1652,9 +1705,15 @@ private struct ConversationView: View, Equatable {
                                 .id(row.id)
                             }
                             // Only while it works: a queue left by a session that stopped never runs.
+                            // The newest of these can be taken back to edit: the last waiting one, else the
+                            // last queued one while nothing is on its way.
+                            let sending = pending.map { !$0.landed(in: conversation) && $0.sending } ?? false
+                            let editQueued = live && outbox.isEmpty && !sending
                             if live {
-                                ForEach(Array(conversation.queued.enumerated()), id: \.offset) { _, text in
-                                    UserBubble(text: text, images: 0, date: nil, note: "Queued, sends when this turn ends")
+                                let queued = conversation.queued
+                                ForEach(Array(queued.enumerated()), id: \.offset) { i, text in
+                                    UserBubble(text: text, images: 0, date: nil, note: "Queued, sends when this turn ends",
+                                               onEdit: editQueued && i == queued.count - 1 ? onEditLatest : nil)
                                         .part("Queued Bubble", .topTrailing)
                                 }
                             }
@@ -1663,8 +1722,9 @@ private struct ConversationView: View, Equatable {
                                     .part("Sending Bubble", .topTrailing)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
-                            ForEach(Array(outbox.enumerated()), id: \.offset) { _, text in
-                                UserBubble(text: text, images: 0, date: nil, note: "Waiting to send")
+                            ForEach(Array(outbox.enumerated()), id: \.offset) { i, text in
+                                UserBubble(text: text, images: 0, date: nil, note: "Waiting to send",
+                                           onEdit: i == outbox.count - 1 ? onEditLatest : nil)
                                     .part("Waiting Bubble", .topTrailing)
                             }
                             if live && turnOver {
@@ -1922,6 +1982,7 @@ private struct UserBubble: View {
     let images: Int
     let date: Date?
     let note: String?
+    var onEdit: (() -> Void)? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -1961,7 +2022,16 @@ private struct UserBubble: View {
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(text.hasPrefix("! ") ? KitInk.shellWash : KitInk.accentWash))
                 if let note {
-                    Text(note).kitType(.meta).foregroundColor(KitInk.textFaint)
+                    HStack(spacing: 8) {
+                        Text(note).kitType(.meta).foregroundColor(KitInk.textFaint)
+                        if let onEdit {
+                            Button("Edit", action: onEdit)
+                                .buttonStyle(.kitPlain)
+                                .kitType(.meta).foregroundColor(KitInk.accentText)
+                                .help("Take it back to the reply box to change it (↑). Send it again when it's right.")
+                                .part("Edit Queued Button", .top)
+                        }
+                    }
                 }
             }
             // Gets its width before the spacer, so a short reply stays on one line.

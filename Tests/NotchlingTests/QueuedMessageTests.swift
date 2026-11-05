@@ -22,6 +22,25 @@ final class QueuedMessageTests: XCTestCase {
         XCTAssertEqual(c.facts.effort, "xhigh")
     }
 
+    /// Up in the input box takes the queue back to edit: one popAll per message, and it's no longer queued.
+    func testPopAllTakesTheQueueBack() throws {
+        let lines = [
+            user,
+            #"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-05T09:58:08.490Z","content":"Then say ONE"}"#,
+            #"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-05T09:58:11.666Z","content":"And TWO"}"#,
+            #"{"type":"queue-operation","operation":"popAll","timestamp":"2026-11-05T09:58:13.059Z","content":"Then say ONE"}"#,
+            #"{"type":"queue-operation","operation":"popAll","timestamp":"2026-11-05T09:58:13.060Z","content":"And TWO"}"#,
+        ]
+        XCTAssertEqual(try read(lines).queued, [])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("popall-\(UUID().uuidString).jsonl")
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let pressed = ISO8601DateFormatter().date(from: "2026-11-05T09:58:12Z")!
+        XCTAssertTrue(ReplySender.poppedAll("And TWO", in: url.path, since: pressed))
+        XCTAssertFalse(ReplySender.poppedAll("And TWO", in: url.path, since: pressed.addingTimeInterval(5)), "an older take-back doesn't count")
+        XCTAssertFalse(ReplySender.poppedAll("Something else", in: url.path, since: pressed))
+    }
+
     /// Waiting behind the turn: queued, not yet a message.
     func testEnqueuedIsQueued() throws {
         let c = try read([

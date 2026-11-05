@@ -339,7 +339,9 @@ enum ConversationReader {
                 switch obj["operation"] as? String {
                 case "enqueue": queue.append(content)
                 case "dequeue": if !queue.isEmpty { queue.removeFirst() }
-                case "remove": if let i = queue.firstIndex(of: content) { queue.remove(at: i) }
+                case "remove", "popAll":
+                    // popAll: Up in the input box took the queued messages back to edit (one line each).
+                    if let i = queue.firstIndex(of: content) { queue.remove(at: i) }
                 default: break
                 }
 

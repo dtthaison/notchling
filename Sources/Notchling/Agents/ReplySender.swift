@@ -126,6 +126,68 @@ enum ReplySender {
     /// Attaches, sends each chunk of keystrokes with a pause between them, then detaches. `settle`:
     /// send after the screen has drawn for this long even if it never goes quiet (a working session).
     private static func type(_ chunks: [String], toJob jobID: String, refuseDialog: Bool = false, settle: TimeInterval? = nil) throws {
+        try attached(jobID, refuseDialog: refuseDialog, settle: settle) { master, _ in
+            for chunk in chunks {
+                write(master, chunk)
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+        }
+    }
+
+    /// Takes the queued messages back out of a working session's queue: Up in its empty input box
+    /// pulls them all into the box (`popAll`), which is then cleared. `keep` (the older ones) go back in
+    /// the queue, in order. True when `latest` was there to take; false leaves the queue as it was.
+    static func takeBackQueued(latest: String, keep: [String], fromJob jobID: String, transcript: String) throws -> Bool {
+        var taken = false
+        try attached(jobID, refuseDialog: true, settle: 1.2) { master, screen in
+            write(master, clearInput)
+            Thread.sleep(forTimeInterval: 0.3)
+            let pressed = Date()
+            write(master, "\u{1b}[A")
+            // Up on an empty box with nothing queued brings back your last prompt, which may be these
+            // same words, so the screen can't tell. The transcript can: taking the queue logs popAll.
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline, !taken {
+                _ = waitForQuiet(master, quiet: 0.3, timeout: 0.5, into: screen)
+                taken = poppedAll(latest, in: transcript, since: pressed.addingTimeInterval(-1))
+            }
+            write(master, clearInput)
+            Thread.sleep(forTimeInterval: 0.3)
+            // The queue had already gone (the turn ended): what Up brought back was history, now cleared.
+            guard taken else { return }
+            for text in keep {
+                write(master, "\u{1b}[200~" + text + "\u{1b}[201~")
+                Thread.sleep(forTimeInterval: 0.3)
+                write(master, "\r")
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        }
+        return taken
+    }
+
+    /// The transcript has a `popAll` of `text` written since `since` (Claude Code 2.1.318 logs one
+    /// queue-operation line per message Up took back).
+    static func poppedAll(_ text: String, in transcript: String, since: Date) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: transcript) else { return false }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > 65536 ? size - 65536 : 0)
+        let tail = String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for line in tail.split(separator: "\n").reversed() where line.contains("\"popAll\"") {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  obj["operation"] as? String == "popAll", obj["content"] as? String == text,
+                  let stamp = (obj["timestamp"] as? String).flatMap(iso.date(from:)), stamp >= since else { continue }
+            return true
+        }
+        return false
+    }
+
+    /// Attaches to the job, waits for its screen, runs `body` with the terminal and what it shows, then
+    /// detaches. `settle`: go ahead after this long even if the screen never goes quiet (a working session).
+    private static func attached(_ jobID: String, refuseDialog: Bool, settle: TimeInterval?,
+                                 _ body: (Int32, TerminalScreen) -> Void) throws {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else {
             throw Failure.pty
@@ -159,11 +221,7 @@ enum ReplySender {
             guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
         }
         if refuseDialog, dialogOpen(screen) { throw Failure.dialog }
-
-        for chunk in chunks {
-            write(master, chunk)
-            Thread.sleep(forTimeInterval: 0.15)
-        }
+        body(master, screen)
         _ = waitForQuiet(master, quiet: 0.4, timeout: 3)
     }
 
