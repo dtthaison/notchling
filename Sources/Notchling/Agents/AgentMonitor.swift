@@ -23,6 +23,14 @@ enum AgentTarget {
     /// An Antigravity CLI conversation, shown only in Chat; `AntigravityRunner` loads it and runs its
     /// turns over ACP. Empty id: a new session not started yet.
     case antigravity(sessionID: String)
+
+    /// A Codex or Antigravity session not started yet.
+    var isDraft: Bool {
+        switch self {
+        case .codex(let id), .antigravity(let id): return id.isEmpty
+        default: return false
+        }
+    }
 }
 
 struct Agent {

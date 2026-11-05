@@ -736,7 +736,39 @@ final class ChatModel: ObservableObject {
     }
 
     /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which only Chat shows.
-    var allAgents: [Agent] { notch.agents + codexDrafts + codexAgents + agyDrafts + agyAgents }
+    var allAgents: [Agent] {
+        notch.agents + codexDrafts + (codexAgents + agyAgents).filter { !isClosed($0) } + agyDrafts
+    }
+
+    /// Codex and Antigravity rows the user closed, with when. The notch's Hide only knows Claude Code's
+    /// sessions, so these are kept here; a row comes back when its session is used again later.
+    @Published private var closedSessions: [String: Double] =
+        UserDefaults.standard.dictionary(forKey: "chatClosedSessions") as? [String: Double] ?? [:]
+
+    private func isClosed(_ agent: Agent) -> Bool {
+        guard let at = closedSessions[agent.id] else { return false }
+        return agent.since.timeIntervalSince1970 <= at
+    }
+
+    /// Takes a Codex or Antigravity session off the list (its history stays with the tool), and ends its
+    /// Antigravity process.
+    func closeSession(_ agent: Agent) {
+        switch agent.target {
+        case .antigravity(let session):
+            guard !session.isEmpty else { closeAntigravity(agent); return }
+            AntigravityRunner.shared.close(session)
+        case .codex(let session) where session.isEmpty:
+            removeCodex(agent)
+            return
+        default: break
+        }
+        closedSessions[agent.id] = max(Date().timeIntervalSince1970, agent.since.timeIntervalSince1970)
+        // Forget entries older than the 14 days the lists cover.
+        let cutoff = Date().timeIntervalSince1970 - 15 * 86_400
+        closedSessions = closedSessions.filter { $0.value > cutoff }
+        UserDefaults.standard.set(closedSessions, forKey: "chatClosedSessions")
+        if selection == agent.id { selection = nil }
+    }
 
     // MARK: Codex sessions
 
@@ -1680,7 +1712,12 @@ private struct SessionSidebar: View {
             Button("Take Over…") { ChatTakeover.run(agent) { model.selection = $0 } }
             Divider()
         }
-        Button("Hide") { notch.onHide?(agent) }
+        switch agent.target {
+        case .codex, .antigravity:
+            Button(agent.target.isDraft ? "Discard New Session" : "Close Session") { model.closeSession(agent) }
+        default:
+            Button("Hide") { notch.onHide?(agent) }
+        }
         if case .job = agent.target {
             Divider()
             Button("Remove Background Session…") { notch.onRemove?(agent) }
@@ -1688,10 +1725,6 @@ private struct SessionSidebar: View {
         if case .codex = agent.target {
             Divider()
             Button("Delete Codex Session…") { model.removeCodex(agent) }
-        }
-        if case .antigravity(let session) = agent.target {
-            Divider()
-            Button(session.isEmpty ? "Discard New Session" : "Close Antigravity Process") { model.closeAntigravity(agent) }
         }
     }
 
@@ -1717,7 +1750,10 @@ private struct SessionRowLabel: View {
             KitAvatar(name: agent.name, size: 30, status: agent.group)
             VStack(alignment: .leading, spacing: 2) {
                 // Three lines: who, on which account, doing what.
-                Text(agent.name).kitType(.heading).foregroundColor(KitInk.text).lineLimit(1)
+                HStack(spacing: 5) {
+                    ToolIcon(tool: SessionTool(agent.target), size: 14).part("Tool Icon", .leading)
+                    Text(agent.name).kitType(.heading).foregroundColor(KitInk.text).lineLimit(1)
+                }
                 if let account {
                     HStack(spacing: 4) {
                         Image(systemName: account.lane == nil ? "person.crop.circle" : "arrow.triangle.branch")
@@ -1815,8 +1851,11 @@ private struct SessionDetail: View {
                 .accessibilityLabel("\(agent.name), \(agent.label)")
                 .part("Avatar", .bottomLeading)
             VStack(alignment: .leading, spacing: 4) {
-                Text(agent.name).kitType(.title).foregroundColor(KitInk.text).lineLimit(1)
-                    .part("Session Name", .topTrailing)
+                HStack(spacing: 6) {
+                    ToolIcon(tool: SessionTool(agent.target), size: 18).part("Tool Icon", .leading)
+                    Text(agent.name).kitType(.title).foregroundColor(KitInk.text).lineLimit(1)
+                        .part("Session Name", .topTrailing)
+                }
                 HStack(spacing: 8) {
                     Text([agent.project, agent.host].filter { !$0.isEmpty }.joined(separator: " · "))
                         .kitType(.meta).foregroundColor(KitInk.textMuted).lineLimit(1)
