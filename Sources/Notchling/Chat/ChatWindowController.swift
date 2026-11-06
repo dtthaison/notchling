@@ -48,6 +48,19 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         model.openTerminal(typing: command)
     }
 
+    /// The model, for AppDelegate to plug in the app sheet and the footer's places.
+    var chatModel: ChatModel { model }
+
+    /// Opens Chat with the app sheet (accounts, token cost, settings) on a tab.
+    func showApp(_ page: AccountsTab, provider: ProviderID? = nil) {
+        show()
+        model.appTab.page = page
+        if let provider { model.appTab.provider = provider }
+        model.appSheet = true
+    }
+
+    var appSheetShown: Bool { model.appSheet && window?.isVisible == true }
+
     /// Opens Chat on a conversation found by search (Claude Code, Codex or Antigravity CLI).
     func showSession(_ session: SessionMeta) {
         show(select: model.prepareSession(session))

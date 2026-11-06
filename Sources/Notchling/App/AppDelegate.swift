@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ConsoleCore
 import ServiceManagement
+import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let awake = AwakeController()
@@ -66,6 +67,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.pagesWindow.show(select: folder)
             return self != nil
         }
+        // Everything the menu bar used to hold lives in Chat: the app sheet (accounts, token cost,
+        // settings) and the sidebar footer's Lanes, Machines and Artifacts.
+        let model = chat.chatModel
+        model.appView = { [weak self, weak model] in
+            guard let self, let model else { return AnyView(EmptyView()) }
+            self.providers.syncAll()
+            self.cost.refresh()
+            self.reloadSettings()
+            return AnyView(AccountsView(registry: self.providers, accounts: self.accounts, cost: self.cost,
+                                        settings: self.settings, tab: model.appTab,
+                                        done: { [weak model] in model?.appSheet = false }))
+        }
+        model.onAppSheetClosed = { [weak self] in self?.providers.accountsWindowClosed() }
+        model.openMachines = { [weak self] in self?.openMachines() }
+        model.openArtifacts = { [weak self] in self?.openAllPages() }
+        model.lanesMenu = { [weak self] in self?.lanesMenu.item().submenu }
         return chat
     }()
     private var statusItem: NSStatusItem!
@@ -292,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         codexLimits.check()
         antigravityLimits.check()
         updateButton()
-        if accountsWindow.isVisible { reloadSettings() }
+        if accountsWindow.isVisible || chatWindow.appSheetShown { reloadSettings() }
     }
 
     private func updateButton() {
@@ -335,82 +352,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Menu
 
+    /// Kept short: the account in use, Chat, Keep Mac Awake and Quit. Everything else (other accounts,
+    /// lanes, limits, cost, the notch, artifacts, machines, settings) is in Chat: the sidebar's bottom
+    /// bar and its Settings sheet.
     func menuNeedsUpdate(_ menu: NSMenu) {
         refresh()
         menu.removeAllItems()
         addUsageItems(to: menu)
         menu.addItem(.separator())
 
-        menu.addItem(header("Keep Mac Awake"))
+        let chatItem = action("Open Chat", #selector(openChatAndPhones))
+        chatItem.keyEquivalent = "o"
+        chatItem.toolTip = "Sessions, accounts, lanes, machines, artifacts and settings."
+        menu.addItem(chatItem)
+        let awakeMenu = NSMenu()
         for mode in AwakeMode.allCases {
             let item = action(mode.title, #selector(setMode(_:)))
             item.representedObject = mode.rawValue
             item.state = awake.mode == mode ? .on : .off
-            menu.addItem(item)
+            awakeMenu.addItem(item)
         }
+        awakeMenu.addItem(.separator())
         let display = action("Keep Display On", #selector(toggleDisplay))
         display.state = awake.keepDisplayOn ? .on : .off
-        menu.addItem(display)
-        let resumeItem = action("Continue Agents After Sleep", #selector(toggleResume))
-        resumeItem.state = resumer.enabled ? .on : .off
-        resumeItem.toolTip = "When the Mac wakes, background agents whose reply was cut off by sleep are told to continue."
-        menu.addItem(resumeItem)
-
+        awakeMenu.addItem(display)
+        let awakeItem = NSMenuItem(title: "Keep Mac Awake", action: nil, keyEquivalent: "")
+        awakeItem.submenu = awakeMenu
+        menu.addItem(awakeItem)
+        let settingsItem = action("Settings…", #selector(showSettings))
+        settingsItem.keyEquivalent = ","
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
-        let chatItem = action("Chat…", #selector(openChat))
-        chatItem.toolTip = "Read every Claude Code session and reply to background ones."
-        menu.addItem(chatItem)
-        let machinesItem = action("Machines…", #selector(openMachines))
-        machinesItem.toolTip = "What the overnight worker machines left for you: branches to merge, questions, stuck jobs."
-        menu.addItem(machinesItem)
-        let searchItem = action("Search Artifacts…", #selector(openSearch))
-        if searchShortcut {
-            searchItem.keyEquivalent = "p"
-            searchItem.keyEquivalentModifierMask = [.command, .shift]
-        }
-        searchItem.toolTip = searchShortcut ? "Find a saved Artifact from anywhere with ⌘⇧P."
-            : "Find a saved Artifact. ⌘⇧P is taken by another app."
-        menu.addItem(searchItem)
-
-        menu.addItem(.separator())
-        menu.addItem(header("Notch"))
-        let notchItem = action("Show Agents in Notch", #selector(toggleNotch))
-        notchItem.state = showNotch ? .on : .off
-        menu.addItem(notchItem)
-        let widthMenu = NSMenu()
-        for width in NotchWidth.allCases {
-            let item = action(width.title, #selector(setWidth(_:)))
-            item.representedObject = width.rawValue
-            item.state = notch.model.width == width ? .on : .off
-            widthMenu.addItem(item)
-        }
-        let widthItem = NSMenuItem(title: "Notch Width", action: nil, keyEquivalent: "")
-        widthItem.submenu = widthMenu
-        menu.addItem(widthItem)
-        let petItem = action("Animate Pet", #selector(togglePet))
-        petItem.state = notch.model.showPet ? .on : .off
-        menu.addItem(petItem)
-        let lastReplyItem = action("Show Last Reply When Peeking", #selector(toggleLastReply))
-        lastReplyItem.state = notch.model.showLastReply ? .on : .off
-        lastReplyItem.toolTip = "Off, a peek only says which agent finished or wants you."
-        menu.addItem(lastReplyItem)
-        let replyItem = action("Reply to Background Agents from the Notch", #selector(toggleReply))
-        replyItem.state = notch.model.replyFromNotch ? .on : .off
-        replyItem.toolTip = "Off, the notch opens the agent in a terminal instead of showing a reply box."
-        menu.addItem(replyItem)
-        let answerItem = action("Answer Prompts from the Notch", #selector(toggleAnswer))
-        answerItem.state = answerFromNotch && HookBridge.isInstalled ? .on : .off
-        answerItem.toolTip = "Adds a hook to Claude Code so questions and permission prompts can be answered here."
-        menu.addItem(answerItem)
-        let pagesItem = action("Keep Local Copies of Artifacts", #selector(toggleKeepPages))
-        pagesItem.state = keepPages && HookBridge.pagesInstalled ? .on : .off
-        pagesItem.toolTip = "Adds a hook to Claude Code that saves each published Artifact page on this Mac, so it stays readable after switching accounts."
-        menu.addItem(pagesItem)
-        menu.addItem(localPagesItem())
-        menu.addItem(.separator())
-        let login = action("Launch at Login", #selector(toggleLogin))
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
         // Its own action, not terminate(_:): macOS 26 gives standard actions an icon, which shifts
         // every item in the group to the right.
         let quit = action("Quit Notchling", #selector(quit))
@@ -424,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if accounts.lastSync.map({ Date().timeIntervalSince($0) > 30 }) ?? true { accounts.sync() }
         if cost.scanned.map({ Date().timeIntervalSince($0) > 30 }) ?? true { cost.refresh() }
 
-        // Only the account in use here; the others are under Switch Account.
+        // Only the account in use here; switching and the other tools are in Chat.
         menu.addItem(header("Claude Code"))
         accountRows = [:]
         if let account = accounts.active {
@@ -437,22 +409,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             menu.addItem(disabled("Not signed in to Claude Code"))
         }
-        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
-        switchItem.submenu = switchMenu()
-        menu.addItem(switchItem)
-        menu.addItem(lanesMenu.item())
-        // Opens the cost window; the breakdown lives there, not in a submenu.
-        menu.addItem(action(costTitle, #selector(showCost)))
-        menu.addItem(limitItem())
-
-        for provider in providers.providers where provider.id != .claudeCode { addProviderItems(provider, to: menu) }
-
-        menu.addItem(.separator())
-        menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
-        menu.addItem(action("Open Chat and Phones", #selector(openChatAndPhones)))
-        let settingsItem = action("Settings…", #selector(showSettings))
-        settingsItem.keyEquivalent = ","
-        menu.addItem(settingsItem)
     }
 
     /// "When the Account in Use Nears Its Limit": what to do, and the percentage to switch at.
@@ -521,7 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if style.showsLimits, let account = state.active {
                 let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? style.planFallback,
                                               usage: provider.usageReport(for: account.id), placeholder: style.limitsPlaceholder)
-                row.onClick = { [weak self] in self?.accountsWindow.show(.accounts, provider: opens.provider) }
+                row.onClick = { [weak self] in self?.chatWindow.showApp(.accounts, provider: opens.provider) }
                 item.view = row
             } else {
                 item.state = .on
@@ -596,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func manageProvider(_ sender: NSMenuItem) {
         guard let target = sender.representedObject as? ProviderMenuTarget else { return }
-        accountsWindow.show(.accounts, provider: target.provider)
+        chatWindow.showApp(.accounts, provider: target.provider)
     }
 
     @objc private func switchProviderItem(_ sender: NSMenuItem) {
@@ -700,15 +656,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Signs in from the Claude Accounts window; Claude Code stays on the account it's using.
     @objc private func addAccount() {
-        accountsWindow.show(.accounts, provider: .claudeCode, signIn: true)
+        chatWindow.show()
+        chatWindow.chatModel.addAccount()
     }
 
     @objc private func manageAccounts() {
-        accountsWindow.show(.accounts, provider: .claudeCode)
+        chatWindow.showApp(.accounts, provider: .claudeCode)
     }
 
     @objc private func showCost() {
-        accountsWindow.show(.cost)
+        chatWindow.showApp(.cost)
     }
 
     /// Opens Chat and, with the phone bridge on, tells paired phones to open too.
@@ -718,7 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showSettings() {
-        accountsWindow.show(.settings)
+        chatWindow.showApp(.settings)
     }
 
     // MARK: - Settings tab

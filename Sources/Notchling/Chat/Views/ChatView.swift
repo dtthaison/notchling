@@ -63,6 +63,9 @@ struct ChatView: View {
         .background(EmptyView().sheet(isPresented: $model.vaultSheet) {
             VaultSheet { model.vaultSheet = false }
         })
+        .background(EmptyView().sheet(isPresented: $model.appSheet) {
+            model.appView?() ?? AnyView(EmptyView())
+        })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
         .environment(\.secondOpinion, model.selected.map { agent in

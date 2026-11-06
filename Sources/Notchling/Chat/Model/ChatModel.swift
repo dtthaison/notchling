@@ -62,6 +62,18 @@ final class ChatModel: ObservableObject {
     @Published var accountTab = AccountTab.claude
     /// The Secret Vault sheet (`VaultSheet`): credentials agents use by name, never through the chat.
     @Published var vaultSheet = false
+    /// The app sheet: every account with its limits, token cost and every setting (what the menu bar used
+    /// to hold). AppDelegate supplies the view, since the stores and settings live there.
+    @Published var appSheet = false {
+        didSet { if !appSheet { onAppSheetClosed?() } }
+    }
+    let appTab = TabModel()
+    var appView: (() -> AnyView)?
+    var onAppSheetClosed: (() -> Void)?
+    /// The sidebar footer's other places: the Machines window, the Artifacts window, the Lanes menu.
+    var openMachines: (() -> Void)?
+    var openArtifacts: (() -> Void)?
+    var lanesMenu: (() -> NSMenu?)?
     /// The New Session sheet (`NewSessionSheet`): account, folder, Start.
     @Published var newSessionSheet = false {
         didSet { if !newSessionSheet { closeAccounts() } }

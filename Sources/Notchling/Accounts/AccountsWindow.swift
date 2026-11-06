@@ -165,6 +165,8 @@ struct AccountsView: View {
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
     @ObservedObject var tab: TabModel
+    /// Set when shown as a sheet over Chat: adds Done.
+    var done: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -176,6 +178,13 @@ struct AccountsView: View {
                 .labelsHidden()
                 .frame(width: 330)
                 HStack {
+                    if let done {
+                        Button("Done", action: done)
+                            .buttonStyle(.kit(.secondary))
+                            .keyboardShortcut(.cancelAction)
+                            .part("Settings Done Button", .bottom)
+                            .padding(.leading, 16)
+                    }
                     Spacer()
                     Button(action: refresh) {
                         Image(systemName: "arrow.clockwise")
@@ -205,7 +214,8 @@ struct AccountsView: View {
             case .settings: SettingsPage(settings: settings)
             }
         }
-        .frame(width: 460, height: 540)
+        // As a sheet it's wider, so Done clears the centred tabs.
+        .frame(width: done == nil ? 460 : 560, height: done == nil ? 540 : 620)
     }
 
     /// Re-reads both logins and rescans cost, for when something changed outside Notchling.

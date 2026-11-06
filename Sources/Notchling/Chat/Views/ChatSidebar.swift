@@ -104,17 +104,33 @@ struct SessionSidebar: View {
             HStack {
                 KitPartsButton()
                 Spacer()
-                Button { model.vaultSheet = true } label: {
-                    Image(systemName: "key").font(.system(size: 13, weight: .medium)).foregroundColor(KitInk.textMuted)
+                footerButton("arrow.triangle.branch", "Lanes", "Lanes: Claude Code config folders, each signed in to its own account") {
+                    model.lanesMenu?()?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
                 }
-                .buttonStyle(.kit(.ghost))
-                .help("Secret Vault: passwords and tokens agents can use without seeing them")
-                .accessibilityLabel("Secret Vault")
-                .part("Secret Vault Button", .top)
+                footerButton("server.rack", "Machines", "Machines: the overnight worker Macs and servers") { model.openMachines?() }
+                footerButton("doc.richtext", "Artifacts", "Artifacts saved on this Mac") { model.openArtifacts?() }
+                footerButton("key", "Secret Vault", "Secret Vault: passwords and tokens agents can use without seeing them") {
+                    model.vaultSheet = true
+                }
+                footerButton("gearshape", "Settings", "Accounts, token cost and settings (⌘,)") {
+                    model.appTab.page = .settings
+                    model.appSheet = true
+                }
             }
                 .padding(.horizontal, 10).padding(.vertical, 8)
         }
         .onChange(of: model.sidebarFocusRequest) { _ in listFocused = true }
+    }
+
+    /// An icon button in the sidebar's bottom bar, tagged with its name for the ? button.
+    private func footerButton(_ icon: String, _ name: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 13, weight: .medium)).foregroundColor(KitInk.textMuted)
+        }
+        .buttonStyle(.kit(.ghost))
+        .help(help)
+        .accessibilityLabel(name)
+        .part("\(name) Button", .top)
     }
 
     /// One list for the right-click menu and the ⋯ menu, so they never differ.
