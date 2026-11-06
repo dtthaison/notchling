@@ -8,6 +8,9 @@ if CommandLine.arguments.count > 1 {
     case "--secret": VaultCLI.use(CommandLine.arguments)
     case "--secrets": VaultCLI.list(CommandLine.arguments)
     case "--secret-request": VaultCLI.request(CommandLine.arguments)
+    // For agents: hand a job to Codex or Antigravity CLI and wait for its end. Its prompt may contain our flags.
+    case "--delegate": DelegateCLI.run(Array(CommandLine.arguments.dropFirst(2)))
+    case "--delegate-models": DelegateCLI.models(Array(CommandLine.arguments.dropFirst(2)))
     default: break
     }
 }

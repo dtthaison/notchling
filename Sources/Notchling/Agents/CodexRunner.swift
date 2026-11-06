@@ -20,8 +20,9 @@ final class CodexRunner {
 
     func isRunning(_ sessionID: String) -> Bool { running.contains(sessionID) }
 
-    static func arguments(prompt: String, session: String?, folder: String, pick: CodexPick = CodexPick()) -> [String] {
-        var common = ["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\""]
+    static func arguments(prompt: String, session: String?, folder: String, pick: CodexPick = CodexPick(),
+                          sandbox: String = "workspace-write") -> [String] {
+        var common = ["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"\(sandbox)\""]
         // A picked model or effort holds from this turn on; Codex keeps its own default otherwise.
         if let model = pick.model { common += ["-m", model] }
         if let effort = pick.effort { common += ["-c", "model_reasoning_effort=\"\(effort)\""] }
@@ -161,7 +162,7 @@ final class CodexRunner {
 
     /// The app's environment plus the login shell's PATH, so the tools Codex runs are found the way they
     /// are in a terminal (an app opened from Finder has only the system PATH).
-    private static func environment() -> [String: String] {
+    static func environment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         if let path = loginPath { env["PATH"] = path }
         env.removeValue(forKey: "NO_COLOR")

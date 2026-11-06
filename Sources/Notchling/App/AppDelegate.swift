@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HookBridge.beat()
         // The vault's socket for `Notchling --secret`, and its skill (rewritten if the app moved).
         VaultServer.shared.start()
-        DispatchQueue.global(qos: .utility).async { VaultSkill.update() }
+        DispatchQueue.global(qos: .utility).async { VaultSkill.update(); DelegateSkill.update() }
         // The phone bridge, the session host connection and the sessions a phone can reach.
         Task { @MainActor [weak self] in
             PhoneService.shared.limitsSource = { [weak self] in self?.phoneLimits() ?? [] }
