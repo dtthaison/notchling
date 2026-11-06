@@ -61,7 +61,9 @@ final class MachinesSafetyTests: XCTestCase {
     }
 
     func testAdminScriptsNeverTouchProductionServices() async throws {
-        var seenAdmin = 0, seenSystemctl = 0
+        var seenAdmin = 0, seenSystemctl = 0, seenApt = 0
+        let aptCommand = try NSRegularExpression(pattern: "apt-get [^\\n;'&|\"]*")
+        let killer = try NSRegularExpression(pattern: "\\b(p|k|x)?kill(all)?\\b")
         let allowedSystemctl: Set<String> = ["systemctl daemon-reload", "systemctl enable --now sd-worker.service",
                                              "systemctl disable --now sd-worker.service"]
         let systemctl = try NSRegularExpression(pattern: "systemctl[^\\n;'&|\"]*")
@@ -87,8 +89,23 @@ final class MachinesSafetyTests: XCTestCase {
                 if !apt.matches(in: text, range: NSRange(text.startIndex..., in: text)).isEmpty {
                     XCTAssertTrue(text.contains("NEEDRESTART_SUSPEND=1"), "\(label) runs apt-get without NEEDRESTART_SUSPEND=1")
                 }
+                // M5: apt only installs what is missing: never an upgrade of what is there, never a removal
+                for m in aptCommand.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    let found = String(text[Range(m.range, in: text)!])
+                    seenApt += 1
+                    if found.contains(" install") {
+                        XCTAssertTrue(found.contains("--no-upgrade"), "\(label) installs without --no-upgrade: \(found)")
+                    } else {
+                        XCTAssertTrue(found.contains(" update"), "\(label) runs an apt-get verb that is not install or update: \(found)")
+                    }
+                    for verb in ["upgrade", "dist-upgrade", "full-upgrade", "remove", "purge", "autoremove"] {
+                        XCTAssertFalse(found.replacingOccurrences(of: "--no-upgrade", with: "").contains(verb), "\(label) runs apt-get \(verb): \(found)")
+                    }
+                }
+                XCTAssertTrue(killer.matches(in: text, range: NSRange(text.startIndex..., in: text)).isEmpty, "\(label) kills a process")
             }
         }
+        XCTAssertGreaterThanOrEqual(seenApt, 4, "the apt-get commands were looked at")
         XCTAssertGreaterThan(seenAdmin, 6, "the admin steps were looked at")
         XCTAssertGreaterThanOrEqual(seenSystemctl, 3, "the systemctl commands were looked at")
     }
@@ -315,6 +332,7 @@ final class MachinesSafetyTests: XCTestCase {
         let writers = ["gh issue", "gh pr ", "gh release", "gh secret", "gh gist", "gh repo create", "gh repo delete",
                        "gh repo edit", "gh repo fork", "deploy-key delete", "--method POST", "--method PUT", "--method PATCH",
                        "--method DELETE", "-X POST", "-X PUT", "-X PATCH", "-X DELETE", "--allow-write"]
+        let ghApi = try NSRegularExpression(pattern: "gh api[^\\n;'\"&|]*")
         var deployAdds = 0
         for machine in machines {
             for (label, raw) in await allTexts(for: machine) {
@@ -324,6 +342,13 @@ final class MachinesSafetyTests: XCTestCase {
                     XCTAssertTrue(found.contains("--dry-run"), "\(label) pushes: \(found)")
                 }
                 for writer in writers { XCTAssertFalse(text.contains(writer), "\(label) uses \(writer)") }
+                // M5: `gh api` only reads (the host-key `meta` call). A field or an input body turns it into a POST.
+                for m in ghApi.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    let found = " " + String(text[Range(m.range, in: text)!]) + " "
+                    for flag in [" -f ", " -F ", " --field", " --raw-field", " --input"] {
+                        XCTAssertFalse(found.contains(flag), "\(label) sends a body with gh api: \(found)")
+                    }
+                }
                 for m in deployAdd.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                     deployAdds += 1
                     let found = String(text[Range(m.range, in: text)!])
