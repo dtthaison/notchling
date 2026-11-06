@@ -5,33 +5,26 @@ import SwiftUI
 /// token cost, and every setting from the menu. Everything `claude auth login`, /status and /usage were
 /// needed for.
 final class AccountsWindowController: NSObject, NSWindowDelegate {
+    private let registry: ProviderRegistry
     private let accounts: AccountStore
-    private let antigravity: AntigravityStore
-    private let desktop: ClaudeDesktopStore
-    private let codex: CodexStore
     private let cost: CostTracker
     private let settings: SettingsModel
-    private let signIn: SignInModel
     private let tab = TabModel()
     private var window: NSWindow?
 
-    init(accounts: AccountStore, antigravity: AntigravityStore, desktop: ClaudeDesktopStore, codex: CodexStore,
-         cost: CostTracker, settings: SettingsModel) {
+    /// `accounts` is for the cost tab, which breaks cost down by Claude Code account.
+    init(registry: ProviderRegistry, accounts: AccountStore, cost: CostTracker, settings: SettingsModel) {
+        self.registry = registry
         self.accounts = accounts
-        self.antigravity = antigravity
-        self.desktop = desktop
-        self.codex = codex
         self.cost = cost
         self.settings = settings
-        signIn = SignInModel(store: accounts)
     }
 
-    func show(_ page: AccountsTab = .accounts, provider: Provider? = nil, signIn startSignIn: Bool = false) {
+    func show(_ page: AccountsTab = .accounts, provider: ProviderID? = nil, signIn startSignIn: Bool = false) {
         tab.page = page
         if let provider { tab.provider = provider }
         if window == nil {
-            let view = AccountsView(accounts: accounts, antigravity: antigravity, desktop: desktop, codex: codex, cost: cost,
-                                    settings: settings, signIn: signIn, tab: tab)
+            let view = AccountsView(registry: registry, accounts: accounts, cost: cost, settings: settings, tab: tab)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Notchling"
             window.styleMask = [.titled, .closable, .miniaturizable]
@@ -40,21 +33,18 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
             window.center()
             self.window = window
         }
-        accounts.sync()
-        antigravity.sync()
-        desktop.sync()
-        codex.sync()
+        registry.syncAll()
         cost.refresh()
         settings.reload?()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
-        if startSignIn { signIn.start() }
+        if startSignIn { registry[.claudeCode]?.beginAdd { _ in } }
     }
 
     var isVisible: Bool { window?.isVisible == true }
 
     func windowWillClose(_ notification: Notification) {
-        signIn.cancel()
+        registry.accountsWindowClosed()
     }
 }
 
@@ -104,13 +94,9 @@ final class SettingsModel: ObservableObject {
     }
 }
 
-enum Provider: String, CaseIterable {
-    case claudeCode = "Claude Code", claudeDesktop = "Claude Desktop", codex = "Codex", antigravity = "Antigravity"
-}
-
 final class TabModel: ObservableObject {
     @Published var page = AccountsTab.accounts
-    @Published var provider = Provider.claudeCode
+    @Published var provider = ProviderID.claudeCode
 }
 
 /// One sign-in at a time, from the browser back to a saved account.
@@ -171,13 +157,10 @@ final class SignInModel: ObservableObject {
 // MARK: - Views
 
 struct AccountsView: View {
+    let registry: ProviderRegistry
     @ObservedObject var accounts: AccountStore
-    @ObservedObject var antigravity: AntigravityStore
-    @ObservedObject var desktop: ClaudeDesktopStore
-    @ObservedObject var codex: CodexStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var settings: SettingsModel
-    @ObservedObject var signIn: SignInModel
     @ObservedObject var tab: TabModel
 
     var body: some View {
@@ -205,18 +188,13 @@ struct AccountsView: View {
             switch tab.page {
             case .accounts:
                 Picker("", selection: $tab.provider) {
-                    ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    ForEach(registry.providers, id: \.id) { Text($0.title).tag($0.id) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 420)
                 .padding(.top, 12)
-                switch tab.provider {
-                case .claudeCode: AccountsPage(accounts: accounts, cost: cost, signIn: signIn)
-                case .claudeDesktop: DesktopPage(accounts: accounts, desktop: desktop)
-                case .codex: CodexPage(store: codex)
-                case .antigravity: AntigravityPage(store: antigravity)
-                }
+                if let provider = registry[tab.provider] { provider.makePage(cost: cost) }
             case .cost: CostPage(cost: cost, accounts: accounts)
             case .settings: SettingsPage(settings: settings)
             }
@@ -226,16 +204,13 @@ struct AccountsView: View {
 
     /// Re-reads both logins and rescans cost, for when something changed outside Notchling.
     private func refresh() {
-        accounts.sync(force: true)
-        antigravity.sync()
-        desktop.sync()
-        codex.sync(force: true)
+        registry.syncAll(force: true)
         cost.refresh()
         settings.reload?()
     }
 }
 
-private struct AccountsPage: View {
+struct AccountsPage: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var cost: CostTracker
     @ObservedObject var signIn: SignInModel
@@ -383,7 +358,7 @@ private struct AccountCard: View {
 
 /// The same accounts as Claude Code, but switching the Claude desktop app. Switching and Add Account
 /// restart the app, so both ask first while it's open.
-private struct DesktopPage: View {
+struct DesktopPage: View {
     @ObservedObject var accounts: AccountStore
     @ObservedObject var desktop: ClaudeDesktopStore
     @State private var error: String?
@@ -841,7 +816,7 @@ struct AntigravityPage: View {
                             .padding(.top, 40)
                     }
                     ForEach(store.accounts) { account in
-                        AntigravityCard(account: account, usage: store.usage[account.id],
+                        AntigravityCard(account: account, usage: store.usage[account.id].map(UsageReport.init),
                                         isActive: account.id == store.activeID,
                                         busy: store.busy || store.adding,
                                         onSwitch: { ask(.switchTo(account)) }, onRemove: { removing = account })
@@ -910,7 +885,7 @@ struct AntigravityPage: View {
 
 private struct AntigravityCard: View {
     let account: AntigravityAccount
-    let usage: GroupedUsage?
+    let usage: UsageReport?
     let isActive: Bool
     let busy: Bool
     let onSwitch: () -> Void
@@ -930,16 +905,16 @@ private struct AntigravityCard: View {
 
 /// Each group's name over its bars (Antigravity's model groups, Codex's limits).
 private struct GroupedLimits: View {
-    let usage: GroupedUsage
+    let usage: UsageReport
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(usage.groups.indices, id: \.self) { i in
                 let group = usage.groups[i]
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(group.name).font(.caption.weight(.medium)).foregroundColor(.secondary)
+                    if let name = group.name { Text(name).font(.caption.weight(.medium)).foregroundColor(.secondary) }
                     ForEach(group.bars.indices, id: \.self) { j in
-                        let short = group.bars[j].label == "5h"
+                        let short = group.bars[j].kind == .session
                         LimitRow(label: short ? "5 hours" : group.bars[j].label,
                                  window: group.bars[j].window, short: short)
                     }
@@ -953,7 +928,7 @@ private struct GroupedLimits: View {
 
 /// The Codex CLI's saved ChatGPT accounts. Adding signs in through `codex login` in the browser and
 /// leaves the account in use alone; switching asks first when it would interrupt something.
-private struct CodexPage: View {
+struct CodexPage: View {
     @ObservedObject var store: CodexStore
     @State private var removing: CodexAccount?
     @State private var confirming: Confirm?
@@ -979,7 +954,7 @@ private struct CodexPage: View {
                         AccountRow(email: account.email, subtitle: account.plan ?? "ChatGPT", isActive: isActive,
                                    busy: store.busy || store.adding, onSwitch: { ask(account) },
                                    menuItems: [("Remove…", { removing = account })]) {
-                            if let usage = store.usage[account.id] {
+                            if let usage = store.usage[account.id].map(UsageReport.init) {
                                 GroupedLimits(usage: usage)
                             } else if !isActive {
                                 Text("Limits show again once you switch to it.").font(.caption).foregroundColor(.secondary)

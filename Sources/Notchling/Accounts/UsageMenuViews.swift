@@ -139,14 +139,14 @@ final class AccountRowView: NSView {
 final class GroupedUsageRowView: NSView {
     var email: String { didSet { needsDisplay = true } }
     var plan: String { didSet { needsDisplay = true } }
-    var usage: GroupedUsage? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    var usage: UsageReport? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     /// Shown in place of the bars while there are none.
     var placeholder: String
     var onClick: (() -> Void)?
 
     static let width: CGFloat = 330
 
-    init(email: String, plan: String, usage: GroupedUsage?, placeholder: String) {
+    init(email: String, plan: String, usage: UsageReport?, placeholder: String) {
         self.email = email
         self.plan = plan
         self.placeholder = placeholder
@@ -161,12 +161,12 @@ final class GroupedUsageRowView: NSView {
     override var isFlipped: Bool { true }
 
     /// Each row is a group header or a bar, so they stack like the Claude limits.
-    private enum Line { case header(String); case bar(String, UsageWindow) }
+    private enum Line { case header(String); case bar(UsageReport.Bar) }
 
     private var lines: [Line] {
         guard let usage else { return [] }
         return usage.groups.flatMap { group -> [Line] in
-            [.header(group.name)] + group.bars.map { .bar($0.label, $0.window) }
+            (group.name.map { [.header($0)] } ?? []) + group.bars.map { .bar($0) }
         }
     }
 
@@ -203,7 +203,8 @@ final class GroupedUsageRowView: NSView {
             switch line {
             case .header(let name):
                 text(name, x: 26, y: y, font: .systemFont(ofSize: 11, weight: .semibold), color: secondary)
-            case .bar(let label, let window):
+            case .bar(let entry):
+                let label = entry.label, window = entry.window
                 text(label, x: 38, y: y, font: small, color: secondary)
                 let bar = NSRect(x: 84, y: y + 5, width: 98, height: 6)
                 (lit ? NSColor.white.withAlphaComponent(0.3) : NSColor.quaternaryLabelColor).setFill()
@@ -217,7 +218,7 @@ final class GroupedUsageRowView: NSView {
                 }
                 text("\(Int(window.percent.rounded()))%", x: 190, y: y, font: digits, color: primary)
                 if let reset = window.resetsAt {
-                    let r = attributed(AccountRowView.resetText(reset, short: label == "5h"), font: small, color: secondary)
+                    let r = attributed(AccountRowView.resetText(reset, short: entry.kind == .session), font: small, color: secondary)
                     r.draw(at: NSPoint(x: right - r.size().width, y: y))
                 }
             }

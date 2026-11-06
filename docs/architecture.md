@@ -113,23 +113,45 @@ Move the pure models, parsers and policies listed above into a library target wi
 | `NotchView.swift` | one file per card; `PetView` goes to a Pet folder with an injected clock and random source |
 | `LimitWatcher` | one switch flow for the main login and for lanes; the notifier and banner move to UI |
 
-### Phase 4: provider registry
+### Phase 4: provider registry (done for the four account providers)
+`Sources/Notchling/Providers/` holds the protocol, the registry, the generic usage type and one thin adapter per provider. The adapters wrap `AccountStore`, `ClaudeDesktopStore`, `CodexStore` and `AntigravityStore` and add no switching logic; the stores keep it, because it touches the user's real logins.
+
 ```swift
 protocol AccountProvider: AnyObject {
-    var id: String { get }
-    var title: String { get }
-    var capabilities: ProviderCapabilities { get }   // add flow, needs restart, usage, auto-switch, cost
-    var state: ProviderState { get }                  // accounts, activeID, busy
+    var id: ProviderID { get }              // "claudeCode", "claudeDesktop", "codex", "antigravity"
+    var title: String { get }               // tab and menu header
+    var capabilities: ProviderCapabilities { get }   // addAccount, addFromMenu, restartsApp, usage, autoSwitch, cost
+    var isAvailable: Bool { get }           // the menu leaves an unavailable provider out
+    var state: ProviderState { get }        // accounts, activeID, busy, adding (read when drawing)
+    var menuStyle: ProviderMenuStyle { get }
+    var changed: (() -> Void)? { get set }  // main thread, after state or limits change
     func sync(force: Bool)
-    func switchTo(_ id: AccountID) async throws
-    func beginAdd() throws
+    func usageReport(for accountID: String) -> UsageReport?
+    func switchTo(_ id: String) async throws
+    func beginAdd(done: @escaping (Error?) -> Void)   // long-lived: progress shows in state.adding
     func cancelAdd()
-    func remove(_ id: AccountID)
+    func remove(_ id: String)
+    func switchConfirmation(to id: String) -> ProviderConfirmation?   // nil: nothing is interrupted
+    func addConfirmation() -> ProviderConfirmation?
+    func makePage(cost: CostTracker) -> AnyView   // the provider's page in the Accounts window
 }
 ```
-- Usage becomes a generic `UsageReport`: groups of bars, each bar with a kind (`session`, `week`, `other`). The cards and `LimitLogic` read that.
-- The Accounts window, the menu sections and the limit watcher iterate the registry.
-- Desktop and Antigravity share one `RestartingAppProvider` base class: quit, open, watch for a new login, cancel.
+- `UsageReport` is groups of bars; each bar has a label, a kind (`session`, `week`, `other`), a percent and a reset time. `UsageReport(AccountUsage)` and `UsageReport(GroupedUsage)` map the existing types. The menu's `GroupedUsageRowView` and the window's `GroupedLimits` draw it. `LimitLogic` and the Claude Code card still read `AccountUsage`.
+- `AppDelegate` registers the providers once (`providers`). The Accounts window tabs, its page, the refresh button, the 60 s sync timer and the Codex, Desktop and Antigravity menu sections all iterate the registry.
+- Deviations from the first sketch: `beginAdd` takes a completion (an add flow can wait minutes on the user) instead of throwing, and `AccountID` stays a plain string.
+
+**Not on the registry yet:**
+- The Claude Code menu section (cost, lanes, limit mode and the Claude-only usage rows) and its card (cost line, signed-out state).
+- `LimitWatcher`, `LanesMenu`, `PagesWindow` and `OwnerPublish` take `AccountStore` directly: they are about Claude logins and lanes, not providers.
+- Chat's account menu, New Session and `AccountsSheet` use the stores directly (`CodexStore`, `AntigravityStore`).
+- Desktop and Antigravity still have two copies of the quit, open and watch-for-login code; the shared `RestartingAppProvider` base class is not written.
+
+#### Adding a provider
+1. Write the store that reads and switches the login (Gemini CLI: its Keychain or file login, saved copies, a usage call). It follows the rules in `CLAUDE.md`: never renew a token that is in use, set every place the login lives, quit apps that read it at launch.
+2. Add `Providers/<Name>Provider.swift`: a final class conforming to `AccountProvider` that holds the store. Map the store's accounts to `ProviderAccount`, its limits to `UsageReport`, and wrap `switchTo` with `awaitStore`. Put the confirmation texts in `switchConfirmation`/`addConfirmation`. Set `menuStyle` (title row, placeholder text, `waitsInMenu` if an app sits at a sign-in screen, `syncsOnOpen` if reading the live login is cheap).
+3. Its page: a SwiftUI view built on `AccountRow` (reuse the card, give it a `content` closure for limits) and return it from `makePage`.
+4. Register it in `AppDelegate.providers`. The tab, the menu section, the refresh and the timer follow. Add the store's UserDefaults keys to the `migrateFromAwake` list.
+5. Test the mapping to `UsageReport` and the store's parsing; never test by switching the real login.
 
 ### Phase 5: a hook with no AppKit
 Once Core and System are separate targets, the `--hook` path links only those two, so the hook starts faster and pulls in less.

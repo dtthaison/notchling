@@ -15,7 +15,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = SettingsModel()
     private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
     private lazy var lanesMenu = LanesMenu(accounts: accounts)
-    private lazy var accountsWindow = AccountsWindowController(accounts: accounts, antigravity: antigravity, desktop: claudeDesktop, codex: codex, cost: cost, settings: settings)
+    /// Every account provider, in the order the Accounts window tabs and the menu sections show them.
+    /// A new provider is registered here and nowhere else.
+    private lazy var providers: ProviderRegistry = {
+        let registry = ProviderRegistry()
+        registry.register(ClaudeCodeProvider(store: accounts))
+        registry.register(ClaudeDesktopProvider(store: claudeDesktop, claude: accounts))
+        registry.register(CodexProvider(store: codex))
+        registry.register(AntigravityProvider(store: antigravity))
+        return registry
+    }()
+    private lazy var accountsWindow = AccountsWindowController(registry: providers, accounts: accounts, cost: cost, settings: settings)
     private lazy var pagesWindow = PagesWindowController(accounts: accounts)
     private lazy var search: SearchPanelController = {
         let search = SearchPanelController()
@@ -91,21 +101,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         settings.apply = { [weak self] in self?.applySetting($0) }
         settings.reload = { [weak self] in self?.reloadSettings() }
-        accounts.changed = { [weak self] in self?.updateUsageViews() }
-        antigravity.changed = { [weak self] in self?.updateButton() }
-        antigravity.sync()
-        claudeDesktop.changed = { [weak self] in self?.updateButton() }
-        claudeDesktop.sync()
-        codex.changed = { [weak self] in self?.updateButton() }
-        codex.sync()
+        for provider in providers.providers {
+            provider.changed = provider.id == .claudeCode
+                ? { [weak self] in self?.updateUsageViews() }
+                : { [weak self] in self?.updateButton() }
+        }
         cost.changed = { [weak self] in self?.updateUsageViews() }
-        accounts.sync()
+        providers.syncAll()
         cost.refresh()
         usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.accounts.sync()
-            self?.antigravity.sync()
-            self?.claudeDesktop.sync()
-            self?.codex.sync()
+            self?.providers.syncAll()
             self?.cost.refresh()
         }
         // An install relaunches Notchling: bring Chat back if it was open, once sessions are listed.
@@ -381,9 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(action(costTitle, #selector(showCost)))
         menu.addItem(limitItem())
 
-        addDesktopItems(to: menu)
-        addCodexItems(to: menu)
-        addAntigravityItems(to: menu)
+        for provider in providers.providers where provider.id != .claudeCode { addProviderItems(provider, to: menu) }
 
         menu.addItem(.separator())
         menu.addItem(action("Manage Accounts…", #selector(manageAccounts)))
@@ -436,121 +439,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chatWindow.noteLimitSwitch(text)
     }
 
-    /// The account Claude Desktop is on, and a Switch Account submenu for the rest.
-    private func addDesktopItems(to menu: NSMenu) {
-        guard claudeDesktop.isAvailable else { return }
-        claudeDesktop.sync()
+    /// One provider's menu section: the account in use (with its limit bars, if it has them), then a
+    /// Switch Account submenu. The Claude Code section above is its own.
+    private func addProviderItems(_ provider: any AccountProvider, to menu: NSMenu) {
+        guard provider.isAvailable else { return }
+        let style = provider.menuStyle
+        if style.syncsOnOpen { provider.sync(force: false) }
+        let state = provider.state
         menu.addItem(.separator())
-        menu.addItem(header("Claude Desktop"))
-        if claudeDesktop.adding {
+        menu.addItem(header(provider.title))
+        if state.adding && style.waitsInMenu {
             menu.addItem(disabled("Waiting for you to sign in…"))
-            menu.addItem(action("Cancel Add Account", #selector(cancelDesktopAdd)))
+            let cancel = action("Cancel Add Account", #selector(cancelProviderAdd(_:)))
+            cancel.representedObject = ProviderMenuTarget(provider: provider.id)
+            menu.addItem(cancel)
             return
         }
-        if let uuid = claudeDesktop.activeUuid {
-            let email = accounts.accounts.first { $0.id.hasPrefix(uuid) }?.email ?? "Signed in"
-            let item = action(email, #selector(manageAccounts))
-            item.state = .on
+        if let name = state.activeName {
+            let opens = ProviderMenuTarget(provider: style.opens ?? provider.id)
+            let item = action(name, #selector(manageProvider(_:)))
+            item.representedObject = opens
+            if style.showsLimits, let account = state.active {
+                let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? style.planFallback,
+                                              usage: provider.usageReport(for: account.id), placeholder: style.limitsPlaceholder)
+                row.onClick = { [weak self] in self?.accountsWindow.show(.accounts, provider: opens.provider) }
+                item.view = row
+            } else {
+                item.state = .on
+            }
             menu.addItem(item)
         } else {
-            menu.addItem(disabled("Not signed in to Claude Desktop"))
+            menu.addItem(disabled(style.notSignedIn))
         }
         let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
-        switchItem.submenu = desktopSwitchMenu()
+        switchItem.submenu = providerSwitchMenu(provider, state: state)
         menu.addItem(switchItem)
     }
 
-    @objc private func cancelDesktopAdd() { claudeDesktop.cancelAdd() }
-
-    /// The ChatGPT account the Codex CLI is on, and the others to switch to.
-    private func addCodexItems(to menu: NSMenu) {
-        guard codex.isAvailable else { return }
-        menu.addItem(.separator())
-        menu.addItem(header("Codex"))
-        if let account = codex.active {
-            let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? "ChatGPT", usage: codex.usage[account.id],
-                                          placeholder: "Reading limits…")
-            row.onClick = { [weak self] in self?.manageCodex() }
-            let item = action(account.email, #selector(manageCodex))
-            item.view = row
-            menu.addItem(item)
-        } else {
-            menu.addItem(disabled("Not signed in to Codex"))
-        }
-        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
+    private func providerSwitchMenu(_ provider: any AccountProvider, state: ProviderState) -> NSMenu {
         let submenu = NSMenu()
-        for account in codex.accounts {
-            let item = action(account.email, #selector(switchCodexItem(_:)))
-            item.representedObject = account.id
-            item.state = account.id == codex.activeID ? .on : .off
+        submenu.autoenablesItems = false
+        for account in state.accounts {
+            let item = action(account.email, #selector(switchProviderItem(_:)))
+            item.representedObject = ProviderMenuTarget(provider: provider.id, account: account.id)
+            item.state = account.id == state.activeID ? .on : .off
             if let plan = account.plan { item.attributedTitle = accountTitle(account.email, detail: [plan]) }
             submenu.addItem(item)
         }
-        if !codex.accounts.isEmpty { submenu.addItem(.separator()) }
-        submenu.addItem(action("Add Account…", #selector(manageCodex)))
-        switchItem.submenu = submenu
-        menu.addItem(switchItem)
+        if !state.accounts.isEmpty { submenu.addItem(.separator()) }
+        let add = action("Add Account…", provider.capabilities.contains(.addFromMenu)
+                         ? #selector(addProviderAccount(_:)) : #selector(manageProvider(_:)))
+        add.representedObject = ProviderMenuTarget(provider: provider.id)
+        submenu.addItem(add)
+        return submenu
     }
 
-    @objc private func manageCodex() {
-        accountsWindow.show(.accounts, provider: .codex)
+    @objc private func cancelProviderAdd(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? ProviderMenuTarget else { return }
+        providers[target.provider]?.cancelAdd()
     }
 
-    @objc private func switchCodexItem(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String, id != codex.activeID else { return }
-        if let warning = CodexStore.switchWarning(CodexStore.runningWork()) {
-            let alert = NSAlert()
-            alert.messageText = "Switch Codex Account?"
-            alert.informativeText = warning
-            alert.addButton(withTitle: "Switch")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        codex.switchTo(id) { error in
-            guard let error else { return }
-            let alert = NSAlert()
-            alert.messageText = "Couldn't switch Codex accounts"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
+    @objc private func manageProvider(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? ProviderMenuTarget else { return }
+        accountsWindow.show(.accounts, provider: target.provider)
+    }
+
+    @objc private func switchProviderItem(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? ProviderMenuTarget, let id = target.account,
+              let provider = providers[target.provider], id != provider.state.activeID else { return }
+        if let ask = provider.switchConfirmation(to: id), !confirm(ask) { return }
+        Task { @MainActor in
+            do { try await provider.switchTo(id) } catch { self.showError(provider.switchFailureTitle, error) }
         }
     }
 
-    /// The Google account Antigravity is on, and the others to switch to.
-    private func addAntigravityItems(to menu: NSMenu) {
-        guard antigravity.isAvailable else { return }
-        antigravity.sync()
-        menu.addItem(.separator())
-        menu.addItem(header("Antigravity"))
-        if antigravity.adding {
-            menu.addItem(disabled("Waiting for you to sign in…"))
-            menu.addItem(action("Cancel Add Account", #selector(cancelAntigravityAdd)))
-            return
+    /// Add Account… for a provider whose flow the menu starts itself (it may restart an app first).
+    @objc private func addProviderAccount(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? ProviderMenuTarget, let provider = providers[target.provider] else { return }
+        if let ask = provider.addConfirmation(), !confirm(ask) { return }
+        provider.beginAdd { [weak self] error in
+            if let error { self?.showError("Couldn't open \(provider.title) to add an account", error) }
         }
-        if let account = antigravity.active {
-            let row = GroupedUsageRowView(email: account.email, plan: account.plan ?? "Google", usage: antigravity.usage[account.id],
-                                          placeholder: "Open Antigravity to read its limits.")
-            row.onClick = { [weak self] in self?.manageAntigravity() }
-            let item = action(account.email, #selector(manageAntigravity))
-            item.view = row
-            menu.addItem(item)
-        } else {
-            menu.addItem(disabled("Not signed in to Antigravity"))
-        }
-        let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        for account in antigravity.accounts {
-            let item = action(account.email, #selector(switchAntigravityItem(_:)))
-            item.representedObject = account.id
-            item.state = account.id == antigravity.activeID ? .on : .off
-            if let plan = account.plan { item.attributedTitle = accountTitle(account.email, detail: [plan]) }
-            submenu.addItem(item)
-        }
-        if !antigravity.accounts.isEmpty { submenu.addItem(.separator()) }
-        submenu.addItem(action("Add Account…", #selector(manageAntigravity)))
-        switchItem.submenu = submenu
-        menu.addItem(switchItem)
+    }
+
+    private func confirm(_ ask: ProviderConfirmation) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = ask.title
+        alert.informativeText = ask.message
+        alert.addButton(withTitle: ask.button)
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showError(_ title: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     /// Every saved account with its plan and limits, then Add Account.
@@ -573,53 +560,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !accounts.accounts.isEmpty { menu.addItem(.separator()) }
         menu.addItem(action("Add Account…", #selector(addAccount)))
         return menu
-    }
-
-    /// The same accounts, switching Claude Desktop instead of Claude Code. Only accounts Notchling has
-    /// captured a desktop login for can be switched to; the rest are a hint to open them in Desktop first.
-    private func desktopSwitchMenu() -> NSMenu {
-        claudeDesktop.sync()
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        if claudeDesktop.adding {
-            menu.addItem(disabled("Waiting for you to sign in…"))
-            return menu
-        }
-        // Only accounts actually in Desktop (the active one, or ones Notchling has captured).
-        for account in accounts.accounts {
-            let uuid = String(account.id.prefix { $0 != ":" })
-            let active = claudeDesktop.activeUuid == uuid
-            guard active || claudeDesktop.saved.contains(uuid) else { continue }
-            let item = action(account.email, #selector(switchDesktopItem(_:)))
-            item.representedObject = uuid
-            item.state = active ? .on : .off
-            menu.addItem(item)
-        }
-        if menu.items.contains(where: { $0.action != nil }) { menu.addItem(.separator()) }
-        menu.addItem(action("Add Account…", #selector(addDesktopAccount)))
-        return menu
-    }
-
-    /// Opens Claude Desktop signed out so the user can sign in to another account there.
-    @objc private func addDesktopAccount() {
-        if ClaudeDesktopStore.isRunning {
-            let alert = NSAlert()
-            alert.messageText = "Open Claude Desktop signed out?"
-            alert.informativeText = "Claude Desktop quits and reopens at the sign-in screen. Sign in to the account "
-                + "you want to add; Notchling saves it. Your current account is kept and you can switch back to it."
-            alert.addButton(withTitle: "Continue")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        claudeDesktop.beginAdd { error in
-            guard let error else { return }
-            let alert = NSAlert()
-            alert.messageText = "Couldn't open Claude Desktop to add an account"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-        }
     }
 
     /// An account's email in menu font, then its plan and limits in small secondary text.
@@ -661,54 +601,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
-    }
-
-    @objc private func switchDesktopItem(_ sender: NSMenuItem) {
-        guard let uuid = sender.representedObject as? String, uuid != claudeDesktop.activeUuid else { return }
-        if ClaudeDesktopStore.isRunning {
-            let alert = NSAlert()
-            alert.messageText = "Restart Claude Desktop?"
-            alert.informativeText = "Claude Desktop quits and opens again on the other account."
-            alert.addButton(withTitle: "Restart")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        claudeDesktop.switchTo(uuid) { error in
-            guard let error else { return }
-            let alert = NSAlert()
-            alert.messageText = "Couldn't switch Claude Desktop"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-        }
-    }
-
-    @objc private func cancelAntigravityAdd() { antigravity.cancelAdd() }
-
-    @objc private func switchAntigravityItem(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String, id != antigravity.activeID else { return }
-        if AntigravityStore.isRunning {
-            let alert = NSAlert()
-            alert.messageText = "Restart Antigravity?"
-            alert.informativeText = "Antigravity quits and opens again on the other account. Agents running in it stop."
-            alert.addButton(withTitle: "Restart")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        antigravity.switchTo(id) { error in
-            guard let error else { return }
-            let alert = NSAlert()
-            alert.messageText = "Couldn't switch Antigravity accounts"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-        }
-    }
-
-    @objc private func manageAntigravity() {
-        accountsWindow.show(.accounts, provider: .antigravity)
     }
 
     /// Signs in from the Claude Accounts window; Claude Code stays on the account it's using.
