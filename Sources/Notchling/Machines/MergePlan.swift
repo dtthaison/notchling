@@ -75,14 +75,17 @@ enum MergePlan {
     static func merge(_ e: ReadyEntry, machine: Machine, repo: MachineRepo, runner: CommandRunning) async -> MergeOutcome {
         var o = MergeOutcome()
         if let why = refusedBranch(e.branch) { o.error = why; return o }
+        guard let machineURL = SSH.gitURL(machine, path: e.worktree) else { o.error = SSH.notAbsolute(e.worktree); return o }
         let path: String
         switch await resolveTarget(repo: repo, runner: runner) {
         case .failure(let f): o.error = f.message; return o
         case .success(let p): path = p
         }
 
-        func git(_ args: [String], timeout: TimeInterval? = nil) async -> CommandResult {
-            await runner.run([gitPath, "-C", path] + args, cwd: nil, timeout: timeout ?? gitTimeout)
+        func git(_ args: [String], timeout: TimeInterval? = nil, env: [String: String] = [:]) async -> CommandResult {
+            let argv = [gitPath, "-C", path] + args
+            if env.isEmpty { return await runner.run(argv, cwd: nil, timeout: timeout ?? gitTimeout) }
+            return await runner.run(argv, cwd: nil, env: env, timeout: timeout ?? gitTimeout)
         }
         let ref = "refs/machines/\(machine.name)/\(e.issue)"
 
@@ -125,8 +128,9 @@ enum MergePlan {
 
         // 3. The machine's branch comes into a private ref, without its tags. The `+` lets a branch the machine
         //    rewrote replace the ref left by an earlier try; the ref is Notchling's own and nothing is pushed from it.
-        let fetchBranch = await git(["fetch", "--no-tags", SSH.gitURL(machine, path: e.worktree),
-                                     "+refs/heads/\(e.branch):\(ref)"], timeout: fetchTimeout)
+        //    BatchMode, so an ssh prompt or a dead host ends the fetch in seconds, not at its timeout.
+        let fetchBranch = await git(["fetch", "--no-tags", machineURL, "+refs/heads/\(e.branch):\(ref)"],
+                                    timeout: fetchTimeout, env: SSH.gitEnvironment)
         guard fetchBranch.code == 0 else { o.error = "fetch from \(machine.name) failed: \(tail(fetchBranch))"; return o }
         o.fetched = true
 

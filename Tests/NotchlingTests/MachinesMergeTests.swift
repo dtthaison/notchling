@@ -201,6 +201,33 @@ final class MachinesMergeTests: XCTestCase {
         XCTAssertFalse(runner.lines.contains { $0.contains("fetch") || $0.contains("merge") || $0.contains("push") })
     }
 
+    // MARK: Fetch over ssh (C20)
+
+    /// BatchMode and a short connect timeout: a prompt or a dead host must not hold the card for the fetch's 300 s.
+    func testTheFetchFromTheMachineRunsWithBatchModeSsh() async {
+        let runner = happyRunner()
+        _ = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        let machineFetches = runner.calls.enumerated().filter { $0.element.contains("fetch") && $0.element.contains { $0.hasPrefix("ssh://") } }
+        XCTAssertEqual(machineFetches.count, 1)
+        XCTAssertEqual(machineFetches.map { runner.envs[$0.offset] }, [["GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=8"]])
+        // the other fetch is origin's; it keeps whatever ssh config the user has
+        let originFetch = runner.calls.firstIndex { $0.contains("fetch") && $0.contains("origin") }
+        XCTAssertEqual(originFetch.map { runner.envs[$0] }, [:])
+    }
+
+    /// The worktree path is the machine's word, and it becomes part of an ssh URL.
+    func testAWorktreePathThatIsNotAbsoluteNeverReachesGit() async {
+        for path in ["", ".evil.com/x", "@other/x", "relative/dir", "-oProxyCommand=x"] {
+            let runner = happyRunner()
+            var e = entry
+            e.worktree = path
+            let o = await MergePlan.merge(e, machine: machine, repo: repo, runner: runner)
+            XCTAssertTrue(o.error?.contains("not an absolute path") ?? false, "\(path): \(o.error ?? "nil")")
+            XCTAssertTrue(runner.lines.isEmpty, "\(path) reached a command: \(runner.lines)")
+            XCTAssertFalse(o.fetched)
+        }
+    }
+
     // MARK: Main ahead of origin (C18)
 
     func testUnpushedMainRefusesWithoutSuggestingAPush() async {
@@ -417,8 +444,9 @@ final class MachinesMergeTests: XCTestCase {
                       runner.envs[i]["PATH"] ?? "no PATH")
         XCTAssertTrue(runner.envs[i]["PATH"]?.hasSuffix(ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin") ?? false)
         XCTAssertEqual(runner.cwds[i], target)
-        // no other command gets an environment
-        XCTAssertEqual(runner.envs.enumerated().filter { !$0.element.isEmpty }.map(\.offset), [i])
+        // the only other command with an environment is the fetch from the machine (BatchMode ssh)
+        let fetchAt = runner.calls.firstIndex { $0.contains("fetch") && $0.contains { $0.hasPrefix("ssh://") } }
+        XCTAssertEqual(runner.envs.enumerated().filter { !$0.element.isEmpty }.map(\.offset), [fetchAt, i].compactMap { $0 })
     }
 
     func testCheckInvocationUsesTheUsersShellWhenItIsOneWeCanRun() {

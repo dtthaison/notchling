@@ -63,7 +63,7 @@ final class MorningActions: ObservableObject {
     @discardableResult func undoMerge(_ item: MorningItem) -> Task<Void, Never> {
         start(item) { [self] in
             guard case .ready(let entry) = item.entry else { return "\(item.id) is not a ready branch" }
-            guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
+            guard let (machine, repo) = lookup(item) else { return refusal(item) }
             let undone = await undoFunction(entry, machine, repo, runner)
             if let error = undone.error { return error }
             outcomes[item.id] = nil
@@ -91,13 +91,17 @@ final class MorningActions: ObservableObject {
     // MARK: Actions on a stuck job
 
     @discardableResult func retry(_ item: MorningItem) -> Task<Void, Never> {
-        start(item) { [self] in await edit(item, ["--add-label", "sd:queued", "--remove-label", "sd:stuck"]) }
+        start(item) { [self] in
+            if let why = registrationError(item) { return why }
+            return await edit(item, ["--add-label", "sd:queued", "--remove-label", "sd:stuck"])
+        }
     }
 
     /// Closes the issue as not planned.
     @discardableResult func close(_ item: MorningItem) -> Task<Void, Never> {
         start(item) { [self] in
-            await gh(["issue", "close", "\(item.issue)", "-R", item.repo, "--reason", "not planned"])
+            if let why = registrationError(item) { return why }
+            return await gh(["issue", "close", "\(item.issue)", "-R", item.repo, "--reason", "not planned"])
         }
     }
 
@@ -129,18 +133,18 @@ final class MorningActions: ObservableObject {
     /// the work tree alone. It holds the item like an action does, so it never runs while a merge fetches into
     /// that ref, and no merge starts while it does.
     func diff(_ item: MorningItem) async -> String {
-        guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
+        guard let (machine, repo) = lookup(item) else { return refusal(item) }
         guard let source = branchSource(item) else { return "\(item.id) has no branch on the machine" }
+        guard let url = SSH.gitURL(machine, path: source.worktree) else { return SSH.notAbsolute(source.worktree) }
         guard !running.contains(item.id) else { return "an action is running on \(item.id); look at the diff when it ends" }
         running.insert(item.id)
         defer { running.remove(item.id) }
         if let why = await MergePlan.branchError(source.branch, path: repo.localPath, runner: runner) { return why }
         let git = MachineTools.path("git")
         let ref = "refs/machines/\(machine.name)/\(item.issue)"
-        let ssh = "ssh -o BatchMode=yes -o ConnectTimeout=8"
-        let fetch = await runner.run([git, "-C", repo.localPath, "-c", "core.sshCommand=\(ssh)", "fetch", "--no-tags",
-                                      SSH.gitURL(machine, path: source.worktree), "+refs/heads/\(source.branch):\(ref)"],
-                                     cwd: nil, timeout: 120)
+        let fetch = await runner.run([git, "-C", repo.localPath, "fetch", "--no-tags", url,
+                                      "+refs/heads/\(source.branch):\(ref)"],
+                                     cwd: nil, env: SSH.gitEnvironment, timeout: 120)
         guard fetch.code == 0 else { return Self.failure(fetch, "git fetch") }
         let diff = await runner.run([git, "-C", repo.localPath, "diff", "refs/heads/main...\(ref)"], cwd: nil, timeout: 60)
         return diff.code == 0 ? diff.out : Self.failure(diff, "git diff")
@@ -154,15 +158,15 @@ final class MorningActions: ObservableObject {
               let (machine, _) = lookup(item) else { return [] }
         let listing = await runner.run(SSH.argv(machine, ["ls", "-1", entry.evidenceDir]), cwd: nil, timeout: 30)
         guard listing.code == 0 else { return [] }
-        let names = listing.out.split(separator: "\n").map(String.init).filter(Self.isImage).sorted()
+        let names = listing.out.split(separator: "\n").map(String.init).filter(Self.isPlainImageName).sorted()
         guard !names.isEmpty else { return [] }
 
         let dir = cacheRoot.appendingPathComponent(machine.name).appendingPathComponent("\(item.issue)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var copied: [URL] = []
         for name in names {
+            guard let target = Self.destination(for: name, in: dir) else { continue }
             let remote = entry.evidenceDir.hasSuffix("/") ? entry.evidenceDir + name : entry.evidenceDir + "/" + name
-            let target = dir.appendingPathComponent(name)
             // -O: the legacy protocol runs the path through the remote shell, so the quoting below holds
             let argv = ["/usr/bin/scp", "-O", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--",
                         "\(machine.user)@\(machine.host):\(LaneStore.quote(remote))", target.path]
@@ -174,11 +178,11 @@ final class MorningActions: ObservableObject {
     // MARK: Plumbing
 
     private func mergeLike(_ item: MorningItem, _ function: @escaping MergeFunction,
-                           unless refusal: @escaping @MainActor () -> String? = { nil }) -> Task<Void, Never> {
+                           unless precondition: @escaping @MainActor () -> String? = { nil }) -> Task<Void, Never> {
         start(item) { [self] in
             guard case .ready(let entry) = item.entry else { return "\(item.id) is not a ready branch" }
-            if let why = refusal() { return why }
-            guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
+            if let why = precondition() { return why }
+            guard let (machine, repo) = lookup(item) else { return refusal(item) }
             let outcome = await function(entry, machine, repo, runner)
             outcomes[item.id] = outcome
             outcomeCommits[item.id] = entry.commit
@@ -189,6 +193,7 @@ final class MorningActions: ObservableObject {
     /// Comments, then edits labels. A failed comment stops the action before the labels move.
     private func comment(_ item: MorningItem, _ body: String, then labels: [String]) -> Task<Void, Never> {
         start(item) { [self] in
+            if let why = registrationError(item) { return why }
             if let error = await gh(["issue", "comment", "\(item.issue)", "-R", item.repo, "--body", body]) { return error }
             return await edit(item, labels)
         }
@@ -230,12 +235,41 @@ final class MorningActions: ObservableObject {
         }
     }
 
+    /// A file name the machine may name in its evidence folder: one plain name, no folders (`/`, `.`, `..`), nothing an
+    /// option parser could take for a flag (leading `-`), no control character (NUL, newline, ...), and an image
+    /// extension. The names come from the machine's `ls`, so each is untrusted.
+    static func isPlainImageName(_ name: String) -> Bool {
+        guard !name.isEmpty, name != ".", name != "..", !name.hasPrefix("-"), !name.contains("/") else { return false }
+        guard !name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) else { return false }
+        return isImage(name)
+    }
+
+    /// Where a copy of `name` goes: a file directly inside `dir`, or nil. Checked on the standardized path, so
+    /// nothing that `appendingPathComponent` would resolve to another folder gets through.
+    static func destination(for name: String, in dir: URL) -> URL? {
+        let target = dir.appendingPathComponent(name)
+        let base = dir.standardizedFileURL.path
+        let parent = target.deletingLastPathComponent().standardizedFileURL.path
+        let leaf = target.standardizedFileURL.lastPathComponent
+        guard parent == base, leaf == name else { return nil }
+        return target
+    }
+
     private static func isImage(_ name: String) -> Bool {
         ["png", "jpg", "jpeg"].contains((name as NSString).pathExtension.lowercased())
     }
 
-    private static func unknownMachine(_ item: MorningItem) -> String {
-        "\(item.machine) or \(item.repo) is not in the machines list"
+    /// Why an action on `item` was refused: the machine is not listed, or the repo is not one of its registered repos.
+    private func refusal(_ item: MorningItem) -> String {
+        machines().contains { $0.name == item.machine }
+            ? "repo \(item.repo) is not registered for \(item.machine)"
+            : "machine \(item.machine) is not in the machines list"
+    }
+
+    /// nil while `item` is on a listed machine and in one of its registered repos. The repo and the machine name
+    /// come from the machine's status, so every action asks before it writes to GitHub.
+    private func registrationError(_ item: MorningItem) -> String? {
+        lookup(item) == nil ? refusal(item) : nil
     }
 
     private static func failure(_ r: CommandResult, _ what: String) -> String {

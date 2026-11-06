@@ -5,6 +5,7 @@ import XCTest
 private final class MorningFakeRunner: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [[String]] = []
+    private var _envs: [[String: String]] = []
     var answer: ([String]) -> CommandResult
 
     init(_ answer: @escaping ([String]) -> CommandResult = { _ in CommandResult(code: 0, out: "", err: "") }) {
@@ -12,6 +13,8 @@ private final class MorningFakeRunner: CommandRunning, @unchecked Sendable {
     }
 
     var calls: [[String]] { lock.withLock { _calls } }
+    /// The environment override of each call, in the order of `calls` (empty for a call made without one).
+    var envs: [[String: String]] { lock.withLock { _envs } }
 
     /// The calls to `gh`, without the path of the executable.
     var ghCalls: [[String]] {
@@ -19,7 +22,14 @@ private final class MorningFakeRunner: CommandRunning, @unchecked Sendable {
     }
 
     func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
-        lock.withLock { _calls.append(argv) }
+        await run(argv, cwd: cwd, env: [:], timeout: timeout)
+    }
+
+    func run(_ argv: [String], cwd: String?, env: [String: String], timeout: TimeInterval) async -> CommandResult {
+        lock.withLock {
+            _calls.append(argv)
+            _envs.append(env)
+        }
         return answer(argv)
     }
 }
@@ -508,6 +518,138 @@ final class MachinesMorningTests: XCTestCase {
         for scp in scps {
             XCTAssertEqual(scp.firstIndex(of: "--").map { $0 < (scp.firstIndex { $0.hasPrefix("agent@") } ?? 0) }, true,
                            "-- ends the options before the host: \(scp)")
+        }
+    }
+
+    // MARK: C20: names from the machine, repos from the machine
+
+    /// The names come from the machine's `ls`: none of them may leave the item's cache folder.
+    func testScreenshotNamesCannotLeaveTheCacheFolder() async {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("morning-shots-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let names = ["../escaped.png", "../../../../escaped.png", "a/b.png", "/abs/path.png", "..", ".", "-o.png", "..png/x.png",
+                     "notes.txt", "ok.png", "UPPER.JPEG", "shot (1).jpg"]
+        let runner = MorningFakeRunner { argv in
+            argv[0] == "/usr/bin/ssh" ? CommandResult(code: 0, out: names.joined(separator: "\n") + "\n", err: "") : CommandResult(code: 0, out: "", err: "")
+        }
+        let urls = await actions(runner, cache: cache).screenshots(item(.ready))
+
+        let dir = cache.appendingPathComponent("m1/7").path
+        XCTAssertEqual(urls.map(\.path), ["\(dir)/UPPER.JPEG", "\(dir)/ok.png", "\(dir)/shot (1).jpg"])
+        let scps = runner.calls.filter { $0[0] == "/usr/bin/scp" }
+        XCTAssertEqual(scps.count, 3, "only plain names were fetched")
+        for scp in scps {
+            XCTAssertTrue(scp.last?.hasPrefix(dir + "/") ?? false, "a copy was aimed outside the cache folder: \(scp)")
+            XCTAssertFalse(scp.last?.contains("..") ?? true)
+            XCTAssertFalse(scp.contains { $0.contains("escaped") || $0.contains("a/b.png") || $0.contains("-o.png") })
+        }
+    }
+
+    func testOnlyAPlainImageNameIsAccepted() {
+        for good in ["a.png", "A.PNG", "shot (1).jpg", "x.JPEG", "a..b.png", "é.png"] {
+            XCTAssertTrue(MorningActions.isPlainImageName(good), good)
+        }
+        for bad in ["", ".", "..", "../x.png", "a/b.png", "/x.png", "x.png/", "-o.png", "--help.jpg", ".png", "x.txt", "x",
+                    "bad\nname.png", "bad\rname.png", "bad\u{0}name.png", "bad\tname.png", "x.png\n", "\u{7f}.png"] {
+            XCTAssertFalse(MorningActions.isPlainImageName(bad), "\(bad.debugDescription) was accepted")
+        }
+    }
+
+    func testTheDestinationMustStayInsideTheCacheFolder() {
+        let dir = URL(fileURLWithPath: "/tmp/cache/m1/7", isDirectory: true)
+        XCTAssertEqual(MorningActions.destination(for: "ok.png", in: dir)?.path, "/tmp/cache/m1/7/ok.png")
+        for bad in ["../escaped.png", "../../x.png", "a/../../x.png", "/etc/x.png", "..", "."] {
+            XCTAssertNil(MorningActions.destination(for: bad, in: dir), bad)
+        }
+    }
+
+    /// A card for a repo this machine is not registered for gets no issue write at all.
+    func testEveryActionChecksTheRepoAgainstTheMachinesRegisteredRepos() async {
+        func foreign(_ kind: MorningKind) -> MorningItem {
+            let entry: MorningEntry
+            switch kind {
+            case .ready: entry = .ready(ReadyEntry(repo: "evil/other", issue: 7, branch: "sd/7", commit: "abc", worktree: "/wt/7", evidenceDir: "", readyAt: nil))
+            case .needsYou: entry = .needsYou(NeedsYouEntry(repo: "evil/other", issue: 7, reason: "q"))
+            case .stuck: entry = .stuck(StuckEntry(repo: "evil/other", issue: 7, reason: "r"))
+            }
+            return MorningItem(id: MorningItems.id(machine: "m1", repo: "evil/other", issue: 7), kind: kind, machine: "m1", repo: "evil/other",
+                               issue: 7, title: "t", entry: entry, comment: nil)
+        }
+        let runner = MorningFakeRunner()
+        let calls = Counter()
+        let a = MorningActions(runner: runner, machines: { [self] in [machine()] },
+                               merge: { _, _, _, _ in calls.bump(); return MergeOutcome() },
+                               retryPush: { _, _, _, _ in calls.bump(); return MergeOutcome() },
+                               undoMerge: { _, _, _, _ in calls.bump(); return MergeOutcome() },
+                               cacheRoot: FileManager.default.temporaryDirectory)
+        let ready = foreign(.ready), needs = foreign(.needsYou), stuck = foreign(.stuck)
+        let want = "repo evil/other is not registered for m1"
+        let actions: [(String, MorningItem, () -> Task<Void, Never>)] = [
+            ("sendBack", ready, { a.sendBack(ready, note: "x") }),
+            ("answer", needs, { a.answer(needs, text: "x") }),
+            ("useRecommended", needs, { a.useRecommended(needs) }),
+            ("retry", stuck, { a.retry(stuck) }),
+            ("close", needs, { a.close(needs) }),
+            ("drop", stuck, { a.drop(stuck) }),
+            ("merge", ready, { a.merge(ready) }),
+            ("undoMerge", ready, { a.undoMerge(ready) }),
+        ]
+        for (name, it, run) in actions {
+            await run().value
+            XCTAssertEqual(a.lastError[it.id], want, name)
+            XCTAssertFalse(a.running.contains(it.id), name)
+        }
+        XCTAssertTrue(runner.calls.isEmpty, "something ran for a repo that is not registered: \(runner.calls)")
+        XCTAssertEqual(calls.value, 0)
+
+        let text = await a.diff(ready)
+        XCTAssertEqual(text, want)
+        let shots = await a.screenshots(ready)
+        XCTAssertTrue(shots.isEmpty)
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testAnActionForAMachineThatIsNotListedSaysSo() async {
+        let runner = MorningFakeRunner()
+        let a = MorningActions(runner: runner, machines: { [] }, cacheRoot: FileManager.default.temporaryDirectory)
+        let it = item(.needsYou)
+        await a.close(it).value
+        XCTAssertEqual(a.lastError[it.id], "machine m1 is not in the machines list")
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testTheRegisteredRepoStillWorks() async {
+        let runner = MorningFakeRunner()
+        await actions(runner).close(item(.needsYou)).value
+        XCTAssertEqual(runner.ghCalls, [["issue", "close", "7", "-R", repo, "--reason", "not planned"]])
+    }
+
+    /// BatchMode and a short connect timeout for the fetch from the machine, so a prompt or a dead host cannot hang the card.
+    func testTheDiffFetchRunsWithBatchModeSsh() async {
+        let runner = MorningFakeRunner { argv in
+            argv.contains("check-ref-format") ? CommandResult(code: 0, out: "sd/7\n", err: "") : CommandResult(code: 0, out: "", err: "")
+        }
+        _ = await actions(runner).diff(item(.ready))
+        let fetchAt = runner.calls.firstIndex { $0.contains("fetch") }
+        XCTAssertNotNil(fetchAt)
+        XCTAssertEqual(fetchAt.map { runner.envs[$0] }, SSH.gitEnvironment)
+        XCTAssertEqual(SSH.gitEnvironment, ["GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=8"])
+        XCTAssertFalse(runner.calls.contains { $0.contains("core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=8") }, "the env replaces the -c option")
+        XCTAssertEqual(runner.envs.filter { !$0.isEmpty }.count, 1, "only the fetch gets an environment")
+    }
+
+    func testDiffRefusesAWorktreePathThatIsNotAbsolute() async {
+        for path in [".evil.com/x", "@other/x", "relative/dir", "-oProxyCommand=x"] {
+            let runner = MorningFakeRunner { argv in
+                argv.contains("check-ref-format") ? CommandResult(code: 0, out: "sd/7\n", err: "") : CommandResult(code: 0, out: "", err: "")
+            }
+            var entry = ready(7)
+            entry.worktree = path
+            let it = MorningItem(id: MorningItems.id(machine: "m1", repo: repo, issue: 7), kind: .ready, machine: "m1", repo: repo,
+                                 issue: 7, title: "t", entry: .ready(entry), comment: nil)
+            let text = await actions(runner).diff(it)
+            XCTAssertTrue(text.contains("not an absolute path"), "\(path): \(text)")
+            XCTAssertFalse(runner.calls.contains { $0.contains("fetch") }, path)
         }
     }
 }

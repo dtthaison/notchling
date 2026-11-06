@@ -86,6 +86,13 @@ final class MachinesPollerTests: XCTestCase {
         XCTAssertEqual(SSH.gitURL(machine("vps"), path: "/home/agent/repo.git"), "ssh://agent@vps.tail/home/agent/repo.git")
     }
 
+    /// Without the leading slash the path would be read as part of the host (`ssh://u@h.evil.com/x`).
+    func testGitURLRefusesAPathThatIsNotAbsolute() {
+        for path in ["", ".evil.com/x", "@other/x", "relative/dir", "-oProxyCommand=x", " /x"] {
+            XCTAssertNil(SSH.gitURL(machine("vps"), path: path), path)
+        }
+    }
+
     // MARK: refresh
 
     func testRefreshRunsStatusCommandOnEveryMachine() async {

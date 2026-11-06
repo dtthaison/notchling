@@ -118,6 +118,34 @@ final class MachinesMergeGitTests: XCTestCase {
         XCTAssertFalse(runner.calls.contains { URL(fileURLWithPath: $0[0]).lastPathComponent == "gh" }, "gh was called", file: file, line: line)
     }
 
+    // MARK: Test isolation
+
+    func testTheRunnerRefusesAnythingThatNamesTheRealLibraryFolder() async {
+        var seen: [String] = []
+        runner.onViolation = { seen.append($0) }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let never = "\(home)/Library/Application Support/Notchling/merge/never-made-\(UUID().uuidString)"
+        let refused: [([String], String?)] = [
+            (["/bin/mkdir", "-p", never], nil),
+            (["/usr/bin/git", "-C", never, "worktree", "add", never, "main"], nil),
+            (["/bin/echo", "x", "\(home)/Library/Caches/Notchling/machines/m1/7"], nil),
+            (["/bin/pwd"], "\(home)/Library"),
+        ]
+        for (argv, cwd) in refused {
+            let r = await runner.run(argv, cwd: cwd, timeout: 5)
+            XCTAssertEqual(r.code, 126, "\(argv)")
+        }
+        XCTAssertEqual(seen.count, refused.count)
+        XCTAssertTrue(seen.allSatisfy { $0.contains("test isolation") })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: never))
+
+        // a temp folder is fine
+        seen = []
+        let ok = await runner.run(["/bin/echo", "hi"], cwd: root, timeout: 5)
+        XCTAssertEqual(ok.out, "hi\n")
+        XCTAssertTrue(seen.isEmpty)
+    }
+
     // MARK: Happy path
 
     func testHappyPathPushesOnlyMainAndLeavesNoTags() async {
@@ -507,6 +535,25 @@ private final class LocalRunner: CommandRunning, @unchecked Sendable {
     private var _calls: [[String]] = []
     /// Runs after each call, before its result is returned: a way to change the world between two steps.
     var afterCall: (([String]) -> Void)?
+    /// Called, instead of running the command, when one would touch the real `~/Library` (the app's own worktree folder
+    /// and caches live there). A test must never create files in the user's real data: this fails the test loudly.
+    var onViolation: (String) -> Void = { XCTFail($0) }
+
+    /// The real home's Library folder, spelled both ways (git prints real paths).
+    static var libraryFolders: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let real = realpath(home, nil).map { String(cString: $0) } ?? home
+        return Array(Set([home + "/Library", real + "/Library"]))
+    }
+
+    private func violation(_ argv: [String], _ cwd: String?) -> String? {
+        for text in argv + [cwd].compactMap({ $0 }) {
+            if let folder = Self.libraryFolders.first(where: { text.contains($0) }) {
+                return "test isolation: refused \(argv.joined(separator: " ")) (cwd \(cwd ?? "none")): it names \(folder), the real user's data"
+            }
+        }
+        return nil
+    }
 
     init(machinePath: String) { self.machinePath = machinePath }
 
@@ -522,6 +569,10 @@ private final class LocalRunner: CommandRunning, @unchecked Sendable {
 
     func run(_ argv: [String], cwd: String?, env: [String: String], timeout: TimeInterval) async -> CommandResult {
         lock.withLock { _calls.append(argv) }
+        if let why = violation(argv, cwd) {
+            onViolation(why)
+            return CommandResult(code: 126, out: "", err: why)
+        }
         var a = argv.map { $0.hasPrefix("ssh://") ? machinePath : $0 }
         if URL(fileURLWithPath: a[0]).lastPathComponent == "gh" { return CommandResult(code: 0, out: "", err: "") }
         // the check runs through the user's login shell in the app; the test runs it with sh

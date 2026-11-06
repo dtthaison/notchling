@@ -170,8 +170,15 @@ enum SSH {
          remote.map(LaneStore.quote).joined(separator: " ")]
     }
 
-    /// Where `git` reaches a path on the machine.
-    static func gitURL(_ m: Machine, path: String) -> String {
-        "ssh://\(m.user)@\(m.host)\(path)"
+    /// For a `git fetch` over ssh: no prompts (a prompt would wait for the whole fetch timeout) and a short connect timeout.
+    static let gitEnvironment = ["GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=8"]
+
+    static func notAbsolute(_ path: String) -> String { "the machine's worktree path \"\(path)\" is not an absolute path" }
+
+    /// Where `git` reaches a path on the machine, or nil for a path that is not absolute: `.evil.com/x` would
+    /// otherwise make the host `m.host.evil.com`.
+    static func gitURL(_ m: Machine, path: String) -> String? {
+        guard path.hasPrefix("/") else { return nil }
+        return "ssh://\(m.user)@\(m.host)\(path)"
     }
 }
