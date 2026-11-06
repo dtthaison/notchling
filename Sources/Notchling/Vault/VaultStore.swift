@@ -45,16 +45,27 @@ final class VaultStore {
         saved.updated = Date()
         list.append(saved)
         try SecretVault.write(list)
-        if Self.changed(old: before, new: stored) {
-            // Only the name goes out, never the value. Machine management listens and offers to update machines.
-            let name = entry.name
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .vaultValueChanged, object: nil, userInfo: ["name": name])
-            }
+        Self.announce(name: entry.name, before: before, after: stored)
+    }
+
+    /// Tells the app a value changed: on the main queue, with the name only, never the value. Machine management
+    /// listens and offers to update machines; nothing is sent from here. Equal values post nothing.
+    static func announce(name: String, before: VaultValue?, after: VaultValue, center: NotificationCenter = .default) {
+        guard changed(old: before, new: after) else { return }
+        DispatchQueue.main.async {
+            center.post(name: .vaultValueChanged, object: nil, userInfo: ["name": name])
         }
     }
 
+    /// Runs `body` with the store's lock held, so a write to the index outside `save` can't interleave with one.
+    func locked<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock(); defer { lock.unlock() }
+        return try body()
+    }
+
     /// Renames an entry and keeps its value: the value never leaves the store. Call it only on the user's click.
+    /// If the index write fails after the Keychain write, the value sits under the new name while the index still
+    /// lists the old one (`save` has always worked this way); the caller should say so and let the user try again.
     func rename(_ entry: VaultEntry, to name: String) throws {
         try save(entry.renamed(to: name), value: nil, replacing: entry)
     }

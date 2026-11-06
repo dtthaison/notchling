@@ -138,6 +138,18 @@ enum VaultExpiry {
 }
 
 extension VaultEntry {
+    /// This entry under a new name. The variables follow the name when they were the old name's defaults;
+    /// custom ones stay. The value is not here: `VaultStore.rename` keeps it.
+    func renamed(to newName: String) -> VaultEntry {
+        var copy = self
+        copy.name = newName
+        let old = VaultEntry.defaultVars(name: name, kind: kind)
+        let new = VaultEntry.defaultVars(name: newName, kind: kind)
+        if secretVar == old.secret { copy.secretVar = new.secret }
+        if kind == .login, userVar == old.user { copy.userVar = new.user }
+        return copy
+    }
+
     /// This saved entry with the fields an agent passed with `--secret-request` laid over it, for the form
     /// to open with. A field the agent left out keeps its saved value; the name, kind and variables never
     /// change here. A date that isn't `YYYY-MM-DD` (an older client) is ignored.
@@ -249,10 +261,37 @@ enum SecretVault {
     static func entry(_ name: String) -> VaultEntry? { all().first { $0.id == name.lowercased() } }
 
     static func write(_ list: [VaultEntry]) throws {
-        try FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try encode(list).write(to: indexURL, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
+        try writeIndex(list, to: indexURL)
         VaultSkill.update(list)
+    }
+
+    /// The list as the index file at `url`, written atomically with mode 600.
+    static func writeIndex(_ list: [VaultEntry], to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try encode(list).write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Sets or clears the expiry day (`YYYY-MM-DD`) of a saved secret in the index at `url`. Only that index is
+    /// rewritten, and only that field. An index it can't read, a missing name or a bad day throws and changes
+    /// nothing. The skill files and the sent reminders are updated only for the real index. It takes the store's
+    /// lock, so it can't interleave with a save.
+    static func setExpires(_ name: String, day: String?, in url: URL = indexURL) throws {
+        if let day, VaultExpiry.parse(day) != day { throw AccountError("\(day) is not a day (YYYY-MM-DD).") }
+        try VaultStore.shared.locked {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var list = try decoder.decode([VaultEntry].self, from: Data(contentsOf: url))
+            guard let i = list.firstIndex(where: { $0.id == name.lowercased() }) else {
+                throw AccountError("There's no secret named \(name).")
+            }
+            let changed = list[i].expires != day
+            list[i].expires = day
+            try writeIndex(list, to: url)
+            guard url == indexURL else { return }
+            VaultSkill.update(list)
+            if changed { VaultReminders.clearSent(ids: [list[i].id]) }
+        }
     }
 
     /// Why `entry` can't be saved into `list` in place of `old`, or nil.

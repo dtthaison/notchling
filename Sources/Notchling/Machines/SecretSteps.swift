@@ -107,6 +107,10 @@ enum SecretSteps {
         guard !value.unicodeScalars.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\u{0}" }) else {
             return FixOutcome(ok: false, message: "the value of \(usage.name) has a line break; save it again")
         }
+        // Redactor holds a tail back across reads only for values it can match; no real token is this short.
+        guard value.utf8.count >= minimumLength else {
+            return FixOutcome(ok: false, message: "the value of \(usage.name) is too short; save it again")
+        }
         let text: String
         switch usage.format {
         case .raw:
@@ -122,8 +126,7 @@ enum SecretSteps {
         let result = await MachineRun.script(RemoteShell.writeFile(usage.remotePath), stdin: Data(text.utf8), ctx: safe)
         filter.finish()
         guard result.code == 0 else {
-            let said = String((result.err.isEmpty ? result.out : result.err)
-                .trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
+            let said = shown(result.err.isEmpty ? result.out : result.err, filter: filter)
             return FixOutcome(ok: false, message: filter.redact(
                 "could not write \(usage.remotePath) on \(usage.machine) (code \(result.code))" + (said.isEmpty ? "" : ": \(said)")))
         }
@@ -146,6 +149,18 @@ enum SecretSteps {
         }
     }
 
+    /// The shortest value delivered. Real tokens are 90 characters or more.
+    private static let minimumLength = 8
+
+    /// What a machine said, for a failure message: redacted first, then cut, so a cut can't leave a piece of the
+    /// value. Output that the runner itself cut (the value's front may be gone) or that is far longer than an
+    /// error is not shown.
+    private static func shown(_ said: String, filter: SecretLogFilter) -> String {
+        let text = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.hasPrefix("[earlier output cut]"), text.count <= 4000 else { return "(output not shown)" }
+        return String(filter.redact(text).prefix(300))
+    }
+
     private static func hasValue(_ secrets: SecretSource, _ name: String) -> Bool {
         !(secrets.value(named: name) ?? "").isEmpty
     }
@@ -163,35 +178,31 @@ enum SecretSteps {
     }
 }
 
-/// Hides one value in a Fix's output, a stream at a time. A value under 4 bytes is not caught by `Redactor`, so
-/// it is replaced chunk by chunk instead.
+/// Hides one value in a Fix's output. `Redactor` holds back the tail of a read that could start the value, so a
+/// value split across two reads is still caught (deliver refuses values too short for that to hold).
 private final class SecretLogFilter: @unchecked Sendable {
     private let lock = NSLock()
     private let value: String
     private let marker: String
     private let sink: @Sendable (String) -> Void
-    private let redactor: Redactor?
+    private let redactor: Redactor
 
     init(value: String, name: String, sink: @escaping @Sendable (String) -> Void) {
         self.value = value
         marker = "[secret:\(name)]"
         self.sink = sink
-        redactor = value.utf8.count >= 4 ? Redactor([value: marker]) : nil
+        redactor = Redactor([value: marker])
     }
 
     func feed(_ chunk: String) {
         lock.lock(); defer { lock.unlock() }
-        if let redactor {
-            emit(redactor.feed(Data(chunk.utf8)))
-        } else {
-            sink(redact(chunk))
-        }
+        emit(redactor.feed(Data(chunk.utf8)))
     }
 
     /// Flushes what the redactor held back while a value might have been split across chunks.
     func finish() {
         lock.lock(); defer { lock.unlock() }
-        if let redactor { emit(redactor.finish()) }
+        emit(redactor.finish())
     }
 
     func redact(_ text: String) -> String {
@@ -265,43 +276,8 @@ enum SecretNames {
     }
 }
 
-extension VaultEntry {
-    /// This entry under a new name. The variables follow the name when they were the old name's defaults;
-    /// custom ones stay. The value is not here: `VaultStore.rename` keeps it.
-    func renamed(to newName: String) -> VaultEntry {
-        var copy = self
-        copy.name = newName
-        let old = VaultEntry.defaultVars(name: name, kind: kind)
-        let new = VaultEntry.defaultVars(name: newName, kind: kind)
-        if secretVar == old.secret { copy.secretVar = new.secret }
-        if kind == .login, userVar == old.user { copy.userVar = new.user }
-        return copy
-    }
-}
-
-extension SecretVault {
-    /// Sets or clears the expiry day (`YYYY-MM-DD`) of a saved secret in the index at `url`. Only that index is
-    /// rewritten, and only that field. An index it can't read, a missing name or a bad day throws and changes
-    /// nothing. The skill files and the sent reminders are updated only for the real index.
-    static func setExpires(_ name: String, day: String?, in url: URL = indexURL) throws {
-        if let day, VaultExpiry.parse(day) != day { throw AccountError("\(day) is not a day (YYYY-MM-DD).") }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        var list = try decoder.decode([VaultEntry].self, from: Data(contentsOf: url))
-        guard let i = list.firstIndex(where: { $0.id == name.lowercased() }) else {
-            throw AccountError("There's no secret named \(name).")
-        }
-        let changed = list[i].expires != day
-        list[i].expires = day
-        try encode(list).write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        guard url == indexURL else { return }
-        VaultSkill.update(list)
-        if changed { VaultReminders.clearSent(ids: [list[i].id]) }
-    }
-}
-
-/// The vault as a `SecretSource`.
+/// The vault as a `SecretSource`. The app reads the Keychain itself for a delivery, which is the user's own click;
+/// an entry's "ask before each use" flag gates agents and is not consulted here.
 struct VaultSecretSource: SecretSource {
     private let lookup: @Sendable (String) -> VaultEntry?
     private let read: @Sendable (VaultEntry) -> VaultValue?

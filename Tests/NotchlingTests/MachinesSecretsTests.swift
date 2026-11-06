@@ -71,14 +71,48 @@ final class MachinesSecretsTests: XCTestCase {
         XCTAssertTrue(lines.lines.joined().contains("[secret:claude-worker]"))
     }
 
-    func testAShortValueTheMachineEchoesIsStillHidden() async {
+    func testATooShortValueIsRefused() async {
         let runner = ScriptedRunner()
-        runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: "got abc"), chunks: ["got abc\n"])
-        let lines = LogBox()
-        let ctx = fixContext(runner: runner, secrets: FakeSecrets(values: ["claude-worker": "abc"]), log: { lines.add($0) })
+        let ctx = fixContext(runner: runner, secrets: FakeSecrets(values: ["claude-worker": "abc1234"]))
         let outcome = await SecretSteps.deliver(claudeUsage(), ctx: ctx)
-        XCTAssertFalse(outcome.message.contains("abc"), outcome.message)
-        XCTAssertFalse(lines.lines.joined().contains("abc"))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertEqual(outcome.message, "the value of claude-worker is too short; save it again")
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    /// A realistic Claude token is 108 characters. The echo starts 250 characters in, so a cut at 300 would
+    /// split it; no 8-character piece of it may reach the message.
+    func testAnEchoThatStartsLateIsRedactedBeforeTheMessageIsCut() async {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        let value = "sk-ant-oat01-" + String((0..<95).map { alphabet[($0 * 7) % alphabet.count] })
+        XCTAssertEqual(value.count, 108)
+        for onStderr in [true, false] {
+            let said = String(repeating: "x", count: 250) + value + " tail"
+            let result = onStderr ? CommandResult(code: 1, out: "", err: said) : CommandResult(code: 1, out: said, err: "")
+            let runner = ScriptedRunner()
+            runner.on({ _ in true }, result: result)
+            let ctx = fixContext(runner: runner, secrets: FakeSecrets(values: ["claude-worker": value]))
+            let outcome = await SecretSteps.deliver(claudeUsage(), ctx: ctx)
+            XCTAssertFalse(outcome.ok)
+            let chars = Array(value)
+            for start in 0...(chars.count - 8) {
+                XCTAssertFalse(outcome.message.contains(String(chars[start..<start + 8])), "fragment at \(start): \(outcome.message)")
+            }
+            XCTAssertTrue(outcome.message.contains("[secret:claude-worker]"), outcome.message)
+        }
+    }
+
+    func testAHugeOrCutEchoIsNotShownAtAll() async {
+        for said in ["[earlier output cut]\nrest of \(claudeValue)", String(repeating: "y", count: 5000)] {
+            let runner = ScriptedRunner()
+            runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: said))
+            let ctx = fixContext(runner: runner, secrets: FakeSecrets(values: ["claude-worker": claudeValue]))
+            let outcome = await SecretSteps.deliver(claudeUsage(), ctx: ctx)
+            XCTAssertFalse(outcome.ok)
+            XCTAssertFalse(outcome.message.contains("SECRETVALUE"))
+            XCTAssertFalse(outcome.message.contains("yyyy"))
+            XCTAssertFalse(outcome.message.contains("rest of"))
+        }
     }
 
     func testRawTokenHasNoNewline() async {
@@ -318,6 +352,25 @@ final class MachinesSecretsTests: XCTestCase {
         XCTAssertTrue(VaultStore.changed(old: a, new: VaultValue(username: "u", secret: "t")))
         XCTAssertTrue(VaultStore.changed(old: a, new: VaultValue(username: "v", secret: "s")))
         XCTAssertTrue(VaultStore.changed(old: nil, new: a))
+    }
+
+    func testTheNoticeCarriesOnlyTheNameAndOnlyForAChangedValue() {
+        let center = NotificationCenter()
+        let seen = Seen<[AnyHashable: Any]>()
+        let onMain = Seen<Bool>()
+        let posted = expectation(description: "posted")
+        let token = center.addObserver(forName: .vaultValueChanged, object: nil, queue: nil) { note in
+            seen.add(note.userInfo ?? [:]); onMain.add(Thread.isMainThread); posted.fulfill()
+        }
+        defer { center.removeObserver(token) }
+        let a = VaultValue(username: "", secret: "old-secret-value")
+        VaultStore.announce(name: "claude-worker", before: a, after: a, center: center)
+        VaultStore.announce(name: "claude-worker", before: a, after: VaultValue(username: "", secret: "new-secret-value"), center: center)
+        wait(for: [posted], timeout: 2)
+        XCTAssertEqual(seen.all.count, 1)
+        XCTAssertEqual(seen.all.first?.count, 1)
+        XCTAssertEqual(seen.all.first?["name"] as? String, "claude-worker")
+        XCTAssertEqual(onMain.all, [true])
     }
 
     // MARK: Expiry
