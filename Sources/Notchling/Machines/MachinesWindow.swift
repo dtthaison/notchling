@@ -72,6 +72,8 @@ struct FixPrompt: Identifiable, Equatable {
     var needsAdmin: Bool
     /// The machine's admin access is root over SSH (no password).
     var root: Bool
+    /// Set up all: the steps the sheet listed, and the only ones the run may run.
+    var approved: [ApprovedStep] = []
 
     var warning: String? { needsAdmin && root ? "Admin steps run as root over SSH on \(host)." : nil }
 }
@@ -422,20 +424,20 @@ final class MachinesModel: ObservableObject {
         setupSheet = .fix(prompt(m, kind: .step(id), title: step.title, display: plan.display, needsAdmin: plan.needsAdmin))
     }
 
-    /// Set up all: shows the commands of every ✗ step. The admin password is asked for per admin step, when
-    /// its turn comes.
+    /// Set up all: shows the commands of every step it will run, the ones waiting for an earlier step too. The admin
+    /// password is asked for per admin step, when its turn comes.
     func requestSetUpAll(on machine: String) {
         guard let m = self.machine(named: machine) else { return }
-        let todo = engine.steps(for: m).compactMap { step -> (SetupStep, FixPlan)? in
-            guard case .run(let plan) = step.fix, case .fail? = engine.results[machine]?[step.id]?.state else { return nil }
-            return (step, plan)
-        }
-        guard !todo.isEmpty else {
+        let plan = engine.setUpAllPlan(for: machine)
+        guard !plan.isEmpty else {
             outcomes[machine] = FixLine(ok: true, text: "nothing to set up", guidance: false)
             return
         }
-        let display = todo.map { "▸ \($0.0.title)\n\($0.1.display)" }.joined(separator: "\n\n")
-        setupSheet = .fix(prompt(m, kind: .all, title: "Set up all on \(machine)", display: display, needsAdmin: false))
+        let display = plan.map { "▸ \($0.title)\($0.waiting ? " (once the steps above pass)" : "")\n\($0.display)" }
+            .joined(separator: "\n\n")
+        var asking = prompt(m, kind: .all, title: "Set up all on \(machine)", display: display, needsAdmin: false)
+        asking.approved = plan
+        setupSheet = .fix(asking)
     }
 
     /// The Running switch: shows its script. Runs nothing.
@@ -473,9 +475,10 @@ final class MachinesModel: ObservableObject {
                 self.record(await self.engine.toggleRunning(on: machine, to: on, approval: approval), for: machine)
             }
         case .all:
+            let approved = prompt.approved
             return Task { [weak self] in
                 guard let self else { return }
-                let outcome = await self.engine.setUpAll(on: machine) { [weak self] step in
+                let outcome = await self.engine.setUpAll(on: machine, approved: approved) { [weak self] step in
                     guard let self else { return .cancelled }
                     return await self.askAdmin(step, on: machine)
                 }

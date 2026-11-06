@@ -8,6 +8,14 @@ struct FixApproval {
 
 enum AdminAnswer { case password(String), rootConfirmed, cancelled }
 
+/// One step of the list Set up all showed: what it will run, and whether it was waiting for an earlier step.
+struct ApprovedStep: Equatable {
+    let id: StepID
+    let title: String
+    let display: String
+    let waiting: Bool
+}
+
 /// Runs the checks and the Fixes.
 ///
 /// - A **check** is read-only. `refresh` batches the `.remote` probes of a machine into one ssh per phase (the
@@ -556,10 +564,28 @@ final class SetupEngine: ObservableObject {
         return FixOutcome(ok: raw.ok, message: message)
     }
 
-    /// Runs every ✗ step with a Fix in catalog order and stops at the first Fix that fails (a secret step with
-    /// no value yet fails with its message and stops it too). A step is looked at when its turn comes, so one
-    /// that waited for an earlier Fix runs after it.
-    func setUpAll(on machine: String, askAdmin: @escaping (SetupStep) async -> AdminAnswer) async -> FixOutcome {
+    /// What Set up all will do, for the confirmation: every step with a run Fix that is ✗ now or waits for an earlier
+    /// step (it becomes ✗ once that one is fixed), in catalog order, with the commands the user sees first.
+    func setUpAllPlan(for machine: String) -> [ApprovedStep] {
+        guard let m = self.machine(named: machine) else { return [] }
+        return stepList(m, currentMachines()).compactMap { step in
+            guard case .run(let plan) = step.fix, let state = results[machine]?[step.id]?.state else { return nil }
+            switch state {
+            case .fail: return ApprovedStep(id: step.id, title: step.title, display: plan.display, waiting: false)
+            case .cantTell(let why) where why.hasPrefix("waits for"):
+                return ApprovedStep(id: step.id, title: step.title, display: plan.display, waiting: true)
+            default: return nil
+            }
+        }
+    }
+
+    /// Runs the `approved` steps that are ✗ when their turn comes, in catalog order, and stops at the first Fix that
+    /// fails (a secret step with no value yet fails with its message and stops it too). A step is looked at when its
+    /// turn comes, so one that waited for an earlier Fix runs after it. It runs nothing the user was not shown: a
+    /// step outside `approved` that is ✗ at its turn, or one whose commands differ from the ones shown, stops the
+    /// run ("needs a look"; the user clicks Set up all again and sees the new list).
+    func setUpAll(on machine: String, approved: [ApprovedStep],
+                  askAdmin: @escaping (SetupStep) async -> AdminAnswer) async -> FixOutcome {
         guard let first = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
         if running[machine] != nil { return FixOutcome(ok: false, message: "another Fix is running on \(machine)") }
         var fixed = 0
@@ -567,6 +593,9 @@ final class SetupEngine: ObservableObject {
             // the step as it is now: an earlier Fix may have changed what this one does
             guard let m = self.machine(named: machine), let step = stepList(m, currentMachines()).first(where: { $0.id == id }),
                   case .run(let plan) = step.fix, case .fail? = results[machine]?[step.id]?.state else { continue }
+            guard let shown = approved.first(where: { $0.id == step.id }), shown.display == plan.display else {
+                return FixOutcome(ok: false, message: "\(step.title) needs a look; Set up again")
+            }
             var approval = FixApproval(adminPassword: nil, asRootConfirmed: false)
             if plan.needsAdmin {
                 switch await askAdmin(step) {

@@ -841,7 +841,8 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(w.engine.updateOffers["claude-worker"], [usage], "the newer value still has to be sent")
     }
 
-    /// M5: setUpAll looks at each step as it is when its turn comes, not as it was when the run started.
+    /// M5: setUpAll looks at each step as it is when its turn comes, not as it was when the run started. It runs
+    /// only steps the user was shown (`approved`), with the commands shown.
     func testSetUpAllUsesTheStepAsItIsAtItsTurn() async {
         let fixes = Counter()
         let flipped = Box(false)
@@ -852,13 +853,81 @@ final class MachinesSetupEngineTests: XCTestCase {
         })
         let w = world { _, _ in [
             step("a", fix: fixA),
-            step("b", fix: flipped.value ? runFix(fixes, "b") : .howTo("by hand")),
+            step("b", fix: runFix(fixes, "b")),
         ] }
         w.answers.value = ["echo probe-a": ("bad", 1), "echo probe-b": ("bad", 1)]
         await w.engine.refresh(["m1"])
-        let out = await w.engine.setUpAll(on: "m1") { _ in .cancelled }
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
         XCTAssertTrue(out.ok, out.message)
         XCTAssertEqual(fixes.all, ["a", "b"])
+    }
+
+    /// Review I1: the list Set up all shows holds the steps that wait for an earlier step, with their commands.
+    func testSetUpAllPlanListsWaitingStepsWithTheirCommands() async {
+        let fixes = Counter()
+        let w = world { _, _ in [
+            step("a", fix: runFix(fixes, "a")),
+            step("b", needs: ["a"], fix: runFix(fixes, "b")),
+            step("c", needs: ["b"], fix: .howTo("by hand")),
+            step("d", fix: runFix(fixes, "d")),
+        ] }
+        w.answers.value = ["echo probe-a": ("bad", 1), "echo probe-b": ("bad", 1), "echo probe-c": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.engine.setUpAllPlan(for: "m1"), [
+            ApprovedStep(id: StepID(raw: "a"), title: "A", display: "do a", waiting: false),
+            ApprovedStep(id: StepID(raw: "b"), title: "B", display: "do b", waiting: true),
+        ], "d passes, c has no run Fix")
+    }
+
+    /// Review I1: a step that was not shown is not run, even when it turns ✗ during the run.
+    func testSetUpAllStopsAtAStepThatWasNotListed() async {
+        let fixes = Counter()
+        let broke = Box(false)
+        let w = world { _, _ in [
+            step("a", fix: .run(FixPlan(display: "do a", needsAdmin: false) { _ in
+                broke.value = true
+                fixes.add("a")
+                return FixOutcome(ok: true, message: "did a")
+            })),
+            step("c", fix: runFix(fixes, "c"), parse: { _, _ in
+                broke.value ? CheckResult(state: .fail("broke")) : CheckResult(state: .pass("fine"))
+            }),
+        ] }
+        w.answers.value = ["echo probe-a": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        let shown = w.engine.setUpAllPlan(for: "m1")
+        XCTAssertEqual(shown.map(\.id.raw), ["a"])
+        let out = await w.engine.setUpAll(on: "m1", approved: shown) { _ in .cancelled }
+        XCTAssertFalse(out.ok)
+        XCTAssertEqual(out.message, "C needs a look; Set up again")
+        XCTAssertEqual(fixes.all, ["a"], "C was not run")
+    }
+
+    /// Review I1: a listed step whose commands changed since the confirmation is not run.
+    func testSetUpAllStopsWhenAListedStepsCommandsChanged() async {
+        let fixes = Counter()
+        let changed = Box(false)
+        let w = world { _, _ in [
+            step("a", fix: .run(FixPlan(display: "do a", needsAdmin: false) { _ in
+                changed.value = true
+                fixes.add("a")
+                return FixOutcome(ok: true, message: "did a")
+            }), parse: { _, _ in
+                changed.value ? CheckResult(state: .pass("ok")) : CheckResult(state: .fail("bad"))
+            }),
+            step("b", needs: ["a"], fix: .run(FixPlan(display: changed.value ? "do b after" : "do b before", needsAdmin: false) { _ in
+                fixes.add("b")
+                return FixOutcome(ok: true, message: "did b")
+            })),
+        ] }
+        w.answers.value = ["echo probe-b": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        let shown = w.engine.setUpAllPlan(for: "m1")
+        XCTAssertEqual(shown.map(\.display), ["do a", "do b before"])
+        let out = await w.engine.setUpAll(on: "m1", approved: shown) { _ in .cancelled }
+        XCTAssertFalse(out.ok)
+        XCTAssertEqual(out.message, "B needs a look; Set up again")
+        XCTAssertEqual(fixes.all, ["a"], "B was not run")
     }
 
     func testTheLogKeepsOrderAndDropsLinesAfterTheFixEnded() async {
@@ -911,7 +980,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         ] }
         w.answers.value = ["echo probe-a": ("bad", 1), "echo probe-c": ("bad", 1), "echo probe-d": ("bad", 1)]
         await w.engine.refresh(["m1"])
-        let out = await w.engine.setUpAll(on: "m1") { _ in .cancelled }
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
         XCTAssertEqual(fixes.all, ["a", "c"])
         XCTAssertFalse(out.ok)
         XCTAssertTrue(out.message.contains("C"), out.message)
@@ -933,7 +1002,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         }
         await w.engine.refresh(["m1"])
         XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "b")]?.state, .cantTell("waits for A"))
-        let out = await w.engine.setUpAll(on: "m1") { _ in .cancelled }
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
         XCTAssertTrue(out.ok, out.message)
         XCTAssertEqual(fixes.all, ["a", "b"])
     }
@@ -945,7 +1014,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         ] }
         w.answers.value = ["echo probe-h": ("bad", 1), "echo probe-t": ("bad", 1), "echo probe-r": ("bad", 1)]
         await w.engine.refresh(["m1"])
-        let out = await w.engine.setUpAll(on: "m1") { _ in .cancelled }
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
         XCTAssertEqual(fixes.all, ["r"])
         XCTAssertTrue(out.ok)
     }
@@ -960,7 +1029,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         ] }
         w.answers.value = ["echo probe-a1": ("bad", 1), "echo probe-p": ("bad", 1), "echo probe-a2": ("bad", 1)]
         await w.engine.refresh(["m1"])
-        let out = await w.engine.setUpAll(on: "m1") { step in
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { step in
             asked.add(step.title)
             return .password("pw-\(step.title)")
         }
@@ -979,7 +1048,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         ] }
         w.answers.value = ["echo probe-p": ("bad", 1), "echo probe-a1": ("bad", 1), "echo probe-q": ("bad", 1)]
         await w.engine.refresh(["m1"])
-        let out = await w.engine.setUpAll(on: "m1") { step in asked.add(step.title); return .cancelled }
+        let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { step in asked.add(step.title); return .cancelled }
         XCTAssertEqual(asked.count, 1)
         XCTAssertEqual(fixes.all, ["p"])
         XCTAssertFalse(out.ok)
@@ -992,10 +1061,10 @@ final class MachinesSetupEngineTests: XCTestCase {
         let w = world([m]) { _, _ in [step("a1", fix: runFix(fixes, "a1", admin: true))] }
         w.answers.value = ["echo probe-a1": ("bad", 1)]
         await w.engine.refresh(["vps"])
-        let pwOnly = await w.engine.setUpAll(on: "vps") { _ in .password("x") }
+        let pwOnly = await w.engine.setUpAll(on: "vps", approved: w.engine.setUpAllPlan(for: "vps")) { _ in .password("x") }
         XCTAssertFalse(pwOnly.ok, "a password is not the root confirmation")
         XCTAssertEqual(fixes.count, 0)
-        let ok = await w.engine.setUpAll(on: "vps") { _ in .rootConfirmed }
+        let ok = await w.engine.setUpAll(on: "vps", approved: w.engine.setUpAllPlan(for: "vps")) { _ in .rootConfirmed }
         XCTAssertTrue(ok.ok)
         XCTAssertEqual(fixes.all, ["a1"])
     }

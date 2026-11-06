@@ -490,6 +490,63 @@ final class MachinesWindowTests: XCTestCase {
     }
 
     @MainActor
+    func testSetUpAllConfirmationListsDeployKeyAndCloneWhileTheyWait() async throws {
+        let repo = TestMachines.repo
+        let order = Order()
+        func make(_ id: StepID, _ title: String, needs: [StepID], pass: @escaping @Sendable () -> Bool) -> SetupStep {
+            SetupStep(id: id, title: title, needs: needs, cadence: .everyRefresh,
+                      probe: .local { _ in pass() ? CheckResult(state: .pass("ok")) : CheckResult(state: .fail("no")) },
+                      fix: .run(FixPlan(display: "run \(title)", needsAdmin: false) { _ in
+                          order.add(title)
+                          return FixOutcome(ok: true, message: "ok")
+                      }))
+        }
+        // each step passes once its own Fix has run
+        let steps: (Machine, [Machine]) -> [SetupStep] = { _, _ in [
+            make(.baseTools, "Base tools", needs: [], pass: { order.items.contains("Base tools") }),
+            make(.deployKey(repo), "Deploy key", needs: [.baseTools], pass: { order.items.contains("Deploy key") }),
+            make(.clone(repo), "Clone", needs: [.deployKey(repo)], pass: { order.items.contains("Clone") }),
+        ] }
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: steps)
+        await model.open()
+        XCTAssertEqual(model.engine.results["m1"]?[.deployKey(repo)]?.state, .cantTell("waits for Base tools"))
+
+        model.requestSetUpAll(on: "m1")
+        guard case .fix(let all)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertEqual(all.kind, .all)
+        for line in ["Base tools", "run Base tools", "Deploy key", "run Deploy key", "Clone", "run Clone"] {
+            XCTAssertTrue(all.display.contains(line), "the confirmation lacks \(line)")
+        }
+        XCTAssertTrue(all.display.contains("once the steps above pass"))
+        await model.confirm(all, password: nil).value
+        XCTAssertEqual(order.items, ["Base tools", "Deploy key", "Clone"])
+        XCTAssertEqual(model.outcomes["m1"]?.ok, true)
+    }
+
+    @MainActor
+    func testSetUpAllRunsOnlyWhatItShowed() async throws {
+        let order = Order()
+        // "Late" passes when the confirmation is made and fails once Base tools has run
+        let steps: (Machine, [Machine]) -> [SetupStep] = { _, _ in [
+            SetupStep(id: .baseTools, title: "Base tools", needs: [], cadence: .everyRefresh,
+                      probe: .local { _ in order.items.contains("Base tools") ? CheckResult(state: .pass("ok")) : CheckResult(state: .fail("no")) },
+                      fix: .run(FixPlan(display: "run Base tools", needsAdmin: false) { _ in order.add("Base tools"); return FixOutcome(ok: true, message: "ok") })),
+            SetupStep(id: .claudeCode, title: "Late", needs: [], cadence: .everyRefresh,
+                      probe: .local { _ in order.items.contains("Base tools") ? CheckResult(state: .fail("broke")) : CheckResult(state: .pass("ok")) },
+                      fix: .run(FixPlan(display: "run Late", needsAdmin: false) { _ in order.add("Late"); return FixOutcome(ok: true, message: "ok") })),
+        ] }
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: steps)
+        await model.open()
+        model.requestSetUpAll(on: "m1")
+        guard case .fix(let all)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertFalse(all.display.contains("Late"))
+        await model.confirm(all, password: nil).value
+        XCTAssertEqual(order.items, ["Base tools"], "Late was not shown, so it did not run")
+        XCTAssertEqual(model.outcomes["m1"]?.text, "Late needs a look; Set up again")
+        XCTAssertEqual(model.outcomes["m1"]?.guidance, true, "a look is asked for, not a red failure")
+    }
+
+    @MainActor
     func testSetUpAllStopsWhenTheAdminSheetIsCancelled() async throws {
         let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: { _, _ in [self.adminStep()] })
         await model.open()
