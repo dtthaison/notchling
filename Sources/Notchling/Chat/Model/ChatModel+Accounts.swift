@@ -62,12 +62,18 @@ extension ChatModel {
     }
 
     /// The limit bars the header shows: the Claude account's 5-hour and weekly limits, or for a Codex
-    /// session the Codex login's (its first group, "Codex": 5h and week on Plus and Pro).
+    /// session the Codex login's (its first group, "Codex": 5h and week on Plus and Pro), or for an
+    /// Antigravity CLI session the active Antigravity login's most used group.
     func limits(for agent: Agent) -> [SessionLimit] {
         if case .codex = agent.target {
             guard let codex, let id = codex.activeID, let usage = codex.usage[id] else { return [] }
             let group = usage.groups.first { $0.name == "Codex" } ?? usage.groups.first
             return (group?.bars ?? []).map { SessionLimit(label: $0.label, name: SessionLimit.name($0.label), window: $0.window) }
+        }
+        if case .antigravity = agent.target {
+            // Limits exist only while the Antigravity app runs; the last numbers stay until it does again.
+            guard let antigravity, let id = antigravity.activeID, let usage = antigravity.usage[id] else { return [] }
+            return SessionLimit.mostUsedGroup(UsageReport(usage))
         }
         guard let usage = usage(for: agent) else { return [] }
         return [usage.session.map { SessionLimit(label: "5h", name: "5-hour limit", window: $0) },

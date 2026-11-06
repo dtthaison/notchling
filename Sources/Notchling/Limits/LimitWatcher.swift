@@ -144,16 +144,11 @@ final class LimitWatcher {
         if fresh { windows += (usage?.other ?? []).map { ($0.name, $0.window) } }
         let skip90 = mode == .notifyAndSwitch && switchAt <= 90
         var fired: (level: Int, text: String)?
-        for (name, window) in windows {
-            guard let window else { continue }
-            let key = "\(active.id)|\(name)"
-            let r = LimitLogic.step(marks[key] ?? .init(), percent: window.percent, resetsAt: window.resetsAt, skip90: skip90)
-            marks[key] = r.mark
-            guard let level = r.fire, level >= (fired?.level ?? 0) else { continue }
-            let pct = Int(window.percent.rounded())
-            fired = (level, level >= 100
-                ? "\(active.email) has used its \(name) limit (\(pct)%)\(Self.resets(window))."
-                : "\(active.email) is at \(pct)% of its \(name) limit\(Self.resets(window)).")
+        if let f = LimitLogic.announcement(marks: &marks, keyPrefix: active.id, windows: windows, skip90: skip90) {
+            let pct = Int(f.window.percent.rounded())
+            fired = (f.level, f.level >= 100
+                ? "\(active.email) has used its \(f.name) limit (\(pct)%)\(Self.resets(f.window))."
+                : "\(active.email) is at \(pct)% of its \(f.name) limit\(Self.resets(f.window)).")
         }
 
         // What pushes toward a switch: a window at the chosen point, or a background agent stopped on the limit.

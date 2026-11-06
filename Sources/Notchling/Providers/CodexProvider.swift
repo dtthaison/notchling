@@ -9,7 +9,7 @@ final class CodexProvider: AccountProvider {
 
     let id = ProviderID.codex
     let title = "Codex"
-    let capabilities: ProviderCapabilities = [.addAccount, .usage]
+    let capabilities: ProviderCapabilities = [.addAccount, .usage, .autoSwitch]
     let menuStyle = ProviderMenuStyle(notSignedIn: "Not signed in to Codex", showsLimits: true, planFallback: "ChatGPT",
                                       limitsPlaceholder: "Reading limits…", opens: .codex)
     let switchFailureTitle = "Couldn't switch Codex accounts"

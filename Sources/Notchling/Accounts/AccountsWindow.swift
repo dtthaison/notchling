@@ -58,7 +58,7 @@ final class SettingsModel: ObservableObject {
     enum Change {
         case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), showNotch(Bool), notchWidth(NotchWidth)
         case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), keepPages(Bool), launchAtLogin(Bool)
-        case limitMode(LimitMode), limitSwitchAt(Int), codexNetwork(Bool)
+        case limitMode(LimitMode), limitSwitchAt(Int), codexLimitMode(LimitMode), antigravityLimitMode(LimitMode), codexNetwork(Bool)
     }
 
     @Published var awakeMode = AwakeMode.off { didSet { push(.awakeMode(awakeMode)) } }
@@ -74,6 +74,8 @@ final class SettingsModel: ObservableObject {
     @Published var launchAtLogin = false { didSet { push(.launchAtLogin(launchAtLogin)) } }
     @Published var limitMode = LimitMode.notifyAndSwitch { didSet { push(.limitMode(limitMode)) } }
     @Published var limitSwitchAt = LimitLogic.defaultSwitchAt { didSet { push(.limitSwitchAt(limitSwitchAt)) } }
+    @Published var codexLimitMode = LimitMode.notify { didSet { push(.codexLimitMode(codexLimitMode)) } }
+    @Published var antigravityLimitMode = LimitMode.notify { didSet { push(.antigravityLimitMode(antigravityLimitMode)) } }
     @Published var codexNetwork = true { didSet { push(.codexNetwork(codexNetwork)) } }
 
     var apply: ((Change) -> Void)?
@@ -780,20 +782,29 @@ private struct SettingsPage: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             Section {
-                Picker("When the account in use nears its limit", selection: $settings.limitMode) {
+                Picker("Claude Code", selection: $settings.limitMode) {
                     ForEach(LimitMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                if settings.limitMode == .notifyAndSwitch {
+                Picker("Codex", selection: $settings.codexLimitMode) {
+                    ForEach(LimitMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Picker("Antigravity", selection: $settings.antigravityLimitMode) {
+                    ForEach([LimitMode.off, .notify], id: \.self) { Text($0.title).tag($0) }
+                }
+                if settings.limitMode == .notifyAndSwitch || settings.codexLimitMode == .notifyAndSwitch {
                     Stepper(value: $settings.limitSwitchAt, in: LimitLogic.switchRange) {
                         Text("Switch at \(settings.limitSwitchAt)%")
                     }
                 }
             } header: {
-                Text("Usage Limits")
+                Text("When the Account in Use Nears Its Limit")
             } footer: {
-                Text("Notify tells you at 90% and 100% of the 5-hour or weekly limit. Notify and Switch also moves "
-                     + "Claude Code to the saved account with the most room (both limits under 80%), at most once "
-                     + "every 30 minutes, and restarts background agents that stopped on the limit.")
+                Text("Notify tells you at 90% and 100% of a limit. Notify and Switch also moves Claude Code to the saved "
+                     + "account with the most room (both limits under 80%), at most once every 30 minutes, and restarts "
+                     + "background agents that stopped on the limit. For Codex it switches only when no Codex session or "
+                     + "turn is running and the ChatGPT app is closed; otherwise it just tells you. Antigravity only "
+                     + "notifies, and only while Antigravity runs (its limits come from the app): switching would "
+                     + "restart it.")
             }
             Section {
                 Toggle("Allow Network in Codex Turns", isOn: $settings.codexNetwork)

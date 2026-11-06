@@ -14,6 +14,18 @@ struct SessionLimit {
     let name: String
     let window: UsageWindow
 
+    /// Antigravity has several quota groups (model families) and the session's model isn't known here,
+    /// so the header shows the group closest to its limit; its name leads the tooltip.
+    static func mostUsedGroup(_ report: UsageReport) -> [SessionLimit] {
+        let group = report.groups.filter { !$0.bars.isEmpty }
+            .max { ($0.bars.map(\.percent).max() ?? 0) < ($1.bars.map(\.percent).max() ?? 0) }
+        guard let group else { return [] }
+        var seen = Set<String>()
+        return group.bars.filter { seen.insert($0.label).inserted }.map {
+            SessionLimit(label: $0.label, name: [group.name, name($0.label)].compactMap { $0 }.joined(separator: " "), window: $0.window)
+        }
+    }
+
     static func name(_ label: String) -> String {
         switch label {
         case "5h": return "5-hour limit"

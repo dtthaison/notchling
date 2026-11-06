@@ -15,6 +15,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = SettingsModel()
     private lazy var limits = LimitWatcher(accounts: accounts) { [weak self] in self?.announceLimit($0) }
     private lazy var lanesMenu = LanesMenu(accounts: accounts)
+    /// Codex and Antigravity limits: Codex may switch (when no turn runs), Antigravity only notifies,
+    /// since a switch restarts the app.
+    private lazy var codexLimits = ProviderLimitWatcher(
+        provider: CodexProvider(store: codex),
+        setup: .init(label: "Codex", modeKey: "codexLimitMode", modes: LimitMode.allCases, defaultMode: .notify,
+                     primaryGroup: "Codex", busyText: "A Codex session is running, so Notchling won't switch now."),
+        switchAt: { [weak self] in self?.limits.switchAt ?? LimitLogic.defaultSwitchAt },
+        canSwitchNow: { CodexStore.idleForAutoSwitch(CodexStore.runningWork()) },
+        announce: { [weak self] in self?.announceLimit($0) })
+    private lazy var antigravityLimits = ProviderLimitWatcher(
+        provider: AntigravityProvider(store: antigravity),
+        setup: .init(label: "Antigravity", modeKey: "antigravityLimitMode", modes: [.off, .notify], defaultMode: .notify,
+                     primaryGroup: nil, busyText: ""),
+        switchAt: { LimitLogic.defaultSwitchAt },
+        announce: { [weak self] in self?.announceLimit($0) })
     /// Every account provider, in the order the Accounts window tabs and the menu sections show them.
     /// A new provider is registered here and nowhere else.
     private lazy var providers: ProviderRegistry = {
@@ -161,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt", "codexNetwork"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt", "codexLimitMode", "antigravityLimitMode", "codexNetwork"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -236,6 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         awake.apply(agentsWorking: agents.contains { $0.group == .working })
         resumer.check(agents)
         limits.check(agents)
+        codexLimits.check()
+        antigravityLimits.check()
         updateButton()
         if accountsWindow.isVisible { reloadSettings() }
     }
@@ -475,6 +492,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let switchItem = NSMenuItem(title: "Switch Account", action: nil, keyEquivalent: "")
         switchItem.submenu = providerSwitchMenu(provider, state: state)
         menu.addItem(switchItem)
+        if let watcher = limitWatcher(for: provider.id) { menu.addItem(providerLimitItem(watcher)) }
+    }
+
+    private func limitWatcher(for id: ProviderID) -> ProviderLimitWatcher? {
+        switch id {
+        case .codex: return codexLimits
+        case .antigravity: return antigravityLimits
+        default: return nil
+        }
+    }
+
+    /// "When Nearing Its Limit" for Codex and Antigravity: the modes that provider allows.
+    private func providerLimitItem(_ watcher: ProviderLimitWatcher) -> NSMenuItem {
+        let sub = NSMenu()
+        for mode in watcher.setup.modes {
+            let item = action(mode.title, #selector(setProviderLimitMode(_:)))
+            item.representedObject = ProviderLimitChoice(provider: watcher.provider.id, mode: mode)
+            item.state = watcher.mode == mode ? .on : .off
+            sub.addItem(item)
+        }
+        let item = NSMenuItem(title: "When the Account in Use Nears Its Limit", action: nil, keyEquivalent: "")
+        item.submenu = sub
+        item.toolTip = watcher.setup.modes.contains(.notifyAndSwitch)
+            ? "Notify at 90% and 100%; or also switch to the saved account with the most room when no Codex turn is running. Uses the Switch At point of Claude Code."
+            : "Notify at 90% and 100% while Antigravity runs. It never switches: that would restart Antigravity."
+        return item
+    }
+
+    private struct ProviderLimitChoice {
+        var provider: ProviderID
+        var mode: LimitMode
+    }
+
+    @objc private func setProviderLimitMode(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? ProviderLimitChoice, let watcher = limitWatcher(for: choice.provider) else { return }
+        watcher.mode = choice.mode
     }
 
     private func providerSwitchMenu(_ provider: any AccountProvider, state: ProviderState) -> NSMenu {
@@ -648,6 +701,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s.launchAtLogin != login { s.launchAtLogin = login }
             if s.limitMode != limits.mode { s.limitMode = limits.mode }
             if s.limitSwitchAt != limits.switchAt { s.limitSwitchAt = limits.switchAt }
+            if s.codexLimitMode != codexLimits.mode { s.codexLimitMode = codexLimits.mode }
+            if s.antigravityLimitMode != antigravityLimits.mode { s.antigravityLimitMode = antigravityLimits.mode }
             if s.codexNetwork != CodexRunner.allowNetwork { s.codexNetwork = CodexRunner.allowNetwork }
         }
     }
@@ -679,6 +734,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             limits.mode = mode
         case .limitSwitchAt(let point):
             limits.switchAt = point
+        case .codexLimitMode(let mode):
+            codexLimits.mode = mode
+        case .antigravityLimitMode(let mode):
+            antigravityLimits.mode = mode
         case .codexNetwork(let on):
             CodexRunner.allowNetwork = on
         case .launchAtLogin(let on):

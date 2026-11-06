@@ -142,7 +142,7 @@ protocol AccountProvider: AnyObject {
 
 **Not on the registry yet:**
 - The Claude Code menu section (cost, lanes, limit mode and the Claude-only usage rows) and its card (cost line, signed-out state).
-- `LimitWatcher`, `LanesMenu`, `PagesWindow` and `OwnerPublish` take `AccountStore` directly: they are about Claude logins and lanes, not providers.
+- `LimitWatcher` (Claude Code; Codex and Antigravity are watched by `ProviderLimitWatcher`, which does read the registry's `UsageReport`s), `LanesMenu`, `PagesWindow` and `OwnerPublish` take `AccountStore` directly: they are about Claude logins and lanes, not providers.
 - Chat's account menu, New Session and `AccountsSheet` use the stores directly (`CodexStore`, `AntigravityStore`).
 - Desktop and Antigravity still have two copies of the quit, open and watch-for-login code; the shared `RestartingAppProvider` base class is not written.
 
