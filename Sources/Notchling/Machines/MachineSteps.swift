@@ -1,27 +1,355 @@
 import Foundation
 
 /// Steps 1–6 and 8 of the catalog: the machine itself. Claude login (7) comes from `SecretSteps`.
-/// Task 5 fills the probes and Fixes; the metadata here is final.
+///
+/// Every probe is a read-only `sh` script whose output is keyed by name (`os=Darwin`, `@@runtimes`), never by line
+/// position, so a probe that printed nothing for one key shifts nothing else. Everything a machine prints is
+/// untrusted: a value is validated before it is kept (`isSafeMachinePath`), cut to 200 characters, and otherwise
+/// only shown. No machine text goes into a script.
 enum MachineSteps {
     /// Reachable, Worker user, Stays awake, FileVault, Base tools, Claude Code, Xcode. The catalog leaves out the
     /// macOS-only ones for a Linux machine.
     static func all(for machine: Machine) -> [SetupStep] {
         let linux = machine.os == .linux
         return [
-            SetupStep(id: .reachable, title: "Reachable", needs: [], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .howTo("Join the machine to Tailscale and turn on Tailscale SSH, then check again.")),
-            SetupStep(id: .workerUser, title: "Worker user", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .howTo("Create the worker user on the machine and give it sudo, then check again.")),
-            SetupStep(id: .staysAwake, title: "Stays awake", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .notBuiltRun(needsAdmin: true)),
-            SetupStep(id: .filevault, title: "FileVault", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .howTo("Turn FileVault on or off in System Settings on the machine, then check again.")),
-            SetupStep(id: .baseTools, title: "Base tools", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .notBuiltRun(needsAdmin: linux)),
-            SetupStep(id: .claudeCode, title: "Claude Code", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .notBuiltRun()),
-            SetupStep(id: .xcode, title: "Xcode", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
+            SetupStep(id: .reachable, title: "Reachable", needs: [], cadence: .everyRefresh,
+                      probe: .remote(script: reachableScript, parse: parseReachable),
+                      fix: .howTo("Turn the machine on and check it from this Mac with `tailscale ping \(machine.host)`. For a new Linux user, add the user to the Tailscale ACL's ssh users. Then check again.")),
+            SetupStep(id: .workerUser, title: "Worker user", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: "id -u", parse: parseWorkerUser),
+                      fix: .howTo("Use the worker account (agent on vps-sing-1). Root is only for steps marked needs admin. Then check again.")),
+            SetupStep(id: .staysAwake, title: "Stays awake", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: "pmset -g", parse: parseStaysAwake),
+                      fix: .run(staysAwakeFix)),
+            SetupStep(id: .filevault, title: "FileVault", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: "fdesetup status", parse: parseFileVault),
+                      fix: .howTo("Notchling only reads this. Turn FileVault on or off in System Settings on the machine. With it on, the machine waits for an unlock after a restart. Then check again.")),
+            SetupStep(id: .baseTools, title: "Base tools", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: baseToolsScript, parse: parseBaseTools),
+                      fix: .run(baseToolsFix(linux: linux))),
+            SetupStep(id: .claudeCode, title: "Claude Code", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: claudeScript, parse: parseClaudeCode),
+                      fix: .run(claudeCodeFix)),
+            SetupStep(id: .xcode, title: "Xcode", needs: [.reachable], cadence: .everyRefresh,
+                      probe: .remote(script: xcodeScript, parse: parseXcode),
                       fix: .howTo("Notchling doesn't install Xcode, which needs your Apple ID. On the machine: App Store, open it once, Xcode > Settings > Components for the iOS runtime, then Check again.")),
         ]
+    }
+
+    // MARK: Parsing helpers
+
+    /// Machine text is cut to this many characters.
+    private static let cutLength = 200
+
+    private static func cut(_ s: String) -> String { String(s.prefix(cutLength)) }
+
+    /// The first `key=value` line for each wanted key. Lines are matched by their key, so a missing line, a banner
+    /// before the output or a repeated key moves nothing.
+    private static func keyed(_ text: String, keys: Set<String>) -> [String: String] {
+        var found: [String: String] = [:]
+        for raw in text.split(whereSeparator: \.isNewline) {
+            guard let eq = raw.firstIndex(of: "=") else { continue }
+            let key = String(raw[raw.startIndex..<eq])
+            guard keys.contains(key), found[key] == nil else { continue }
+            found[key] = String(raw[raw.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        }
+        return found
+    }
+
+    private static func firstLine(_ text: String) -> String {
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { return line }
+        }
+        return ""
+    }
+
+    /// A short failure line from a Fix's result: the last line of what the command said. The admin password is
+    /// replaced if a machine echoed it back.
+    private static func outcome(_ r: CommandResult, ok: String, ctx: FixContext) -> FixOutcome {
+        if r.code == 0 { return FixOutcome(ok: true, message: ok) }
+        let lines = (r.err + "\n" + r.out).split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var last = cut(lines.last ?? "no output")
+        if let password = ctx.adminPassword, !password.isEmpty {
+            last = last.replacingOccurrences(of: password, with: "[admin password]")
+        }
+        return FixOutcome(ok: false, message: "failed (code \(r.code)): \(last)")
+    }
+
+    // MARK: 1 Reachable
+
+    private static let reachableScript = #"""
+    echo "os=$(uname -s)"
+    echo "arch=$(uname -m)"
+    echo "uid=$(id -u)"
+    echo "user=$(id -un)"
+    echo "home=$HOME"
+    if [ "$(uname -s)" = Darwin ]; then v=$(sw_vers -productVersion 2>/dev/null); else v=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"'); fi
+    echo "version=$v"
+    echo "disk_kb=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if command -v docker >/dev/null 2>&1; then if o=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null); then case "$o" in *rootless*) echo docker=rootless;; *) echo docker=rootful;; esac; else echo docker=stopped; fi; else echo docker=none; fi
+    """#
+
+    private static func parseReachable(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        let kv = keyed(out.text, keys: ["os", "arch", "home", "version", "disk_kb", "docker"])
+        guard let osName = kv["os"], !osName.isEmpty else {
+            if out.code != 0 {
+                let why = firstLine(out.text)
+                return CheckResult(state: .fail(why.isEmpty ? "can't reach the machine" : "can't reach the machine: \(cut(why))"))
+            }
+            return CheckResult(state: .cantTell("the machine gave no answer"))
+        }
+        let os: MachineOS
+        switch osName {
+        case "Darwin": os = .macOS
+        case "Linux": os = .linux
+        default: return CheckResult(state: .fail("unsupported OS \(cut(osName))"))
+        }
+        var detected = Detected()
+        detected.os = os
+        guard let home = kv["home"], RemoteShell.isSafeMachinePath(home) else {
+            return CheckResult(state: .fail("the machine's home folder is missing or has characters Notchling won't use"),
+                               detected: detected)
+        }
+        detected.home = home
+
+        var abilities = ctx.machine.abilities ?? MachineAbilities()
+        abilities.home = home
+        let arch = kv["arch"].flatMap { $0.isEmpty ? nil : cut($0) }
+        let version = kv["version"].flatMap { $0.isEmpty ? nil : cut($0) }
+        if let arch { abilities.arch = arch }
+        if let version { abilities.osVersion = version }
+        if let docker = kv["docker"].flatMap({ DockerState(rawValue: $0) }) { abilities.docker = docker }
+        if let kb = kv["disk_kb"].flatMap({ Int($0) }), kb >= 0 { abilities.freeDiskGB = kb / 1_048_576 }
+        detected.abilities = abilities
+
+        let label = os == .macOS ? (version.map { "macOS \($0)" } ?? "macOS") : (version ?? "Linux")
+        return CheckResult(state: .pass(arch.map { "\(label), \($0)" } ?? label), detected: detected)
+    }
+
+    // MARK: 2 Worker user
+
+    private static func parseWorkerUser(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        let uid = out.text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }
+        guard let uid, let number = Int(uid) else { return CheckResult(state: .cantTell("the machine did not say who this is")) }
+        if number == 0 {
+            return CheckResult(state: .fail("signed in as root; use the worker account. Root is only for steps marked needs admin"))
+        }
+        return CheckResult(state: .pass("user id \(number), not root"))
+    }
+
+    // MARK: 3 Stays awake
+
+    private static func parseStaysAwake(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        let wanted: [(key: String, value: Int)] = [("sleep", 0), ("disksleep", 0), ("autorestart", 1)]
+        var seen: [String: Int] = [:]
+        for raw in out.text.split(whereSeparator: \.isNewline) {
+            let words = raw.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard words.count >= 2, wanted.contains(where: { $0.key == String(words[0]) }),
+                  seen[String(words[0])] == nil, let value = Int(words[1]) else { continue }
+            seen[String(words[0])] = value
+        }
+        let missing = wanted.filter { seen[$0.key] == nil }.map(\.key)
+        if !missing.isEmpty { return CheckResult(state: .cantTell("pmset did not report \(missing.joined(separator: ", "))")) }
+        let wrong = wanted.filter { seen[$0.key] != $0.value }
+        if wrong.isEmpty { return CheckResult(state: .pass(wanted.map { "\($0.key) \($0.value)" }.joined(separator: ", "))) }
+        return CheckResult(state: .fail(wrong.map { "\($0.key) \(seen[$0.key]!) (should be \($0.value))" }.joined(separator: ", ")))
+    }
+
+    private static let staysAwakeScript = "pmset -a sleep 0 disksleep 0 && pmset -a autorestart 1"
+
+    private static var staysAwakeFix: FixPlan {
+        FixPlan(display: "as admin: \(staysAwakeScript)", needsAdmin: true) { ctx in
+            let r = await MachineRun.admin(staysAwakeScript, ctx: ctx)
+            return outcome(r, ok: "sleep 0, disksleep 0, autorestart 1 set", ctx: ctx)
+        }
+    }
+
+    // MARK: 4 FileVault
+
+    private static func parseFileVault(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        if out.text.contains("FileVault is On") {
+            var detected = Detected()
+            detected.fileVault = true
+            return CheckResult(state: .pass("on: after a restart it waits for an unlock"), detected: detected)
+        }
+        if out.text.contains("FileVault is Off") {
+            var detected = Detected()
+            detected.fileVault = false
+            return CheckResult(state: .pass("off"), detected: detected)
+        }
+        let why = firstLine(out.text)
+        return CheckResult(state: .cantTell(why.isEmpty ? "fdesetup said nothing" : cut(why)))
+    }
+
+    // MARK: 5 Base tools
+
+    private static let baseToolNames = ["git", "python3", "jq", "gh"]
+
+    private static let baseToolsScript = #"""
+    echo "git=$(command -v git)"
+    echo "python3=$(command -v python3)"
+    echo "jq=$(command -v jq)"
+    echo "gh=$(command -v gh)"
+    pv=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null); echo "pyver=$pv"
+    if command -v brew >/dev/null 2>&1; then echo brew=yes; else echo brew=no; fi
+    """#
+
+    /// `3.12` as (3, 12), or nil.
+    private static func majorMinor(_ s: String) -> (Int, Int)? {
+        let parts = s.split(separator: ".")
+        guard parts.count == 2, let major = Int(parts[0]), let minor = Int(parts[1]) else { return nil }
+        return (major, minor)
+    }
+
+    private static func parseBaseTools(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        let kv = keyed(out.text, keys: Set(baseToolNames + ["pyver", "brew"]))
+        let found = baseToolNames.filter { !(kv[$0] ?? "").isEmpty }
+        var problems: [String] = []
+        let missing = baseToolNames.filter { !found.contains($0) }
+        if !missing.isEmpty { problems.append("missing: \(missing.joined(separator: ", "))") }
+
+        let version = kv["pyver"].flatMap { majorMinor($0) }
+        var pythonOK = false
+        if found.contains("python3") {
+            if let version {
+                if version >= (3, 10) { pythonOK = true }
+                else { problems.append("python3 is \(version.0).\(version.1), sd needs 3.10 or newer") }
+            } else {
+                problems.append("python3 does not run")
+            }
+        }
+
+        var detected = Detected()
+        if pythonOK, let path = kv["python3"], RemoteShell.isSafeMachinePath(path) { detected.python = path }
+
+        let rows = baseToolNames.map { name -> SubRow in
+            let path = kv[name] ?? ""
+            return SubRow(name: name, ok: !path.isEmpty, detail: path.isEmpty ? "missing" : cut(path))
+        }
+        if !problems.isEmpty { return CheckResult(state: .fail(problems.joined(separator: "; ")), rows: rows, detected: detected) }
+        let python = version.map { "python3 \($0.0).\($0.1)" } ?? "python3"
+        return CheckResult(state: .pass(["git", python, "jq", "gh"].joined(separator: ", ")), rows: rows, detected: detected)
+    }
+
+    private static let macBaseToolsScript = #"command -v brew >/dev/null 2>&1 || { echo 'Homebrew is missing: install it from https://brew.sh in the machine'"'"'s own Terminal, then Check again.'; exit 1; }; brew install git python jq gh"#
+
+    /// Runs as root through sudo, so it names no path of the worker's home.
+    private static let linuxBaseToolsScript = #"""
+    set -e
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
+    apt-get update
+    apt-get install -y git python3 jq wget
+    mkdir -p -m 755 /etc/apt/keyrings
+    wget -nv -O /etc/apt/keyrings/githubcli-archive-keyring.gpg https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+    apt-get update
+    apt-get install -y gh
+    """#
+
+    private static func baseToolsFix(linux: Bool) -> FixPlan {
+        if linux {
+            return FixPlan(display: "as admin:\n\(linuxBaseToolsScript)", needsAdmin: true) { ctx in
+                guard ctx.step.machine.os == .linux else { return FixOutcome(ok: false, message: "this machine is not Linux; check again first") }
+                let r = await MachineRun.admin(linuxBaseToolsScript, ctx: ctx)
+                return outcome(r, ok: "git, python3, jq, wget and gh installed", ctx: ctx)
+            }
+        }
+        return FixPlan(display: macBaseToolsScript, needsAdmin: false) { ctx in
+            guard ctx.step.machine.os != .linux else { return FixOutcome(ok: false, message: "this machine is Linux; check again first") }
+            let r = await MachineRun.script(macBaseToolsScript, ctx: ctx)
+            return outcome(r, ok: "git, python, jq and gh installed with Homebrew", ctx: ctx)
+        }
+    }
+
+    // MARK: 6 Claude Code
+
+    private static let claudeScript = "command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null"
+
+    private static func parseClaudeCode(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        let line = firstLine(out.text)
+        guard !line.isEmpty, line.contains(where: \.isNumber) else { return CheckResult(state: .fail("not installed")) }
+        return CheckResult(state: .pass(cut(line)))
+    }
+
+    private static let claudeInstall = "curl -fsSL https://claude.ai/install.sh | bash"
+
+    private static var claudeCodeFix: FixPlan {
+        FixPlan(display: claudeInstall, needsAdmin: false) { ctx in
+            let r = await MachineRun.script(claudeInstall, ctx: ctx)
+            return outcome(r, ok: "Claude Code installed", ctx: ctx)
+        }
+    }
+
+    // MARK: 8 Xcode
+
+    private static let xcodeScript = """
+    xcodebuild -version | head -1
+    echo @@runtimes
+    xcrun simctl list runtimes available -j 2>/dev/null
+    echo @@devices
+    xcrun simctl list devices available -j 2>/dev/null
+    """
+
+    private static func parseXcode(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
+        var xcodeLine: String?
+        var runtimesJSON = "", devicesJSON = ""
+        var section = 0                                              // 0 head, 1 runtimes, 2 devices
+        for raw in out.text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let line = String(raw)
+            if line == "@@runtimes" { section = 1; continue }
+            if line == "@@devices" { section = 2; continue }
+            switch section {
+            case 0: if xcodeLine == nil, line.hasPrefix("Xcode ") { xcodeLine = cut(line.trimmingCharacters(in: .whitespaces)) }
+            case 1: runtimesJSON += line + "\n"
+            default: devicesJSON += line + "\n"
+            }
+        }
+
+        // iOS runtimes, the newest first
+        var runtimes: [(name: String, version: String)] = []
+        if let root = json(runtimesJSON) as? [String: Any], let list = root["runtimes"] as? [[String: Any]] {
+            for item in list {
+                guard let name = item["name"] as? String, (item["platform"] as? String) == "iOS" || name.hasPrefix("iOS "),
+                      (item["isAvailable"] as? Bool) != false else { continue }
+                runtimes.append((cut(name), (item["version"] as? String) ?? ""))
+            }
+        }
+        runtimes.sort { $0.version.compare($1.version, options: .numeric) == .orderedDescending }
+
+        // iPhone names under iOS runtimes, the newest runtime first, without repeats
+        var phones: [String] = []
+        if let root = json(devicesJSON) as? [String: Any], let byRuntime = root["devices"] as? [String: Any] {
+            let keys = byRuntime.keys.filter { $0.contains("iOS") }
+                .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            for key in keys {
+                for item in (byRuntime[key] as? [[String: Any]]) ?? [] {
+                    guard let name = item["name"] as? String, name.hasPrefix("iPhone"),
+                          (item["isAvailable"] as? Bool) != false, !phones.contains(cut(name)) else { continue }
+                    phones.append(cut(name))
+                }
+            }
+        }
+
+        var abilities = ctx.machine.abilities ?? MachineAbilities()
+        abilities.xcode = xcodeLine
+        abilities.iosRuntimes = runtimes.map(\.name)
+        abilities.simulators = phones
+        var detected = Detected()
+        detected.abilities = abilities
+
+        guard let xcodeLine else { return CheckResult(state: .fail("Xcode is not installed"), detected: detected) }
+        guard let runtime = runtimes.first else { return CheckResult(state: .fail("no iOS runtime"), detected: detected) }
+        guard let phone = phones.first else { return CheckResult(state: .fail("no iPhone simulator"), detected: detected) }
+        let more = phones.count > 1 ? " and \(phones.count - 1) more" : ""
+        return CheckResult(state: .pass("\(xcodeLine) · \(runtime.name) · \(phone)\(more)"), detected: detected)
+    }
+
+    private static func json(_ text: String) -> Any? {
+        try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
 }
