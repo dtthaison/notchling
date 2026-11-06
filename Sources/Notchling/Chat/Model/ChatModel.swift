@@ -45,6 +45,8 @@ final class ChatModel: ObservableObject {
     @Published var conversation = Conversation()
     /// Which tool steps are open; shared so a refresh never folds them.
     let expansion = ChatExpansion()
+    /// Second opinions asked from Chat (`SecondOpinionStore`), shown under the message they review.
+    let secondOpinions = SecondOpinionStore()
     /// The session details panel on the right.
     @Published var showInspector = UserDefaults.standard.object(forKey: "chatInspector") as? Bool ?? false {
         didSet { UserDefaults.standard.set(showInspector, forKey: "chatInspector") }

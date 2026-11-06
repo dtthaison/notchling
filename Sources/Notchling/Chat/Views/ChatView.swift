@@ -65,6 +65,10 @@ struct ChatView: View {
         })
         .environment(\.openURL, OpenURLAction { model.open($0) })
         .environment(\.chatFolder, model.selected?.cwd)
+        .environment(\.secondOpinion, model.selected.map { agent in
+            SecondOpinionContext(store: model.secondOpinions, session: agent.id, folder: agent.cwd,
+                                 open: { [weak model] run in model?.openDelegatedSession(run) })
+        })
         .environment(\.runCommand, { [weak model] script, folder in model?.runCommand(script, in: folder) })
         .kitNoFocusRing()
         .frame(minWidth: 720, minHeight: 460)

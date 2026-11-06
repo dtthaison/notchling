@@ -8,9 +8,12 @@ import UniformTypeIdentifiers
 struct AssistantMessage: View {
     let text: String
     let date: Date?
+    /// The conversation item's id, which a Second Opinion on this message hangs its card under.
+    var anchor: String? = nil
     @State private var overCard = false
     @State private var overBar = false
     @State private var shown = false
+    @State private var asking = false
 
     var body: some View {
         // Full width, no avatar: the card and its place on the left already say who wrote it.
@@ -23,6 +26,7 @@ struct AssistantMessage: View {
                     if shown {
                         HStack(spacing: 2) {
                             if let date { Text(ChatFormat.time(date)).kitType(.meta).foregroundColor(KitInk.textFaint).padding(.horizontal, 4) }
+                            if let anchor { SecondOpinionButton(subject: .message(text), anchor: anchor, isOpen: $asking) }
                             CopyButton(text: text)
                         }
                         .fixedSize()
@@ -38,14 +42,15 @@ struct AssistantMessage: View {
                 }
         }
         .onHover { overCard = $0; update() }
+        .onChange(of: asking) { _ in update() }
     }
 
     /// Moving from the card up to the bar leaves one before entering the other: hide only once the
     /// pointer has been off both for a moment.
     private func update() {
-        if overCard || overBar { shown = true; return }
+        if overCard || overBar || asking { shown = true; return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            if !overCard && !overBar { shown = false }
+            if !overCard && !overBar && !asking { shown = false }
         }
     }
 }

@@ -210,11 +210,17 @@ struct ConversationView: View, Equatable {
             UserBubble(text: text, images: images, date: item.date, note: nil)
                 .part(text.hasPrefix("! ") ? "Shell Command Bubble" : "Your Message", .topTrailing)
         case .assistant(let text):
-            AssistantMessage(text: text, date: item.date).part("Claude's Reply")
+            VStack(alignment: .leading, spacing: 0) {
+                AssistantMessage(text: text, date: item.date, anchor: item.id).part("Claude's Reply")
+                SecondOpinionCards(anchors: [item.id])
+            }
         case .thinking(let seconds, let text):
             ThinkingRow(id: item.id, seconds: seconds, text: text, expansion: expansion).part("Thinking Row", .trailing)
         case .tools(let calls):
-            ToolStepView(id: item.id, calls: calls, live: liveTools, expansion: expansion).part("Tool Steps", .topTrailing)
+            VStack(alignment: .leading, spacing: 0) {
+                ToolStepView(id: item.id, calls: calls, live: liveTools, expansion: expansion).part("Tool Steps", .topTrailing)
+                SecondOpinionCards(anchors: calls.map(\.id))
+            }
         case .turnEnd(let seconds, let model):
             TurnFooter(seconds: seconds, model: model).part("Turn Footer", .trailing)
         case .notice(let text, let symbol):

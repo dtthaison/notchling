@@ -143,6 +143,8 @@ struct ToolCallRow: View {
     let running: Bool
     @ObservedObject var expansion: ChatExpansion
     @State private var hovering = false
+    @State private var overRow = false
+    @State private var asking = false
 
     var body: some View {
         let open = expansion.open.contains(call.id)
@@ -194,7 +196,13 @@ struct ToolCallRow: View {
                 .help("Read what this subagent did")
                 .part("Open Subagent Button", .bottom)
             }
+            // An edit with a diff can be put to Codex or Antigravity for review.
+            if !call.diff.isEmpty {
+                SecondOpinionButton(subject: .change(path: call.input, diff: call.diff), anchor: call.id, isOpen: $asking)
+                    .opacity(overRow || asking ? 1 : 0)
             }
+            }
+            .onHover { overRow = $0 }
 
             if open {
                 VStack(alignment: .leading, spacing: 6) {
