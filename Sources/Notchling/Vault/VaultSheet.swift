@@ -163,8 +163,13 @@ final class VaultForm: ObservableObject {
     let original: VaultEntry?
     /// Why an agent asked for this secret, shown above the form.
     let reason: String?
-    /// Opened by Renew…: the value field is empty and focused, the how-to sits above it and the expiry is asked for.
+    /// Opened by Renew…: the value field is empty and focused, the how-to sits above it, and Save waits for a
+    /// new value and a chosen expiry (a date or "No expiry").
     let renewing: Bool
+    /// An ordinary edit needs no choice; a renewal starts with none made.
+    @Published var expiryChosen: Bool
+    /// What an agent's request changed in this saved secret, marked in the form with the old values.
+    private(set) var changes = VaultPrefillChanges()
     @Published var name: String { didSet { followName() } }
     @Published var kind: VaultEntry.Kind { didSet { followName() } }
     @Published var username = ""
@@ -195,11 +200,12 @@ final class VaultForm: ObservableObject {
         url = entry?.url ?? ""
         howTo = entry?.howTo ?? ""
         let day = entry?.expires.flatMap { VaultExpiry.date(from: $0) }
-        // Editing keeps the saved day (an expired one shows in red). A renewal asks for the new day: the
-        // picker is shown, on the saved day while that is still ahead, else 30 days out.
-        let ahead = day.flatMap { $0 >= Calendar.current.startOfDay(for: Date()) ? $0 : nil }
-        hasExpiry = day != nil || renew && entry != nil
-        expiryDate = (renew && entry != nil ? ahead : day) ?? Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()
+        let renewal = renew && entry != nil
+        // Editing keeps the saved day (an expired one shows in red). A renewal starts with no day chosen,
+        // and "No expiry" unless the user picks one; the picker then starts 30 days out.
+        expiryChosen = !renewal
+        hasExpiry = !renewal && day != nil
+        expiryDate = (renewal ? nil : day) ?? Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()
         ask = entry?.asks ?? false
         let vars = VaultEntry.defaultVars(name: entry?.name ?? "", kind: entry?.kind ?? .token)
         userVar = entry?.kind == .login ? entry?.userVar ?? vars.user : vars.user
@@ -213,13 +219,18 @@ final class VaultForm: ObservableObject {
     /// passed replaces the saved text in the form (`VaultEntry.prefilled`); nothing is saved until the user
     /// presses Save.
     convenience init(request: VaultRequest) {
-        let existing = request.name.flatMap(SecretVault.entry)
+        self.init(saved: request.name.flatMap(SecretVault.entry), request: request)
+    }
+
+    /// `init(request:)` with the saved secret given (so a render or a test needn't read the real vault).
+    convenience init(saved existing: VaultEntry?, request: VaultRequest) {
         self.init(existing, reason: request.reason)
         if existing == nil {
             name = request.name ?? ""
             if let kind = request.kind.flatMap(VaultEntry.Kind.init(rawValue:)) { self.kind = kind }
         }
         let merged = (existing ?? VaultEntry(name: request.name ?? "", kind: .token)).prefilled(by: request)
+        if let existing { changes = VaultEntry.prefillChanges(of: existing, by: request) }
         note = merged.note
         url = merged.url ?? ""
         howTo = merged.howTo ?? ""
@@ -229,8 +240,26 @@ final class VaultForm: ObservableObject {
         }
     }
 
+    /// The secret's URL when Renew won't open it (not http or https), shown as plain text.
+    var renewRefusal: String? { original.flatMap(VaultRenew.refusal(for:)) }
+
     /// The chosen day, or nil for "No expiry".
     var expiresDay: String? { hasExpiry ? VaultExpiry.day(of: expiryDate) : nil }
+
+    /// A renewal's choice of expiry: a date (the picker starts 30 days out) or none.
+    func chooseExpiry(date: Bool) {
+        expiryChosen = true
+        hasExpiry = date
+        if date { expiryDate = Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date() }
+    }
+
+    /// Whether Save is allowed. A renewal needs the new value (an empty one would keep the dead value) and a
+    /// chosen expiry, so a Save can't extend the date of a secret that was never replaced.
+    var canSave: Bool {
+        guard !name.isEmpty else { return false }
+        if renewing { return !secret.isEmpty && expiryChosen }
+        return original != nil || !secret.isEmpty
+    }
 
     private static func defaults(_ name: String, _ kind: VaultEntry.Kind) -> [String] {
         let v = VaultEntry.defaultVars(name: name, kind: kind)
@@ -254,6 +283,10 @@ final class VaultForm: ObservableObject {
     }
 
     func save() -> Bool {
+        if renewing, !canSave {
+            error = secret.isEmpty ? "Enter the new value." : "Pick the new expiry date, or No expiry."
+            return false
+        }
         let name = name.trimmingCharacters(in: .whitespaces)
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let howTo = howTo.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -288,6 +321,15 @@ private struct VaultFormView: View {
     @ObservedObject var form: VaultForm
     let close: (_ saved: Bool) -> Void
     @FocusState private var focus: Field?
+    /// The how-to is in one place at a time: the rendered help box, or its editor. The editor starts open
+    /// when there is no how-to yet, and stays open while it is typed in.
+    @State private var howToOpen: Bool
+
+    init(form: VaultForm, close: @escaping (_ saved: Bool) -> Void) {
+        _form = ObservedObject(wrappedValue: form)
+        self.close = close
+        _howToOpen = State(initialValue: form.howTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
     /// Variable names are made from the name; most people never change them, so they sit behind this.
     @State private var advanced = false
 
@@ -328,6 +370,14 @@ private struct VaultFormView: View {
                     .focused($focus, equals: .url)
                     .modifier(KitField(focused: focus == .url))
             }
+            if let old = form.changes.old[.url] {
+                VaultChangedNote(old: old, empty: "no URL", host: form.changes.hostChange, showHost: true).padding(.leading, 92)
+            }
+            if form.renewing, let refused = form.renewRefusal {
+                Text("This address isn't http or https, so Renew won't open it: \(refused)")
+                    .kitType(.meta).foregroundColor(KitInk.textMuted).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 92)
+            }
             row("Kind") {
                 Picker("", selection: $form.kind) {
                     Text("Token").tag(VaultEntry.Kind.token)
@@ -342,38 +392,59 @@ private struct VaultFormView: View {
                         .modifier(KitField(focused: focus == .username))
                 }
             }
-            if form.renewing, hasHowTo {
-                VaultHelpView(text: form.howTo).padding(.leading, 92)
+            if form.renewing, hasHowTo, !howToOpen {
+                VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
             }
             row(form.kind == .login ? "Password" : "Token") {
                 SecureField(form.original == nil ? "" : form.renewing ? "New value" : "Unchanged", text: $form.secret)
                     .focused($focus, equals: .secret)
                     .modifier(KitField(focused: focus == .secret))
             }
-            if !form.renewing, hasHowTo {
-                VaultHelpView(text: form.howTo).padding(.leading, 92)
+            if !form.renewing, hasHowTo, !howToOpen {
+                VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
             }
             row("Note", top: true) {
                 VaultTextArea(text: $form.note, placeholder: "What it's for, e.g. GitHub API for my repos")
                     .part("Note Field")
             }
-            row("How to get or renew", top: true) {
-                VaultTextArea(text: $form.howTo, placeholder: "Where to click and which scopes, e.g. GitHub > Settings > Developer settings > Tokens. Links work.")
-                    .part("How To Field")
-            }
-            row(form.renewing ? "New expiry" : "Expires") {
-                HStack(spacing: 10) {
-                    Toggle("No expiry", isOn: Binding(get: { !form.hasExpiry }, set: { form.hasExpiry = !$0 }))
-                        .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
-                    if form.hasExpiry {
-                        DatePicker("", selection: $form.expiryDate, displayedComponents: .date)
-                            .datePickerStyle(.field).labelsHidden().fixedSize()
-                        if let day = form.expiresDay { VaultExpiryLabel(day: day) }
+            if let old = form.changes.old[.note] { VaultChangedNote(old: old).padding(.leading, 92) }
+            if howToOpen || !hasHowTo {
+                row("How to get or renew", top: true) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        VaultTextArea(text: $form.howTo, placeholder: "Where to click and which scopes, e.g. GitHub > Settings > Developer settings > Tokens. Links work (https only).")
+                            .part("How To Field")
+                        if hasHowTo {
+                            Button("Done") { howToOpen = false }.buttonStyle(.kit(.ghost))
+                                .help("Show the how-to as help text under the value field")
+                        }
                     }
-                    Spacer(minLength: 0)
                 }
-                .part("Expires Field")
             }
+            if let old = form.changes.old[.howTo] { VaultChangedNote(old: old).padding(.leading, 92) }
+            row(form.renewing ? "New expiry" : "Expires") {
+                if !form.expiryChosen {
+                    HStack(spacing: 8) {
+                        Button("Pick a date") { form.chooseExpiry(date: true) }.buttonStyle(.kit(.secondary))
+                        Button("No expiry") { form.chooseExpiry(date: false) }.buttonStyle(.kit(.secondary))
+                        Text("Choose one to save").kitType(.meta).foregroundColor(KitInk.textMuted)
+                        Spacer(minLength: 0)
+                    }
+                    .part("Expires Choice")
+                } else {
+                    HStack(spacing: 10) {
+                        Toggle("No expiry", isOn: Binding(get: { !form.hasExpiry }, set: { form.hasExpiry = !$0 }))
+                            .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
+                        if form.hasExpiry {
+                            DatePicker("", selection: $form.expiryDate, displayedComponents: .date)
+                                .datePickerStyle(.field).labelsHidden().fixedSize()
+                            if let day = form.expiresDay { VaultExpiryLabel(day: day) }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .part("Expires Field")
+                }
+            }
+            if let old = form.changes.old[.expires] { VaultChangedNote(old: old, empty: "no expiry").padding(.leading, 92) }
             row("") {
                 Toggle("Ask me before an agent uses it", isOn: $form.ask)
                     .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
@@ -408,14 +479,15 @@ private struct VaultFormView: View {
                     }
                 }
             }
-            Text("Agents see the name, URL, variables, note, how-to and expiry. Only Notchling can read the value.")
-                .kitType(.meta).foregroundColor(KitInk.textMuted)
-                .padding(.leading, 92)
         }
     }
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Agents see the name, URL, variables, note, how-to and expiry. Only Notchling can read the value.")
+                .kitType(.meta).foregroundColor(KitInk.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 92)
             if let error = form.error {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
@@ -429,7 +501,7 @@ private struct VaultFormView: View {
                     .buttonStyle(.kit(.secondary)).keyboardShortcut(.cancelAction)
                 Button("Save") { if form.save() { close(true) } }
                     .buttonStyle(.kit(.primary)).keyboardShortcut(.defaultAction)
-                    .disabled(form.name.isEmpty || (form.original == nil && form.secret.isEmpty))
+                    .disabled(!form.canSave)
                     .part("Save Secret Button", .top)
             }
         }
@@ -464,12 +536,17 @@ struct VaultExpiryLabel: View {
 /// The how-to under the value field: selectable, with Markdown links and bare URLs clickable.
 struct VaultHelpView: View {
     let text: String
+    var edit: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "questionmark.circle").foregroundColor(KitInk.accentText).padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
-                Text("How to get or renew").kitType(.section).foregroundColor(KitInk.textFaint)
+                HStack {
+                    Text("How to get or renew").kitType(.section).foregroundColor(KitInk.textFaint)
+                    Spacer(minLength: 0)
+                    if let edit { Button("Edit", action: edit).buttonStyle(.kit(.ghost)) }
+                }
                 Text(VaultHelp.attributed(text))
                     .font(.system(size: 12)).foregroundColor(KitInk.text)
                     .tint(KitInk.accentText)
@@ -484,16 +561,56 @@ struct VaultHelpView: View {
     }
 }
 
+/// Marks a field an agent's request changed: a badge and the saved value it replaced. For the URL it also
+/// shows the old host next to the new one, and warns when the host changed.
+struct VaultChangedNote: View {
+    let old: String
+    var empty = "nothing"
+    var host: VaultPrefillChanges.HostChange?
+    var showHost = false
+
+    private func name(_ host: String?) -> String { host ?? "none" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label("Changed by the request", systemImage: "sparkles").kitType(.meta).foregroundColor(KitInk.accentText)
+            Text(old.isEmpty ? "Was: \(empty)" : "Was: \(old)").kitType(.meta).foregroundColor(KitInk.textMuted)
+                .lineLimit(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            if showHost, let host {
+                Text("Host: \(name(host.from)) → \(name(host.to))").kitType(.meta).foregroundColor(KitInk.text)
+                Label("The request changes where this secret is used: \(name(host.from)) → \(name(host.to))",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .kitType(.label).foregroundColor(KitInk.expired).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .part("Request Change")
+    }
+}
+
 /// Help text as the form shows it.
 enum VaultHelp {
-    /// Inline Markdown (links, bold, code) with the line breaks kept, plus bare `https://…` links made clickable.
+    /// Inline Markdown (links, bold, code) with the line breaks kept, plus bare `https://…` links made
+    /// clickable. Only https links are links; any other scheme is plain text. A link written as Markdown
+    /// shows its real host after the text, so a label can't pass for another site.
     static func attributed(_ text: String) -> AttributedString {
         var out = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+        let written = out.runs.compactMap { run in run.link.map { (run.range, $0) } }
+        for (range, url) in written.reversed() {
+            guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), !host.isEmpty else {
+                out[range].link = nil
+                continue
+            }
+            if String(out[range].characters).trimmingCharacters(in: .whitespaces) != url.absoluteString {
+                var shown = AttributedString(" (\(host))")
+                shown.foregroundColor = KitInk.textMuted
+                out.insert(shown, at: range.upperBound)
+            }
+        }
         let plain = String(out.characters)
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         for match in detector?.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) ?? [] {
-            guard let url = match.url, let r = Range(match.range, in: plain),
+            guard let url = match.url, url.scheme?.lowercased() == "https", let r = Range(match.range, in: plain),
                   let lower = AttributedString.Index(r.lowerBound, within: out),
                   let upper = AttributedString.Index(r.upperBound, within: out) else { continue }
             let range = lower..<upper

@@ -151,6 +151,41 @@ extension VaultEntry {
     }
 }
 
+/// What an agent's `--secret-request` changes in a saved secret's form: the old value of each field whose
+/// passed value differs from the saved one, and a change of the URL's host. The form marks these so the user
+/// sees what the request did before pressing Save.
+struct VaultPrefillChanges: Equatable {
+    enum Field: Hashable { case note, url, howTo, expires }
+
+    struct HostChange: Equatable {
+        let from: String?
+        let to: String?
+    }
+
+    /// The saved value of each changed field ("" when it had none).
+    var old: [Field: String] = [:]
+    /// Set when the URL's host differs: `$NAME_URL` would then point somewhere else.
+    var hostChange: HostChange?
+
+    var isEmpty: Bool { old.isEmpty }
+}
+
+extension VaultEntry {
+    static func prefillChanges(of saved: VaultEntry, by request: VaultRequest) -> VaultPrefillChanges {
+        var changes = VaultPrefillChanges()
+        func trimmed(_ text: String?) -> String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let note = request.note, trimmed(note) != trimmed(saved.note) { changes.old[.note] = saved.note }
+        if let url = request.url, trimmed(url) != trimmed(saved.url) {
+            changes.old[.url] = saved.url ?? ""
+            let from = saved.url.flatMap(host(of:)), to = host(of: url)
+            if from != to { changes.hostChange = .init(from: from, to: to) }
+        }
+        if let howTo = request.howTo, trimmed(howTo) != trimmed(saved.howTo) { changes.old[.howTo] = saved.howTo ?? "" }
+        if let day = request.expires.flatMap(VaultExpiry.parse), day != saved.expires { changes.old[.expires] = saved.expires ?? "" }
+        return changes
+    }
+}
+
 /// The username and the password or token, as stored in Keychain.
 struct VaultValue: Codable, Equatable {
     var username: String = ""

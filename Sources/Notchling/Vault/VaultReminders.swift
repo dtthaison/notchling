@@ -57,25 +57,42 @@ enum VaultReminder {
 
 /// Where Renew… sends the user.
 enum VaultRenew {
-    /// The page to get a new value on: GitHub's token settings for a GitHub secret, else the secret's URL.
+    /// The page to get a new value on: GitHub's fine-grained token settings for a GitHub secret, else the
+    /// secret's URL. Only http(s) with a host: the URL comes from an agent, and `file:`, `smb:` or an app's
+    /// scheme must never be handed to the system to open.
     static func url(for entry: VaultEntry) -> URL? {
         guard let text = entry.url?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
         if let host = VaultEntry.host(of: text), host == "github.com" || host.hasSuffix(".github.com") {
-            return URL(string: "https://github.com/settings/tokens")
+            return URL(string: "https://github.com/settings/personal-access-tokens")
         }
-        return URL(string: text.contains("://") ? text : "https://" + text)
+        guard let url = URL(string: text.contains("://") ? text : "https://" + text),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
     }
 
-    /// Opens the page in the browser, if the secret has a URL.
+    /// The secret's URL when it won't be opened (not http or https), to show as plain text; else nil.
+    static func refusal(for entry: VaultEntry) -> String? {
+        guard let text = entry.url?.trimmingCharacters(in: .whitespaces), !text.isEmpty, url(for: entry) == nil else { return nil }
+        return text
+    }
+
+    /// Opens the page in the browser, if the secret has an http(s) URL.
     static func openPage(for entry: VaultEntry) {
         if let url = url(for: entry) { NSWorkspace.shared.open(url) }
     }
 
-    /// A reminder's Renew…: the page, then the secret's form with the value empty (its own panel).
+    /// A reminder's Renew… button: the page, then the secret's form with the value empty (its own panel).
     static func start(name: String) {
         guard let entry = SecretVault.entry(name) else { return }
         openPage(for: entry)
-        VaultPrompt.renew(entry)
+        VaultPrompt.open(entry, renew: true)
+    }
+
+    /// Clicking a reminder: the secret's form, without opening the browser.
+    static func show(name: String) {
+        guard let entry = SecretVault.entry(name) else { return }
+        VaultPrompt.open(entry, renew: false)
     }
 }
 
@@ -119,19 +136,36 @@ final class VaultReminders: NSObject, UNUserNotificationCenterDelegate {
         Self.sent = sent
     }
 
+    /// Reminders being posted right now, so two checks don't post one twice.
+    private var inflight = Set<String>()
+
+    /// A reminder counts as sent only once it was seen: the system notification was delivered, or the user
+    /// clicked Notchling's banner (which times out and is replaced by the next one). Until then the next
+    /// check shows it again.
     func check(now: Date = Date()) {
         let entries = SecretVault.all()
-        var sent = VaultReminder.pruned(Self.sent, to: entries)
-        for due in VaultReminder.due(entries: entries, sent: sent, now: now, calendar: .current) {
-            post(due)
-            sent = VaultReminder.markSent(due, in: sent)
-        }
+        let sent = VaultReminder.pruned(Self.sent, to: entries)
         Self.sent = sent
+        for due in VaultReminder.due(entries: entries, sent: sent, now: now, calendar: .current) {
+            let key = "\(VaultReminder.key(id: due.id, day: due.day))|\(due.threshold.rawValue)"
+            guard inflight.insert(key).inserted else { continue }
+            post(due) { [weak self] delivered in
+                DispatchQueue.main.async {
+                    self?.inflight.remove(key)
+                    if delivered { self?.markSent(due) }
+                }
+            }
+        }
     }
 
-    private func post(_ due: VaultReminder.Due) {
+    private func markSent(_ due: VaultReminder.Due) {
+        Self.sent = VaultReminder.markSent(due, in: Self.sent)
+    }
+
+    /// `done(true)` when the system notification was delivered; the banner paths answer false.
+    private func post(_ due: VaultReminder.Due, done: @escaping (Bool) -> Void) {
         let title = due.threshold == .expired ? "Secret expired" : "Secret expiring"
-        guard Bundle.main.bundleIdentifier != nil else { return banner(title, due) }
+        guard Bundle.main.bundleIdentifier != nil else { banner(title, due); return done(false) }
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { [weak self] settings in
             switch settings.authorizationStatus {
@@ -142,20 +176,27 @@ final class VaultReminders: NSObject, UNUserNotificationCenterDelegate {
                 content.categoryIdentifier = Self.category
                 content.userInfo = ["secret": due.name]
                 let request = UNNotificationRequest(identifier: "vault-expiry-\(due.id)-\(due.threshold.rawValue)", content: content, trigger: nil)
-                center.add(request) { error in if error != nil { self?.banner(title, due) } }
+                center.add(request) { error in
+                    if error != nil { self?.banner(title, due) }
+                    done(error == nil)
+                }
             case .notDetermined:
                 // The answer can take as long as the user does; the reminder can't wait for it.
                 self?.banner(title, due)
                 center.requestAuthorization(options: [.alert]) { _, _ in }
+                done(false)
             default:
                 self?.banner(title, due)
+                done(false)
             }
         }
     }
 
     private func banner(_ title: String, _ due: VaultReminder.Due) {
-        DispatchQueue.main.async {
-            NoticeBanner.show(title, due.message, action: ("Renew…", { VaultRenew.start(name: due.name) }))
+        DispatchQueue.main.async { [weak self] in
+            NoticeBanner.show(title, due.message,
+                              action: ("Renew…", { self?.markSent(due); VaultRenew.start(name: due.name) }),
+                              onClick: { self?.markSent(due) })
         }
     }
 
@@ -163,9 +204,13 @@ final class VaultReminders: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let name = response.notification.request.content.userInfo["secret"] as? String,
-           response.actionIdentifier == Self.renewAction || response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            DispatchQueue.main.async { VaultRenew.start(name: name) }
+        if let name = response.notification.request.content.userInfo["secret"] as? String {
+            switch response.actionIdentifier {
+            // Only the Renew… button opens the browser; a click on the body shows the secret.
+            case Self.renewAction: DispatchQueue.main.async { VaultRenew.start(name: name) }
+            case UNNotificationDefaultActionIdentifier: DispatchQueue.main.async { VaultRenew.show(name: name) }
+            default: break
+            }
         }
         completionHandler()
     }

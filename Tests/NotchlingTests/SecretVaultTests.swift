@@ -269,11 +269,100 @@ final class SecretVaultTests: XCTestCase {
         func url(_ u: String?, name: String = "x") -> String? {
             VaultRenew.url(for: VaultEntry(name: name, kind: .token, url: u, secretVar: "X_TOKEN"))?.absoluteString
         }
-        XCTAssertEqual(url("https://api.github.com"), "https://github.com/settings/tokens")
-        XCTAssertEqual(url("github.com/org/repo"), "https://github.com/settings/tokens")
+        XCTAssertEqual(url("https://api.github.com"), "https://github.com/settings/personal-access-tokens")
+        XCTAssertEqual(url("github.com/org/repo"), "https://github.com/settings/personal-access-tokens")
         XCTAssertEqual(url("https://registry.npmjs.org/-/tokens"), "https://registry.npmjs.org/-/tokens")
         XCTAssertEqual(url("example.com/keys"), "https://example.com/keys")
         XCTAssertNil(url(nil))
         XCTAssertNil(url(""))
+    }
+
+    // MARK: Fix round 1
+
+    func testRenewOpensOnlyHttpAndHttps() {
+        func url(_ u: String) -> String? {
+            VaultRenew.url(for: VaultEntry(name: "x", kind: .token, url: u, secretVar: "X_TOKEN"))?.absoluteString
+        }
+        for refused in ["file:///Users/me/evil.command", "smb://evil.example/share", "vscode://x/y", "javascript:alert(1)",
+                        "ssh://host", "x-apple.systempreferences:com.apple.x", "https://", "ftp://example.com/f"] {
+            XCTAssertNil(url(refused), refused)
+        }
+        XCTAssertEqual(url("https://example.com/keys"), "https://example.com/keys")
+        XCTAssertEqual(url("http://localhost:3000/tokens"), "http://localhost:3000/tokens")
+        // A URL that is refused is said so, as plain text.
+        let bad = VaultEntry(name: "x", kind: .token, url: "smb://evil.example/share", secretVar: "X_TOKEN")
+        XCTAssertEqual(VaultRenew.refusal(for: bad), "smb://evil.example/share")
+        XCTAssertNil(VaultRenew.refusal(for: VaultEntry(name: "x", kind: .token, url: "https://example.com", secretVar: "X_TOKEN")))
+        XCTAssertNil(VaultRenew.refusal(for: VaultEntry(name: "x", kind: .token, secretVar: "X_TOKEN")))
+    }
+
+    func testRenewNeedsAValueAndAChosenExpiry() {
+        let saved = VaultEntry(name: "gh", kind: .token, expires: "2026-01-01", secretVar: "GH_TOKEN")
+        let form = VaultForm(saved, renew: true)
+        XCTAssertFalse(form.canSave, "no value, no expiry chosen")
+        XCTAssertFalse(form.save(), "a renewal without a value never saves")
+        XCTAssertNil(form.saved)
+        form.secret = "a-new-value-that-is-not-real"
+        XCTAssertFalse(form.canSave, "the expiry still has to be picked")
+        XCTAssertFalse(form.save())
+        form.chooseExpiry(date: false)
+        XCTAssertTrue(form.canSave)
+        XCTAssertNil(form.expiresDay, "No expiry stays off")
+        form.secret = ""
+        XCTAssertFalse(form.canSave, "choosing the expiry doesn't replace the value")
+        form.secret = "x"
+        form.chooseExpiry(date: true)
+        XCTAssertNotNil(form.expiresDay)
+        XCTAssertTrue(form.canSave)
+    }
+
+    func testRenewDoesNotTurnExpiryOnForAnEntryWithoutOne() {
+        let none = VaultEntry(name: "gh", kind: .token, howTo: "steps", secretVar: "GH_TOKEN")
+        let form = VaultForm(none, renew: true)
+        XCTAssertFalse(form.hasExpiry)
+        XCTAssertNil(form.expiresDay)
+        XCTAssertFalse(form.expiryChosen)
+        // An ordinary edit needs no value and no choice.
+        XCTAssertTrue(VaultForm(none).canSave)
+    }
+
+    func testRequestChangesAreListedWithTheirOldValues() {
+        let saved = VaultEntry(name: "gh", kind: .token, note: "old note", url: "https://api.github.com/v3", howTo: "old steps",
+                               expires: "2026-01-01", secretVar: "GH_TOKEN")
+        let same = VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: "https://api.github.com/v3",
+                                                                       note: "old note", expires: "2026-01-01"))
+        XCTAssertEqual(same, VaultPrefillChanges(), "passing the saved value changes nothing")
+        let c = VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: "https://api.github-cdn.io/v3",
+                                                                    note: "n", howTo: "h", expires: "2027-03-04"))
+        XCTAssertEqual(c.old[.note], "old note")
+        XCTAssertEqual(c.old[.url], "https://api.github.com/v3")
+        XCTAssertEqual(c.old[.howTo], "old steps")
+        XCTAssertEqual(c.old[.expires], "2026-01-01")
+        XCTAssertEqual(c.hostChange, VaultPrefillChanges.HostChange(from: "api.github.com", to: "api.github-cdn.io"))
+        // The path alone moving is a change, but not of host.
+        let path = VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: "https://api.github.com/v4"))
+        XCTAssertNotNil(path.old[.url])
+        XCTAssertNil(path.hostChange)
+        // www. and case don't count as another host.
+        XCTAssertNil(VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: "HTTPS://API.GitHub.com")).hostChange)
+        // A secret that had no URL gets one: that is a host change from nothing.
+        let bare = VaultEntry(name: "gh", kind: .token, secretVar: "GH_TOKEN")
+        let from = VaultEntry.prefillChanges(of: bare, by: VaultRequest(op: .request, name: "gh", url: "https://evil.io"))
+        XCTAssertEqual(from.hostChange, VaultPrefillChanges.HostChange(from: nil, to: "evil.io"))
+        XCTAssertEqual(from.old[.url], "")
+        // The merged entry is still what prefilled() gives.
+        XCTAssertEqual(saved.prefilled(by: VaultRequest(op: .request, name: "gh", note: "n")).note, "n")
+    }
+
+    func testHowToLinksAreHttpsOnlyAndShowTheirHost() {
+        let evil = VaultHelp.attributed("[https://github.com/settings/tokens](https://github.com.evil.io/login) then go")
+        XCTAssertEqual(String(evil.characters), "https://github.com/settings/tokens (github.com.evil.io) then go")
+        XCTAssertEqual(evil.runs.compactMap(\.link).map(\.absoluteString), ["https://github.com.evil.io/login"])
+        let file = VaultHelp.attributed("[run this](file:///tmp/a.command) or [site](http://example.com) or [x](vscode://a/b)")
+        XCTAssertEqual(file.runs.compactMap(\.link).count, 0, "no link besides https")
+        XCTAssertEqual(String(file.characters), "run this or site or x")
+        let ok = VaultHelp.attributed("Open [Tokens](https://github.com/settings/tokens) and https://example.com/new, not http://example.org/x")
+        XCTAssertEqual(ok.runs.compactMap(\.link).map(\.absoluteString), ["https://github.com/settings/tokens", "https://example.com/new"])
+        XCTAssertTrue(String(ok.characters).hasPrefix("Open Tokens (github.com) and"))
     }
 }

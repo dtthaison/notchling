@@ -395,10 +395,12 @@ enum NoticeBanner {
     private static var panel: NSPanel?
     private static var closing: DispatchWorkItem?
 
-    static func show(_ title: String, _ body: String, action: (title: String, run: () -> Void)? = nil) {
+    /// `onClick` runs when the user clicks the banner (not when it times out).
+    static func show(_ title: String, _ body: String, action: (title: String, run: () -> Void)? = nil,
+                     onClick: (() -> Void)? = nil) {
         dismiss()
         let button = action.map { action in (title: action.title, run: { dismiss(); action.run() }) }
-        let view = NSHostingView(rootView: NoticeBannerView(title: title, message: body, action: button) { dismiss() })
+        let view = NSHostingView(rootView: NoticeBannerView(title: title, message: body, action: button) { dismiss(); onClick?() })
         view.setFrameSize(NSSize(width: width, height: view.fittingSize.height))
         let panel = NSPanel(contentRect: view.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentView = view
