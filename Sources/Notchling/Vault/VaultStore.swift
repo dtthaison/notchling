@@ -36,6 +36,7 @@ final class VaultStore {
         guard let stored, !stored.secret.isEmpty else {
             throw AccountError(entry.kind == .login ? "Enter the password." : "Enter the token.")
         }
+        let before = values[old?.id ?? entry.id]
         if let old { values[old.id] = nil }
         values[entry.id] = stored
         try write(values)
@@ -44,7 +45,22 @@ final class VaultStore {
         saved.updated = Date()
         list.append(saved)
         try SecretVault.write(list)
+        if Self.changed(old: before, new: stored) {
+            // Only the name goes out, never the value. Machine management listens and offers to update machines.
+            let name = entry.name
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .vaultValueChanged, object: nil, userInfo: ["name": name])
+            }
+        }
     }
+
+    /// Renames an entry and keeps its value: the value never leaves the store. Call it only on the user's click.
+    func rename(_ entry: VaultEntry, to name: String) throws {
+        try save(entry.renamed(to: name), value: nil, replacing: entry)
+    }
+
+    /// Whether a save puts a different value in place of the stored one (a new entry counts as different).
+    static func changed(old: VaultValue?, new: VaultValue) -> Bool { old != new }
 
     func remove(_ entry: VaultEntry) throws {
         lock.lock(); defer { lock.unlock() }

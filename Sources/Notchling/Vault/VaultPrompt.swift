@@ -28,6 +28,22 @@ enum VaultPrompt {
         controller.show(AnyView(VaultSheet(form: VaultForm(entry, renew: renew), finish: { _ in close() }, done: close)))
     }
 
+    /// The form for an agent-style request (name, kind, URL, note, how-to, expiry filled in) in its own panel,
+    /// without blocking: `done` gets the saved entry, or nil when the user closed or cancelled it. Nothing is
+    /// saved until the user presses Save. Call on the main thread.
+    static func open(request: VaultRequest, done: @escaping (VaultEntry?) -> Void) {
+        let controller = PromptPanel(title: "Secret Vault")
+        var answered = false
+        let answer: (VaultEntry?) -> Void = { [weak controller] entry in
+            guard !answered else { return }
+            answered = true
+            controller?.close()
+            done(entry)
+        }
+        controller.onClose = { answer(nil) }
+        controller.show(AnyView(VaultSheet(form: VaultForm(request: request), finish: { answer($0) }, done: { answer(nil) })))
+    }
+
     /// Shows `content` in a floating panel on the main thread and waits for its answer (closing the panel
     /// answers `fallback`).
     private static func wait<T, V: View>(title: String, default fallback: T,
