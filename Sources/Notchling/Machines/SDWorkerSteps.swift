@@ -345,15 +345,19 @@ enum SDWorkerSteps {
         }
         let here = machineVersions(json)
         var wrong: [String] = []
-        for (name, id, mac) in [("superpowers", superpowersPlugin, superpowers), ("sd", sdPlugin, sd)] {
+        // sd must match this Mac exactly (the worker and the Mac speak one protocol). superpowers only has to be as
+        // new: a newer one on the machine is not a reason to push this Mac's older copy over it.
+        for (name, id, mac, exact) in [("superpowers", superpowersPlugin, superpowers, false), ("sd", sdPlugin, sd, true)] {
             guard let version = here[id] else { wrong.append("\(name) missing, \(mac.version) on this Mac"); continue }
-            if version != mac.version { wrong.append("\(name) \(version) here, \(mac.version) on this Mac") }
+            let ok = exact ? version == mac.version : (version == mac.version || isAtLeast(version, mac.version))
+            if !ok { wrong.append("\(name) \(version) here, \(mac.version) on this Mac") }
         }
         if !wrong.isEmpty { return CheckResult(state: .fail(wrong.joined(separator: "; ")), detected: detected) }
         guard detected.sdPath != nil else {
             return CheckResult(state: .fail("sd.py is not at ~/.local/share/agents/system-design/plugin"), detected: detected)
         }
-        return CheckResult(state: .pass("superpowers \(superpowers.version), sd \(sd.version)"), detected: detected)
+        let versions = [here[superpowersPlugin], here[sdPlugin]].map { $0 ?? "" }
+        return CheckResult(state: .pass("superpowers \(versions[0]), sd \(versions[1])"), detected: detected)
     }
 
     static func pluginsScript(marketplace: String) -> String {

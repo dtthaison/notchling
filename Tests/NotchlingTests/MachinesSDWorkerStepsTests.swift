@@ -116,6 +116,24 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(none.state, .fail("superpowers missing, 7.0.0 on this Mac; sd missing, 1.19.2 on this Mac"))
     }
 
+    func testANewerSuperpowersPassesButAnOlderOrUnreadableOneFailsAndSdStaysExact() async throws {
+        let newer = try await check(.plugins, out: pluginsJSON(sd: "1.19.2", sp: "7.0.1") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(newer.state, .pass("superpowers 7.0.1, sd 1.19.2"))
+        let muchNewer = try await check(.plugins, out: pluginsJSON(sd: "1.19.2", sp: "7.10.0") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(muchNewer.state, .pass("superpowers 7.10.0, sd 1.19.2"))
+
+        let older = try await check(.plugins, out: pluginsJSON(sd: "1.19.2", sp: "6.9.0") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(older.state, .fail("superpowers 6.9.0 here, 7.0.0 on this Mac"))
+        let unreadable = try await check(.plugins, out: pluginsJSON(sd: "1.19.2", sp: "7.0.0;x") + "\n@@sd\n" + sdLine)
+        guard case .fail(let why) = unreadable.state else { return XCTFail("\(unreadable.state)") }
+        XCTAssertTrue(why.contains("superpowers"), why)
+        XCTAssertTrue(why.contains("7.0.0 on this Mac"), why)
+
+        // sd is never "newer is fine": a newer sd here still fails.
+        let newerSd = try await check(.plugins, out: pluginsJSON(sd: "1.19.3") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(newerSd.state, .fail("sd 1.19.3 here, 1.19.2 on this Mac"))
+    }
+
     func testPluginsCantTellWhenThisMacLacksOne() async throws {
         let bare = MacFacts(plugins: ["sd@system-design": sdHere], marketplaceJSON: [:])
         let result = try await check(.plugins, out: pluginsJSON(sd: "1.19.2") + "\n@@sd\n" + sdLine, mac: bare)
