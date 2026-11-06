@@ -59,7 +59,7 @@ struct DiffSheet: Identifiable {
 /// What a Fix confirmation sheet shows. It never holds a password: the sheet keeps that in its own `@State`
 /// and hands it to `MachinesModel.confirm` for the one run.
 struct FixPrompt: Identifiable, Equatable {
-    enum Kind: Equatable { case step(StepID), all, toggle(on: Bool), resend(SecretUsage) }
+    enum Kind: Equatable { case step(StepID), all, toggle(on: Bool), resend(SecretUsage), replaceKey(StepID) }
 
     let id = UUID()
     var machine: String
@@ -474,6 +474,15 @@ final class MachinesModel: ObservableObject {
         setupSheet = .fix(prompt(m, kind: .step(id), title: step.title, display: plan.display, needsAdmin: plan.needsAdmin))
     }
 
+    /// Replace key on a Deploy key step: shows its exact commands in the Fix sheet. Runs nothing. Only while the
+    /// step's Check is ✓, or says GitHub has no record of the machine's key.
+    func requestReplaceKey(_ id: StepID, on machine: String) {
+        guard let m = self.machine(named: machine),
+              let step = engine.steps(for: m).first(where: { $0.id == id }), let plan = step.replace,
+              RepoSteps.offersReplace(engine.results[machine]?[id]) else { return }
+        setupSheet = .fix(prompt(m, kind: .replaceKey(id), title: step.replaceTitle, display: plan.display, needsAdmin: false))
+    }
+
     /// Set up all: shows the commands of every step it will run, the ones waiting for an earlier step too. The admin
     /// password is asked for per admin step, when its turn comes.
     func requestSetUpAll(on machine: String) {
@@ -536,6 +545,11 @@ final class MachinesModel: ObservableObject {
             return Task { [weak self] in
                 guard let self else { return }
                 self.record(await self.engine.runFix(id, on: machine, approval: approval, expectedDisplay: display), for: machine)
+            }
+        case .replaceKey(let id):
+            return Task { [weak self] in
+                guard let self else { return }
+                self.record(await self.engine.runReplace(id, on: machine, expectedDisplay: display), for: machine)
             }
         case .toggle(let on):
             let approval = FixApproval(adminPassword: prompt.root ? nil : password, asRootConfirmed: prompt.root)

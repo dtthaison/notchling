@@ -560,4 +560,412 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(all[1].needs, [.deployKey(repo)])
         XCTAssertEqual(all[2].needs, [.clone(repo)])
     }
+
+    // MARK: Replace key
+
+    private let newBody = "AAAAC3NzaC1lZDI1NTE5AAAAINewKeyForReplaceTestsOnly0123456789abcdefgh"
+    private var newPub: String { "ssh-ed25519 \(newBody) agents-m1-20270115" }
+    private let newTitle = "agents-m1-20270115"
+
+    private func replacePlan(machine: Machine = TestMachines.mac()) -> FixPlan {
+        let step = steps(machine: machine).first { $0.id == .deployKey(repo) }!
+        guard let plan = step.replace else { fatalError("no Replace key plan") }
+        return plan
+    }
+
+    private func keyJSON(id: String, body: String, title: String, readOnly: Bool) -> String {
+        "{\"id\":\(id),\"key\":\"ssh-ed25519 \(body)\",\"title\":\"\(title)\",\"read_only\":\(readOnly)}"
+    }
+
+    /// A machine and GitHub for Replace key: the old key is id 11 on GitHub, the new one becomes id 22.
+    private func replaceRunner(sshOK: Bool = true, pushAccepted: Bool = false, newReadOnly: Bool? = true,
+                               oldID: String? = "11", deleteOldCode: Int32 = 0, deleteNewCode: Int32 = 0,
+                               addCode: Int32 = 0, keygenOut: String? = nil) -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        var listed: [String] = []
+        if let oldID { listed.append(keyJSON(id: oldID, body: body, title: "agents-m1", readOnly: true)) }
+        if let newReadOnly { listed.append(keyJSON(id: "22", body: newBody, title: newTitle, readOnly: newReadOnly)) }
+        let list = "[" + listed.joined(separator: ",") + "]"
+        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: list, err: ""))
+        runner.on({ $0.first == self.gh && $0.contains("delete") && $0.contains("11") },
+                  result: CommandResult(code: deleteOldCode, out: "", err: deleteOldCode == 0 ? "" : "delete boom"))
+        runner.on({ $0.first == self.gh && $0.contains("delete") && $0.contains("22") },
+                  result: CommandResult(code: deleteNewCode, out: "", err: deleteNewCode == 0 ? "" : "delete new boom"))
+        runner.on({ $0.first == self.gh && $0.contains("add") }, result: CommandResult(code: addCode, out: "", err: addCode == 0 ? "" : "add boom"))
+        runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: keygenOut ?? newPub + "\n", err: ""))
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
+        runner.on({ $0.last?.contains("-T git@github.com") == true },
+                  result: CommandResult(code: 0, out: sshOK ? welcome + "\n" : "git@github.com: Permission denied (publickey).\n", err: ""))
+        runner.on({ $0.last?.contains("push --dry-run") == true },
+                  result: CommandResult(code: 0, out: pushAccepted ? "To github.com:\(repo).git\n * [new branch] HEAD -> agents-push-test\n@@push 0\n"
+                                        : readOnly + "\n@@push 128\n", err: ""))
+        return runner
+    }
+
+    /// What each call was, in order: `gh list`, `gh add`, `gh delete <id>`, or the kind of script sent to the machine.
+    private func kinds(_ runner: ScriptedRunner) -> [String] {
+        runner.calls.map { call in
+            let argv = call.argv
+            if argv.first == gh {
+                if argv.contains("add") { return "gh add" }
+                if argv.contains("delete") { return "gh delete \(argv[argv.firstIndex(of: "delete")! + 1])" }
+                return "gh list"
+            }
+            let script = unquoted(argv.last ?? "")
+            if script.contains("ssh-keygen") { return "keygen" }
+            if script.contains("head -c 1024") { return "read old" }
+            if script.contains("-T git@github.com") { return "ssh -T" }
+            if script.contains("push --dry-run") { return "push" }
+            if script.contains("mv -f") { return "swap" }
+            if script.contains("rm -f") { return "rm" }
+            return "other"
+        }
+    }
+
+    private func run(_ plan: FixPlan, _ runner: ScriptedRunner) async -> FixOutcome {
+        await plan.run(.test(.test(runner: runner)))
+    }
+
+    func testReplaceKeyHappyPathRunsInOrderAndDeletesOnlyTheOldKeyLast() async {
+        let runner = replaceRunner()
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+        XCTAssertEqual(kinds(runner), ["read old", "keygen", "gh add", "ssh -T", "push", "gh list", "swap", "gh delete 11"])
+        let calls = runner.calls.map(\.argv)
+        let keygen = unquoted(calls[1].last!)
+        XCTAssertTrue(keygen.contains("ssh-keygen -q -t ed25519 -N '' -C 'agents-m1-20270115' -f"), keygen)
+        XCTAssertTrue(keygen.contains(".ssh/agents-dtthaison-lingeva-mono.new'"), keygen)
+        XCTAssertTrue(keygen.contains("cat \"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono.new.pub'"), keygen)
+        XCTAssertEqual(Array(calls[2].prefix(4)), [gh, "repo", "deploy-key", "add"])
+        XCTAssertEqual(Array(calls[2].suffix(4)), ["-R", repo, "--title", newTitle])
+        XCTAssertEqual(calls[2].count, 9, "no flag besides -R and --title")
+        let ssh = unquoted(calls[3].last!)
+        XCTAssertTrue(ssh.contains(".ssh/agents-dtthaison-lingeva-mono.new'"), ssh)
+        XCTAssertTrue(ssh.contains("IdentitiesOnly=yes") && ssh.contains("BatchMode=yes") && ssh.contains("-F /dev/null"), ssh)
+        XCTAssertTrue(ssh.contains("</dev/null"), ssh)
+        let push = unquoted(calls[4].last!)
+        XCTAssertTrue(push.contains("core.hooksPath=/dev/null") && push.contains("push --dry-run") && push.contains("</dev/null"), push)
+        XCTAssertTrue(push.contains("GIT_TERMINAL_PROMPT=0") && push.contains("IdentitiesOnly=yes") && push.contains(".new"), push)
+        XCTAssertEqual(calls[5], [gh, "api", "--paginate", "repos/\(repo)/keys"])
+        let swap = unquoted(calls[6].last!)
+        XCTAssertTrue(swap.contains(".new.pub") && swap.contains("mv -f"), swap)
+        XCTAssertFalse(swap.contains(".ssh/config"), "the alias file name is the same, so ssh config is not touched")
+        XCTAssertEqual(calls[7], [gh, "repo", "deploy-key", "delete", "11", "-R", repo])
+        XCTAssertTrue(runner.calls.allSatisfy { $0.stdin == nil })
+        XCTAssertTrue(outcome.message.contains("old key was deleted"), outcome.message)
+    }
+
+    func testReplaceKeyNeverUsesTheWriteFlagAndTheDisplayShowsTheCommands() async {
+        let runner = replaceRunner()
+        _ = await run(replacePlan(), runner)
+        for argv in runner.calls.map(\.argv) {
+            XCTAssertFalse(argv.contains { $0.contains("allow-write") }, "\(argv)")
+            XCTAssertFalse(argv.contains("-w"), "\(argv)")
+        }
+        let display = replacePlan().display
+        XCTAssertFalse(display.contains("allow-write"))
+        XCTAssertTrue(display.contains("ssh-keygen"))
+        XCTAssertTrue(display.contains("deploy-key add"))
+        XCTAssertTrue(display.contains("deploy-key delete"))
+        XCTAssertTrue(display.contains("push --dry-run"))
+        XCTAssertTrue(display.contains(".new"))
+        XCTAssertFalse(replacePlan().needsAdmin)
+    }
+
+    private func assertCleanedUp(_ runner: ScriptedRunner, file: StaticString = #filePath, line: UInt = #line) {
+        let k = kinds(runner)
+        XCTAssertFalse(k.contains("swap"), "\(k)", file: file, line: line)
+        XCTAssertFalse(k.contains("gh delete 11"), "the old key stays on GitHub: \(k)", file: file, line: line)
+        XCTAssertTrue(k.contains("rm"), "the .new files are removed: \(k)", file: file, line: line)
+        XCTAssertTrue(k.contains("gh delete 22"), "the new key is deleted from GitHub: \(k)", file: file, line: line)
+        let rm = runner.calls.map(\.argv).first { unquoted($0.last ?? "").contains("rm -f") && !unquoted($0.last ?? "").contains("ssh-keygen") }
+        let text = unquoted(rm?.last ?? "")
+        XCTAssertTrue(text.contains(".new'") && text.contains(".new.pub'"), text, file: file, line: line)
+    }
+
+    func testReplaceKeyWhoseNewKeyCanPushIsUndoneAndSaysWhy() async {
+        let runner = replaceRunner(pushAccepted: true)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("can write"), outcome.message)
+        assertCleanedUp(runner)
+        XCTAssertTrue(outcome.message.contains("old key"), outcome.message)
+    }
+
+    func testReplaceKeyWhoseNewKeyCannotAuthenticateIsUndone() async {
+        let runner = replaceRunner(sshOK: false)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("ssh"), outcome.message)
+        XCTAssertFalse(kinds(runner).contains("push"), "the push is not tried when ssh failed")
+        assertCleanedUp(runner)
+    }
+
+    func testReplaceKeyWhoseNewKeyGitHubListsAsWritableIsUndone() async {
+        let runner = replaceRunner(newReadOnly: false)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("can write"), outcome.message)
+        assertCleanedUp(runner)
+    }
+
+    func testReplaceKeyWhoseAddFailsLooksForTheNewKeyAndStopsBeforeAnyCheck() async {
+        let runner = replaceRunner(newReadOnly: nil, addCode: 1)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("add boom"), outcome.message)
+        let k = kinds(runner)
+        XCTAssertFalse(k.contains("ssh -T") || k.contains("swap") || k.contains("gh delete 11"), "\(k)")
+        XCTAssertTrue(k.contains("rm"), "\(k)")
+    }
+
+    func testReplaceKeyCleanupThatCannotDeleteTheNewKeyTellsWhereToRemoveIt() async {
+        let runner = replaceRunner(pushAccepted: true, deleteNewCode: 1)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("Settings → Deploy keys"), outcome.message)
+        XCTAssertTrue(outcome.message.contains(newTitle), outcome.message)
+        XCTAssertFalse(kinds(runner).contains("gh delete 11"))
+    }
+
+    func testReplaceKeyWhoseKeygenGivesSomethingElseStopsAndCleansUp() async {
+        let runner = replaceRunner(keygenOut: "ssh-rsa AAAA\nrm -rf /\n")
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("unexpected public key"), outcome.message)
+        XCTAssertEqual(kinds(runner), ["read old", "keygen", "rm"])
+    }
+
+    func testReplaceKeyDeleteOfTheOldKeyFailingAfterTheSwapIsNotASilentPass() async {
+        let runner = replaceRunner(deleteOldCode: 1)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("new key in use"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("old key is still on GitHub"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("Settings → Deploy keys"), outcome.message)
+        XCTAssertEqual(Array(kinds(runner).suffix(2)), ["swap", "gh delete 11"])
+        XCTAssertFalse(kinds(runner).contains("rm"), "the swap happened; nothing is rolled back")
+    }
+
+    func testReplaceKeyWithAnOldIdThatIsNotAnIntegerDeletesNothing() async {
+        for bad in ["\"11; touch x\"", "\"abc\"", "\"11\"", "1.5", "true", "null", "-3", "0"] {
+            let runner = replaceRunner(oldID: bad)
+            let outcome = await run(replacePlan(), runner)
+            XCTAssertFalse(outcome.ok, bad)
+            XCTAssertTrue(outcome.message.contains("not a number"), "\(bad): \(outcome.message)")
+            let k = kinds(runner)
+            XCTAssertFalse(k.contains { $0.hasPrefix("gh delete") && $0 != "gh delete 22" }, "\(bad): \(k)")
+            XCTAssertFalse(k.contains("swap"), "\(bad): nothing was replaced: \(k)")
+            for argv in runner.calls.map(\.argv) { XCTAssertFalse(argv.contains { $0.contains("touch") }, "\(argv)") }
+        }
+    }
+
+    func testReplaceKeyWhenGitHubDoesNotListTheOldKeyDeletesNothingAndSaysSo() async {
+        let runner = replaceRunner(oldID: nil)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+        XCTAssertTrue(outcome.message.contains("not listed"), outcome.message)
+        let k = kinds(runner)
+        XCTAssertTrue(k.contains("swap"))
+        XCTAssertFalse(k.contains { $0.hasPrefix("gh delete") }, "\(k)")
+    }
+
+    func testReplaceKeyMatchesTheOldKeyByItsKeyTextNotByTitle() async {
+        // another key with the old key's title and a lower id must not be deleted
+        let runner = ScriptedRunner()
+        let decoy = keyJSON(id: "5", body: otherBody, title: "agents-m1", readOnly: true)
+        let mine = keyJSON(id: "11", body: body, title: "something else", readOnly: true)
+        let new = keyJSON(id: "22", body: newBody, title: newTitle, readOnly: true)
+        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: "[\(decoy),\(mine),\(new)]", err: ""))
+        runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: newPub + "\n", err: ""))
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
+        runner.on({ $0.last?.contains("-T git@github.com") == true }, result: CommandResult(code: 0, out: welcome, err: ""))
+        runner.on({ $0.last?.contains("push --dry-run") == true }, result: CommandResult(code: 0, out: readOnly + "\n@@push 128\n", err: ""))
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+        XCTAssertEqual(runner.calls.last?.argv, [gh, "repo", "deploy-key", "delete", "11", "-R", repo])
+        XCTAssertFalse(runner.calls.map(\.argv).contains { $0.contains("delete") && $0.contains("5") })
+    }
+
+    func testReplaceKeyWithAnUnreadableOldKeyChangesNothing() async {
+        let runner = ScriptedRunner()
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: "ssh-rsa AAAA\nrm -rf x\n", err: ""))
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("unexpected public key"), outcome.message)
+        XCTAssertEqual(runner.calls.count, 1, "nothing but the read of the old key ran")
+    }
+
+    func testReplaceKeyWithAnUnsafeMachineNameRunsNothing() async {
+        var machine = TestMachines.mac()
+        machine.name = "m1; touch x"
+        let runner = replaceRunner()
+        let outcome = await replacePlan(machine: machine).run(.test(.test(machine: machine, runner: runner)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testReplaceKeyMasksWhatItShowsBeforeCuttingIt() async {
+        let token = testLongToken
+        let said = String(repeating: "f", count: 170) + token
+        let runner = ScriptedRunner()
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
+        runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 1, out: "", err: said))
+        let outcome = await replacePlan().run(.test(.test(runner: runner, mask: testMask(token, as: "[secret:m1-github-issues]"))))
+        XCTAssertFalse(outcome.ok)
+        assertNoFragment(of: token, in: outcome.message)
+        XCTAssertTrue(outcome.message.contains("[secret:m1-github-issues]"), outcome.message)
+    }
+
+    func testReplaceKeyIsOfferedWhenTheCheckPassesOrTheKeyIsNotOnGitHub() {
+        XCTAssertTrue(RepoSteps.offersReplace(CheckResult(state: .pass("read-only key"))))
+        let notListed = CheckResult(state: .fail("the key is not on \(repo) yet"),
+                                    rows: [SubRow(name: "Key on GitHub", ok: false, detail: "not listed")])
+        XCTAssertTrue(RepoSteps.offersReplace(notListed))
+        // no key on the machine, a writable key, a missing alias, can't tell, no result yet
+        XCTAssertFalse(RepoSteps.offersReplace(CheckResult(state: .fail("no deploy key on m1 yet"))))
+        XCTAssertFalse(RepoSteps.offersReplace(CheckResult(state: .fail("can write"), rows: [SubRow(name: "Key on GitHub", ok: false, detail: "can write")])))
+        XCTAssertFalse(RepoSteps.offersReplace(CheckResult(state: .fail("no ssh alias"),
+                                                           rows: [SubRow(name: "Key on GitHub", ok: true, detail: "read-only")])))
+        XCTAssertFalse(RepoSteps.offersReplace(CheckResult(state: .cantTell("waits for Reachable"))))
+        XCTAssertFalse(RepoSteps.offersReplace(nil))
+    }
+
+    func testTheProbeNamesTheRowThatMakesReplaceKeyAvailable() async {
+        // the Check itself produces the row Replace key looks for
+        let (absent, _) = await check(text: remoteText(pub: pub, ssh: welcome), keys: ghKeys("ssh-ed25519 \(otherBody)", readOnly: true))
+        XCTAssertTrue(RepoSteps.offersReplace(absent))
+        let (ok, _) = await check(text: remoteText(pub: pub, ssh: welcome), keys: ghKeys("ssh-ed25519 \(body)", readOnly: true))
+        XCTAssertTrue(RepoSteps.offersReplace(ok))
+        let (writable, _) = await check(text: remoteText(pub: pub, ssh: welcome), keys: ghKeys("ssh-ed25519 \(body)", readOnly: false))
+        XCTAssertFalse(RepoSteps.offersReplace(writable))
+    }
+
+    func testOnlyTheDeployKeyStepOfAValidRepoHasAReplacePlan() {
+        let all = steps()
+        XCTAssertNotNil(all[0].replace)
+        XCTAssertNil(all[1].replace)
+        XCTAssertNil(all[2].replace)
+        let bad = MachineRepo(github: "a/b; touch x", localPath: "/x", checkCommand: "true")
+        for step in RepoSteps.all(for: TestMachines.mac(), repo: bad) { XCTAssertNil(step.replace, step.id.raw) }
+    }
+
+    /// The scripts run in a real shell against a throwaway HOME: they parse, the new pair appears beside the old one,
+    /// and the swap leaves the new key under the old file names and no `.new` file behind.
+    func testReplaceKeyScriptsRunInARealShellOnAThrowawayHome() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("notchling-replace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".ssh"), withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        let keyPath = home.appendingPathComponent(".ssh/agents-dtthaison-lingeva-mono").path
+        try "OLD-PRIVATE".write(toFile: keyPath, atomically: true, encoding: .utf8)
+        try pub.write(toFile: keyPath + ".pub", atomically: true, encoding: .utf8)
+
+        func shell(_ script: String) throws -> (Int32, String) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", script]
+            p.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = pipe
+            try p.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+        }
+        // what the plan sends to the machine, with the ssh and gh calls left out
+        let runner = replaceRunner()
+        _ = await run(replacePlan(), runner)
+        func script(containing needle: String) -> String {
+            // ssh's last argument is `/bin/sh -c '<prelude + script>'`: the script is what sits inside the quotes
+            var text = unquoted(runner.calls.map(\.argv).first { unquoted($0.last ?? "").contains(needle) && $0.first == "/usr/bin/ssh" }!.last!)
+            text.removeFirst("/bin/sh -c '".count + RemoteShell.prelude.count)
+            text.removeLast()
+            return text
+        }
+        // every script is valid sh
+        for needle in ["head -c 1024", "ssh-keygen", "-T git@github.com", "push --dry-run", "mv -f"] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-n", "-c", script(containing: needle)]
+            try p.run()
+            p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "syntax: \(needle)")
+        }
+        let (readCode, readOut) = try shell(script(containing: "head -c 1024"))
+        XCTAssertEqual(readCode, 0)
+        XCTAssertEqual(readOut, pub)
+
+        let (genCode, genOut) = try shell(script(containing: "ssh-keygen"))
+        XCTAssertEqual(genCode, 0, genOut)
+        XCTAssertNotNil(RepoSteps.singleEd25519Line(genOut), genOut)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: keyPath + ".new"))
+        XCTAssertEqual(try String(contentsOfFile: keyPath, encoding: .utf8), "OLD-PRIVATE", "the old key is untouched until the swap")
+        let newPubText = try String(contentsOfFile: keyPath + ".new.pub", encoding: .utf8)
+
+        let (swapCode, swapOut) = try shell(script(containing: "mv -f"))
+        XCTAssertEqual(swapCode, 0, swapOut)
+        XCTAssertEqual(try String(contentsOfFile: keyPath + ".pub", encoding: .utf8), newPubText)
+        XCTAssertNotEqual(try String(contentsOfFile: keyPath, encoding: .utf8), "OLD-PRIVATE")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: keyPath + ".new"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: keyPath + ".new.pub"))
+
+        // a second swap has nothing to move: it fails without touching the key now in place
+        let (again, _) = try shell(script(containing: "mv -f"))
+        XCTAssertEqual(again, 3)
+        XCTAssertEqual(try String(contentsOfFile: keyPath + ".pub", encoding: .utf8), newPubText)
+    }
+
+    /// The push check in a real shell with a stub git: a throwaway repo is made, the dry run goes to the repo's
+    /// GitHub URL through the new key alone, and the exit code comes back on the marker line.
+    func testReplaceKeyPushCheckRunsAThrowawayRepoThroughTheNewKeyOnly() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("notchling-pushcheck-\(UUID().uuidString)", isDirectory: true)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true), home = dir.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let log = dir.appendingPathComponent("git.log").path
+        let stub = "#!/bin/sh\necho \"GIT_SSH_COMMAND=$GIT_SSH_COMMAND :: $*\" >> \(log)\n"
+            + "case \"$*\" in *push*) echo 'ERROR: The key you are authenticating with has been marked as read only.' >&2; exit 128;; esac\nexit 0\n"
+        let gitURL = bin.appendingPathComponent("git")
+        try stub.write(to: gitURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gitURL.path)
+        // no network even if a stub is bypassed: ssh is a stub too
+        let sshURL = bin.appendingPathComponent("ssh")
+        try "#!/bin/sh\nexit 255\n".write(to: sshURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sshURL.path)
+
+        let runner = replaceRunner()
+        _ = await run(replacePlan(), runner)
+        var text = unquoted(runner.calls.map(\.argv).first { unquoted($0.last ?? "").contains("push --dry-run") && $0.first == "/usr/bin/ssh" }!.last!)
+        // the prelude would replace the PATH that holds the stub: leave it out
+        text.removeFirst("/bin/sh -c '".count + RemoteShell.prelude.count)
+        text.removeLast()
+        XCTAssertFalse(text.contains("export PATH"))
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", text]
+        p.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "HOME": home.path]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        try p.run()
+        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        XCTAssertTrue(out.contains("marked as read only"), out)
+        XCTAssertEqual(out.components(separatedBy: "\n").last { $0.hasPrefix("@@push ") }, "@@push 128")
+        let calls = try String(contentsOfFile: log, encoding: .utf8)
+        XCTAssertTrue(calls.contains("push --dry-run git@github.com:\(repo).git HEAD:refs/heads/agents-push-test"), calls)
+        XCTAssertTrue(calls.contains("-F /dev/null -i \(home.path)/.ssh/agents-dtthaison-lingeva-mono.new -o IdentitiesOnly=yes"), calls)
+        for line in calls.split(separator: "\n") { XCTAssertTrue(line.contains("core.hooksPath=/dev/null"), String(line)) }
+        XCTAssertFalse(calls.contains("github-agents-"), "the alias would lead to the old key")
+    }
+
+    func testTheSwapEndsOnTheSameFilesTheProbeAndFixUse() async {
+        let runner = replaceRunner()
+        _ = await run(replacePlan(), runner)
+        let swap = unquoted(runner.calls.map(\.argv).first { unquoted($0.last ?? "").contains("mv -f") }!.last!)
+        XCTAssertTrue(swap.contains("\"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono'"), swap)
+        XCTAssertTrue(swap.contains("\"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono.pub'"), swap)
+    }
 }

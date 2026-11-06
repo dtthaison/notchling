@@ -21,8 +21,9 @@ struct ApprovedStep: Equatable {
 /// - A **check** is read-only. `refresh` batches the `.remote` probes of a machine into one ssh per phase (the
 ///   cheap ones with 60 s, then the slow ones whose needs passed with 180 s); `.local` probes run up to four at
 ///   a time. A step whose need isn't passing says `waits for <title>` and its probe's answer is dropped.
-/// - A **Fix** runs only from `runFix`, `setUpAll`, `toggleRunning` and `updateMachines`, which a button calls with
-///   a `FixApproval`. Refresh, Add, opening the window and a changed vault value never reach them.
+/// - A **Fix** runs only from `runFix`, `setUpAll`, `toggleRunning`, `updateMachines` and `runReplace` (Replace key),
+///   which a button calls (with a `FixApproval` where they take one). Refresh, Add, opening the window and a
+///   changed vault value never reach them.
 /// - **Secrets.** Every string that leaves the engine (a result, a log line, a Fix's message) goes through the
 ///   masks of the machine: its vault values as `[secret:<name>]`, the admin password as `[admin password]`. The
 ///   password lives in the Fix's context for that one step; no property of the engine holds it.
@@ -562,6 +563,28 @@ final class SetupEngine: ObservableObject {
         // only an admin step on a sudo machine gets the password, and only for this one step
         let password = plan.needsAdmin && m.admin == .sudo ? approval.adminPassword : nil
         let outcome = await perform(step: id, title: step.title, on: m, adminPassword: password) { ctx in await plan.run(ctx) }
+        await refresh([machine], includeSlow: true)
+        return outcome
+    }
+
+    /// Replace key on a Deploy key step, from its own button and the sheet that showed the commands. It goes through
+    /// `perform`, so the log, the masks and the one-Fix-per-machine rule apply, and the step's Check runs again after.
+    /// It is offered (and allowed) only while the Check is ✓ or says GitHub has no record of the machine's key.
+    func runReplace(_ id: StepID, on machine: String, expectedDisplay: String? = nil) async -> FixOutcome {
+        guard let m = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
+        guard let step = stepList(m, currentMachines()).first(where: { $0.id == id }), let plan = step.replace else {
+            return FixOutcome(ok: false, message: "\(machine) has nothing to replace in \(id.raw)")
+        }
+        guard RepoSteps.offersReplace(results[machine]?[id]) else {
+            return FixOutcome(ok: false, message: "\(step.replaceTitle) is offered when the Deploy key check passes or the key is not on GitHub; Check again")
+        }
+        if let expectedDisplay, expectedDisplay != plan.display {
+            return FixOutcome(ok: false, message: "\(step.replaceTitle) needs a look; Check again")
+        }
+        if let why = refusal(for: step, on: m, approval: FixApproval(adminPassword: nil, asRootConfirmed: false), needsAdmin: false) {
+            return FixOutcome(ok: false, message: why)
+        }
+        let outcome = await perform(step: id, title: step.replaceTitle, on: m, adminPassword: nil) { ctx in await plan.run(ctx) }
         await refresh([machine], includeSlow: true)
         return outcome
     }

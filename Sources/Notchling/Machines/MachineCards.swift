@@ -505,6 +505,12 @@ private struct MachineCardView: View {
     }
 
     @ViewBuilder private func action(for step: SetupStep, result: CheckResult?) -> some View {
+        // Replace key: only on a click, and only while the key is ✓ or GitHub has no record of it
+        if step.replace != nil, RepoSteps.offersReplace(result) {
+            Button("Replace key…") { model.requestReplaceKey(step.id, on: machine.name) }
+                .buttonStyle(.kit(.ghost)).disabled(busy)
+                .help("Makes a new read-only deploy key, proves it works, then removes the old one")
+        }
         switch step.fix {
         case .run:
             if case .fail? = result?.state {

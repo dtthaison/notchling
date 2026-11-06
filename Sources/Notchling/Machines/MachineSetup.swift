@@ -89,6 +89,12 @@ struct SetupStep {
     let cadence: Cadence
     let probe: Probe
     let fix: StepFix
+    /// An action beside the Fix that the card offers on its own button (the Deploy key's Replace key). It is not part
+    /// of Set up or Set up all, and it runs only through `SetupEngine.runReplace` after its own confirmation.
+    var replace: FixPlan? = nil
+
+    /// The title of the replace action in the log and its sheet: `Deploy key (o/n)` becomes `Replace key (o/n)`.
+    var replaceTitle: String { title.replacingOccurrences(of: "Deploy key", with: "Replace key") }
 }
 
 /// The vault as a step sees it. A value is read here and travels only on a process's stdin or in an HTTP header.

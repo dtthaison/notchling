@@ -23,7 +23,8 @@ enum RepoSteps {
         }
         return [
             SetupStep(id: .deployKey(github), title: "Deploy key (\(github))", needs: [.reachable, .baseTools],
-                      cadence: .slow, probe: deployKeyProbe(github), fix: .run(deployKeyFix(machine, github))),
+                      cadence: .slow, probe: deployKeyProbe(github), fix: .run(deployKeyFix(machine, github)),
+                      replace: replaceKeyPlan(machine, github)),
             SetupStep(id: .clone(github), title: "Clone (\(github))", needs: [.deployKey(github)],
                       cadence: .everyRefresh, probe: cloneProbe(repo), fix: .run(cloneFix(repo))),
             SetupStep(id: .pushRefused(github), title: "Push is refused (\(github))", needs: [.clone(github)],
@@ -161,7 +162,7 @@ enum RepoSteps {
         }
         guard let entry = listed(pub, in: keys) else {
             return CheckResult(state: .fail("the key is not on \(github) yet"),
-                               rows: [SubRow(name: "Key on GitHub", ok: false, detail: "not listed")])
+                               rows: [notListedRow])
         }
         guard (entry["read_only"] as? Bool) == true else {
             return CheckResult(state: .fail(canWrite(github)),
@@ -285,6 +286,206 @@ enum RepoSteps {
                 return FixOutcome(ok: false, message: "gh could not add the deploy key to \(github): \(firstLine(added.err.isEmpty ? added.out : added.err, ctx.mask))")
             }
             return FixOutcome(ok: true, message: "added a read-only deploy key to \(github)")
+        }
+    }
+
+    // MARK: Replace key
+
+    /// The Check's row that says GitHub has no record of the machine's key. Replace key is offered for it.
+    private static let notListedRow = SubRow(name: "Key on GitHub", ok: false, detail: "not listed")
+
+    /// Whether the card offers Replace key for this Check: the key is ✓, or it is on the machine and GitHub has no
+    /// record of it. A missing key, a writable one, a missing alias and "can't tell" are not offered.
+    static func offersReplace(_ result: CheckResult?) -> Bool {
+        switch result?.state {
+        case .pass?: return true
+        case .fail?: return result?.rows.contains(notListedRow) ?? false
+        default: return false
+        }
+    }
+
+    /// `yyyymmdd` in UTC, for the new key's title and comment.
+    private static func dateStamp(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d%02d%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// GitHub's id of a key: a positive JSON integer and nothing else, since it goes into an argv.
+    private static func keyID(_ entry: [String: Any]) -> Int? {
+        guard let number = entry["id"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              !CFNumberIsFloatType(number) else { return nil }
+        let id = number.intValue
+        return id > 0 ? id : nil
+    }
+
+    private static func addArgv(_ file: String, github: String, title: String) -> [String] {
+        [gh, "repo", "deploy-key", "add", file, "-R", github, "--title", title]
+    }
+
+    private static func deleteArgv(_ id: String, github: String) -> [String] {
+        [gh, "repo", "deploy-key", "delete", id, "-R", github]
+    }
+
+    /// Replaces the machine's deploy key for one repo. The old key stays valid until the new one is proven: the
+    /// new pair is made beside the old (`<key>.new`), added read-only, and has to authenticate, be refused a push
+    /// and be listed read-only before it is moved over the old files. Only then is the old key deleted from GitHub,
+    /// found by its public key text (never by title). A failure before the move removes the `.new` files and the
+    /// new key from GitHub and leaves the old key and the ssh alias as they were.
+    private static func replaceKeyPlan(_ machine: Machine, _ github: String) -> FixPlan {
+        let name = machine.name
+        let path = keyFile(github)
+        let key = RemoteShell.path(path), keyPub = RemoteShell.path(path + ".pub")
+        let newKey = RemoteShell.path(path + ".new"), newPub = RemoteShell.path(path + ".new.pub")
+        let readOld = "f=\(keyPub); if [ -f \"$f\" ]; then head -c 1024 \"$f\"; fi"
+        func keygen(_ comment: String) -> String {
+            "set -e; mkdir -p \"$HOME/.ssh\"; chmod 700 \"$HOME/.ssh\"\n"
+                + "rm -f \(newKey) \(newPub)\n"
+                + "ssh-keygen -q -t ed25519 -N '' -C \(LaneStore.quote(comment)) -f \(newKey)\n"
+                + "cat \(newPub)"
+        }
+        // -F /dev/null: the check uses the new key alone, not whatever the ssh config would offer
+        let sshCheck = "ssh -F /dev/null -i \(newKey) -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1 || true"
+        // a throwaway repo, so no checkout is needed; hooks off and stdin closed, as the Push-is-refused check
+        let pushCheck = "k=\(newKey); t=$(mktemp -d) || { echo '@@push 99'; exit 0; }\n"
+            + "trap 'rm -rf \"$t\"' EXIT\n"
+            + "git -c core.hooksPath=/dev/null init -q \"$t\" </dev/null >/dev/null 2>&1 && "
+            + "git -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=notchling -c user.email=notchling@localhost "
+            + "-C \"$t\" commit -q --allow-empty -m probe </dev/null >/dev/null 2>&1 || { echo '@@push 98'; exit 0; }\n"
+            + "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=\"ssh -F /dev/null -i $k -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8\" "
+            + "git -c core.hooksPath=/dev/null -C \"$t\" push --dry-run git@github.com:\(github).git HEAD:refs/heads/agents-push-test </dev/null 2>&1\n"
+            + "echo \"@@push $?\""
+        // 3: a file is missing, 1: the private key could not move (nothing moved), 2: only the .pub could not move
+        let swap = "[ -f \(newKey) ] && [ -f \(newPub) ] || exit 3\n"
+            + "mv -f \(newKey) \(key) || exit 1\n"
+            + "mv -f \(newPub) \(keyPub) || exit 2"
+        let cleanup = "rm -f \(newKey) \(newPub)"
+
+        let display = "On \(name):\n\(readOld)\n(the old public key is read first)\n\n"
+            + "On \(name) (<yyyymmdd> is today's date):\n\(keygen("agents-\(name)-<yyyymmdd>"))\n(the new key is made next to the old one; the old key stays valid)\n\n"
+            + "On this Mac:\n\(addArgv("<the new public key file>", github: github, title: "agents-\(name)-<yyyymmdd>").joined(separator: " "))\n(read-only: the key is added without write access)\n\n"
+            + "On \(name):\n\(sshCheck)\n(the new key must authenticate)\n\n"
+            + "On \(name):\n\(pushCheck)\n(GitHub must refuse the push)\n\n"
+            + "On this Mac:\n\(listArgv(github).joined(separator: " "))\n(GitHub must list the new key as read-only)\n\n"
+            + "Only when every check above passed:\nOn \(name):\n\(swap)\n\n"
+            + "On this Mac:\n\(deleteArgv("<id of the old key>", github: github).joined(separator: " "))\n(the old key is found by its public key text)\n\n"
+            + "If a check fails, the new key is deleted from GitHub and these files from \(name); the old key stays:\n\(cleanup)"
+
+        return FixPlan(display: display, needsAdmin: false) { ctx in
+            guard isValidMachineName(name) else { return FixOutcome(ok: false, message: "the machine name \(name) is not a plain name") }
+            let title = "agents-\(name)-\(dateStamp(ctx.step.now))"
+            func said(_ r: CommandResult) -> String { firstLine(r.err.isEmpty ? r.out : r.err, ctx.mask) }
+
+            /// Deletes the new key from GitHub: nil when it is gone (or was never there), else what to tell the user.
+            func removeNewKeyFromGitHub(_ pub: String) async -> String? {
+                let still = "the new key (\(title)) is still on GitHub; remove it in Settings → Deploy keys"
+                let current = await MachineRun.local(listArgv(github), ctx: ctx)
+                guard current.code == 0, let keys = parseKeys(current.out) else { return still }
+                guard let entry = listed(pub, in: keys) else { return nil }
+                guard let id = keyID(entry) else { return still }
+                let gone = await MachineRun.local(deleteArgv(String(id), github: github), ctx: ctx)
+                return gone.code == 0 ? nil : still
+            }
+
+            /// A failure before the move: the `.new` files go, and so does the new key on GitHub if it got there.
+            func undo(_ why: String, newKey pub: String? = nil, onGitHub: Bool = false) async -> FixOutcome {
+                var notes: [String] = []
+                let removed = await MachineRun.script(cleanup, ctx: ctx, timeout: 60)
+                if removed.code != 0 { notes.append("the .new key files could not be removed from ~/.ssh on \(name)") }
+                if onGitHub, let pub, let note = await removeNewKeyFromGitHub(pub) { notes.append(note) }
+                return FixOutcome(ok: false, message: ([why] + notes + ["the old key and the ssh alias are untouched"]).joined(separator: "; "))
+            }
+
+            // 1. the old public key, read before anything changes: it is how the old key is found on GitHub
+            let reading = await MachineRun.script(readOld, ctx: ctx, timeout: 60)
+            guard reading.code == 0, let oldPub = singleEd25519Line(reading.out) else {
+                return FixOutcome(ok: false, message: "unexpected public key on \(name); nothing was changed")
+            }
+
+            // 2. the new pair, next to the old one; only its public line comes back
+            let made = await MachineRun.script(keygen("\(title)"), ctx: ctx)
+            guard made.code == 0 else { return await undo("could not make the new key on \(name): \(said(made))") }
+            guard let pub = singleEd25519Line(made.out) else { return await undo("unexpected public key from \(name); nothing was added") }
+            guard keyBody(pub) != keyBody(oldPub) else { return await undo("the new key is the old key; nothing was added") }
+
+            // 3. read-only, through the user's gh. A failed add is looked for on GitHub too: gh may have been cut short.
+            let dir = (NSTemporaryDirectory() as NSString).appendingPathComponent("notchling-keys")
+            let file = (dir as NSString).appendingPathComponent("\(name)-\(slug(github))-new.pub")
+            do {
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                try (pub + "\n").write(toFile: file, atomically: true, encoding: .utf8)
+            } catch {
+                return await undo("could not write the public key file on this Mac")
+            }
+            defer { try? FileManager.default.removeItem(atPath: file) }
+            let added = await MachineRun.local(addArgv(file, github: github, title: title), ctx: ctx)
+            guard added.code == 0 else {
+                return await undo("gh could not add the new deploy key to \(github): \(said(added))", newKey: pub, onGitHub: true)
+            }
+
+            // 4. the new key has to work and still be read-only, from three sides
+            let auth = await MachineRun.script(sshCheck, ctx: ctx, timeout: 60)
+            guard auth.out.contains("successfully authenticated") else {
+                let line = firstLine(auth.out.isEmpty ? auth.err : auth.out, ctx.mask)
+                return await undo("the new key could not authenticate to GitHub over ssh" + (line.isEmpty ? "" : ": \(line)"),
+                                  newKey: pub, onGitHub: true)
+            }
+            let pushed = await MachineRun.script(pushCheck, ctx: ctx, timeout: 90)
+            let pushLines = pushed.out.components(separatedBy: "\n")
+            guard let marker = pushLines.lastIndex(where: { $0.hasPrefix("@@push ") }), let pushCode = Int(pushLines[marker].dropFirst(7)) else {
+                let line = firstLine(pushed.out.isEmpty ? pushed.err : pushed.out, ctx.mask)
+                return await undo("the push check with the new key failed" + (line.isEmpty ? "" : ": \(line)"), newKey: pub, onGitHub: true)
+            }
+            let git = pushLines[..<marker].joined(separator: "\n")
+            if pushCode == 0 {
+                return await undo("the new key can write to \(github): a dry-run push was accepted", newKey: pub, onGitHub: true)
+            }
+            guard git.contains("marked as read only") else {
+                let line = firstLine(git, ctx.mask)
+                return await undo("the push check with the new key failed" + (line.isEmpty ? " (code \(pushCode))" : ": \(line)"),
+                                  newKey: pub, onGitHub: true)
+            }
+            let current = await MachineRun.local(listArgv(github), ctx: ctx)
+            guard current.code == 0, let keys = parseKeys(current.out) else {
+                return await undo("gh could not list the deploy keys of \(github): \(said(current))", newKey: pub, onGitHub: true)
+            }
+            guard let entry = listed(pub, in: keys) else {
+                return await undo("GitHub does not list the new key on \(github)", newKey: pub, onGitHub: true)
+            }
+            guard (entry["read_only"] as? Bool) == true else {
+                return await undo("the new key can write to \(github) according to GitHub", newKey: pub, onGitHub: true)
+            }
+            // the old key's id comes from GitHub's JSON and goes into an argv: it has to be an integer, and it
+            // is found before the move so that a bad one stops everything while the old key is still in place
+            var oldID: Int?
+            if let old = listed(oldPub, in: keys) {
+                guard let id = keyID(old) else {
+                    return await undo("the old key's id on GitHub is not a number; no key was deleted and nothing was replaced",
+                                      newKey: pub, onGitHub: true)
+                }
+                oldID = id
+            }
+
+            // 5. every check passed: the new pair takes the old one's file names, so ~/.ssh/config stays as it is
+            let moved = await MachineRun.script(swap, ctx: ctx, timeout: 60)
+            switch moved.code {
+            case 0: break
+            case 2:
+                return FixOutcome(ok: false, message: "new key in use, but its public key file could not replace the old one on \(name); the old key is still on GitHub, remove it in Settings → Deploy keys")
+            default:
+                return await undo("could not move the new key over the old one on \(name): \(said(moved))", newKey: pub, onGitHub: true)
+            }
+            guard let oldID else {
+                return FixOutcome(ok: true, message: "replaced the deploy key of \(github) on \(name); the old key was not listed on GitHub, so nothing was deleted")
+            }
+            let deleted = await MachineRun.local(deleteArgv(String(oldID), github: github), ctx: ctx)
+            guard deleted.code == 0 else {
+                let why = said(deleted)
+                return FixOutcome(ok: false, message: "new key in use; the old key is still on GitHub, remove it in Settings → Deploy keys" + (why.isEmpty ? "" : " (gh said: \(why))"))
+            }
+            return FixOutcome(ok: true, message: "replaced the deploy key of \(github) on \(name); the old key was deleted from GitHub")
         }
     }
 

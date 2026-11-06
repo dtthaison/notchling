@@ -253,7 +253,7 @@ final class MachinesWindowTests: XCTestCase {
 
     // MARK: Cadence: checks run on their own, Fixes only on a click
 
-    private let forbidden = ["cat > ", "sudo -S", "deploy-key add", "git clone", "systemctl enable", "launchctl bootstrap",
+    private let forbidden = ["cat > ", "sudo -S", "deploy-key add", "deploy-key delete", "agents-dtthaison-lingeva-mono.new", "git clone", "systemctl enable", "launchctl bootstrap",
                              "pmset -a", "apt-get", "brew install", "install.sh"]
 
     @MainActor
@@ -790,6 +790,144 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertEqual(order.items, ["a refresh learned something", "ran"])
     }
 
+    // MARK: Replace key
+
+    /// A Deploy key step whose Check answer a test can change, with a Set up and a Replace key that count their runs.
+    private func deployKeyStep(_ order: Order, check: ProbeAnswer, replaceDisplay: @escaping @Sendable () -> String = { "replace the key" },
+                               replaceOK: Bool = true) -> (Machine, [Machine]) -> [SetupStep] {
+        let id = StepID.deployKey("o/n")
+        return { _, _ in [
+            SetupStep(id: id, title: "Deploy key (o/n)", needs: [], cadence: .everyRefresh,
+                      probe: .local { _ in check.result },
+                      fix: .run(FixPlan(display: "set the key up", needsAdmin: false) { _ in
+                          order.add("set up")
+                          return FixOutcome(ok: true, message: "key set up")
+                      }),
+                      replace: FixPlan(display: replaceDisplay(), needsAdmin: false) { _ in
+                          order.add("replaced")
+                          return FixOutcome(ok: replaceOK, message: replaceOK ? "replaced the key" : "the new key could not authenticate")
+                      }),
+        ] }
+    }
+
+    @MainActor
+    func testReplaceKeyShowsItsCommandsFirstAndRunsOnlyOnTheClick() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .pass("read-only key on o/n")))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: deployKeyStep(order, check: check))
+        await model.open()
+        await model.refreshAll()
+        await model.check("m1")
+        XCTAssertTrue(order.items.isEmpty, "opening, refreshing and Check never replace a key")
+
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no confirmation sheet") }
+        XCTAssertEqual(prompt.kind, .replaceKey(.deployKey("o/n")))
+        XCTAssertEqual(prompt.title, "Replace key (o/n)")
+        XCTAssertEqual(prompt.display, "replace the key")
+        XCTAssertFalse(prompt.needsAdmin)
+        XCTAssertTrue(order.items.isEmpty, "the sheet runs nothing")
+
+        await model.confirm(prompt, password: nil).value
+        XCTAssertEqual(order.items, ["replaced"])
+        XCTAssertEqual(model.outcomes["m1"]?.ok, true)
+        XCTAssertEqual(model.outcomes["m1"]?.text, "replaced the key")
+        XCTAssertTrue(model.engine.logs["m1"]?.contains("▸ Replace key (o/n)") == true, "\(String(describing: model.engine.logs["m1"]))")
+        XCTAssertTrue(model.engine.running.isEmpty)
+    }
+
+    @MainActor
+    func testReplaceKeyIsNotShownWhileTheCheckSaysThereIsNothingToReplace() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .fail("no deploy key on m1 yet")))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: deployKeyStep(order, check: check))
+        await model.open()
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        XCTAssertNil(model.setupSheet, "no key on the machine: there is nothing to replace")
+
+        // the key is on the machine and GitHub has no record of it: offered
+        check.set(CheckResult(state: .fail("the key is not on o/n yet"), rows: [SubRow(name: "Key on GitHub", ok: false, detail: "not listed")]))
+        await model.check("m1")
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        guard case .fix? = model.setupSheet else { return XCTFail("not offered for a key GitHub has no record of") }
+        XCTAssertTrue(order.items.isEmpty)
+
+        // a writable key is for Set up's repair path, not for Replace key
+        model.setupSheet = nil
+        check.set(CheckResult(state: .fail("can write"), rows: [SubRow(name: "Key on GitHub", ok: false, detail: "can write")]))
+        await model.check("m1")
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        XCTAssertNil(model.setupSheet)
+    }
+
+    @MainActor
+    func testReplaceKeyCancelAndStaleCommandsRunNothing() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .pass("ok")))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]),
+                              steps: deployKeyStep(order, check: check, replaceDisplay: { "replace with \(order.items.count) notes" }))
+        await model.open()
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
+        model.cancel(prompt)
+        XCTAssertNil(model.setupSheet)
+        XCTAssertTrue(order.items.isEmpty)
+
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        guard case .fix(let stale)? = model.setupSheet else { return XCTFail("no sheet") }
+        order.add("something changed the commands")
+        await model.confirm(stale, password: nil).value
+        XCTAssertEqual(order.items, ["something changed the commands"], "the commands differ from the ones shown: nothing ran")
+        XCTAssertEqual(model.outcomes["m1"]?.guidance, true)
+        XCTAssertTrue(model.outcomes["m1"]?.text.contains("needs a look") == true)
+    }
+
+    @MainActor
+    func testAFailedReplaceKeyIsShownAsAFailureWithItsReason() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .pass("ok")))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: deployKeyStep(order, check: check, replaceOK: false))
+        await model.open()
+        model.requestReplaceKey(.deployKey("o/n"), on: "m1")
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
+        await model.confirm(prompt, password: nil).value
+        XCTAssertEqual(model.outcomes["m1"]?.ok, false)
+        XCTAssertEqual(model.outcomes["m1"]?.guidance, false)
+        XCTAssertEqual(model.outcomes["m1"]?.text, "the new key could not authenticate")
+    }
+
+    @MainActor
+    func testTheEngineRefusesReplaceKeyWhenTheCheckDoesNotOfferIt() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .fail("no deploy key on m1 yet")))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: deployKeyStep(order, check: check))
+        await model.open()
+        let refused = await model.engine.runReplace(.deployKey("o/n"), on: "m1")
+        XCTAssertFalse(refused.ok)
+        XCTAssertTrue(refused.message.contains("Check again"), refused.message)
+        let missing = await model.engine.runReplace(.baseTools, on: "m1")
+        XCTAssertFalse(missing.ok)
+        XCTAssertTrue(order.items.isEmpty)
+    }
+
+    @MainActor
+    func testSetUpAllAndSetUpNeverRunReplaceKey() async throws {
+        let order = Order()
+        let check = ProbeAnswer(CheckResult(state: .fail("the key is not on o/n yet"), rows: [SubRow(name: "Key on GitHub", ok: false, detail: "not listed")]))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: deployKeyStep(order, check: check))
+        await model.open()
+        model.requestSetUpAll(on: "m1")
+        guard case .fix(let all)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertFalse(all.display.contains("replace the key"), "Set up all does not list Replace key")
+        await model.confirm(all, password: nil).value
+        XCTAssertEqual(order.items, ["set up"])
+        model.requestSetUp(.deployKey("o/n"), on: "m1")
+        guard case .fix(let one)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertEqual(one.display, "set the key up")
+        await model.confirm(one, password: nil).value
+        XCTAssertEqual(order.items, ["set up", "set up"])
+    }
+
     /// M8: removing a machine also drops what the engine held for it.
     @MainActor
     func testRemovingAMachineDropsItsEngineState() async throws {
@@ -945,6 +1083,15 @@ final class MachinesWindowTests: XCTestCase {
         try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertTrue(runner.calls.isEmpty, "saving a job does not ask GitHub for issues")
     }
+}
+
+/// A Check answer a test can change between runs.
+private final class ProbeAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: CheckResult
+    init(_ result: CheckResult) { current = result }
+    var result: CheckResult { lock.withLock { current } }
+    func set(_ result: CheckResult) { lock.withLock { current = result } }
 }
 
 private final class Order: @unchecked Sendable {

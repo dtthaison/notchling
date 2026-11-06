@@ -56,8 +56,33 @@ final class MachinesSafetyTests: XCTestCase {
                 _ = await plan.run(fixContext(adminRunnable(machine), runner: runner))
                 for call in runner.calls { texts.append((label + " run", call.argv.joined(separator: " "))) }
             }
+            // Replace key is no Fix of Set up or Set up all, but its commands are held to the same scans
+            if let replace = step.replace, !adminOnly {
+                texts.append((label + " replace display", replace.display))
+                let runner = replaceKeyRunner()
+                _ = await replace.run(fixContext(machine, runner: runner))
+                for call in runner.calls { texts.append((label + " replace run", call.argv.joined(separator: " "))) }
+            }
         }
         return texts
+    }
+
+    private let oldKeyBody = "AAAAC3NzaC1lZDI1NTE5AAAAIMachineKeyForTestsOnly0123456789abcdefg"
+    private let newKeyBody = "AAAAC3NzaC1lZDI1NTE5AAAAINewKeyForReplaceTestsOnly0123456789abcdefgh"
+
+    /// A machine and GitHub that let Replace key run to the end: the old key is id 11, the new one id 22.
+    private func replaceKeyRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        let keys = "[{\"id\":11,\"key\":\"ssh-ed25519 \(oldKeyBody)\",\"title\":\"agents-old\",\"read_only\":true},"
+            + "{\"id\":22,\"key\":\"ssh-ed25519 \(newKeyBody)\",\"title\":\"agents-new\",\"read_only\":true}]"
+        runner.on({ $0.contains("--paginate") }, result: CommandResult(code: 0, out: keys, err: ""))
+        runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: "ssh-ed25519 \(newKeyBody) agents-new\n", err: ""))
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: "ssh-ed25519 \(oldKeyBody) agents-old\n", err: ""))
+        runner.on({ $0.last?.contains("-T git@github.com") == true },
+                  result: CommandResult(code: 0, out: "Hi o/n! You've successfully authenticated, but GitHub does not provide shell access.\n", err: ""))
+        runner.on({ $0.last?.contains("push --dry-run") == true },
+                  result: CommandResult(code: 0, out: "ERROR: The key you are authenticating with has been marked as read only.\n@@push 128\n", err: ""))
+        return runner
     }
 
     func testAdminScriptsNeverTouchProductionServices() async throws {
@@ -275,6 +300,7 @@ final class MachinesSafetyTests: XCTestCase {
             for step in engine.steps(for: machine) {
                 if case .remote(let script, _) = step.probe { said.append(script) }
                 if case .run(let plan) = step.fix { said.append(plan.display) }
+                if let replace = step.replace { said.append(replace.display) }
             }
             XCTAssertFalse(shown.isEmpty)
             for text in said {
@@ -333,7 +359,8 @@ final class MachinesSafetyTests: XCTestCase {
                        "gh repo edit", "gh repo fork", "deploy-key delete", "--method POST", "--method PUT", "--method PATCH",
                        "--method DELETE", "-X POST", "-X PUT", "-X PATCH", "-X DELETE", "--allow-write"]
         let ghApi = try NSRegularExpression(pattern: "gh api[^\\n;'\"&|]*")
-        var deployAdds = 0
+        let deployDelete = try NSRegularExpression(pattern: "\\S*gh repo deploy-key delete[^\\n;'\"&|]*")
+        var deployAdds = 0, deployDeletes = 0
         for machine in machines {
             for (label, raw) in await allTexts(for: machine) {
                 let text = withDecodedBlobs(raw)
@@ -341,7 +368,25 @@ final class MachinesSafetyTests: XCTestCase {
                     let found = String(text[Range(m.range, in: text)!])
                     XCTAssertTrue(found.contains("--dry-run"), "\(label) pushes: \(found)")
                 }
-                for writer in writers { XCTAssertFalse(text.contains(writer), "\(label) uses \(writer)") }
+                // Replace key is the one place that deletes a deploy key, and only the old key by an integer id
+                let replacing = label.contains("replace")
+                for writer in writers where !(replacing && writer == "deploy-key delete") {
+                    XCTAssertFalse(text.contains(writer), "\(label) uses \(writer)")
+                }
+                for m in deployDelete.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    let found = String(text[Range(m.range, in: text)!])
+                    XCTAssertTrue(replacing, "\(label) deletes a deploy key: \(found)")
+                    if label.hasSuffix("replace run") {
+                        XCTAssertNotNil(found.range(of: #"^\S*gh repo deploy-key delete [0-9]+ -R [A-Za-z0-9._/-]+$"#, options: .regularExpression),
+                                        "\(label): \(found)")
+                        deployDeletes += 1
+                    } else {
+                        XCTAssertTrue(found.contains("<id of the old key>"), "\(label): \(found)")
+                    }
+                }
+                // neither the write flag nor its short form, anywhere
+                XCTAssertFalse(text.contains("allow-write"), "\(label) has the write flag")
+                XCTAssertNil(text.range(of: #"deploy-key (add|delete)[^\n;'"&|]* -w( |$)"#, options: .regularExpression), "\(label) has -w")
                 // M5: `gh api` only reads (the host-key `meta` call). A field or an input body turns it into a POST.
                 for m in ghApi.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                     let found = " " + String(text[Range(m.range, in: text)!]) + " "
@@ -357,5 +402,37 @@ final class MachinesSafetyTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(deployAdds, 0, "the deploy-key add was looked at")
+        XCTAssertGreaterThan(deployDeletes, 0, "Replace key's delete of the old key was looked at")
+    }
+
+    /// Replace key runs from its own confirmed click and nowhere else: a refresh, a Check of a draft, a changed
+    /// vault value, Set up all and Set up on the step never delete a deploy key or make a `.new` key.
+    @MainActor
+    func testNoPathRunsReplaceKeyWithoutItsOwnClick() async throws {
+        let reachableText: [String: String] = [
+            "m1": "os=Darwin\narch=arm64\nuid=501\nuser=sondoan\nhome=/Users/sondoan\nversion=26.1\ndisk_kb=125829120\ndocker=none",
+            "vps-sing-1": "os=Linux\narch=x86_64\nuid=1000\nuser=agent\nhome=/home/agent\nversion=Ubuntu 24.04\ndisk_kb=83886080\ndocker=none",
+        ]
+        for machine in machines {
+            let log = CallLog()
+            let runner = ReachableRunner(reachable: reachableText[machine.name] ?? "", sink: { log.add($0) })
+            let reg = TestRegistry(machines: [machine])
+            let engine = SetupEngine(runner: runner, secrets: ClosureSecrets { _ in "zZ9-some-vault-value-0123456789" }, http: NoHTTP(), mac: { .empty },
+                                     machines: { reg.machines }, save: reg.save, clock: { Date(timeIntervalSince1970: 1_800_000_000) },
+                                     observeVault: false)
+            await engine.refresh([machine.name], includeSlow: true)
+            await engine.refresh(nil, includeSlow: true)
+            _ = await engine.check(draft: machine)
+            for name in ["claude-worker", "\(machine.name)-github-issues"] { engine.vaultValueChanged(name: name) }
+            let plan = engine.setUpAllPlan(for: machine.name)
+            _ = await engine.setUpAll(on: machine.name, approved: plan, askAdmin: { _ in .cancelled })
+            _ = await engine.runFix(.deployKey(TestMachines.repo), on: machine.name, approval: FixApproval(adminPassword: nil, asRootConfirmed: false))
+            XCTAssertFalse(log.calls.isEmpty, "the checks did run")
+            for call in log.calls {
+                let text = call.argv.joined(separator: " ")
+                XCTAssertFalse(text.contains("deploy-key delete"), "\(machine.name): a deploy key was deleted without a click: \(text)")
+                XCTAssertFalse(text.contains("agents-dtthaison-lingeva-mono.new"), "\(machine.name): a new key was made without a click")
+            }
+        }
     }
 }
