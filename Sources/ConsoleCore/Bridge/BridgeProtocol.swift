@@ -133,6 +133,8 @@ public struct SessionDTO: Codable, Equatable, Sendable {
     public let facts: FactsDTO?
     /// Claude's newest reply (id and first lines). A phone compares the id with the one it saw to announce a new reply.
     public let lastMessage: LastMessageDTO?
+    /// "claude", "codex" or "agy". Additive: an older phone ignores it and treats every session as Claude Code.
+    public let tool: String
 
     public init(_ session: Session) {
         id = session.id; name = session.name; project = session.project; cwd = session.cwd
@@ -162,6 +164,7 @@ public struct SessionDTO: Codable, Equatable, Sendable {
         activity = session.activity
         facts = session.facts.map(FactsDTO.init)
         lastMessage = session.lastMessage.map { LastMessageDTO(id: $0.id, text: $0.text) }
+        tool = session.tool
         switch session.takeover {
         case .available?: takeover = TakeoverDTO(available: true, reason: nil, stoppable: false, busy: false)
         case .stoppable(let busy)?: takeover = TakeoverDTO(available: false, reason: Takeover.aliveReason, stoppable: true, busy: busy)
@@ -361,6 +364,25 @@ public struct BridgeChatPage: Sendable {
     /// The `after` message is not in the newest window any more: the phone should replace what it has with this page.
     public var reset: Bool
 
+    /// The newest `limit` of a whole history, or the ones before / after a message of it.
+    public static func page(of all: [ChatMessage], before: String?, after: String?, limit: Int) throws -> BridgeChatPage {
+        var messages = all
+        if let before {
+            guard let index = messages.firstIndex(where: { $0.id.uuidString == before }) else {
+                throw BridgeFailure(.notFound, "Không thấy tin \"before\".")
+            }
+            messages = Array(messages[..<index])
+        } else if let after {
+            guard let index = messages.firstIndex(where: { $0.id.uuidString == after }) else {
+                let page = messages.suffix(limit)
+                return BridgeChatPage(messages: Array(page), hasMore: messages.count > limit, reset: true)
+            }
+            let newer = Array(messages[(index + 1)...])
+            return BridgeChatPage(messages: Array(newer.suffix(limit)), hasMore: newer.count > limit)
+        }
+        return BridgeChatPage(messages: Array(messages.suffix(limit)), hasMore: messages.count > limit)
+    }
+
     public init(messages: [ChatMessage], hasMore: Bool, reset: Bool = false) {
         self.messages = messages
         self.hasMore = hasMore
@@ -381,20 +403,6 @@ extension BridgeBackend {
     }
 
     public func chatPage(sessionId: String, subagentId: String?, before: String?, after: String?, limit: Int) async throws -> BridgeChatPage {
-        var messages = try await chatMessages(sessionId: sessionId, subagentId: subagentId)
-        if let before {
-            guard let index = messages.firstIndex(where: { $0.id.uuidString == before }) else {
-                throw BridgeFailure(.notFound, "Không thấy tin \"before\".")
-            }
-            messages = Array(messages[..<index])
-        } else if let after {
-            guard let index = messages.firstIndex(where: { $0.id.uuidString == after }) else {
-                let page = messages.suffix(limit)
-                return BridgeChatPage(messages: Array(page), hasMore: messages.count > limit, reset: true)
-            }
-            let newer = Array(messages[(index + 1)...])
-            return BridgeChatPage(messages: Array(newer.suffix(limit)), hasMore: newer.count > limit)
-        }
-        return BridgeChatPage(messages: Array(messages.suffix(limit)), hasMore: messages.count > limit)
+        try BridgeChatPage.page(of: try await chatMessages(sessionId: sessionId, subagentId: subagentId), before: before, after: after, limit: limit)
     }
 }

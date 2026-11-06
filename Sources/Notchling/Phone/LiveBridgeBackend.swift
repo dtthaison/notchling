@@ -11,6 +11,8 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     private let chatCache = ChatTranscriptCache()
     private let vizEngine = VizEngine()
     private let phone = PhoneStreamer()
+    /// Codex and Antigravity CLI sessions, listed and driven next to Claude Code's.
+    private let foreign = ForeignSessionSource()
 
     init(model: PhoneModel, controller: BridgeController) {
         self.model = model
@@ -32,7 +34,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     /// main.swift"), the context in use and the account's limits. Both readers keep a cursor per transcript and read only
     /// what was appended, so this is cheap on every list push.
     private func enrich(_ session: inout Session, limits: [LimitInfo]) {
-        guard session.state != .exited, let path = session.transcriptURL?.path,
+        guard session.tool == "claude", session.state != .exited, let path = session.transcriptURL?.path,
               Date().timeIntervalSince(session.lastActivity) < 6 * 3600 else { return }
         if session.state == .running { session.activity = TranscriptReader.snapshot(atPath: path).activity }
         let conversation = ConversationReader.read(path)
@@ -50,6 +52,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func commands(sessionId: String) async -> [CommandInfo] {
+        if ForeignSessions.parse(sessionId) != nil { return await foreign.commands(sessionID: sessionId) }
         guard let session = await rawSessions().first(where: { $0.id == sessionId }) else { return [] }
         let cwd = session.cwd
         return await Task.detached(priority: .utility) {
@@ -73,7 +76,8 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     private func rawSessions() async -> [Session] {
-        await MainActor.run { model.bridgeSessions }
+        let claude = await MainActor.run { model.bridgeSessions }
+        return claude + (await foreign.sessions())
     }
 
     private func session(_ id: String) async throws -> Session {
@@ -84,6 +88,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func chatMessages(sessionId: String, subagentId: String?) async throws -> [ChatMessage] {
+        if ForeignSessions.parse(sessionId) != nil { return try await foreign.messages(sessionID: sessionId) }
         let session = try await session(sessionId)
         let url: URL?
         let isMain: Bool
@@ -99,6 +104,12 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func chatPage(sessionId: String, subagentId: String?, before: String?, after: String?, limit: Int) async throws -> BridgeChatPage {
+        if ForeignSessions.parse(sessionId) != nil {
+            // Codex and Antigravity histories are read whole (Antigravity's replays on load), so the protocol's
+            // in-memory paging applies. The first open waits for Antigravity to load the history.
+            let messages = try await foreign.messages(sessionID: sessionId, waitForLoad: true)
+            return try BridgeChatPage.page(of: messages, before: before, after: after, limit: limit)
+        }
         let session = try await session(sessionId)
         let url: URL?
         let isMain: Bool
@@ -129,6 +140,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func chatImage(sessionId: String, imageId: String, maxWidth: Int) async throws -> Data {
+        if ForeignSessions.parse(sessionId) != nil { throw BridgeFailure(.notFound, "Không thấy ảnh này.") }
         let session = try await session(sessionId)
         guard let url = session.transcriptURL else { throw BridgeFailure(.notFound, "Chưa tìm thấy transcript.") }
         let cache = chatCache
@@ -140,6 +152,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func viz(sessionId: String, includeEntity: Bool) async throws -> BridgeViz {
+        if ForeignSessions.parse(sessionId) != nil { throw BridgeFailure(.invalid, "Codex và Antigravity chưa có tab hình.") }
         let session = try await session(sessionId)
         let engine = vizEngine
         return await Task.detached(priority: .utility) {
@@ -160,6 +173,7 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func sendMessage(_ text: String, to session: Session) async throws {
+        if session.tool != "claude" { return try await foreign.send(text, to: session) }
         try await model.deliver(text, to: session)
     }
 
@@ -169,10 +183,12 @@ final class LiveBridgeBackend: BridgeBackend, @unchecked Sendable {
     }
 
     func pendingPrompt(requestId: String) async -> PendingPrompt? {
-        await MainActor.run { model.sessions.compactMap(\.pending).first { $0.id == requestId } }
+        if requestId.hasPrefix(ForeignSessions.promptPrefix) { return await foreign.pendingPrompt(requestID: requestId) }
+        return await MainActor.run { model.sessions.compactMap(\.pending).first { $0.id == requestId } }
     }
 
     func respond(to prompt: PendingPrompt, with response: PromptResponse) async throws {
+        if prompt.id.hasPrefix(ForeignSessions.promptPrefix) { return try await foreign.respond(to: prompt, with: response) }
         try await MainActor.run { try model.submit(response, to: prompt) }
     }
 

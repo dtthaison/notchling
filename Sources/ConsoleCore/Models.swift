@@ -109,6 +109,8 @@ public struct Session: Identifiable, Sendable, Equatable {
     /// The newest thing Claude said in this session, so the phone can tell a new reply from an old one without
     /// reading the chat.
     public var lastMessage: LastMessageInfo?
+    /// Which tool runs the session: "claude" (the default), "codex" or "agy". Sent to the phone as `tool`.
+    public var tool: String = "claude"
 
     public init(id: String, pid: Int32?, name: String, project: String, cwd: String, entrypoint: Entrypoint, kind: String,
                 state: SessionState, statusUpdatedAt: Date, startedAt: Date, transcriptURL: URL?,
@@ -211,4 +213,11 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     public var steps: [ToolStep] = []
     /// On `.shell` messages: what the command printed.
     public var output: String? = nil
+}
+
+extension ChatMessage {
+    /// For backends outside this module (the struct's memberwise init is internal).
+    public init(id: UUID, role: ChatRole, text: String, timestamp: Date, toolSummary: String? = nil) {
+        self.init(id: id, role: role, text: text, timestamp: timestamp, toolSummary: toolSummary, queued: false)
+    }
 }
