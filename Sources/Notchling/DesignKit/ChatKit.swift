@@ -130,6 +130,21 @@ enum KitType {
     }
 }
 
+extension KitType {
+    /// The same scale for AppKit text views (the reply box), where a SwiftUI `Font` can't be used.
+    var nsFont: NSFont {
+        switch self {
+        case .title: return .systemFont(ofSize: 17, weight: .semibold)
+        case .heading: return .systemFont(ofSize: 13, weight: .semibold)
+        case .body: return .systemFont(ofSize: 13)
+        case .label: return .systemFont(ofSize: 12, weight: .medium)
+        case .meta: return .systemFont(ofSize: 11)
+        case .section: return .systemFont(ofSize: 10.5, weight: .semibold)
+        case .mono: return .monospacedSystemFont(ofSize: 12, weight: .regular)
+        }
+    }
+}
+
 extension View {
     func kitType(_ type: KitType) -> some View {
         Group {

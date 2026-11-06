@@ -11,7 +11,10 @@ struct SessionDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            // A fresh header and conversation per session (so switching back opens at the newest message
+            // and the reply box takes focus), but the side panel below sits outside that identity: a page or
+            // file open beside the chat stays as it is, scroll position and all, while you change session.
+            header.id(agent.id)
             Rectangle().fill(KitInk.hairline).frame(height: 1)
             GeometryReader { geo in
             HStack(spacing: 0) {
@@ -41,12 +44,11 @@ struct SessionDetail: View {
                                          pageOpen: model.panelOpen,
                                          onEditLatest: { [weak model] in model?.editLatestQueued() })
                             .equatable()
-                            // A fresh view per session, so switching back opens at the newest message.
-                            .id(agent.id)
                             .part("Conversation", .bottom)
                     }
                     if model.viewedSubagent == nil { bottom }
                 }
+                .id(agent.id)
                 // Files and images dropped anywhere on the conversation go into the reply as paths, as in
                 // Claude Code's terminal; Claude reads them from there.
                 .onDrop(of: ChatModel.dropTypes, isTargeted: $dropping) { providers in
@@ -64,6 +66,7 @@ struct SessionDetail: View {
                                      subagents: model.subagents, viewing: model.subagentID,
                                      openSubagent: { id in model.subagentID = id })
                         .part("Details Panel", .topTrailing)
+                        .id(agent.id)
                         .frame(width: 250)
                         .transition(.move(edge: .trailing))
                 }

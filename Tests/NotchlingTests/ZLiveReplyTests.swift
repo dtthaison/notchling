@@ -45,6 +45,23 @@ extension ZLiveReplyTests {
         session.close()
     }
 
+    /// Reads, and with NOTCHLING_LIVE_ANSWER=1 answers, the AskUserQuestion open in a real background session:
+    /// `claude --bg -n askprobe --model haiku "Call the AskUserQuestion tool exactly once with two questions:
+    /// 'Favourite color?' (options Red, Blue) and 'Favourite fruit?' (options Apple, Pear). Then stop."`, then
+    /// `NOTCHLING_LIVE_ASK_JOB=<id> [NOTCHLING_LIVE_ANSWER=1] swift test --filter ZLiveReplyTests/testQuestion`
+    func testQuestion() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let job = env["NOTCHLING_LIVE_ASK_JOB"] else { throw XCTSkip("set NOTCHLING_LIVE_ASK_JOB") }
+        let question = try XCTUnwrap(try ReplySender.readQuestion(job: job), "no question read off the terminal")
+        print("QUESTION", question)
+        XCTAssertTrue(question.items.allSatisfy { !$0.question.isEmpty && $0.options.count >= 2 })
+        if env["NOTCHLING_LIVE_ANSWER"] == "1" {
+            var choices: [ReplySender.Choice] = question.items.map { $0.multiSelect ? .options([1, 3]) : .option(1) }
+            if env["NOTCHLING_LIVE_FREETEXT"] == "1", !choices.isEmpty { choices[choices.count - 1] = .text("Somewhere else") }
+            try ReplySender.answer(choices, to: question, toJob: job)
+        }
+    }
+
     /// Prints how the Chat window would show a real transcript:
     /// `NOTCHLING_LIVE_TRANSCRIPT=<path.jsonl> swift test --filter ZLiveReplyTests`
     func testShowTranscript() throws {

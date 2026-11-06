@@ -5,6 +5,8 @@ import Foundation
 enum ReplySender {
     enum Failure: Error, LocalizedError {
         case pty, launch(String), timeout, dialog
+        /// A question being answered from Chat: the terminal no longer shows it, or shows another one.
+        case questionGone, questionMismatch
 
         var errorDescription: String? {
             switch self {
@@ -12,6 +14,9 @@ enum ReplySender {
             case .launch(let why): return "Couldn't run claude attach: \(why)"
             case .timeout: return "The session didn't open in time."
             case .dialog: return "The session is asking you something. Answer it in the terminal, then send again."
+            case .questionGone: return "That question isn't open in the session any more."
+            case .questionMismatch:
+                return "The terminal shows a different question than Chat does, so nothing more was typed. Finish it in the terminal."
             }
         }
     }
@@ -66,31 +71,27 @@ enum ReplySender {
         case options([Int])  // 1-based, multi-select
     }
 
-    /// Answers an AskUserQuestion prompt in a background job's terminal.
-    static func answer(_ choices: [Choice], to question: PendingQuestion, toJob jobID: String) throws {
-        try type(answerKeys(choices, to: question), toJob: jobID)
-    }
-
     /// The keystrokes for an AskUserQuestion prompt, one chunk per key press. The terminal shows one question at a
     /// time: a digit picks an option (single select) or toggles it (multi select), the number after the last option is
     /// "Type something". A multi-select list ends with an "Other" row, so Tab count+1 times lands on Submit/Next and
     /// Enter confirms. A final review screen (several questions, or any multi-select) needs "1" to submit.
     static func answerKeys(_ choices: [Choice], to question: PendingQuestion) -> [String] {
         var chunks: [String] = []
-        for (item, choice) in zip(question.items, choices) {
-            switch choice {
-            case .option(let n):
-                chunks.append("\(n)")
-            case .text(let t):
-                chunks += ["\(item.options.count + 1)", t.replacingOccurrences(of: "\n", with: " "), "\r"]
-            case .options(let numbers):
-                chunks += numbers.map(String.init)
-                chunks += Array(repeating: "\t", count: item.options.count + 1)
-                chunks.append("\r")
-            }
-        }
+        for (item, choice) in zip(question.items, choices) { chunks += keys(for: choice, in: item) }
         if question.items.count > 1 || question.items.contains(where: \.multiSelect) { chunks.append("1") }
         return chunks
+    }
+
+    /// The keystrokes for one question's answer.
+    static func keys(for choice: Choice, in item: PendingQuestion.Item) -> [String] {
+        switch choice {
+        case .option(let n):
+            return ["\(n)"]
+        case .text(let t):
+            return ["\(item.options.count + 1)", t.replacingOccurrences(of: "\n", with: " "), "\r"]
+        case .options(let numbers):
+            return numbers.map(String.init) + Array(repeating: "\t", count: item.options.count + 1) + ["\r"]
+        }
     }
 
     /// The answers a hook-held question is released with, keyed by question text. Claude Code joins multi-select
@@ -227,8 +228,8 @@ enum ReplySender {
 
     /// Attaches to the job, waits for its screen, runs `body` with the terminal and what it shows, then
     /// detaches. `settle`: go ahead after this long even if the screen never goes quiet (a working session).
-    private static func attached(_ jobID: String, refuseDialog: Bool, settle: TimeInterval?,
-                                 _ body: (Int32, TerminalScreen) -> Void) throws {
+    static func attached(_ jobID: String, refuseDialog: Bool, settle: TimeInterval?,
+                         _ body: (Int32, TerminalScreen) throws -> Void) throws {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else {
             throw Failure.pty
@@ -262,11 +263,11 @@ enum ReplySender {
             guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
         }
         if refuseDialog, dialogOpen(screen) { throw Failure.dialog }
-        body(master, screen)
+        try body(master, screen)
         _ = waitForQuiet(master, quiet: 0.4, timeout: 3)
     }
 
-    private static func write(_ fd: Int32, _ s: String) {
+    static func write(_ fd: Int32, _ s: String) {
         let bytes = Array(s.utf8)
         var offset = 0
         while offset < bytes.count {
@@ -277,7 +278,7 @@ enum ReplySender {
     }
 
     /// Drains output until nothing arrives for `quiet` seconds. False if no output arrived before `timeout`.
-    private static func waitForQuiet(_ fd: Int32, quiet: TimeInterval, timeout: TimeInterval, into screen: TerminalScreen? = nil) -> Bool {
+    static func waitForQuiet(_ fd: Int32, quiet: TimeInterval, timeout: TimeInterval, into screen: TerminalScreen? = nil) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var lastOutput: Date?
         var buffer = [UInt8](repeating: 0, count: 65536)

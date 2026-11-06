@@ -89,7 +89,14 @@ struct ChatQuestionCard: View {
                 }
             }
             if let error = notch.sendError {
-                Text(error).kitType(.meta).foregroundColor(.red)
+                HStack(alignment: .top, spacing: 8) {
+                    Text(error).kitType(.meta).foregroundColor(.red)
+                    Spacer(minLength: 0)
+                    // The dialog is still open in the session: finish it there.
+                    if canAnswer, case .job = agent.target {
+                        Button("Answer in Terminal") { notch.answerInTerminal(agent.id) }.buttonStyle(.kit(.secondary))
+                    }
+                }
             } else if notch.sending {
                 Text("Sending the answer…").kitType(.meta).foregroundColor(KitInk.textMuted)
             }

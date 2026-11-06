@@ -104,9 +104,18 @@ extension ChatModel {
                     self.errors[id] = failure.localizedDescription
                     let draft = self.drafts[id] ?? ""
                     self.drafts[id] = (unsent + (draft.isEmpty ? [] : [draft])).joined(separator: "\n\n")
-                    // A question or permission Chat can't show is open there: show it where it can be answered.
+                    // A question or permission is open in the session. A question gets read off its terminal and
+                    // shown as a card here; anything Chat can't show opens in the terminal sheet.
                     if case ReplySender.Failure.dialog = failure, self.selection == id, self.terminal == nil {
-                        self.openTerminal(typing: nil)
+                        guard let agent = self.selected, agent.id == id else { return }
+                        self.notch.readScreenQuestion(agent, force: true) { [weak self] found in
+                            guard let self else { return }
+                            if found {
+                                self.errors[id] = nil
+                            } else if self.selection == id, self.terminal == nil {
+                                self.openTerminal(typing: nil)
+                            }
+                        }
                     }
                     return
                 }
