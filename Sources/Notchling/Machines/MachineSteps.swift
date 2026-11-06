@@ -42,6 +42,10 @@ enum MachineSteps {
 
     private static func cut(_ s: String) -> String { String(s.prefix(cutLength)) }
 
+    /// A piece of machine text for a message or a saved fact: masked first (`mask` is the context's), then cut, so
+    /// a cut can't leave a piece of a vault value.
+    private static func shown(_ s: String, _ mask: (String) -> String) -> String { cut(mask(s)) }
+
     /// The first `key=value` line for each wanted key. Lines are matched by their key, so a missing line, a banner
     /// before the output or a repeated key moves nothing.
     private static func keyed(_ text: String, keys: Set<String>) -> [String: String] {
@@ -65,16 +69,13 @@ enum MachineSteps {
 
     /// A short failure line from a Fix's result: the last line of stderr (where brew, apt and curl say what went
     /// wrong), or of stdout when stderr is empty. The vault values and the admin password are masked first
-    /// (`ctx.mask`), then the line is cut, so no piece of a secret survives a cut. Output `ProcessRunner` cut at
+    /// (`ctx.mask`, which the engine builds with both), then the line is cut, so no piece of a secret survives a
+    /// cut. Output `ProcessRunner` cut at
     /// its start is a notice and a half line that can hold the end of a value: that half line is not shown.
     private static func outcome(_ r: CommandResult, ok: String, ctx: FixContext) -> FixOutcome {
         if r.code == 0 { return FixOutcome(ok: true, message: ok) }
         func lastLine(_ output: String) -> String? {
-            var text = ctx.mask(output)
-            if let password = ctx.adminPassword, !password.isEmpty {
-                text = text.replacingOccurrences(of: password, with: "[admin password]")
-            }
-            var lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            var lines = ctx.mask(output).split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
             if output.hasPrefix(ProcessRunner.cutNotice), lines.count > 1 { lines.remove(at: 1) }
             return lines.last
@@ -214,10 +215,10 @@ enum MachineSteps {
         return (major, minor)
     }
 
-    private static func baseToolRows(_ kv: [String: String]) -> [SubRow] {
+    private static func baseToolRows(_ kv: [String: String], _ mask: (String) -> String) -> [SubRow] {
         baseToolNames.map { name -> SubRow in
             let path = kv[name] ?? ""
-            return SubRow(name: name, ok: !path.isEmpty, detail: path.isEmpty ? "missing" : cut(path))
+            return SubRow(name: name, ok: !path.isEmpty, detail: path.isEmpty ? "missing" : shown(path, mask))
         }
     }
 
@@ -227,7 +228,7 @@ enum MachineSteps {
         // Without the Command Line Tools /usr/bin/git and /usr/bin/python3 are stubs that open an install dialog on
         // the machine when run, so the probe never runs them there.
         if kv["clt"] == "missing" {
-            return CheckResult(state: .fail("Command Line Tools missing"), rows: baseToolRows(kv))
+            return CheckResult(state: .fail("Command Line Tools missing"), rows: baseToolRows(kv, ctx.mask))
         }
         var problems: [String] = []
         let missing = baseToolNames.filter { !found.contains($0) }
@@ -247,7 +248,7 @@ enum MachineSteps {
         var detected = Detected()
         if pythonOK, let path = kv["python3"], RemoteShell.isSafeMachinePath(path) { detected.python = path }
 
-        let rows = baseToolRows(kv)
+        let rows = baseToolRows(kv, ctx.mask)
         if !problems.isEmpty { return CheckResult(state: .fail(problems.joined(separator: "; ")), rows: rows, detected: detected) }
         let python = version.map { "python3 \($0.0).\($0.1)" } ?? "python3"
         return CheckResult(state: .pass(["git", python, "jq", "gh"].joined(separator: ", ")), rows: rows, detected: detected)
@@ -351,7 +352,7 @@ enum MachineSteps {
             if line == "@@runtimes" { section = 1; sawRuntimes = true; continue }
             if line == "@@devices" { section = 2; sawDevices = true; continue }
             switch section {
-            case 0: if xcodeLine == nil, line.hasPrefix("Xcode ") { xcodeLine = cut(line.trimmingCharacters(in: .whitespaces)) }
+            case 0: if xcodeLine == nil, line.hasPrefix("Xcode ") { xcodeLine = shown(line.trimmingCharacters(in: .whitespaces), ctx.mask) }
             case 1: runtimeLines.append(line)
             default: devicesJSON += line + "\n"
             }
@@ -367,7 +368,7 @@ enum MachineSteps {
             guard let open = line.range(of: " ("),
                   let version = line[open.upperBound...].split(whereSeparator: { $0 == " " || $0 == ")" }).first,
                   majorMinorOrMore(String(version)) else { return unreadable }
-            runtimes.append((cut(String(line[..<open.lowerBound])), String(version)))
+            runtimes.append((shown(String(line[..<open.lowerBound]), ctx.mask), String(version)))
         }
         runtimes.sort { $0.version.compare($1.version, options: .numeric) == .orderedDescending }
 
@@ -380,8 +381,9 @@ enum MachineSteps {
             for key in keys {
                 for item in (byRuntime[key] as? [[String: Any]]) ?? [] {
                     guard let name = item["name"] as? String, name.hasPrefix("iPhone"),
-                          (item["isAvailable"] as? Bool) != false, !phones.contains(cut(name)) else { continue }
-                    phones.append(cut(name))
+                          (item["isAvailable"] as? Bool) != false else { continue }
+                    let phone = shown(name, ctx.mask)
+                    if !phones.contains(phone) { phones.append(phone) }
                 }
             }
         }

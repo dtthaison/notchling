@@ -766,6 +766,15 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(runner.calls.count, 2, "the state probe, then the write")
     }
 
+    /// A loaded label that `print-disabled` lists as enabled is Running on too.
+    func testServiceFixLeavesAListedEnabledLabelEnabled() async throws {
+        let (outcome, runner) = try await macServiceFix(running: CommandResult(code: 0, out: "loaded\n\t\"com.sd.worker\" => enabled\n", err: ""))
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(calls(runner, containing: "launchctl disable"), 0, "Running would turn off")
+        XCTAssertEqual(runner.calls.count, 2, "the state probe, then the write")
+        XCTAssertTrue(outcome.message.contains("Running stays on"), outcome.message)
+    }
+
     /// Anything but loaded-and-enabled disables the label before the plist is written.
     func testServiceFixDisablesFirstUnlessRunningIsOn() async throws {
         let disabledLine = "\t\"com.sd.worker\" => disabled\n"

@@ -181,7 +181,9 @@ final class MachinesMachineStepsTests: XCTestCase {
         // the password would straddle character 200 of the line
         let line = String(repeating: "a", count: 180) + " " + password
         runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: line + "\n"))
-        let outcome = await plan(step(.staysAwake)).run(.test(.test(runner: runner), adminPassword: password))
+        // the engine's mask for a Fix holds the admin password; a hand-built context says so
+        let outcome = await plan(step(.staysAwake)).run(.test(.test(runner: runner), adminPassword: password,
+                                                              mask: testMask(password, as: "[admin password]")))
         XCTAssertFalse(outcome.message.contains("pw-"), outcome.message)
         XCTAssertTrue(outcome.message.contains("[admin password]"), outcome.message)
     }
@@ -189,7 +191,8 @@ final class MachinesMachineStepsTests: XCTestCase {
     func testAFailedFixMessageNeverHoldsTheAdminPassword() async {
         let runner = ScriptedRunner()
         runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: "Sorry, try again pw-1234\n"))
-        let outcome = await plan(step(.staysAwake)).run(.test(.test(runner: runner), adminPassword: "pw-1234"))
+        let outcome = await plan(step(.staysAwake)).run(.test(.test(runner: runner), adminPassword: "pw-1234",
+                                                              mask: testMask("pw-1234", as: "[admin password]")))
         XCTAssertFalse(outcome.ok)
         XCTAssertFalse(outcome.message.contains("pw-1234"), outcome.message)
     }
@@ -369,6 +372,49 @@ final class MachinesMachineStepsTests: XCTestCase {
         cutRunner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: ProcessRunner.cutNotice + String(token.suffix(60))))
         let cut = await plan(step(.claudeCode)).run(.test(.test(runner: cutRunner, mask: mask)))
         assertNoFragment(of: token, in: cut.message)
+    }
+
+    /// Fix round 1: the base-tool path rows, the Xcode line, the runtime names and the phone names are masked
+    /// before they are cut to 200 characters, and what is saved as abilities is masked too.
+    func testToolPathsAndXcodeNamesAreMaskedBeforeTheyAreCut() async {
+        let token = testLongToken
+        let marker = "[secret:claude-worker]"
+        let ctx = StepContext.test(machine: TestMachines.mac(), mask: testMask(token, as: marker))
+        func parse(_ id: StepID, _ text: String) async -> CheckResult {
+            guard case let .remote(_, parse) = step(id).probe else { XCTFail("\(id.raw) has no remote probe"); return CheckResult(state: .cantTell("")) }
+            return await parse(RemoteOutput(text: text, code: 0), ctx)
+        }
+        // short enough that the marker fits inside the 200 characters, long enough that the cut falls in the token
+        let filler = String(repeating: "f", count: 150)
+
+        // a tool path that is long and holds the token where the cut falls
+        let tools = await parse(.baseTools, "git=/usr/bin/\(filler)\(token)\npython3=/usr/bin/python3\njq=/usr/bin/jq\ngh=/usr/bin/gh\npyver=3.12\nbrew=yes\n")
+        let gitRow = tools.rows.first { $0.name == "git" }
+        XCTAssertNotNil(gitRow)
+        assertNoFragment(of: token, in: gitRow?.detail ?? "")
+        XCTAssertTrue(gitRow?.detail.contains(marker) == true, gitRow?.detail ?? "")
+
+        // the Xcode line, an iOS runtime name and an iPhone name
+        let devices = "{\"devices\":{\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\":[{\"name\":\"iPhone \(filler)\(token)\",\"isAvailable\":true}]}}"
+        let xcode = await parse(.xcode, "Xcode 26.1 \(filler)\(token)\n@@runtimes\niOS \(filler)\(token) (26.5 - 23F77) - x\n@@devices\n\(devices)\n")
+        let abilities = xcode.detected.abilities
+        XCTAssertNotNil(abilities?.xcode)
+        for shown in [abilities?.xcode ?? "", (abilities?.iosRuntimes ?? []).joined(), (abilities?.simulators ?? []).joined(), "\(xcode.state)"] {
+            assertNoFragment(of: token, in: shown)
+        }
+        XCTAssertTrue(abilities?.xcode?.contains(marker) == true, abilities?.xcode ?? "")
+        XCTAssertTrue(abilities?.iosRuntimes.first?.contains(marker) == true, "\(abilities?.iosRuntimes ?? [])")
+        XCTAssertTrue(abilities?.simulators.first?.contains(marker) == true, "\(abilities?.simulators ?? [])")
+    }
+
+    /// Fix round 1: a failure line hides the admin password through the context's mask (the engine's mask has it;
+    /// the step does not replace it a second time).
+    func testAFixFailureHidesTheAdminPasswordThroughTheMask() async {
+        let runner = ScriptedRunner()
+        runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: "sudo: wrong password hunter22 for agent"))
+        let ctx = FixContext.test(.test(runner: runner), adminPassword: "hunter22", mask: testMask("hunter22", as: "[admin password]"))
+        let hidden = await plan(step(.claudeCode)).run(ctx)
+        XCTAssertEqual(hidden.message, "failed (code 1): sudo: wrong password [admin password] for agent")
     }
 
     func testClaudeCodeFixInstallsAsTheWorkerWithoutAdmin() async {
