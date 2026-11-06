@@ -14,11 +14,16 @@ struct VaultEntry: Codable, Identifiable, Equatable {
 
     var name: String
     var kind: Kind
-    /// Shown to agents by `--secrets`: what it's for, which host or tool.
+    /// Shown to agents by `--secrets`: what it's for, which host or tool. May span several lines.
     var note: String = ""
     /// Where it's used (a site, an API, a registry), so an agent can tell which secret a task needs.
     /// Optional for lists saved before it existed.
     var url: String?
+    /// How to get or renew it (where to click, which scopes), multi-line, Markdown links allowed. Shown in the
+    /// form under the value field and by `--secrets`. Optional for lists saved before it existed.
+    var howTo: String?
+    /// The last day it works, `YYYY-MM-DD` (`VaultExpiry`). Optional for lists saved before it existed.
+    var expires: String?
     /// Variable for the username (logins only).
     var userVar: String = ""
     /// Variable for the password or token.
@@ -70,6 +75,147 @@ struct VaultEntry: Codable, Identifiable, Equatable {
     }
 }
 
+/// A secret's last day, kept as `YYYY-MM-DD` text so it means the same day in every time zone. The day
+/// itself still works; the secret is expired from the day after.
+enum VaultExpiry {
+    enum Status: Equatable { case expired, today, inDays(Int) }
+
+    /// `text` as `YYYY-MM-DD` when it is a real calendar day, else nil.
+    static func parse(_ text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return nil }
+        let p = text.split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return nil }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let parts = DateComponents(year: p[0], month: p[1], day: p[2])
+        guard let date = utc.date(from: parts) else { return nil }
+        let back = utc.dateComponents([.year, .month, .day], from: date)
+        return back.year == p[0] && back.month == p[1] && back.day == p[2] ? text : nil
+    }
+
+    /// The day (at noon, away from midnight and daylight-saving edges) in `calendar`, or nil for a bad text.
+    static func date(from day: String, calendar: Calendar = .current) -> Date? {
+        guard let day = parse(day) else { return nil }
+        let p = day.split(separator: "-").compactMap { Int($0) }
+        return calendar.date(from: DateComponents(year: p[0], month: p[1], day: p[2], hour: 12))
+    }
+
+    /// The `YYYY-MM-DD` of `date` in `calendar`.
+    static func day(of date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    static func status(of day: String, now: Date = Date(), calendar: Calendar = .current) -> Status? {
+        guard let end = date(from: day, calendar: calendar),
+              let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: end)).day
+        else { return nil }
+        return days < 0 ? .expired : days == 0 ? .today : .inDays(days)
+    }
+
+    /// `in 30 days`, `in 1 day` or `today`; nil when expired or not a day.
+    static func phrase(of day: String, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        switch status(of: day, now: now, calendar: calendar) {
+        case .inDays(let n): return n == 1 ? "in 1 day" : "in \(n) days"
+        case .today: return "today"
+        case .expired, nil: return nil
+        }
+    }
+
+    /// Days left at or under which `--secrets` says "renew soon" (and the first reminder fires).
+    static let renewSoonDays = 7
+
+    /// `expires 2026-12-06 (in 30 days)`, with `, renew soon` at 7 days or fewer, or `EXPIRED 2026-12-06`.
+    static func line(for day: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let status = status(of: day, now: now, calendar: calendar)
+        if status == .expired { return "EXPIRED \(day)" }
+        guard let phrase = phrase(of: day, now: now, calendar: calendar) else { return "expires \(day)" }
+        var soon = false
+        if case .inDays(let n)? = status { soon = n <= renewSoonDays } else if status == .today { soon = true }
+        return "expires \(day) (\(phrase)\(soon ? ", renew soon" : ""))"
+    }
+}
+
+extension VaultEntry {
+    /// This saved entry with the fields an agent passed with `--secret-request` laid over it, for the form
+    /// to open with. A field the agent left out keeps its saved value; the name, kind and variables never
+    /// change here. A date that isn't `YYYY-MM-DD` (an older client) is ignored.
+    func prefilled(by request: VaultRequest) -> VaultEntry {
+        var merged = self
+        if let note = request.note { merged.note = note }
+        if let url = request.url { merged.url = url }
+        if let howTo = request.howTo { merged.howTo = howTo }
+        if let day = request.expires.flatMap(VaultExpiry.parse) { merged.expires = day }
+        return merged
+    }
+}
+
+/// What an agent's `--secret-request` changes in a saved secret's form: the old value of each field whose
+/// passed value differs from the saved one, and a change of the URL's host. The form marks these so the user
+/// sees what the request did before pressing Save.
+struct VaultPrefillChanges: Equatable {
+    enum Field: Hashable {
+        case note, url, howTo, expires
+
+        /// The badge text, naming the field so each marker sits unmistakably under its own.
+        var marker: String {
+            switch self {
+            case .note: return "Note changed by the request"
+            case .url: return "URL changed by the request"
+            case .howTo: return "How-to changed by the request"
+            case .expires: return "Expiry changed by the request"
+            }
+        }
+    }
+
+    /// The URL's origin (scheme, host, non-default port) before and after, when it differs: that is where
+    /// the secret is sent, so an https to http downgrade or another port counts, not only another host.
+    struct HostChange: Equatable {
+        let from: String?
+        let to: String?
+
+        var warning: String {
+            "The request changes where this secret is sent: \(from ?? "none") → \(to ?? "none")"
+        }
+    }
+
+    /// The saved value of each changed field ("" when it had none).
+    var old: [Field: String] = [:]
+    /// Set when the URL's host differs: `$NAME_URL` would then point somewhere else.
+    var hostChange: HostChange?
+
+    var isEmpty: Bool { old.isEmpty }
+}
+
+extension VaultEntry {
+    /// `https://api.github.com`, `http://localhost:8080`: scheme, host without `www.`, and the port unless it is
+    /// the scheme's default. A URL without a scheme is https, as Renew and the form treat it. Nil when it has no host.
+    static func origin(of text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard let host = host(of: text),
+              let url = URL(string: text.contains("://") ? text : "https://" + text) else { return nil }
+        let scheme = url.scheme?.lowercased() ?? "https"
+        var origin = "\(scheme)://\(host)"
+        if let port = url.port, port != (scheme == "https" ? 443 : scheme == "http" ? 80 : -1) { origin += ":\(port)" }
+        return origin
+    }
+
+    static func prefillChanges(of saved: VaultEntry, by request: VaultRequest) -> VaultPrefillChanges {
+        var changes = VaultPrefillChanges()
+        func trimmed(_ text: String?) -> String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let note = request.note, trimmed(note) != trimmed(saved.note) { changes.old[.note] = saved.note }
+        if let url = request.url, trimmed(url) != trimmed(saved.url) {
+            changes.old[.url] = saved.url ?? ""
+            let from = saved.url.flatMap(origin(of:)), to = origin(of: url)
+            if from != to { changes.hostChange = .init(from: from, to: to) }
+        }
+        if let howTo = request.howTo, trimmed(howTo) != trimmed(saved.howTo) { changes.old[.howTo] = saved.howTo ?? "" }
+        if let day = request.expires.flatMap(VaultExpiry.parse), day != saved.expires { changes.old[.expires] = saved.expires ?? "" }
+        return changes
+    }
+}
+
 /// The username and the password or token, as stored in Keychain.
 struct VaultValue: Codable, Equatable {
     var username: String = ""
@@ -83,19 +229,28 @@ enum SecretVault {
 
     static func all() -> [VaultEntry] {
         guard let data = try? Data(contentsOf: indexURL) else { return [] }
+        return decode(data)
+    }
+
+    /// The list as `vault.json` holds it.
+    static func decode(_ data: Data) -> [VaultEntry] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return ((try? decoder.decode([VaultEntry].self, from: data)) ?? []).sorted { $0.id < $1.id }
     }
 
-    static func entry(_ name: String) -> VaultEntry? { all().first { $0.id == name.lowercased() } }
-
-    static func write(_ list: [VaultEntry]) throws {
+    static func encode(_ list: [VaultEntry]) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(list.sorted { $0.id < $1.id })
+    }
+
+    static func entry(_ name: String) -> VaultEntry? { all().first { $0.id == name.lowercased() } }
+
+    static func write(_ list: [VaultEntry]) throws {
         try FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try encoder.encode(list.sorted { $0.id < $1.id }).write(to: indexURL, options: .atomic)
+        try encode(list).write(to: indexURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
         VaultSkill.update(list)
     }
@@ -136,7 +291,7 @@ enum SecretVault {
                 else if h.split(separator: ".").suffix(2) == qHost.split(separator: ".").suffix(2) { s += 3 }
             }
             if e.id == q { s += 8 }
-            let text = "\(e.name) \(e.url ?? "") \(e.note)".lowercased()
+            let text = "\(e.name) \(e.url ?? "") \(e.note) \(e.howTo ?? "")".lowercased()
             s += words.filter { text.contains($0) }.count
             return s
         }
@@ -158,13 +313,26 @@ enum SecretVault {
         return (env, hide)
     }
 
-    /// One entry as `--secrets` prints it.
-    static func describe(_ e: VaultEntry) -> String {
+    /// One entry as `--secrets` prints it: every line of the note and of the how-to indented under the name.
+    static func describe(_ e: VaultEntry, now: Date = Date(), calendar: Calendar = .current) -> String {
         var lines = ["\(e.name)  (\(e.kind.rawValue))  \(e.allVariables.map { "$" + $0 }.joined(separator: " "))"]
         if let url = e.url, !url.isEmpty { lines.append("    \(url)") }
-        if !e.note.isEmpty { lines.append("    \(e.note)") }
+        lines += indented(e.note, by: 4)
+        if let howTo = e.howTo, !howTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("    How to get/renew:")
+            lines += indented(howTo, by: 6)
+        }
+        if let day = e.expires { lines.append("    " + VaultExpiry.line(for: day, now: now, calendar: calendar)) }
         if e.asks { lines.append("    The user approves each use.") }
         return lines.joined(separator: "\n")
+    }
+
+    /// `text` split into lines, each indented; a blank line stays empty.
+    private static func indented(_ text: String, by spaces: Int) -> [String] {
+        let pad = String(repeating: " ", count: spaces)
+        var lines = text.components(separatedBy: .newlines)
+        while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+        return lines.map { $0.trimmingCharacters(in: .whitespaces).isEmpty ? "" : pad + $0 }
     }
 }
 
@@ -346,15 +514,15 @@ enum VaultSkill {
         '\(binary)' --secrets '<URL, host or words from the task>'
         ```
 
-        Prints the saved secrets that fit, best first (exit code 1 when none does). Each is a name, its kind (login or token) and the environment variables it sets, then its URL (also in `$<NAME>_URL`), the user's note, and whether the user approves each use. `--secrets` alone lists them all. Values are never printed.
+        Prints the saved secrets that fit, best first (exit code 1 when none does). Each is a name, its kind (login or token) and the environment variables it sets, then its URL (also in `$<NAME>_URL`), the user's note, how to get or renew it, its expiry (`renew soon` within 7 days, `EXPIRED` once past: ask the user to renew it), and whether the user approves each use. `--secrets` alone lists them all. Values are never printed.
 
         ## 2. Missing or wrong? Ask the user to add or update it
 
         ```sh
-        '\(binary)' --secret-request <name> --kind token|login --url '<url>' --note '<what it is for>' --reason '<why you need it now>'
+        '\(binary)' --secret-request <name> --kind token|login --url '<url>' --note '<what it is for>' --how '<steps to get it>' --expires YYYY-MM-DD --reason '<why you need it now>'
         ```
 
-        Opens Notchling's form with those fields filled in; the user types the value there. For a name that exists (an expired token, a changed password) it opens that secret for editing. It waits for the user, so give it the longest timeout your shell tool allows (Claude Code's Bash: 600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
+        Opens Notchling's form with those fields filled in; the user types the value there. Whenever you ask for a token, fill `--how` with the steps for getting it (where to click, which scopes to tick, a link to the page): the form shows it under the value field. Add `--expires` whenever you know the last day; Notchling reminds the user before it. `--note` and `--how` may span lines. For a name that exists (an expired token, a changed password) it opens that secret for editing: each of `--note`, `--url`, `--how` and `--expires` you pass replaces the saved text in the form, the others keep their saved values, and the user saves or cancels. It waits for the user, so give it the longest timeout your shell tool allows (Claude Code's Bash: 600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
 
         ## 3. Use it
 

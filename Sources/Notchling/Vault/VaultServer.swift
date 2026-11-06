@@ -15,6 +15,9 @@ struct VaultRequest: Codable {
     var url: String?
     var note: String?
     var reason: String?
+    /// request: how to get or renew it (multi-line), and its last day as YYYY-MM-DD.
+    var howTo: String?
+    var expires: String?
 }
 
 struct VaultReply: Codable {
