@@ -343,12 +343,16 @@ enum MachineSteps {
 
     // MARK: 8 Xcode
 
+    /// Without the Command Line Tools `xcodebuild` and `xcrun` are stubs that open an install dialog, so nothing runs
+    /// then. `simctl list devices iPhone` keeps only the iPhones in the JSON (the full list can pass the 64 KiB cap
+    /// with several runtimes); each device's `isAvailable` is still read from it.
     private static let xcodeScript = """
+    if ! xcode-select -p >/dev/null 2>&1; then echo @@noclt; exit 0; fi
     xcodebuild -version | head -1
     echo @@runtimes
     xcrun simctl list runtimes available 2>/dev/null | grep '^iOS '
     echo @@devices
-    xcrun simctl list devices available -j 2>/dev/null
+    xcrun simctl list devices iPhone -j 2>/dev/null
     """
 
     /// `ProcessRunner` keeps the last `ProcessRunner.outputCap` (2 MiB) of a command's output and says so with this
@@ -362,6 +366,9 @@ enum MachineSteps {
     private static func parseXcode(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
         let unreadable = CheckResult(state: .cantTell("the Xcode check's output was too long or not readable"))
         if out.text.hasPrefix(cutNotice) || out.text.utf8.count >= outputCap { return unreadable }
+        if out.text.split(whereSeparator: \.isNewline).contains("@@noclt") {
+            return CheckResult(state: .fail("Xcode is not installed: the Command Line Tools are missing"))
+        }
 
         var xcodeLine: String?
         var runtimeLines: [String] = []

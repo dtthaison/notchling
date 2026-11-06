@@ -542,7 +542,22 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertTrue(s.contains("@@runtimes") && s.contains("@@devices"))
         XCTAssertTrue(s.contains("xcrun simctl list runtimes available 2>/dev/null | grep '^iOS '"))
         XCTAssertFalse(s.contains("runtimes available -j"), "the runtimes JSON alone is 48 KB")
-        XCTAssertTrue(s.contains("xcrun simctl list devices available -j"))
+        // M7: only iPhones come back (the unfiltered list passes 64 KiB with several runtimes); `isAvailable` is read from the JSON
+        XCTAssertTrue(s.contains("xcrun simctl list devices iPhone -j"))
+        XCTAssertFalse(s.contains("devices available"), "the unfiltered list can pass the 64 KiB cap")
+    }
+
+    /// M7: without the Command Line Tools `xcodebuild` and `xcrun` are the install-dialog stubs, so nothing runs.
+    func testXcodeProbeAsksXcodeSelectFirstAndSaysSoWhenTheToolsAreMissing() async {
+        let s = script(step(.xcode))
+        let guardAt = s.range(of: "xcode-select -p >/dev/null 2>&1")
+        XCTAssertNotNil(guardAt)
+        XCTAssertLessThan(guardAt?.lowerBound ?? s.endIndex, s.range(of: "xcodebuild")?.lowerBound ?? s.startIndex)
+        var known = TestMachines.mac()
+        known.abilities?.xcode = "Xcode 25.0"
+        let r = await check(.xcode, "@@noclt\n", machine: known)
+        XCTAssertEqual(r.state, .fail("Xcode is not installed: the Command Line Tools are missing"))
+        XCTAssertNil(r.detected.abilities, "the saved abilities stay as they are")
     }
 
     func testXcodeCantTellWhenTheOutputWasCutOrCannotBeRead() async throws {
