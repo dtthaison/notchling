@@ -24,7 +24,7 @@ struct TabBar: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(AgentGroup.allCases, id: \.self) { group in
-                let count = model.agents.filter { $0.group == group }.count
+                let count = model.listed.filter { $0.group == group }.count
                 let selected = model.tab == group
                 Button { model.tab = group } label: {
                     HStack(spacing: 4) {
@@ -67,6 +67,9 @@ struct AgentRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    if NotchForeign.isForeign(agent) {
+                        ToolIcon(tool: SessionTool(agent.target), size: 13).part("Tool Icon", .bottom)
+                    }
                     Text(agent.name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
                     // Subagents at work, which can go on after the session's own turn ended.
                     if snapshot.subagentsActive > 0 {
@@ -109,6 +112,7 @@ struct AgentRow: View {
 
     private func statusLine(_ snapshot: Snapshot) -> String {
         if let r = model.permission(agent.id) { return "Wants to use \(r.toolName): \(r.summary)" }
+        if let p = model.agyPermission(agent.id) { return "Wants to \(p.call.title)" }
         if let q = model.question(agent.id), let first = q.items.first { return "Asks: \(first.question)" }
         if agent.group == .needsInput { return agent.detail ?? snapshot.lastReply ?? agent.label }
         return snapshot.activity ?? agent.detail ?? "Thinking…"
@@ -119,11 +123,11 @@ struct AgentListView: View {
     @ObservedObject var model: NotchModel
 
     var body: some View {
-        let members = model.agents.filter { $0.group == model.tab }
+        let members = model.listed.filter { $0.group == model.tab }
         VStack(spacing: 0) {
             TabBar(model: model).part("Notch Tabs", .trailing)
             if members.isEmpty {
-                Text(model.agents.isEmpty ? "No Claude agents running" : "Nothing \(model.tab.title.lowercased())")
+                Text(model.listed.isEmpty ? (model.foreignAgents.isEmpty ? "No Claude agents running" : "No agents running") : "Nothing \(model.tab.title.lowercased())")
                     .font(.system(size: 12)).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40)
             } else {

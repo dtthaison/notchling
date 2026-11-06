@@ -10,13 +10,18 @@ struct DetailView: View {
     var body: some View {
         let question = model.question(agent.id)
         let permission = model.permission(agent.id)
+        let agyPermission = model.agyPermission(agent.id)
         VStack(alignment: .leading, spacing: 10) {
             header
-            conversation(showNeeds: question == nil && permission == nil)
+            conversation(showNeeds: question == nil && permission == nil && agyPermission == nil)
             // Cards keep their full height and the conversation above gives way; squeezed, the
             // wrapped option text spills out of its buttons and overlaps.
             if let permission {
                 PermissionCard(model: model, agent: agent, request: permission).part("Notch Permission Card", .topTrailing)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+            } else if let agyPermission {
+                AgyPermissionCard(model: model, agent: agent, permission: agyPermission).part("Notch Permission Card", .topTrailing)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             } else if let question {
@@ -47,6 +52,7 @@ struct DetailView: View {
             Button { model.go(.list) } label: { Image(systemName: "chevron.left") }
                 .buttonStyle(.kitPlain).foregroundColor(.secondary)
             Circle().fill(agent.color).frame(width: 8, height: 8)
+            if NotchForeign.isForeign(agent) { ToolIcon(tool: SessionTool(agent.target), size: 14) }
             VStack(alignment: .leading, spacing: 1) {
                 Text(agent.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text("\(agent.label) · \(agent.host) · \(agent.ago)")
