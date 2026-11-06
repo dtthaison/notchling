@@ -5,9 +5,17 @@ import Foundation
 /// writes to the session's file and exits when the turn ends, so Chat reads the conversation from the
 /// file like any other session. `--json` gives the session id (`thread.started`) for a new one.
 /// Exec mode can't ask for approval, so turns run in the workspace-write sandbox: the session's
-/// folder is writable, the network and the rest of the disk aren't.
+/// folder is writable and the rest of the disk isn't. The network is open unless "Allow Network in
+/// Codex Turns" is off, since the Secret Vault and API calls need it.
 final class CodexRunner {
     static let shared = CodexRunner()
+
+    static let networkKey = "codexNetwork"
+    /// The "Allow Network in Codex Turns" setting; on unless turned off.
+    static var allowNetwork: Bool {
+        get { UserDefaults.standard.object(forKey: networkKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: networkKey) }
+    }
 
     private let lock = NSLock()
     private var processes: [String: Process] = [:]
@@ -20,9 +28,12 @@ final class CodexRunner {
 
     func isRunning(_ sessionID: String) -> Bool { running.contains(sessionID) }
 
+    /// `network` only matters in the workspace-write sandbox (read-only has no such table); Codex 0.166
+    /// reads it as `[sandbox_workspace_write] network_access`.
     static func arguments(prompt: String, session: String?, folder: String, pick: CodexPick = CodexPick(),
-                          sandbox: String = "workspace-write") -> [String] {
+                          sandbox: String = "workspace-write", network: Bool = false) -> [String] {
         var common = ["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"\(sandbox)\""]
+        if network, sandbox == "workspace-write" { common += ["-c", "sandbox_workspace_write.network_access=true"] }
         // A picked model or effort holds from this turn on; Codex keeps its own default otherwise.
         if let model = pick.model { common += ["-m", model] }
         if let effort = pick.effort { common += ["-c", "model_reasoning_effort=\"\(effort)\""] }
@@ -44,7 +55,8 @@ final class CodexRunner {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codex)
-        process.arguments = Self.arguments(prompt: prompt, session: session, folder: folder, pick: pick)
+        process.arguments = Self.arguments(prompt: prompt, session: session, folder: folder, pick: pick,
+                                           network: Self.allowNetwork)
         process.currentDirectoryURL = URL(fileURLWithPath: folder)
         process.environment = Self.environment()
         let out = Pipe(), err = Pipe()

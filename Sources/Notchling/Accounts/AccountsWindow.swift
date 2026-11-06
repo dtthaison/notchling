@@ -68,7 +68,7 @@ final class SettingsModel: ObservableObject {
     enum Change {
         case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), showNotch(Bool), notchWidth(NotchWidth)
         case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), keepPages(Bool), launchAtLogin(Bool)
-        case limitMode(LimitMode), limitSwitchAt(Int)
+        case limitMode(LimitMode), limitSwitchAt(Int), codexNetwork(Bool)
     }
 
     @Published var awakeMode = AwakeMode.off { didSet { push(.awakeMode(awakeMode)) } }
@@ -84,6 +84,7 @@ final class SettingsModel: ObservableObject {
     @Published var launchAtLogin = false { didSet { push(.launchAtLogin(launchAtLogin)) } }
     @Published var limitMode = LimitMode.notifyAndSwitch { didSet { push(.limitMode(limitMode)) } }
     @Published var limitSwitchAt = LimitLogic.defaultSwitchAt { didSet { push(.limitSwitchAt(limitSwitchAt)) } }
+    @Published var codexNetwork = true { didSet { push(.codexNetwork(codexNetwork)) } }
 
     var apply: ((Change) -> Void)?
     var reload: (() -> Void)?
@@ -812,6 +813,14 @@ private struct SettingsPage: View {
                 Text("Notify tells you at 90% and 100% of the 5-hour or weekly limit. Notify and Switch also moves "
                      + "Claude Code to the saved account with the most room (both limits under 80%), at most once "
                      + "every 30 minutes, and restarts background agents that stopped on the limit.")
+            }
+            Section {
+                Toggle("Allow Network in Codex Turns", isOn: $settings.codexNetwork)
+            } header: {
+                Text("Codex")
+            } footer: {
+                Text("Chat runs each Codex turn in the workspace-write sandbox, which blocks the network unless this is on. "
+                     + "Turn it on for the Secret Vault and API calls; Codex then can reach any site from the session's folder.")
             }
             Section("General") {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)

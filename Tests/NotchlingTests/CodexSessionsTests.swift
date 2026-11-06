@@ -85,6 +85,17 @@ final class CodexSessionsTests: XCTestCase {
                        ["exec", "resume", "--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\"", "abc", "more"])
     }
 
+    func testNetworkIsOpenedOnlyInTheWorkspaceWriteSandbox() {
+        let open = "sandbox_workspace_write.network_access=true"
+        XCTAssertTrue(CodexRunner.arguments(prompt: "hi", session: nil, folder: "/p", network: true).contains(open))
+        XCTAssertFalse(CodexRunner.arguments(prompt: "hi", session: nil, folder: "/p", network: false).contains(open))
+        XCTAssertFalse(CodexRunner.arguments(prompt: "hi", session: nil, folder: "/p", sandbox: "read-only", network: true).contains(open),
+                       "read-only stays as it is")
+        // The option sits before the session id and prompt, which must stay last.
+        let args = CodexRunner.arguments(prompt: "more", session: "abc", folder: "/p", network: true)
+        XCTAssertEqual(Array(args.suffix(2)), ["abc", "more"])
+    }
+
     func testPickedModelAndEffortGoOnEveryTurn() {
         let pick = CodexPick(model: "gpt-6.1-sol", effort: "high")
         let args = CodexRunner.arguments(prompt: "more", session: "abc", folder: "/p", pick: pick)
