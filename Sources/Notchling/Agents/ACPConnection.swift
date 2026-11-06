@@ -19,6 +19,8 @@ final class ACPConnection {
     /// The last lines it printed to stderr, for an error message when it dies.
     private var errorTail = ""
     private(set) var closed = false
+    /// The tool's name, for error messages.
+    private let toolName: String
 
     /// `session/update` and other notifications: method and params.
     var onNotification: ((String, [String: Any]) -> Void)?
@@ -26,7 +28,8 @@ final class ACPConnection {
     var onRequest: ((Any, String, [String: Any]) -> Void)?
     var onExit: ((String?) -> Void)?
 
-    init(binary: String, arguments: [String] = ["acp"], folder: String) {
+    init(binary: String, arguments: [String] = ["acp"], folder: String, toolName: String = "Antigravity") {
+        self.toolName = toolName
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: folder.isEmpty ? NSHomeDirectory() : folder)
@@ -63,7 +66,7 @@ final class ACPConnection {
 
     /// A request; `done` runs on the main thread with the result or the error.
     func request(_ method: String, _ params: [String: Any], done: @escaping (Result<[String: Any], Error>) -> Void) {
-        guard !closed else { done(.failure(Failure(message: "Antigravity isn't running."))); return }
+        guard !closed else { done(.failure(Failure(message: "\(toolName) isn't running."))); return }
         let id = nextID
         nextID += 1
         waiting[id] = done
@@ -87,7 +90,7 @@ final class ACPConnection {
         closed = true
         try? stdin.fileHandleForWriting.close()
         if process.isRunning { process.terminate() }
-        failWaiting("Antigravity was closed.")
+        failWaiting("\(toolName) was closed.")
     }
 
     // MARK: Private
@@ -120,7 +123,7 @@ final class ACPConnection {
         }
         guard let id = (message["id"] as? Int) ?? Int(message["id"] as? String ?? ""), let done = waiting.removeValue(forKey: id) else { return }
         if let error = message["error"] as? [String: Any] {
-            done(.failure(Failure(message: error["message"] as? String ?? "Antigravity returned an error.")))
+            done(.failure(Failure(message: error["message"] as? String ?? "\(toolName) returned an error.")))
         } else {
             done(.success(message["result"] as? [String: Any] ?? [:]))
         }
@@ -130,7 +133,7 @@ final class ACPConnection {
         let wasClosed = closed
         closed = true
         let tail = errorTail.split(whereSeparator: \.isNewline).last.map(String.init)
-        failWaiting(tail ?? "Antigravity stopped.")
+        failWaiting(tail ?? "\(toolName) stopped.")
         if !wasClosed { onExit?(tail) }
         onExit = nil
     }

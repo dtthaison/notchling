@@ -143,8 +143,8 @@ struct SessionDetail: View {
             AccountBanner(text: note.text, isError: false) { model.dismissAccountNote(for: agent) }.part("Account Banner", .trailing)
         }
         Group {
-            if case .antigravity(let session) = agent.target, let request = AntigravityRunner.shared.permission(session) {
-                AntigravityPermissionCard(session: session, request: request).part("Permission Card", .topTrailing)
+            if let (tool, session) = agent.target.acp, let request = tool.runner.permission(session) {
+                AntigravityPermissionCard(session: session, request: request, runner: tool.runner).part("Permission Card", .topTrailing)
             } else if let request = notch.permission(agent.id) {
                 ChatPermissionCard(notch: notch, agent: agent, request: request).part("Permission Card", .topTrailing)
             } else if let question = notch.question(agent.id) {
@@ -154,7 +154,7 @@ struct SessionDetail: View {
                 case .job where agent.command != nil:
                     Notice(text: "This background job runs a command, not a conversation, so it can't take replies.")
                         .part("Read-Only Notice", .trailing)
-                case .job, .codex, .antigravity:
+                case .job, .codex, .antigravity, .gemini:
                     Composer(model: model, agent: agent, dropping: dropping)
                 case .process where agent.repliesViaHost:
                     Composer(model: model, agent: agent, dropping: dropping)

@@ -23,12 +23,24 @@ enum AgentTarget {
     /// An Antigravity CLI conversation, shown in Chat and the notch; `AntigravityRunner` loads it and runs its
     /// turns over ACP. Empty id: a new session not started yet.
     case antigravity(sessionID: String)
+    /// A Gemini CLI session, shown only in Chat; `GeminiRunner` loads it and runs its turns over ACP
+    /// (`gemini --acp`). Empty id: a new session not started yet.
+    case gemini(sessionID: String)
 
     /// A Codex or Antigravity session not started yet.
     var isDraft: Bool {
         switch self {
-        case .codex(let id), .antigravity(let id): return id.isEmpty
+        case .codex(let id), .antigravity(let id), .gemini(let id): return id.isEmpty
         default: return false
+        }
+    }
+
+    /// The Agent Client Protocol tool and session id behind an Antigravity or Gemini session.
+    var acp: (tool: ACPTool, session: String)? {
+        switch self {
+        case .antigravity(let id): return (.antigravity, id)
+        case .gemini(let id): return (.gemini, id)
+        default: return nil
         }
     }
 }
@@ -58,6 +70,7 @@ struct Agent {
         if case .job = target { return command == nil }
         if case .codex = target { return true }
         if case .antigravity = target { return true }
+        if case .gemini = target { return true }
         return false
     }
 
@@ -65,7 +78,7 @@ struct Agent {
     /// has none yet: a draft, or a command job with no transcript.
     var sessionID: String? {
         switch target {
-        case .resume(let id, _), .codex(let id), .antigravity(let id): return id.isEmpty ? nil : id
+        case .resume(let id, _), .codex(let id), .antigravity(let id), .gemini(let id): return id.isEmpty ? nil : id
         case .job, .process:
             guard let transcriptPath else { return nil }
             let stem = URL(fileURLWithPath: transcriptPath).deletingPathExtension().lastPathComponent

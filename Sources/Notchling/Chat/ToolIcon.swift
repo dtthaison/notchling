@@ -1,14 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// Which tool runs a session: Claude Code, Codex or Antigravity CLI.
+/// Which tool runs a session: Claude Code, Codex, Antigravity CLI or Gemini CLI.
 enum SessionTool {
-    case claude, codex, antigravity
+    case claude, codex, antigravity, gemini
 
     init(_ target: AgentTarget) {
         switch target {
         case .codex: self = .codex
         case .antigravity: self = .antigravity
+        case .gemini: self = .gemini
         case .job, .process, .resume: self = .claude
         }
     }
@@ -18,6 +19,7 @@ enum SessionTool {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
         case .antigravity: return "Antigravity CLI"
+        case .gemini: return "Gemini CLI"
         }
     }
 
@@ -27,6 +29,7 @@ enum SessionTool {
         case .claude: return ["com.anthropic.claudefordesktop"]
         case .codex: return ["com.openai.codex"]
         case .antigravity: return ["com.google.antigravity", "com.google.antigravity-ide"]
+        case .gemini: return []  // no app of its own, and no logo shipped here: the symbol stands in
         }
     }
 
@@ -35,6 +38,7 @@ enum SessionTool {
         case .claude: return "sparkle"
         case .codex: return "chevron.left.forwardslash.chevron.right"
         case .antigravity: return "paperplane"
+        case .gemini: return "rhombus"
         }
     }
 }

@@ -222,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cost.saveNow()
         awake.stop()
         AntigravityRunner.shared.closeAll()
+        GeminiRunner.shared.closeAll()
     }
 
     // MARK: - Polling
