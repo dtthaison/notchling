@@ -84,11 +84,17 @@ enum MergePlan {
             return o
         }
 
-        // 2. Local main catches up with origin.
+        // 2. Local main catches up with origin, and must not be ahead of it: the push below would send those
+        //    commits too, although nobody asked for that.
         let fetchOrigin = await git(["fetch", "origin", "main"], timeout: fetchTimeout)
         guard fetchOrigin.code == 0 else { o.error = "fetch origin main failed: \(tail(fetchOrigin))"; return o }
         let catchUp = await git(["merge", "--ff-only", "origin/main"])
         guard catchUp.code == 0 else { o.error = "main cannot fast-forward to origin/main: \(tail(catchUp))"; return o }
+        let ahead = await git(["rev-list", "--count", "origin/main..main"])
+        guard ahead.code == 0, ahead.out.trimmingCharacters(in: .whitespacesAndNewlines) == "0" else {
+            o.error = "main has commits that are not on origin; push or drop them first"
+            return o
+        }
 
         // 3. The machine's branch comes into a private ref. The `+` lets a branch the machine rewrote replace
         //    the ref left by an earlier try; the ref is Notchling's own and nothing is pushed from it.
@@ -104,12 +110,20 @@ enum MergePlan {
             return o
         }
 
-        // 5. The merge commit.
+        // 5. The merge commit. `pre` is where a failed check puts main back.
+        let preHead = await git(["rev-parse", "HEAD"])
+        let pre = preHead.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard preHead.code == 0, !pre.isEmpty else { o.error = "git rev-parse HEAD failed: \(tail(preHead))"; return o }
         let merge = await git(["merge", "--no-ff", "-m", "Merge \(e.branch) (\(repo.github)#\(e.issue))", ref])
         if merge.code != 0 {
             let diff = await git(["diff", "--name-only", "--diff-filter=U"])
             let files = diff.out.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
-            _ = await git(["merge", "--abort"])
+            let abort = await git(["merge", "--abort"])
+            guard abort.code == 0 else {
+                o.error = "merge could not be aborted in \(path); fix it by hand"
+                return o
+            }
+            guard diff.code == 0 else { o.error = "merge failed, and the conflicting files could not be listed: \(tail(merge))"; return o }
             guard !files.isEmpty else { o.error = "merge failed: \(tail(merge))"; return o }
             o.conflictFiles = files
             o.error = "merge conflict in \(files.joined(separator: ", "))"
@@ -122,37 +136,41 @@ enum MergePlan {
             }
             return o
         }
-        // A merge that found nothing to do leaves ORIG_HEAD from an older merge, so it must not reach the reset below.
-        guard !merge.out.contains("Already up to date") else {
+        let head = await git(["rev-parse", "HEAD"])
+        let sha = head.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard head.code == 0, !sha.isEmpty else { o.error = "git rev-parse HEAD failed: \(tail(head))"; return o }
+        // The branch was already in main: no merge commit, nothing to check or push.
+        guard sha != pre else {
             o.error = "\(e.branch) is already in main; nothing to merge"
             return o
         }
         o.merged = true
-        let head = await git(["rev-parse", "HEAD"])
-        guard head.code == 0 else {
-            o.error = "git rev-parse HEAD failed: \(tail(head))"
-            return o
-        }
-        let sha = head.out.trimmingCharacters(in: .whitespacesAndNewlines)
         o.commit = sha
 
-        // 6. The repo's check, in the target.
+        // 6. The repo's check, in the target (the user's own main checkout when they have one; the merge is
+        //    theirs to approve). It runs a long time, so main is re-verified before anything acts on the result.
         let check = await runner.run([shellPath, "-c", repo.checkCommand], cwd: path, timeout: checkTimeout)
         guard check.code == 0 else {
-            // Step 1 proved the target clean, so this loses only the merge.
-            let reset = await git(["reset", "--hard", "ORIG_HEAD"])
-            o.merged = false
-            o.commit = nil
+            guard await stillMerged(sha, path: path, runner: runner) else { o.error = changedError; return o }
+            // `--keep` never discards an edit made during the check.
+            let reset = await git(["reset", "--keep", pre])
             o.error = "check failed: \(tail(check))"
-            if reset.code != 0 { o.error = (o.error ?? "") + " (and the merge could not be undone in \(path): \(tail(reset)))" }
+            if reset.code == 0 {
+                o.merged = false
+                o.commit = nil
+            } else {
+                o.error = (o.error ?? "") + " (and the merge could not be undone in \(path): \(tail(reset)))"
+            }
             return o
         }
         o.checked = true
+        guard await stillMerged(sha, path: path, runner: runner) else { o.error = changedError; return o }
 
         return await pushAndClose(&o, e, repo: repo, sha: sha, path: path, runner: runner)
     }
 
-    /// Repeats the push and the issue close alone, after a push failed.
+    /// Repeats the push and the issue close alone, after a push failed. It pushes only the merge commit this
+    /// branch made, sitting alone on top of origin/main with a clean tree on main; anything else is the user's.
     static func retryPush(_ e: ReadyEntry, machine: Machine, repo: MachineRepo, runner: CommandRunning) async -> MergeOutcome {
         var o = MergeOutcome()
         let path: String
@@ -163,13 +181,30 @@ enum MergePlan {
         func git(_ args: [String]) async -> CommandResult {
             await runner.run([gitPath, "-C", path] + args, cwd: nil, timeout: gitTimeout)
         }
-        // Only a merge that is still in main (so its check passed) goes out; a rolled-back one does not.
-        let ref = "refs/machines/\(machine.name)/\(e.issue)"
-        let inMain = await git(["merge-base", "--is-ancestor", ref, "HEAD"])
-        guard inMain.code == 0 else { o.error = "the merge of \(e.branch) is not in main here; nothing to push"; return o }
+        func refuse(_ why: String) -> MergeOutcome {
+            o.error = "cannot push again: \(why)"
+            return o
+        }
+        let status = await git(["status", "--porcelain"])
+        guard status.code == 0, status.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return refuse("main has local changes in \(path)")
+        }
+        let branch = await git(["symbolic-ref", "HEAD"])
+        guard branch.code == 0, branch.out.trimmingCharacters(in: .whitespacesAndNewlines) == "refs/heads/main" else {
+            return refuse("\(path) is not on main")
+        }
+        let second = await git(["rev-parse", "HEAD^2"])
+        guard second.code == 0, !e.commit.isEmpty, second.out.trimmingCharacters(in: .whitespacesAndNewlines) == e.commit else {
+            return refuse("main's last commit is not the merge of \(e.branch)")
+        }
+        // First parents only: the merged branch's own commits are not on origin either.
+        let ahead = await git(["rev-list", "--first-parent", "--count", "origin/main..main"])
+        guard ahead.code == 0, ahead.out.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else {
+            return refuse("main is not exactly one merge ahead of origin")
+        }
         let head = await git(["rev-parse", "HEAD"])
-        guard head.code == 0 else { o.error = "git rev-parse HEAD failed: \(tail(head))"; return o }
         let sha = head.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard head.code == 0, !sha.isEmpty else { return refuse("git rev-parse HEAD failed: \(tail(head))") }
         o.fetched = true
         o.merged = true
         o.checked = true
@@ -178,6 +213,16 @@ enum MergePlan {
     }
 
     // MARK: Steps 7 and 8
+
+    private static let changedError = "main changed during the check; nothing pushed"
+
+    /// True while the target is still on `main` at the merge commit.
+    private static func stillMerged(_ sha: String, path: String, runner: CommandRunning) async -> Bool {
+        let branch = await runner.run([gitPath, "-C", path, "symbolic-ref", "HEAD"], cwd: nil, timeout: gitTimeout)
+        guard branch.code == 0, branch.out.trimmingCharacters(in: .whitespacesAndNewlines) == "refs/heads/main" else { return false }
+        let head = await runner.run([gitPath, "-C", path, "rev-parse", "HEAD"], cwd: nil, timeout: gitTimeout)
+        return head.code == 0 && head.out.trimmingCharacters(in: .whitespacesAndNewlines) == sha
+    }
 
     /// Pushes `main` (and nothing else, never forced) then closes the issue. A failed push keeps the merge commit.
     private static func pushAndClose(_ o: inout MergeOutcome, _ e: ReadyEntry, repo: MachineRepo, sha: String,

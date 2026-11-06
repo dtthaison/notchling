@@ -10,8 +10,14 @@ private final class MergeFakeRunner: CommandRunning, @unchecked Sendable {
     private var _cwds: [String?] = []
     private var _timeouts: [TimeInterval] = []
     var rules: [(String, CommandResult)]
+    /// Rules that answer one call at a time; the last answer repeats. They win over `rules`.
+    var queues: [(String, [CommandResult])]
+    private var used: [Int: Int] = [:]
 
-    init(_ rules: [(String, CommandResult)] = []) { self.rules = rules }
+    init(_ rules: [(String, CommandResult)] = [], queues: [(String, [CommandResult])] = []) {
+        self.rules = rules
+        self.queues = queues
+    }
 
     var calls: [[String]] { lock.withLock { _calls } }
     var cwds: [String?] { lock.withLock { _cwds } }
@@ -29,6 +35,11 @@ private final class MergeFakeRunner: CommandRunning, @unchecked Sendable {
             _calls.append(argv)
             _cwds.append(cwd)
             _timeouts.append(timeout)
+            if let q = queues.firstIndex(where: { line.contains($0.0) }) {
+                let n = used[q, default: 0]
+                used[q] = n + 1
+                return queues[q].1[min(n, queues[q].1.count - 1)]
+            }
             return rules.first { line.contains($0.0) }?.1 ?? CommandResult(code: 0, out: "", err: "")
         }
     }
@@ -41,6 +52,7 @@ final class MachinesMergeTests: XCTestCase {
     private let target = "/Users/me/code/app"
     private let sha = "1111111111111111111111111111111111111111"
     private let merged = "2222222222222222222222222222222222222222"
+    private let pre = "0000000000000000000000000000000000000abc"
     private let ref = "refs/machines/m1/7"
 
     private var repo: MachineRepo { MachineRepo(github: "acme/app", localPath: "/Users/me/code/app", checkCommand: "just check") }
@@ -54,12 +66,20 @@ final class MachinesMergeTests: XCTestCase {
         "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/main\n"
     }
 
-    /// Rules for a run where every step passes.
+    /// Rules for a run where every step passes. `rev-parse HEAD` answers the sha before the merge, then the
+    /// merge commit (also at each re-check).
     private func happyRules() -> [(String, CommandResult)] {
         [("worktree list", ok(mainListing)),
          ("rev-parse \(ref)", ok(sha + "\n")),
-         ("rev-parse HEAD", ok(merged + "\n")),
+         ("--count origin/main..main", ok("0\n")),
+         ("symbolic-ref HEAD", ok("refs/heads/main\n")),
          ("merge --no-ff", ok("Merge made by the 'ort' strategy.\n"))]
+    }
+
+    private var happyQueues: [(String, [CommandResult])] { [("rev-parse HEAD", [ok(pre + "\n"), ok(merged + "\n")])] }
+
+    private func happyRunner(_ extra: [(String, CommandResult)] = [], queues: [(String, [CommandResult])]? = nil) -> MergeFakeRunner {
+        MergeFakeRunner(extra + happyRules(), queues: queues ?? happyQueues)
     }
 
     private func t(_ rest: String) -> String { "git -C \(target) \(rest)" }
@@ -92,7 +112,7 @@ final class MachinesMergeTests: XCTestCase {
 
     func testOwnWorktreeIsMadeUnderTheRealHomeFolder() async {
         let list = "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/feature\n"
-        let runner = MergeFakeRunner([("worktree list", ok(list)), ("rev-parse \(ref)", ok(sha)), ("rev-parse HEAD", ok(merged))])
+        let runner = MergeFakeRunner([("worktree list", ok(list)), ("rev-parse \(ref)", ok(sha)), ("--count origin/main..main", ok("0"))], queues: happyQueues)
         _ = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         let own = FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Notchling/merge/acme-app"
         XCTAssertEqual(runner.lines[1], "mkdir -p " + (own as NSString).deletingLastPathComponent)
@@ -115,7 +135,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testFetchFailureChangesNothing() async {
-        let runner = MergeFakeRunner([("worktree list", ok(mainListing)), ("fetch ssh://", bad("ssh: could not resolve host"))])
+        let runner = MergeFakeRunner([("worktree list", ok(mainListing)), ("--count origin/main..main", ok("0")), ("fetch ssh://", bad("ssh: could not resolve host"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertFalse(o.fetched)
         XCTAssertFalse(o.merged)
@@ -128,7 +148,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testMovedBranchRefuses() async {
-        let runner = MergeFakeRunner([("worktree list", ok(mainListing)), ("rev-parse \(ref)", ok("9999999999999999999999999999999999999999\n"))])
+        let runner = MergeFakeRunner([("worktree list", ok(mainListing)), ("--count origin/main..main", ok("0")), ("rev-parse \(ref)", ok("9999999999999999999999999999999999999999\n"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertEqual(o.error, "branch moved on the machine; refresh")
         XCTAssertTrue(o.fetched)
@@ -139,10 +159,8 @@ final class MachinesMergeTests: XCTestCase {
     // MARK: Conflict, check, push
 
     func testConflictAbortsAndLabelsNeedsYou() async {
-        var rules = happyRules()
-        rules.insert(("merge --no-ff", bad("CONFLICT (content): Merge conflict in a.swift", out: "Automatic merge failed")), at: 0)
-        rules.insert(("diff --name-only", ok("a.swift\nb/c.swift\n")), at: 0)
-        let runner = MergeFakeRunner(rules)
+        let runner = happyRunner([("merge --no-ff", bad("CONFLICT (content): Merge conflict in a.swift", out: "Automatic merge failed")),
+                                  ("diff --name-only", ok("a.swift\nb/c.swift\n"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertEqual(o.conflictFiles, ["a.swift", "b/c.swift"])
         XCTAssertFalse(o.merged)
@@ -157,7 +175,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testMergeFailureWithoutConflictLabelsNothing() async {
-        let runner = MergeFakeRunner([("merge --no-ff", bad("fatal: refusing to merge unrelated histories"))] + happyRules())
+        let runner = happyRunner([("merge --no-ff", bad("fatal: refusing to merge unrelated histories"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertTrue(o.error?.contains("unrelated histories") ?? false)
         XCTAssertTrue(o.conflictFiles.isEmpty)
@@ -166,7 +184,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testNothingToMergeStopsBeforeTheCheck() async {
-        let runner = MergeFakeRunner([("merge --no-ff", ok("Already up to date.\n"))] + happyRules())
+        let runner = happyRunner(queues: [("rev-parse HEAD", [ok(pre + "\n")])])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertFalse(o.merged)
         XCTAssertTrue(o.error?.contains("already in main") ?? false)
@@ -174,13 +192,14 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testCheckFailureResetsAndKeepsReady() async {
-        let runner = MergeFakeRunner([("sh -c", bad("error: 2 tests failed", out: "building...\nFAIL FooTests"))] + happyRules())
+        let runner = happyRunner([("sh -c", bad("error: 2 tests failed", out: "building...\nFAIL FooTests"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertFalse(o.checked)
         XCTAssertFalse(o.merged)
         XCTAssertFalse(o.pushed)
         XCTAssertTrue(o.error?.contains("2 tests failed") ?? false)
-        XCTAssertEqual(runner.lines.last, t("reset --hard ORIG_HEAD"))
+        XCTAssertEqual(runner.lines.suffix(3), [t("symbolic-ref HEAD"), t("rev-parse HEAD"), t("reset --keep \(pre)")])
+        XCTAssertFalse(runner.lines.contains { $0.contains("ORIG_HEAD") || $0.contains("--hard") })
         XCTAssertFalse(runner.lines.contains { $0.contains(" push ") || $0.hasPrefix("gh ") })
         // the check ran in the target, with a long timeout
         guard let i = runner.lines.firstIndex(where: { $0.hasPrefix("sh -c") }) else { return XCTFail("the check never ran") }
@@ -190,7 +209,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testPushFailureKeepsIssueOpen() async {
-        let runner = MergeFakeRunner([("push origin main", bad("remote: rejected"))] + happyRules())
+        let runner = happyRunner([("push origin main", bad("remote: rejected"))])
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertTrue(o.merged)
         XCTAssertTrue(o.checked)
@@ -204,7 +223,7 @@ final class MachinesMergeTests: XCTestCase {
     // MARK: Happy path
 
     func testHappyPathOrder() async {
-        let runner = MergeFakeRunner(happyRules())
+        let runner = happyRunner()
         let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertEqual(o, MergeOutcome(fetched: true, merged: true, checked: true, pushed: true, closed: true, commit: merged, error: nil, conflictFiles: []))
         XCTAssertEqual(runner.lines, [
@@ -212,11 +231,15 @@ final class MachinesMergeTests: XCTestCase {
             t("status --porcelain"),
             t("fetch origin main"),
             t("merge --ff-only origin/main"),
+            t("rev-list --count origin/main..main"),
             t("fetch ssh://agent@m1.tail/work/app 7 +sd/issue-7:\(ref)"),
             t("rev-parse \(ref)"),
+            t("rev-parse HEAD"),
             t("merge --no-ff -m Merge sd/issue-7 (acme/app#7) \(ref)"),
             t("rev-parse HEAD"),
             "sh -c just check",
+            t("symbolic-ref HEAD"),
+            t("rev-parse HEAD"),
             t("push origin main"),
             "gh issue close 7 -R acme/app --comment notchling: merged in \(merged)",
             "gh issue edit 7 -R acme/app --remove-label sd:ready",
@@ -224,7 +247,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testOnlyMainIsPushedAndNeverForced() async {
-        let runner = MergeFakeRunner(happyRules())
+        let runner = happyRunner()
         _ = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         let pushes = runner.calls.filter { $0.contains("push") }
         XCTAssertEqual(pushes, [["/usr/bin/git", "-C", target, "push", "origin", "main"]])
@@ -234,7 +257,7 @@ final class MachinesMergeTests: XCTestCase {
     }
 
     func testGitCallsUseFullPathsAndTimeouts() async {
-        let runner = MergeFakeRunner(happyRules())
+        let runner = happyRunner()
         _ = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
         for (argv, timeout) in zip(runner.calls, runner.timeouts) {
             XCTAssertTrue(argv[0].hasPrefix("/"), "\(argv[0]) is not a full path")
@@ -243,17 +266,89 @@ final class MachinesMergeTests: XCTestCase {
         }
     }
 
+    // MARK: Guards added in fix round 1
+
+    func testUnpushedMainRefuses() async {
+        let runner = happyRunner([("--count origin/main..main", ok("2\n"))])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "main has commits that are not on origin; push or drop them first")
+        XCTAssertFalse(o.fetched)
+        XCTAssertEqual(runner.lines.last, t("rev-list --count origin/main..main"))
+    }
+
+    func testBranchSwitchedDuringFailedCheckBlocksReset() async {
+        let runner = happyRunner([("sh -c", bad("tests failed")), ("symbolic-ref HEAD", ok("refs/heads/feature\n"))])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "main changed during the check; nothing pushed")
+        XCTAssertFalse(runner.lines.contains { $0.contains(" reset ") || $0.contains(" push ") || $0.hasPrefix("gh ") })
+    }
+
+    func testMovedHeadDuringFailedCheckBlocksReset() async {
+        let other = "3333333333333333333333333333333333333333"
+        let runner = happyRunner([("sh -c", bad("tests failed"))], queues: [("rev-parse HEAD", [ok(pre), ok(merged), ok(other)])])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "main changed during the check; nothing pushed")
+        XCTAssertFalse(runner.lines.contains { $0.contains(" reset ") })
+    }
+
+    func testBranchSwitchedDuringCheckBlocksPush() async {
+        let runner = happyRunner([("symbolic-ref HEAD", ok("refs/heads/feature\n"))])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "main changed during the check; nothing pushed")
+        XCTAssertTrue(o.checked)
+        XCTAssertFalse(o.pushed)
+        XCTAssertFalse(runner.lines.contains { $0.contains(" push ") || $0.hasPrefix("gh ") || $0.contains(" reset ") })
+    }
+
+    func testCommitAddedDuringCheckBlocksPush() async {
+        let other = "3333333333333333333333333333333333333333"
+        let runner = happyRunner(queues: [("rev-parse HEAD", [ok(pre), ok(merged), ok(other)])])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "main changed during the check; nothing pushed")
+        XCTAssertFalse(runner.lines.contains { $0.contains(" push ") || $0.hasPrefix("gh ") })
+    }
+
+    func testFailedAbortStopsBeforeGh() async {
+        let runner = happyRunner([("merge --no-ff", bad("CONFLICT")), ("diff --name-only", ok("a.swift\n")),
+                                  ("merge --abort", bad("fatal: cannot abort"))])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertEqual(o.error, "merge could not be aborted in \(target); fix it by hand")
+        XCTAssertFalse(runner.lines.contains { $0.hasPrefix("gh ") })
+    }
+
+    func testFailedDiffIsReportedAndLabelsNothing() async {
+        let runner = happyRunner([("merge --no-ff", bad("fatal: weird")), ("diff --name-only", bad("fatal: diff broke"))])
+        let o = await MergePlan.merge(entry, machine: machine, repo: repo, runner: runner)
+        XCTAssertTrue(o.error?.contains("could not be listed") ?? false)
+        XCTAssertTrue(o.conflictFiles.isEmpty)
+        XCTAssertFalse(runner.lines.contains { $0.hasPrefix("gh ") })
+        XCTAssertEqual(runner.lines.last, t("merge --abort"))
+    }
+
     // MARK: Retry
 
+    /// A target where the failed push left exactly one merge of this branch on top of origin/main.
+    private func retryRunner(_ extra: [(String, CommandResult)] = []) -> MergeFakeRunner {
+        MergeFakeRunner(extra + [("worktree list", ok(mainListing)),
+                                 ("status --porcelain", ok("")),
+                                 ("symbolic-ref HEAD", ok("refs/heads/main\n")),
+                                 ("rev-parse HEAD^2", ok(sha + "\n")),
+                                 ("--first-parent --count origin/main..main", ok("1\n")),
+                                 ("rev-parse HEAD", ok(merged + "\n"))])
+    }
+
     func testRetryPushRepeatsOnlyPushAndClose() async {
-        let runner = MergeFakeRunner(happyRules())
+        let runner = retryRunner()
         let o = await MergePlan.retryPush(entry, machine: machine, repo: repo, runner: runner)
         XCTAssertTrue(o.pushed)
         XCTAssertTrue(o.closed)
         XCTAssertEqual(o.commit, merged)
         XCTAssertEqual(runner.lines, [
             "git -C /Users/me/code/app worktree list --porcelain",
-            t("merge-base --is-ancestor \(ref) HEAD"),
+            t("status --porcelain"),
+            t("symbolic-ref HEAD"),
+            t("rev-parse HEAD^2"),
+            t("rev-list --first-parent --count origin/main..main"),
             t("rev-parse HEAD"),
             t("push origin main"),
             "gh issue close 7 -R acme/app --comment notchling: merged in \(merged)",
@@ -261,11 +356,18 @@ final class MachinesMergeTests: XCTestCase {
         ])
     }
 
-    func testRetryPushRefusesWhenTheMergeIsNotInMain() async {
-        let runner = MergeFakeRunner([("merge-base --is-ancestor", bad("", code: 1))] + happyRules())
+    private func assertRetryRefuses(_ extra: [(String, CommandResult)], file: StaticString = #filePath, line: UInt = #line) async {
+        let runner = retryRunner(extra)
         let o = await MergePlan.retryPush(entry, machine: machine, repo: repo, runner: runner)
-        XCTAssertFalse(o.pushed)
-        XCTAssertNotNil(o.error)
-        XCTAssertFalse(runner.lines.contains { $0.contains(" push ") || $0.hasPrefix("gh ") })
+        XCTAssertFalse(o.pushed, file: file, line: line)
+        XCTAssertNotNil(o.error, file: file, line: line)
+        XCTAssertFalse(runner.lines.contains { $0.contains(" push ") || $0.hasPrefix("gh ") }, file: file, line: line)
     }
+
+    func testRetryPushRefusesDirtyTree() async { await assertRetryRefuses([("status --porcelain", ok(" M a.swift\n"))]) }
+    func testRetryPushRefusesWhenNotOnMain() async { await assertRetryRefuses([("symbolic-ref HEAD", ok("refs/heads/feature\n"))]) }
+    func testRetryPushRefusesWhenHeadIsNotThisMerge() async { await assertRetryRefuses([("rev-parse HEAD^2", ok("9999999999999999999999999999999999999999\n"))]) }
+    func testRetryPushRefusesWhenHeadIsNoMerge() async { await assertRetryRefuses([("rev-parse HEAD^2", bad("fatal: ambiguous argument"))]) }
+    func testRetryPushRefusesOtherUnpushedCommits() async { await assertRetryRefuses([("--first-parent --count", ok("2\n"))]) }
+    func testRetryPushRefusesWhenNothingIsAhead() async { await assertRetryRefuses([("--first-parent --count", ok("0\n"))]) }
 }
