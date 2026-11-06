@@ -760,6 +760,58 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertTrue(model.updateOffers.isEmpty)
     }
 
+    /// I3: every delivered-secret row offers Send again, an OK one too; it shows the same confirmation as any Fix and
+    /// sends nothing until Run.
+    @MainActor
+    func testSendAgainIsOnAnOKUsageAndRunsOnlyAfterTheConfirmation() async throws {
+        let runner = ScriptedRunner()
+        let delivered = Order()
+        let reg = TestRegistry(machines: [TestMachines.mac()])
+        let login = SetupStep(id: .claudeLogin, title: "Claude login", needs: [], cadence: .everyRefresh,
+                              probe: .local { _ in CheckResult(state: .pass("mode 600, 41 bytes, same as the vault")) },
+                              fix: .run(FixPlan(display: "x", needsAdmin: false) { _ in FixOutcome(ok: true, message: "") }))
+        let engine = SetupEngine(runner: runner, secrets: FakeSecrets(values: ["claude-worker": testLongToken]), http: FakeHTTP(),
+                                 mac: { .empty }, machines: { reg.machines }, save: reg.save, clock: { Date() },
+                                 steps: { _, _ in [login] },
+                                 deliver: { usage, _ in delivered.add(usage.name); return FixOutcome(ok: true, message: "stored") },
+                                 observeVault: false)
+        let poller = MachinePoller(runner: runner, machines: { reg.machines }, clock: { Date() }, observeSleep: false)
+        let entry = VaultEntry(name: "claude-worker", kind: .token, expires: "2027-01-01")
+        let model = MachinesModel(poller: poller, actions: MorningActions(runner: runner), engine: engine,
+                                  registry: { reg.state }, save: reg.save, vaultEntries: { [entry] }, rename: { _, _ in },
+                                  renew: { _ in }, registryPath: "/tmp/x", runner: runner)
+        await model.open()
+        let machine = try XCTUnwrap(model.machines.first)
+        let row = try XCTUnwrap(model.secretRows(for: machine).first { $0.usage.name == "claude-worker" })
+        XCTAssertTrue(row.canSend, "an OK row can be sent again")
+        XCTAssertEqual(engine.results["m1"]?[.claudeLogin]?.state, .pass("mode 600, 41 bytes, same as the vault"))
+
+        model.requestSendAgain(row.usage)
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no confirmation") }
+        XCTAssertEqual(prompt.kind, .resend(row.usage))
+        XCTAssertEqual(prompt.title, "Send claude-worker again")
+        XCTAssertTrue(prompt.display.contains("[secret:claude-worker]"), prompt.display)
+        XCTAssertFalse(prompt.display.contains(testLongToken))
+        XCTAssertFalse(prompt.needsAdmin)
+        XCTAssertEqual(delivered.items, [], "showing the confirmation sends nothing")
+
+        await model.confirm(prompt, password: nil).value
+        XCTAssertEqual(delivered.items, ["claude-worker"])
+        XCTAssertEqual(model.outcomes["m1"]?.ok, true)
+    }
+
+    @MainActor
+    func testSendAgainIsNotOfferedForAValueThatIsNotInTheVault() async throws {
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: { _, _ in [] })
+        await model.open()
+        let machine = try XCTUnwrap(model.machines.first)
+        let rows = model.secretRows(for: machine)
+        XCTAssertFalse(rows.isEmpty)
+        XCTAssertTrue(rows.allSatisfy { !$0.canSend })
+        model.requestSendAgain(rows[0].usage)
+        XCTAssertNil(model.setupSheet)
+    }
+
     // MARK: Machines and jobs
 
     @MainActor

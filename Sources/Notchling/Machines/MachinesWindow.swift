@@ -59,7 +59,7 @@ struct DiffSheet: Identifiable {
 /// What a Fix confirmation sheet shows. It never holds a password: the sheet keeps that in its own `@State`
 /// and hands it to `MachinesModel.confirm` for the one run.
 struct FixPrompt: Identifiable, Equatable {
-    enum Kind: Equatable { case step(StepID), all, toggle(on: Bool) }
+    enum Kind: Equatable { case step(StepID), all, toggle(on: Bool), resend(SecretUsage) }
 
     let id = UUID()
     var machine: String
@@ -166,6 +166,8 @@ struct UpdateOfferRow: Identifiable, Equatable {
 struct SecretRow: Identifiable, Equatable {
     var usage: SecretUsage
     var text: String
+    /// Send again is possible: the vault holds the value.
+    var canSend = false
     var id: String { usage.name + "@" + usage.remotePath }
 }
 
@@ -491,6 +493,14 @@ final class MachinesModel: ObservableObject {
                            blocker: engine.turnOnBlocker(for: machine.name), busy: engine.running[machine.name] != nil)
     }
 
+    /// Send again on a secret file, an OK one too: shows the delivery. Runs nothing.
+    func requestSendAgain(_ usage: SecretUsage) {
+        guard let m = self.machine(named: usage.machine),
+              secretRows(for: m).contains(where: { $0.usage == usage && $0.canSend }) else { return }
+        setupSheet = .fix(prompt(m, kind: .resend(usage), title: "Send \(usage.name) again",
+                                 display: SecretSteps.sendDisplay(for: usage, machine: m), needsAdmin: false))
+    }
+
     /// The Running switch: shows its script. Runs nothing.
     func requestToggle(on machine: String, to on: Bool) {
         guard let m = self.machine(named: machine),
@@ -529,6 +539,12 @@ final class MachinesModel: ObservableObject {
             return Task { [weak self] in
                 guard let self else { return }
                 self.record(await self.engine.toggleRunning(on: machine, to: on, approval: approval), for: machine)
+            }
+        case .resend(let usage):
+            return Task { [weak self] in
+                guard let self else { return }
+                let approval = FixApproval(adminPassword: nil, asRootConfirmed: false)
+                self.record(await self.engine.sendAgain(usage, approval: approval), for: machine)
             }
         case .all:
             let approved = prompt.approved
@@ -613,7 +629,8 @@ final class MachinesModel: ObservableObject {
             let stepID: StepID = usage.name == machine.claudeSecret ? .claudeLogin : .issuesToken
             let entry = vaultEntries.first { $0.id == usage.name.lowercased() }
             return SecretRow(usage: usage, text: SecretRowFacts.text(usage: usage, entry: entry,
-                                                                    facts: engine.results[machine.name]?[stepID], now: now))
+                                                                    facts: engine.results[machine.name]?[stepID], now: now),
+                             canSend: entry != nil)
         }
     }
 
@@ -723,7 +740,9 @@ final class MachinesCenter {
         actions = MorningActions(runner: runner)
         engine = SetupEngine(runner: runner, secrets: VaultSecretSource(), http: URLSessionFetcher(),
                              mac: { MacFacts.load(home: FileManager.default.homeDirectoryForCurrentUser) },
-                             machines: { MachineRegistry.all() }, save: { MachineRegistry.save($0) }, clock: Date.init)
+                             machines: { MachineRegistry.all() }, save: { MachineRegistry.save($0) }, clock: Date.init,
+                             // next to machines.json: the vault names and machine names of a pending "Update N machines"
+                             offersFile: MachineRegistry.fileURL.deletingLastPathComponent().appendingPathComponent("pending-updates.json"))
     }
 
     func startIfNeeded() {

@@ -51,6 +51,8 @@ final class SetupEngine: ObservableObject {
     private let deliver: (SecretUsage, FixContext) async -> FixOutcome
     private let setVaultExpiry: (String, String) -> Void
     private let toggleScript: (Bool, Bool) -> String
+    /// Where the pending update offers are kept between launches; nil keeps them in memory only.
+    private let offersFile: URL?
     private var vaultObserver: NSObjectProtocol?
 
     /// When each machine's slow checks last ran.
@@ -83,7 +85,8 @@ final class SetupEngine: ObservableObject {
          deliver: @escaping (SecretUsage, FixContext) async -> FixOutcome = SecretSteps.deliver,
          setVaultExpiry: @escaping (String, String) -> Void = { try? SecretVault.setExpires($0, day: $1) },
          observeVault: Bool = true,
-         toggleScript: @escaping (Bool, Bool) -> String = SDWorkerSteps.toggleScript) {
+         toggleScript: @escaping (Bool, Bool) -> String = SDWorkerSteps.toggleScript,
+         offersFile: URL? = nil) {
         self.runner = runner
         self.secrets = secrets
         self.http = http
@@ -96,6 +99,8 @@ final class SetupEngine: ObservableObject {
         self.deliver = deliver
         self.setVaultExpiry = setVaultExpiry
         self.toggleScript = toggleScript
+        self.offersFile = offersFile
+        loadOffers()
         if observeVault {
             // the notification carries the name only; the handler makes the offer and sends nothing
             vaultObserver = NotificationCenter.default.addObserver(forName: .vaultValueChanged, object: nil, queue: .main) { [weak self] note in
@@ -690,11 +695,83 @@ final class SetupEngine: ObservableObject {
 
     // MARK: renewed secrets
 
+    /// Sends the vault value of `usage` to its file again, on the click that calls this, whatever the file's check
+    /// says (an OK file can still hold an older value). Only a file the machines' own usages name is written.
+    func sendAgain(_ usage: SecretUsage, approval: FixApproval) async -> FixOutcome {
+        guard let m = self.machine(named: usage.machine) else { return FixOutcome(ok: false, message: "no machine named \(usage.machine)") }
+        guard usageList(currentMachines()).contains(usage) else {
+            return FixOutcome(ok: false, message: "\(usage.name) at \(usage.remotePath) is not a secret file of \(m.name)")
+        }
+        if running[m.name] != nil { return FixOutcome(ok: false, message: "another Fix is running on \(m.name)") }
+        let outcome = await deliverAndCheck(usage, to: m, title: "Send \(usage.name) again")
+        // what was just sent is the current vault value: that usage no longer waits in the update offer
+        if outcome.ok, var rest = updateOffers[usage.name] {
+            rest.removeAll { $0 == usage }
+            setOffer(usage.name, rest.isEmpty ? nil : rest)
+        }
+        return outcome
+    }
+
+    /// Delivers `usage` as the Fix in flight on `m`, then checks its file again (a renewed issues token also has a new
+    /// scope and expiry).
+    private func deliverAndCheck(_ usage: SecretUsage, to m: Machine, title: String) async -> FixOutcome {
+        let isIssues = usage.name == m.sdWorker?.issuesSecret
+            || (usage.name != m.claudeSecret && usage.remotePath == MachinePaths.githubToken)
+        let deliver = deliver
+        // `perform` builds the context from this usage's own machine
+        let outcome = await perform(step: isIssues ? .issuesToken : .claudeLogin, title: title, on: m, adminPassword: nil) { ctx in
+            await deliver(usage, ctx)
+        }
+        await refresh([m.name], includeSlow: isIssues)
+        return outcome
+    }
+
+    // MARK: the pending offer, kept in a small file (vault names and machine names only, never a value)
+
+    private struct OfferFile: Codable {
+        var version = 1
+        var offers: [String: [String]]
+    }
+
+    private func setOffer(_ name: String, _ usages: [SecretUsage]?) {
+        updateOffers[name] = usages
+        saveOffers()
+    }
+
+    /// Reads the pending offers back (at launch). A name or machine that is no longer there is dropped; a file that
+    /// can't be read is ignored.
+    private func loadOffers() {
+        guard let url = offersFile, let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(OfferFile.self, from: data), file.version == 1 else { return }
+        let usages = usageList(currentMachines())
+        var loaded: [String: [SecretUsage]] = [:]
+        for (name, machines) in file.offers {
+            let found = usages.filter { $0.name == name && machines.contains($0.machine) }
+            if !found.isEmpty { loaded[name] = found }
+        }
+        updateOffers = loaded
+    }
+
+    private func saveOffers() {
+        guard let url = offersFile else { return }
+        let names = updateOffers.mapValues { $0.map(\.machine) }
+        guard !names.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        guard let data = try? encoder.encode(OfferFile(offers: names)) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
     /// Makes the update offer from the name; sends nothing.
     func vaultValueChanged(name: String) {
         offerRevision[name, default: 0] += 1
         let found = usageList(currentMachines()).filter { $0.name == name }
-        updateOffers[name] = found.isEmpty ? nil : found
+        setOffer(name, found.isEmpty ? nil : found)
     }
 
     /// Delivers the renewed value to each usage (on the click that calls this), checks that usage's step again,
@@ -714,20 +791,12 @@ final class SetupEngine: ObservableObject {
                 failed.append(usage)
                 continue
             }
-            let isIssues = usage.name == m.sdWorker?.issuesSecret
-                || (usage.name != m.claudeSecret && usage.remotePath == MachinePaths.githubToken)
-            let deliver = deliver
-            // `perform` builds the context from this usage's own machine
-            let outcome = await perform(step: isIssues ? .issuesToken : .claudeLogin, title: "Update \(usage.name)", on: m, adminPassword: nil) { ctx in
-                await deliver(usage, ctx)
-            }
-            // check the delivered file again; a renewed issues token also has a new scope and expiry
-            await refresh([m.name], includeSlow: isIssues)
+            let outcome = await deliverAndCheck(usage, to: m, title: "Update \(usage.name)")
             outcomes.append(outcome)
             if !outcome.ok { failed.append(usage) }
         }
         // a value renewed while this ran has its own, newer offer
-        if offerRevision[secret] == revision { updateOffers[secret] = failed.isEmpty ? nil : failed }
+        if offerRevision[secret] == revision { setOffer(secret, failed.isEmpty ? nil : failed) }
         return outcomes
     }
 }

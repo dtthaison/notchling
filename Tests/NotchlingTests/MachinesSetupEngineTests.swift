@@ -178,15 +178,23 @@ final class MachinesSetupEngineTests: XCTestCase {
                        steps: @escaping (Machine, [Machine]) -> [SetupStep],
                        usages: @escaping ([Machine]) -> [SecretUsage] = { _ in [] },
                        deliver: @escaping (SecretUsage, FixContext) async -> FixOutcome = { _, _ in FixOutcome(ok: true, message: "") },
-                       observeVault: Bool = false) -> World {
+                       observeVault: Bool = false, offersFile: URL? = nil) -> World {
         let w = World(machines: machines, now: t0)
         let store = w.store, clock = w.clock, expiry = w.expiry
         w.engine = SetupEngine(
             runner: w.runner, secrets: secrets, http: FakeHTTP(), mac: { .empty },
             machines: { store.machines }, save: { store.save($0) }, clock: { clock.value },
             steps: steps, usages: usages, deliver: deliver,
-            setVaultExpiry: { name, day in expiry.add("\(name)=\(day)") }, observeVault: observeVault)
+            setVaultExpiry: { name, day in expiry.add("\(name)=\(day)") }, observeVault: observeVault, offersFile: offersFile)
         return w
+    }
+
+    /// A folder for one test, never the real support folder.
+    private func tempFolder() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("notchling-offers-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
     }
 
     private func admin(password: String? = nil, root: Bool = false) -> FixApproval {
@@ -1200,6 +1208,143 @@ final class MachinesSetupEngineTests: XCTestCase {
         let outcomes = await w.engine.updateMachines(for: "claude-worker", approval: admin())
         XCTAssertEqual(outcomes.first?.message, "echo [secret:claude-worker]")
         XCTAssertEqual(w.engine.logs["m1"]?.contains("wrote [secret:claude-worker]"), true)
+    }
+
+    // MARK: I3: the offer survives a relaunch; Send again
+
+    private func claudeUsage(_ machine: String) -> SecretUsage {
+        SecretUsage(name: "claude-worker", machine: machine, remotePath: MachinePaths.claudeEnv, format: .keyValue(MachinePaths.claudeKey))
+    }
+
+    func testThePendingOfferSurvivesANewEngineAndHoldsNamesOnly() async throws {
+        let file = try tempFolder().appendingPathComponent("pending-updates.json")
+        let machines = [TestMachines.mac("m1"), TestMachines.linux("vps")]
+        let both = [claudeUsage("m1"), claudeUsage("vps")]
+        let first = world(machines, secrets: FakeSecrets(values: ["claude-worker": longToken]),
+                          steps: { _, _ in [step("claude-login")] }, usages: { _ in both }, offersFile: file)
+        first.engine.vaultValueChanged(name: "claude-worker")
+        XCTAssertEqual(first.engine.updateOffers["claude-worker"]?.count, 2)
+
+        // the file holds the vault name and the machine names, nothing else
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(saved.contains("claude-worker") && saved.contains("m1") && saved.contains("vps"), saved)
+        XCTAssertFalse(saved.contains(longToken))
+        XCTAssertFalse(saved.contains(".config/agents"), "no paths")
+        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
+
+        // a relaunch: a new engine on the same file offers the same update, and sends nothing
+        let sent = Counter()
+        let second = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both },
+                           deliver: { u, _ in sent.add(u.machine); return FixOutcome(ok: true, message: "stored") }, offersFile: file)
+        XCTAssertEqual(second.engine.updateOffers["claude-worker"], both)
+        XCTAssertEqual(sent.count, 0, "loading an offer sends nothing")
+
+        // sending it clears the file, so the third launch has none
+        let outcomes = await second.engine.updateMachines(for: "claude-worker", approval: admin())
+        XCTAssertEqual(outcomes.map(\.ok), [true, true])
+        let third = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both }, offersFile: file)
+        XCTAssertTrue(third.engine.updateOffers.isEmpty)
+    }
+
+    func testAFailedDeliveryStaysInTheSavedOffer() async throws {
+        let file = try tempFolder().appendingPathComponent("pending-updates.json")
+        let machines = [TestMachines.mac("m1"), TestMachines.linux("vps")]
+        let both = [claudeUsage("m1"), claudeUsage("vps")]
+        let w = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both },
+                      deliver: { u, _ in FixOutcome(ok: u.machine == "m1", message: "x") }, offersFile: file)
+        w.engine.vaultValueChanged(name: "claude-worker")
+        _ = await w.engine.updateMachines(for: "claude-worker", approval: admin())
+        let after = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both }, offersFile: file)
+        XCTAssertEqual(after.engine.updateOffers["claude-worker"]?.map(\.machine), ["vps"])
+    }
+
+    func testASavedOfferForAMachineThatIsGoneOrAnUnreadableFileIsDropped() async throws {
+        let folder = try tempFolder()
+        let file = folder.appendingPathComponent("pending-updates.json")
+        try Data(#"{"version":1,"offers":{"claude-worker":["gone","m1"],"unknown-secret":["m1"]}}"#.utf8).write(to: file)
+        let w = world(steps: { _, _ in [step("claude-login")] }, usages: { _ in [self.claudeUsage("m1")] }, offersFile: file)
+        XCTAssertEqual(w.engine.updateOffers, ["claude-worker": [claudeUsage("m1")]])
+
+        let broken = folder.appendingPathComponent("broken.json")
+        try Data("{not json".utf8).write(to: broken)
+        let b = world(steps: { _, _ in [step("claude-login")] }, usages: { _ in [self.claudeUsage("m1")] }, offersFile: broken)
+        XCTAssertTrue(b.engine.updateOffers.isEmpty)
+        // and a missing folder is made when there is something to save
+        let deep = folder.appendingPathComponent("a/b/pending-updates.json")
+        let d = world(steps: { _, _ in [step("claude-login")] }, usages: { _ in [self.claudeUsage("m1")] }, offersFile: deep)
+        d.engine.vaultValueChanged(name: "claude-worker")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: deep.path))
+    }
+
+    /// Send again works on a usage whose check is OK, runs only through this call, and only for a file of the machines.
+    func testSendAgainDeliversAUsageThatIsOKAndRefusesOtherFiles() async {
+        let sent = Counter()
+        let usage = claudeUsage("m1")
+        let w = world(steps: { _, _ in [step("claude-login", title: "Claude login")] }, usages: { _ in [usage] },
+                      deliver: { u, ctx in sent.add("\(u.name)@\(u.machine)"); ctx.log("sent\n"); return FixOutcome(ok: true, message: "stored") })
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.engine.results["m1"]?[.claudeLogin]?.state, .pass("ok"))
+        XCTAssertEqual(sent.count, 0, "checking sends nothing")
+
+        let out = await w.engine.sendAgain(usage, approval: admin())
+        XCTAssertEqual(out, FixOutcome(ok: true, message: "stored"))
+        XCTAssertEqual(sent.all, ["claude-worker@m1"])
+        XCTAssertEqual(w.engine.logs["m1"]?.contains("sent"), true)
+        XCTAssertNil(w.engine.running["m1"])
+
+        // a path or machine that is not one of the usages is refused, with nothing sent
+        let elsewhere = SecretUsage(name: "claude-worker", machine: "m1", remotePath: "/etc/passwd", format: .raw)
+        let refused = await w.engine.sendAgain(elsewhere, approval: admin())
+        XCTAssertFalse(refused.ok)
+        let nobody = await w.engine.sendAgain(claudeUsage("nowhere"), approval: admin())
+        XCTAssertFalse(nobody.ok)
+        XCTAssertEqual(sent.count, 1)
+    }
+
+    func testSendAgainSatisfiesThePendingOfferForThatUsage() async throws {
+        let file = try tempFolder().appendingPathComponent("pending-updates.json")
+        let machines = [TestMachines.mac("m1"), TestMachines.linux("vps")]
+        let both = [claudeUsage("m1"), claudeUsage("vps")]
+        let w = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both },
+                      deliver: { _, _ in FixOutcome(ok: true, message: "stored") }, offersFile: file)
+        w.engine.vaultValueChanged(name: "claude-worker")
+        _ = await w.engine.sendAgain(claudeUsage("m1"), approval: admin())
+        XCTAssertEqual(w.engine.updateOffers["claude-worker"]?.map(\.machine), ["vps"])
+        _ = await w.engine.sendAgain(claudeUsage("vps"), approval: admin())
+        XCTAssertNil(w.engine.updateOffers["claude-worker"])
+        let after = world(machines, steps: { _, _ in [step("claude-login")] }, usages: { _ in both }, offersFile: file)
+        XCTAssertTrue(after.engine.updateOffers.isEmpty)
+    }
+
+    func testAFailedSendAgainKeepsTheOffer() async {
+        let usage = claudeUsage("m1")
+        let w = world(steps: { _, _ in [step("claude-login")] }, usages: { _ in [usage] },
+                      deliver: { _, _ in FixOutcome(ok: false, message: "ssh failed") })
+        w.engine.vaultValueChanged(name: "claude-worker")
+        let out = await w.engine.sendAgain(usage, approval: admin())
+        XCTAssertFalse(out.ok)
+        XCTAssertEqual(w.engine.updateOffers["claude-worker"], [usage])
+    }
+
+    /// The hash of the machine's file is compared in memory; no result, log line or message holds it.
+    func testAStaleFileShowsAsDifferentFromTheVaultAndNoHashIsKept() async {
+        let m = TestMachines.mac("m1")
+        let value = "sk-ant-oat01-" + String(repeating: "q", count: 40)
+        let stale = String(repeating: "ab12", count: 16)
+        let w = world([m], secrets: FakeSecrets(values: ["claude-worker": value]),
+                      steps: { machine, _ in
+                          // the stub answers every probe alike, so Reachable must not echo what it was told
+                          [step("reachable", parse: { _, _ in CheckResult(state: .pass("up")) }), SecretSteps.claudeLogin(for: machine)]
+                      })
+        w.runner.handler = { call in
+            (FakeSSH.batch(call, reply: { _ in (out: "600 \(value.count + 32)\n\(stale)", code: 0) }) ?? CommandResult(code: 0, out: "", err: ""), [])
+        }
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.engine.results["m1"]?[.claudeLogin]?.state, .fail("different from the vault (Send again)"))
+        let everything = String(describing: w.engine.results) + String(describing: w.engine.logs)
+        XCTAssertFalse(everything.contains(stale), "the machine's hash is shown nowhere")
+        XCTAssertFalse(everything.contains(value))
     }
 
     // MARK: detected facts

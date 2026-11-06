@@ -526,6 +526,9 @@ private struct MachineCardView: View {
                 HStack(spacing: 8) {
                     Text(verbatim: row.text).kitType(.meta).foregroundColor(KitInk.text).textSelection(.enabled)
                     Spacer(minLength: 8)
+                    // on every delivered secret, an OK one too: the file can hold an older value than the vault
+                    Button("Send again") { model.requestSendAgain(row.usage) }.buttonStyle(.kit(.ghost))
+                        .disabled(busy || !row.canSend)
                     Button("Renew…") { model.renew(row.usage.name) }.buttonStyle(.kit(.ghost))
                 }
             }

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Notchling
 
@@ -192,13 +193,16 @@ final class MachinesSecretsTests: XCTestCase {
         return await parse(RemoteOutput(text: text, code: code), .test()).state
     }
 
-    func testVerifyLooksOnlyAtModeAndSize() async {
+    func testVerifyNeverPrintsTheFilesContent() async {
         for linux in [false, true] {
             let probe = SecretSteps.verifyProbe(claudeUsage(), linux: linux)
             guard case let .remote(script, _) = probe else { return XCTFail("not a remote probe") }
-            XCTAssertEqual(script, RemoteShell.stat([MachinePaths.claudeEnv], linux: linux))
-            XCTAssertFalse(script.contains("cat"))
+            // mode and size first, then the hash of the file (M13); the content itself is never printed
+            XCTAssertTrue(script.hasPrefix(RemoteShell.stat([MachinePaths.claudeEnv], linux: linux)), script)
+            XCTAssertTrue(script.contains(linux ? "sha256sum" : "shasum -a 256"), script)
+            XCTAssertFalse(script.contains("cat "))
             XCTAssertFalse(script.contains("head"))
+            XCTAssertFalse(script.contains("grep"))
         }
         let probe = SecretSteps.verifyProbe(claudeUsage(), linux: false)
         let pass = await parse(probe, "600 41\n")
@@ -213,6 +217,71 @@ final class MachinesSecretsTests: XCTestCase {
         if case .cantTell? = garbage {} else { XCTFail("expected can't tell, got \(String(describing: garbage))") }
         let failed = await parse(probe, "600 41\n", code: 255)
         if case .cantTell? = failed {} else { XCTFail("expected can't tell, got \(String(describing: failed))") }
+    }
+
+    // MARK: Content check (M13)
+
+    private func sha256(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
+
+    private func parse(_ probe: Probe, _ text: String, secrets: FakeSecrets) async -> CheckState? {
+        guard case let .remote(_, parse) = probe else { return nil }
+        return await parse(RemoteOutput(text: text, code: 0), .test(secrets: secrets)).state
+    }
+
+    private func text(_ state: CheckState?) -> String {
+        switch state {
+        case .pass(let s), .fail(let s), .cantTell(let s): return s
+        case nil: return ""
+        }
+    }
+
+    /// The file on the machine is compared with the vault by hash, in memory. The result says "same" or "different"
+    /// and holds neither hash.
+    func testVerifyComparesTheFilesHashWithTheVaultsAndShowsNeitherHash() async {
+        let secrets = FakeSecrets(values: ["claude-worker": claudeValue, "m1-github-issues": "github_pat_ABC"])
+        let claude = SecretSteps.verifyProbe(claudeUsage(), linux: false)
+        let same = sha256("CLAUDE_CODE_OAUTH_TOKEN=\(claudeValue)\n")
+        let other = sha256("CLAUDE_CODE_OAUTH_TOKEN=an-older-token\n")
+
+        let ok = await parse(claude, "600 41\n\(same)\n", secrets: secrets)
+        XCTAssertEqual(ok, .pass("mode 600, 41 bytes, same as the vault"))
+        let stale = await parse(claude, "600 41\n\(other)\n", secrets: secrets)
+        XCTAssertEqual(stale, .fail("different from the vault (Send again)"))
+        for state in [ok, stale] {
+            XCTAssertFalse(text(state).contains(same) || text(state).contains(other), "no hash in a result")
+            XCTAssertFalse(text(state).contains(claudeValue))
+        }
+
+        // the issues token is the raw value, no newline
+        let issues = SecretSteps.verifyProbe(SecretUsage(name: "m1-github-issues", machine: "m1", remotePath: MachinePaths.githubToken,
+                                                         format: .raw), linux: true)
+        let rawOK = await parse(issues, "600 14\n\(sha256("github_pat_ABC"))\n", secrets: secrets)
+        XCTAssertEqual(rawOK, .pass("mode 600, 14 bytes, same as the vault"))
+        let rawStale = await parse(issues, "600 14\n\(sha256("github_pat_ABC\n"))\n", secrets: secrets)
+        XCTAssertEqual(rawStale, .fail("different from the vault (Send again)"), "a trailing newline is a different file")
+
+        // upper case hex from the machine counts the same
+        let upper = await parse(claude, "600 41\n\(same.uppercased())\n", secrets: secrets)
+        XCTAssertEqual(upper, .pass("mode 600, 41 bytes, same as the vault"))
+    }
+
+    func testTheContentCheckComesAfterModeAndSizeAndNeedsAHashToSayAnything() async {
+        let secrets = FakeSecrets(values: ["claude-worker": claudeValue])
+        let probe = SecretSteps.verifyProbe(claudeUsage(), linux: false)
+        let hash = sha256("CLAUDE_CODE_OAUTH_TOKEN=\(claudeValue)\n")
+        let loose = await parse(probe, "644 41\n\(hash)\n", secrets: secrets)
+        XCTAssertEqual(loose, .fail("mode 644, should be 600"))
+        let missing = await parse(probe, "missing\n", secrets: secrets)
+        XCTAssertEqual(missing, .fail("not on the machine"))
+        // no hash line (the tool is missing) or a line that is not a hash: can't tell, with no part of it shown
+        for text in ["600 41\n", "600 41\nsha256sum: command not found\n", "600 41\n\(hash.prefix(63))\n", "600 41\n" + String(repeating: "z", count: 64) + "\n"] {
+            let state = await parse(probe, text, secrets: secrets)
+            guard case .cantTell(let why)? = state else { XCTFail("expected can't tell for \(text), got \(String(describing: state))"); continue }
+            XCTAssertFalse(why.contains("sha256sum: command"), why)
+        }
+        // nothing in the vault to compare with: mode and size only, as before
+        let empty = await parse(probe, "600 41\n\(hash)\n", secrets: FakeSecrets())
+        XCTAssertEqual(empty, .pass("mode 600, 41 bytes"))
     }
 
     // MARK: Steps
@@ -279,8 +348,9 @@ final class MachinesSecretsTests: XCTestCase {
         guard case let .remote(claudeScript, _) = claude.probe, case let .remote(issuesScript, _) = issues.probe else {
             return XCTFail("not remote probes")
         }
-        XCTAssertEqual(claudeScript, RemoteShell.stat([MachinePaths.claudeEnv], linux: true))
-        XCTAssertEqual(issuesScript, RemoteShell.stat([MachinePaths.githubToken], linux: true))
+        XCTAssertTrue(claudeScript.hasPrefix(RemoteShell.stat([MachinePaths.claudeEnv], linux: true)))
+        XCTAssertTrue(issuesScript.hasPrefix(RemoteShell.stat([MachinePaths.githubToken], linux: true)))
+        XCTAssertTrue(claudeScript.contains("sha256sum") && issuesScript.contains("sha256sum"))
     }
 
     // MARK: Token creation

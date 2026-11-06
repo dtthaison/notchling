@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// How a secret sits in its file on the machine.
@@ -111,15 +112,9 @@ enum SecretSteps {
         guard value.utf8.count >= minimumLength else {
             return FixOutcome(ok: false, message: "the value of \(usage.name) is too short; save it again")
         }
-        let text: String
-        switch usage.format {
-        case .raw:
-            text = value
-        case .keyValue(let key):
-            guard key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else {
-                return FixOutcome(ok: false, message: "\(key) is not a variable name")
-            }
-            text = "\(key)=\(value)\n"
+        guard let text = fileText(usage.format, value: value) else {
+            if case .keyValue(let key) = usage.format { return FixOutcome(ok: false, message: "\(key) is not a variable name") }
+            return FixOutcome(ok: false, message: "the file for \(usage.name) can't be built")
         }
         let filter = SecretLogFilter(value: value, name: usage.name, sink: ctx.log)
         let safe = FixContext(step: ctx.step, adminPassword: nil, log: { filter.feed($0) }, mask: ctx.mask)
@@ -135,11 +130,27 @@ enum SecretSteps {
         return FixOutcome(ok: true, message: "\(usage.name) is on \(usage.machine) at \(usage.remotePath)")
     }
 
-    /// A read-only check of the file's mode and size; its content is never read.
+    /// The exact text `deliver` writes for `value`, or nil when the format is not a plain variable name.
+    static func fileText(_ format: SecretFormat, value: String) -> String? {
+        switch format {
+        case .raw:
+            return value
+        case .keyValue(let key):
+            guard key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else { return nil }
+            return "\(key)=\(value)\n"
+        }
+    }
+
+    /// A read-only check of the delivered file: its mode and size, and whether it is the vault's value. The
+    /// machine prints the SHA-256 of the file and nothing else about its content; the app hashes the text it would
+    /// send and compares the two in memory. The result says "same" or "different" and holds neither hash, and no
+    /// hash is stored or logged.
     static func verifyProbe(_ usage: SecretUsage, linux: Bool) -> Probe {
-        .remote(script: RemoteShell.stat([usage.remotePath], linux: linux)) { output, _ in
+        let script = RemoteShell.stat([usage.remotePath], linux: linux) + "; " + RemoteShell.sha256(usage.remotePath, linux: linux)
+        return .remote(script: script) { output, ctx in
             guard output.code == 0 else { return CheckResult(state: .cantTell("the check didn't run")) }
-            if output.text.split(separator: "\n", omittingEmptySubsequences: true).first == "missing" {
+            let lines = output.text.split(separator: "\n", omittingEmptySubsequences: true)
+            if lines.first == "missing" {
                 return CheckResult(state: .fail("not on the machine"))
             }
             guard let facts = RemoteShell.parseStat(output.text, count: 1).first ?? nil else {
@@ -147,7 +158,18 @@ enum SecretSteps {
             }
             if facts.mode != "600" { return CheckResult(state: .fail("mode \(facts.mode), should be 600")) }
             if facts.size == 0 { return CheckResult(state: .fail("empty")) }
-            return CheckResult(state: .pass("mode 600, \(facts.size) bytes"))
+            let found = "mode 600, \(facts.size) bytes"
+            // nothing in the vault to compare with: the mode and size are all there is to say
+            guard let value = ctx.secrets.value(named: usage.name), !value.isEmpty,
+                  let expected = fileText(usage.format, value: value) else { return CheckResult(state: .pass(found)) }
+            let remote = lines.count > 1 ? lines[1].lowercased() : ""
+            guard remote.count == 64, remote.allSatisfy(\.isHexDigit) else {
+                return CheckResult(state: .cantTell("couldn't compare the file with the vault"))
+            }
+            let local = SHA256.hash(data: Data(expected.utf8)).map { String(format: "%02x", $0) }.joined()
+            return local == remote
+                ? CheckResult(state: .pass(found + ", same as the vault"))
+                : CheckResult(state: .fail("different from the vault (Send again)"))
         }
     }
 
@@ -169,13 +191,22 @@ enum SecretSteps {
     /// The commands the user sees before the Fix runs: the placeholder stands for the value, which only ssh's
     /// stdin carries.
     private static func display(for usage: SecretUsage, machine: Machine, missing: String) -> String {
+        "\(missing)\nOtherwise: \(sendCommand(usage, machine: machine))"
+    }
+
+    /// The confirmation of Send again: the same delivery as the Fix, with the value as a placeholder.
+    static func sendDisplay(for usage: SecretUsage, machine: Machine) -> String {
+        "Send the vault value of \(usage.name) to \(usage.machine) again:\n\(sendCommand(usage, machine: machine))"
+    }
+
+    private static func sendCommand(_ usage: SecretUsage, machine: Machine) -> String {
         let source: String
         switch usage.format {
         case .raw: source = "printf %s '[secret:\(usage.name)]'"
         case .keyValue(let key): source = "printf '\(key)=%s\\n' '[secret:\(usage.name)]'"
         }
         let ssh = SSH.script(machine, RemoteShell.writeFile(usage.remotePath)).map(LaneStore.quote).joined(separator: " ")
-        return "\(missing)\nOtherwise: \(source) | \(ssh)"
+        return "\(source) | \(ssh)"
     }
 }
 

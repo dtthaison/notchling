@@ -449,6 +449,13 @@ enum RemoteShell {
         return paths.map { "if [ -f \(path($0)) ]; then \(format) \(path($0)); else echo missing; fi" }.joined(separator: "; ")
     }
 
+    /// The SHA-256 of a file as 64 hex characters on one line, and nothing for a missing file. The caller compares it
+    /// in memory with the hash of the text it expects and shows no part of it; the content itself is never printed.
+    static func sha256(_ p: String, linux: Bool) -> String {
+        let tool = linux ? "sha256sum" : "shasum -a 256"
+        return "if [ -f \(path(p)) ]; then \(tool) \(path(p)) 2>/dev/null | cut -d' ' -f1; fi"
+    }
+
     /// The facts for each of `count` paths, nil for a missing file or a line that is not `mode size`.
     static func parseStat(_ out: String, count: Int) -> [FileFacts?] {
         let lines = out.split(separator: "\n", omittingEmptySubsequences: false)
