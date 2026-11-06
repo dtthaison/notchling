@@ -8,7 +8,7 @@ struct Composer: View {
     let agent: Agent
     /// A file is being dragged over the conversation (the drop target is `SessionDetail`).
     let dropping: Bool
-    @FocusState private var focused: Bool
+    @State private var focused = false
     @State private var focusedBeforeDrag = false
 
     private var placeholder: String {
@@ -34,6 +34,8 @@ struct Composer: View {
         }()
         // A session waiting on you gets its suggested reply as a one-click chip; otherwise Tab takes it.
         let showsChip = commands.isEmpty && empty && agent.group == .needsInput && !(agent.suggestedReply ?? "").isEmpty
+        // Tab takes it, unless the chip above already offers it.
+        let suggestion = showsChip ? nil : model.suggestion(for: agent)
         VStack(alignment: .leading, spacing: 8) {
             if showsChip, let suggested = agent.suggestedReply {
                 Button { model.send(suggested) } label: {
@@ -101,16 +103,14 @@ struct Composer: View {
                     }
                 }
                 HStack(alignment: .bottom, spacing: 10) {
-                    TextField(showsChip || model.suggestion(for: agent) == nil ? placeholder
-                              : "\(model.suggestion(for: agent) ?? "")   ⇥ Tab",
-                              text: draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .kitType(shell ? .mono : .body).foregroundColor(KitInk.text)
-                        .lineLimit(1...8)
-                        .focused($focused)
-                        .onSubmit { model.send() }
+                    ReplyEditor(text: draft, focused: $focused,
+                                placeholder: suggestion.map { "\($0)   ⇥ Tab" } ?? placeholder,
+                                placeholderIsSuggestion: suggestion != nil,
+                                font: (shell ? KitType.mono : KitType.body).nsFont,
+                                accessibilityLabel: "Reply to \(agent.name)",
+                                onSubmit: { model.send() })
+                        .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
-                        .accessibilityLabel("Reply to \(agent.name)")
                     Button { model.send() } label: {
                         ZStack {
                             Circle().fill(empty ? KitInk.raised : shell ? KitInk.shell : KitInk.accent)
