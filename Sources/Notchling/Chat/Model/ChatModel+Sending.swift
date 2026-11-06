@@ -7,11 +7,11 @@ extension ChatModel {
     // MARK: Replying
 
     func send(_ preset: String? = nil) {
-        if let agent = selected, case .antigravity(let session) = agent.target {
+        if let agent = selected, let (tool, session) = agent.target.acp {
             let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty, AntigravityRunner.shared.permission(session) == nil else { return }
+            guard !text.isEmpty, tool.runner.permission(session) == nil else { return }
             if preset == nil { drafts[agent.id] = "" }
-            sendAntigravity(agent, sessionID: session, text: text)
+            sendACP(agent, sessionID: session, text: text)
             return
         }
         if let agent = selected, case .codex(let session) = agent.target {
@@ -169,8 +169,8 @@ extension ChatModel {
         if case .codex = agent.target {
             return Array(SlashCommands.matches(String(draft.dropFirst()), in: CodexCommands.available()).prefix(8))
         }
-        if case .antigravity(let session) = agent.target {
-            return Array(SlashCommands.matches(String(draft.dropFirst()), in: AntigravityRunner.shared.commands(session)).prefix(8))
+        if let (tool, session) = agent.target.acp {
+            return Array(SlashCommands.matches(String(draft.dropFirst()), in: tool.runner.commands(session)).prefix(8))
         }
         return Array(SlashCommands.matches(String(draft.dropFirst()), in: SlashCommands.all(for: agent.cwd)).prefix(8))
     }

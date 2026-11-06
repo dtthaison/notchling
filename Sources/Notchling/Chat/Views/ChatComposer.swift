@@ -157,8 +157,8 @@ struct Composer: View {
                 HStack(spacing: 8) {
                     if case .codex = agent.target {
                         CodexModelPicker(model: model, agent: agent).part("Codex Model Picker", .top)
-                    } else if case .antigravity(let session) = agent.target {
-                        AntigravityOptionsPicker(model: model, agent: agent, session: session).part("Antigravity Options", .top)
+                    } else if let (tool, session) = agent.target.acp {
+                        ACPOptionsPicker(model: model, agent: agent, tool: tool, session: session).part("\(tool.name) Options", .top)
                     } else {
                         ModelPicker(model: model, current: model.conversation.facts.model).part("Model Picker", .top)
                         EffortPicker(model: model, current: model.conversation.facts.effort).part("Effort Picker", .top)

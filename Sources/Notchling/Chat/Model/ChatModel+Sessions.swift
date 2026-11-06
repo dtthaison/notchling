@@ -30,6 +30,10 @@ extension ChatModel {
             agent = Agent(id: AntigravitySessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
                           group: .completed, label: "Antigravity", detail: nil, since: ref.date,
                           target: .antigravity(sessionID: ref.sessionID), host: "Antigravity")
+        case .gemini:
+            agent = Agent(id: GeminiSessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
+                          group: .completed, label: "Gemini", detail: nil, since: ref.date,
+                          target: .gemini(sessionID: ref.sessionID), host: "Gemini")
         }
         if closedSessions[agent.id] != nil {
             closedSessions[agent.id] = nil
@@ -37,13 +41,13 @@ extension ChatModel {
         }
         if allAgents.first(where: { $0.id == agent.id }) == nil { seen[agent.id] = agent }
         if ref.tool == .codex { refreshCodex(force: true) }
-        if ref.tool == .antigravity { refreshAntigravity(force: true) }
+        if ref.tool == .antigravity || ref.tool == .gemini { refreshACP(force: true) }
         return agent.id
     }
 
-    /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which only Chat shows.
+    /// Claude Code's sessions (the notch's), then Codex's, Antigravity CLI's and Gemini CLI's, which only Chat shows.
     var allAgents: [Agent] {
-        notch.agents + codexDrafts + (codexAgents + agyAgents).filter { !isClosed($0) } + agyDrafts
+        notch.agents + codexDrafts + (codexAgents + acpAgents).filter { !isClosed($0) } + acpDrafts
     }
 
     private func isClosed(_ agent: Agent) -> Bool {
@@ -51,13 +55,14 @@ extension ChatModel {
         return agent.since.timeIntervalSince1970 <= at
     }
 
-    /// Takes a Codex or Antigravity session off the list (its history stays with the tool), and ends its
-    /// Antigravity process.
+    /// Takes a Codex, Antigravity or Gemini session off the list (its history stays with the tool), and ends
+    /// its process.
     func closeSession(_ agent: Agent) {
+        if let (tool, session) = agent.target.acp {
+            guard !session.isEmpty else { closeACP(agent); return }
+            tool.runner.close(session)
+        }
         switch agent.target {
-        case .antigravity(let session):
-            guard !session.isEmpty else { closeAntigravity(agent); return }
-            AntigravityRunner.shared.close(session)
         case .codex(let session) where session.isEmpty:
             removeCodex(agent)
             return
@@ -86,14 +91,14 @@ extension ChatModel {
         refreshPage()
         if accounts != nil { refreshLanes() }
         refreshCodex()
-        refreshAntigravity()
+        refreshACP()
         guard let agent = selected else { return }
-        if case .antigravity(let session) = agent.target {
+        if let (tool, session) = agent.target.acp {
             if session.isEmpty {
                 if conversation != Conversation() { conversation = Conversation() }
             } else {
-                AntigravityRunner.shared.open(session, folder: agent.cwd)
-                let fresh = AntigravityRunner.shared.conversation(session) ?? Conversation()
+                tool.runner.open(session, folder: agent.cwd)
+                let fresh = tool.runner.conversation(session) ?? Conversation()
                 if fresh != conversation { conversation = fresh }
                 dropDelivered(agent.id)
             }

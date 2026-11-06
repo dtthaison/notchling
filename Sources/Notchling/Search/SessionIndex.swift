@@ -100,8 +100,12 @@ final class SessionIndex {
             // Search works while the first scan is still going.
             if batch % 25 == 0 { notify() }
         }
-        for row in AntigravitySessions.rows(now: now) {
-            let meta = SessionMeta(key: "agy:" + row.id, toolKey: SessionTool.antigravity.key, sessionID: row.id,
+        // Antigravity's and Gemini's steps aren't read: their sessions are found by title.
+        let titled: [(key: String, tool: SessionTool, id: String, title: String, folder: String, modified: Date)] =
+            AntigravitySessions.rows(now: now).map { ("agy:" + $0.id, .antigravity, $0.id, $0.title, $0.folder, $0.modified) }
+            + GeminiSessions.rows(now: now).map { ("gemini:" + $0.id, .gemini, $0.id, $0.title, $0.folder, $0.modified) }
+        for row in titled {
+            let meta = SessionMeta(key: row.key, toolKey: row.tool.key, sessionID: row.id,
                                    title: row.title, folder: row.folder, path: "", configDir: nil,
                                    modified: row.modified.timeIntervalSince1970)
             live.insert(meta.key)
@@ -194,7 +198,7 @@ final class SessionIndex {
             guard let info = CodexSessions.meta(candidate.path) else { return nil }
             meta.folder = info.cwd
             forEachLine(in: data) { if let line = TranscriptText.codex($0) { builder.add(line) } }
-        case .antigravity:
+        case .antigravity, .gemini:
             return nil
         }
         let text = builder.text

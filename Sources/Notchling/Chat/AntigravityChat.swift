@@ -1,11 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// A permission an Antigravity CLI session asks for mid-turn: what the tool would do (with the edit's
-/// diff when there is one) and Antigravity's own options. Stopping the turn answers it as cancelled.
+/// A permission an Antigravity or Gemini CLI session asks for mid-turn: what the tool would do (with the
+/// edit's diff when there is one) and the tool's own options. Stopping the turn answers it as cancelled.
 struct AntigravityPermissionCard: View {
     let session: String
     let request: ACPPermission
+    var runner: ACPRunner = AntigravityRunner.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -35,13 +36,13 @@ struct AntigravityPermissionCard: View {
             .background(RoundedRectangle(cornerRadius: KitMetric.radiusMd, style: .continuous).fill(KitInk.raised))
             HStack(spacing: 8) {
                 ForEach(request.options.filter { !$0.allows }) { option in
-                    Button(option.name) { AntigravityRunner.shared.answer(session, option: option.id) }
+                    Button(option.name) { runner.answer(session, option: option.id) }
                         .buttonStyle(.kit(.ghost))
                 }
                 Spacer()
                 // The one-time Allow goes last, where Return's default button sits in the Claude card.
                 ForEach(request.options.filter(\.allows).sorted { a, _ in a.kind != "allow_once" }) { option in
-                    Button(option.name) { AntigravityRunner.shared.answer(session, option: option.id) }
+                    Button(option.name) { runner.answer(session, option: option.id) }
                         .buttonStyle(.kit(option.kind == "allow_once" ? .primary : .secondary))
                 }
             }
@@ -62,21 +63,30 @@ struct AntigravityPermissionCard: View {
     }
 }
 
-/// An Antigravity CLI session's options (Model, Thinking Level, Mode), as Antigravity lists them for the
-/// session; picking one applies from the next turn. A session not started yet shows its tool name.
-struct AntigravityOptionsPicker: View {
+/// An Antigravity or Gemini CLI session's options (Model, Thinking Level, Mode), as the tool lists them for
+/// the session; picking one applies from the next turn. A session not started yet shows its tool name.
+struct ACPOptionsPicker: View {
     @ObservedObject var model: ChatModel
-    @ObservedObject private var runner = AntigravityRunner.shared
+    @ObservedObject private var runner: ACPRunner
     let agent: Agent
+    let tool: ACPTool
     let session: String
+
+    init(model: ChatModel, agent: Agent, tool: ACPTool, session: String) {
+        self.model = model
+        self.agent = agent
+        self.tool = tool
+        self.session = session
+        runner = tool.runner
+    }
 
     private var options: [ACPConfigOption] { session.isEmpty ? [] : runner.config(session) }
 
     private var label: String {
         let parts = options.filter { $0.id == "model" || $0.id == "thought_level" }.map(\.currentName)
-        if session.isEmpty { return "Antigravity" }
-        if parts.isEmpty { return runner.isLoading(session) ? "Antigravity · Loading…" : "Antigravity" }
-        return (["Antigravity"] + parts).joined(separator: " · ")
+        if session.isEmpty { return tool.name }
+        if parts.isEmpty { return runner.isLoading(session) ? "\(tool.name) · Loading…" : tool.name }
+        return ([tool.name] + parts).joined(separator: " · ")
     }
 
     var body: some View {
@@ -106,7 +116,7 @@ struct AntigravityOptionsPicker: View {
             sub.autoenablesItems = false
             for value in option.values {
                 let row = ActionMenuItem(value.name) { [model, session] in
-                    AntigravityRunner.shared.set(session, option: option.id, to: value.value) { failure in
+                    runner.set(session, option: option.id, to: value.value) { failure in
                         model.errors[id] = "Couldn't change it: \(failure)"
                     }
                 }

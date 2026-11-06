@@ -20,7 +20,7 @@ enum ChatFormat {
         case .job: return "Open in Terminal"
         case .process: return "Open in \(agent.host.isEmpty || agent.host == "claude -p" ? "Terminal" : agent.host)"
         case .resume: return "Resume in Terminal"
-        case .codex, .antigravity: return "Open in Terminal"
+        case .codex, .antigravity, .gemini: return "Open in Terminal"
         }
     }
 
@@ -36,6 +36,7 @@ enum ChatFormat {
         case .resume: return "Start this session again in a terminal with claude --resume"
         case .codex: return "Continue this Codex session in a terminal with codex resume"
         case .antigravity: return "Continue this Antigravity session in a terminal with agy --conversation"
+        case .gemini: return "Continue this Gemini session in a terminal with gemini --resume"
         }
     }
 

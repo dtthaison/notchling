@@ -16,6 +16,8 @@ struct ACPTranscript: Equatable {
     /// The kind of the last text or tool update, so chunks of one message join up.
     private var lastKind: String?
     private var counter = 0
+    /// A `usage_update` came in this turn, so the context size is known and the turn's totals only add up.
+    private var reportedContext = false
 
     // MARK: Updates
 
@@ -25,6 +27,8 @@ struct ACPTranscript: Equatable {
         case "user_message_chunk", "agent_message_chunk", "agent_thought_chunk":
             let text = Self.text(update["content"])
             guard !text.isEmpty else { return }
+            // Gemini reports an approval-mode change as a message of its own; the mode shows in the picker.
+            if kind == "agent_message_chunk", text.hasPrefix("[MODE_UPDATE]") { return }
             if lastKind == kind, let last = items.indices.last {
                 switch items[last].kind {
                 case .user(let t, let images): items[last].kind = .user(text: t + text, images: images)
@@ -63,6 +67,10 @@ struct ACPTranscript: Equatable {
             }
         case "session_info_update":
             if let t = update["title"] as? String, !t.isEmpty { title = t }
+        case "usage_update":
+            // Gemini: tokens in the context now (`used`) and the model's window (`size`).
+            let used = Self.int(update["used"])
+            if used > 0 { facts.contextTokens = used; reportedContext = true }
         default:
             break
         }
@@ -89,12 +97,15 @@ struct ACPTranscript: Equatable {
         append(.turnEnd(seconds: seconds, model: model), at: date)
         facts.turns += 1
         if let usage {
-            let input = Self.int(usage["inputTokens"]) + Self.int(usage["cachedReadTokens"])
+            // Gemini's input count already includes its cached tokens; Antigravity's doesn't.
+            let input = Self.int(usage["inputTokens"]) + (reportedContext ? 0 : Self.int(usage["cachedReadTokens"]))
             let output = Self.int(usage["outputTokens"])
             facts.inputTokens += input
             facts.outputTokens += output
-            facts.contextTokens = input + output
+            // A slash command Gemini handled itself reports zeros; the context didn't change.
+            if !reportedContext, input + output > 0 { facts.contextTokens = input + output }
         }
+        reportedContext = false
     }
 
     /// A turn that never answered (the process died, or the request failed).

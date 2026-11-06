@@ -147,12 +147,12 @@ final class ChatModel: ObservableObject {
         antigravityWatch = antigravity?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
         }
-        agyWatch = AntigravityRunner.shared.$version.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.antigravityChanged() }
+        acpWatch = AntigravityRunner.shared.$version.merge(with: GeminiRunner.shared.$version).sink { [weak self] _ in
+            DispatchQueue.main.async { self?.acpChanged() }
         }
     }
     private var codexWatch: AnyCancellable?
-    private var agyWatch: AnyCancellable?
+    private var acpWatch: AnyCancellable?
     private var antigravityWatch: AnyCancellable?
 
     // Stored properties of the extensions in ChatModel+*.swift (an extension can't hold them).
@@ -187,15 +187,15 @@ final class ChatModel: ObservableObject {
         return saved
     }()
 
-    /// Recent Antigravity CLI conversations (`AntigravitySessions`), re-read every few seconds.
-    @Published var agyAgents: [Agent] = []
-    /// New Antigravity sessions picked in New Session that wait for their first message.
-    @Published var agyDrafts: [Agent] = []
-    var agyListedAt = Date.distantPast
-    var agyListing = false
+    /// Recent Antigravity CLI and Gemini CLI conversations (`AntigravitySessions`, `GeminiSessions`), re-read every few seconds.
+    @Published var acpAgents: [Agent] = []
+    /// New Antigravity and Gemini sessions picked in New Session that wait for their first message.
+    @Published var acpDrafts: [Agent] = []
+    var acpListedAt = Date.distantPast
+    var acpListing = false
 
-    /// Sessions started from Chat, kept until Antigravity's summaries list them.
-    var agyStarted: [Agent] = []
+    /// Sessions started from Chat, kept until the tool's own list shows them.
+    var acpStarted: [Agent] = []
 
     /// Sessions a Stop was sent to, until they stop working (or 20 s pass).
     @Published var stopping: [String: Date] = [:]
