@@ -140,11 +140,102 @@ final class NotchModel: ObservableObject {
         !q.items.isEmpty && (multiSelect || q.answerable) && (q.toolUseID.hasPrefix("hook:") || agent.canType)
     }
 
+    /// The question a session is asking, from the best source there is: the prompt hook holding it, the
+    /// transcript (a terminal session writes it at once), the question read off the job's terminal, then
+    /// the summary in the job's state. Only one of them ever shows, so the sources never double up.
     func question(_ id: String) -> PendingQuestion? {
         if let r = requests[id], let q = r.question, !answered.contains(r.id) { return q }
-        guard let q = snapshots[id]?.question ?? agent(id).flatMap(Self.questionFromNeeds),
+        guard let q = snapshots[id]?.question ?? screenQuestion(id) ?? agent(id).flatMap(summaryQuestion),
               !answered.contains(q.toolUseID) else { return nil }
         return q
+    }
+
+    /// The summary in a job's state, as a last resort: not while its terminal is yet to be read (or is being
+    /// read), since the summary holds the first question only and an answer to it would leave the rest open.
+    private func summaryQuestion(_ agent: Agent) -> PendingQuestion? {
+        if asksWithoutHook(agent) {
+            guard let read = screenReads[agent.id], read.key == Self.screenKey(agent), !read.reading else { return nil }
+        }
+        return Self.questionFromNeeds(agent)
+    }
+
+    // MARK: Questions read off the terminal
+
+    /// What was found when a background job's terminal was read for a question. `key` names the question
+    /// it asked about (session and the job's "needs" text), so a new question is read afresh.
+    struct ScreenRead: Equatable {
+        var key: String
+        var question: PendingQuestion?
+        var at: Date
+        var tries: Int
+        var reading: Bool
+    }
+
+    /// Per session, while it waits on a question nothing else describes. A background job writes its
+    /// question into the transcript only once it's answered, and without the prompt hook ("Answer Prompts
+    /// from the Notch") its state holds just a one-line summary, which can't carry several questions,
+    /// descriptions, or a question with brackets in it.
+    @Published private(set) var screenReads: [String: ScreenRead] = [:] { didSet { layoutChanged?() } }
+
+    private static func screenKey(_ agent: Agent) -> String { agent.id + "|" + (agent.detail ?? "") }
+
+    private func screenQuestion(_ id: String) -> PendingQuestion? {
+        guard let read = screenReads[id], let agent = agent(id), read.key == Self.screenKey(agent) else { return nil }
+        return read.question
+    }
+
+    /// A background job is asking something ("answer: …" in its state), no hook holds it and the transcript
+    /// doesn't have it.
+    private func asksWithoutHook(_ agent: Agent) -> Bool {
+        guard agent.group == .needsInput, case .job = agent.target, agent.command == nil,
+              requests[agent.id] == nil, snapshots[agent.id]?.question == nil,
+              let needs = agent.detail else { return false }
+        return needs.hasPrefix("answer")
+    }
+
+    /// After each poll: reads the terminal of every background job that asks a question, once per question
+    /// (again a few times if the dialog hadn't drawn yet), and forgets sessions that stopped asking.
+    func updateScreenQuestions() {
+        let asking = Set(agents.filter { $0.group == .needsInput }.map(\.id))
+        let stale = screenReads.keys.filter { !asking.contains($0) }
+        if !stale.isEmpty {
+            var next = screenReads
+            for id in stale { next[id] = nil }
+            screenReads = next
+        }
+        for agent in agents where asksWithoutHook(agent) { readScreenQuestion(agent, force: false) }
+    }
+
+    /// Reads the job's terminal for its open question. `force`: even when it was tried and found nothing
+    /// (a reply bounced off a dialog, so one is open). `done` says whether a question was found.
+    func readScreenQuestion(_ agent: Agent, force: Bool, done: ((Bool) -> Void)? = nil) {
+        guard case .job(let jobID) = agent.target, agent.command == nil, requests[agent.id] == nil else { done?(false); return }
+        let key = Self.screenKey(agent)
+        let before = screenReads[agent.id]?.key == key ? screenReads[agent.id] : nil
+        if let before {
+            if before.reading {
+                // One read at a time: whoever asked gets the answer of the one under way.
+                if done != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.readScreenQuestion(agent, force: force, done: done) } }
+                return
+            }
+            if before.question != nil { done?(true); return }
+            if !force, before.tries >= 3 || Date().timeIntervalSince(before.at) < 8 { return }
+        }
+        screenReads[agent.id] = ScreenRead(key: key, question: nil, at: Date(), tries: (before?.tries ?? 0) + 1, reading: true)
+        let id = agent.id
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let found = (try? ReplySender.readQuestion(job: jobID)) ?? nil
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if var read = self.screenReads[id], read.key == key {
+                    read.reading = false
+                    read.question = found
+                    read.at = Date()
+                    self.screenReads[id] = read
+                }
+                done?(found != nil)
+            }
+        }
     }
 
     /// A background job only writes the question into its transcript once it's answered. While it's
@@ -190,6 +281,7 @@ final class NotchModel: ObservableObject {
                 guard let self else { return }
                 let old = self.snapshots
                 if fresh != old { self.snapshots = fresh }
+                self.updateScreenQuestions()
                 done(old, fresh)
             }
         }
