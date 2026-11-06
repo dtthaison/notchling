@@ -361,15 +361,29 @@ enum SSH {
          "/bin/sh -c " + LaneStore.quote(RemoteShell.prelude + script)]
     }
 
-    /// A script that needs admin rights. Through sudo, the password is the first line of ssh's stdin (`sudo -S`
+    /// The PATH an admin script runs with. Nothing the worker account owns is on it.
+    static let adminPath = "/usr/sbin:/usr/bin:/sbin:/bin"
+
+    /// The home of the account an admin script runs as (root).
+    static func adminHome(_ m: Machine) -> String { m.os == .macOS ? "/var/root" : "/root" }
+
+    /// Why an admin step can't run on `m`, or nil. On Linux the worker account must not be the admin: it can plant
+    /// a shell file, and any password typed into its ssh session passes through the shell files it owns.
+    static func adminRefusal(_ m: Machine) -> String? {
+        guard m.os == .linux, m.admin == .sudo else { return nil }
+        return "On Linux the worker account can't be the admin: its own shell files could read the password. Use root over SSH or another admin account."
+    }
+
+    /// A script that needs admin rights, built so that nothing the worker account can change decides what runs:
+    /// `/usr/bin/sudo` by absolute path, and the script under `env -i` with a fixed PATH (no user prelude, so no
+    /// `~/.local/bin`, cargo or mise). Through sudo the password is the first line of ssh's stdin (`sudo -S`
     /// reads it); the script itself reads no stdin, so a line sudo did not take (NOPASSWD) reaches no command.
     /// As root over ssh there is no sudo at all.
     static func admin(_ m: Machine, _ script: String, asRoot: Bool) -> [String] {
         let user = asRoot ? "root" : m.user
         let body = "exec </dev/null; " + script
-        let remote = asRoot
-            ? RemoteShell.prelude + body
-            : RemoteShell.prelude + "sudo -S -k -p '' /bin/sh -c " + LaneStore.quote(body)
+        let fixed = "/usr/bin/env -i PATH=\(adminPath) HOME=\(adminHome(m)) /bin/sh -c " + LaneStore.quote(body)
+        let remote = asRoot ? fixed : "/usr/bin/sudo -S -k -p '' " + fixed
         return ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--", "\(user)@\(m.host)",
                 "/bin/sh -c " + LaneStore.quote(remote)]
     }

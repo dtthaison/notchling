@@ -497,13 +497,14 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let facts = MacFacts(plugins: ["sd@system-design": InstalledPlugin(version: "1.19.2", path: sdDir.path)], marketplaceJSON: [:])
         let runner = ScriptedRunner()
         var vps = TestMachines.linux()
+        vps.admin = .rootSSH                   // on Linux the admin is root over ssh, never the worker account
         vps.jobs[0].sdWorker?.sdPath = MachinePaths.sdPy(home: "/home/agent")
-        let outcome = try await plan(.service).run(.test(.test(machine: vps, runner: runner, mac: facts), adminPassword: "pw-123"))
+        let outcome = try await plan(.service).run(.test(.test(machine: vps, runner: runner, mac: facts)))
         XCTAssertTrue(outcome.ok, outcome.message)
         let call = try XCTUnwrap(runner.calls.first)
-        XCTAssertTrue(try XCTUnwrap(call.argv.last).contains("sudo -S"))
-        XCTAssertEqual(call.stdin, Data("pw-123\n".utf8))
-        XCTAssertFalse(call.argv.joined().contains("pw-123"))
+        XCTAssertTrue(call.argv.contains("root@vps-sing-1"))
+        XCTAssertFalse(try XCTUnwrap(call.argv.last).contains("sudo"))
+        XCTAssertNil(call.stdin)
         XCTAssertEqual(runner.calls.count, 1)
     }
 

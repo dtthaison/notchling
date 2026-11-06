@@ -135,7 +135,9 @@ struct Machine: Codable, Equatable {
         user = try c.decode(String.self, forKey: .user)
         os = try c.decodeIfPresent(MachineOS.self, forKey: .os)
         fileVault = try c.decodeIfPresent(Bool.self, forKey: .fileVault) ?? false
-        admin = try c.decodeIfPresent(AdminAccess.self, forKey: .admin) ?? .sudo
+        // On Linux the worker account can't be the admin (`SSH.adminRefusal`), so a file that says nothing gets root
+        // over ssh there; what a file says is kept.
+        admin = try c.decodeIfPresent(AdminAccess.self, forKey: .admin) ?? (os == .linux ? .rootSSH : .sudo)
         claudeSecret = try c.decodeIfPresent(String.self, forKey: .claudeSecret) ?? "claude-worker"
         abilities = try c.decodeIfPresent(MachineAbilities.self, forKey: .abilities)
         jobs = try c.decodeIfPresent([Job].self, forKey: .jobs) ?? []

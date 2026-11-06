@@ -272,6 +272,7 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertEqual(reg.machines.map(\.name), ["m1", "m2"])
         let added = try XCTUnwrap(reg.machines.last)
         XCTAssertEqual(added.os, .macOS)
+        XCTAssertEqual(added.admin, .sudo, "a Mac's admin is its own login account")
         XCTAssertEqual(added.abilities?.arch, "arm64")
         XCTAssertEqual(added.abilities?.home, "/Users/sondoan")
         XCTAssertTrue(added.jobs.isEmpty)
@@ -287,6 +288,17 @@ final class MachinesWindowTests: XCTestCase {
         }
         XCTAssertTrue(model.engine.running.isEmpty)
         XCTAssertTrue(model.engine.logs.values.allSatisfy { $0.isEmpty }, "no Fix logged anything")
+    }
+
+    /// M10: a new Linux machine starts with root over SSH as its admin (sudo as the worker is refused there).
+    @MainActor
+    func testANewLinuxMachineStartsWithRootOverSSH() async throws {
+        let runner = ReachableRunner(reachable: "os=Linux\narch=x86_64\nuid=1000\nuser=agent\nhome=/home/agent\nversion=Ubuntu 24.04\ndisk_kb=1048576\ndocker=none")
+        let reg = TestRegistry(machines: [])
+        let model = makeModel(reg, runner: runner)
+        let draft = await model.checkDraft(name: "vps2", host: "vps2", user: "agent")
+        XCTAssertNil(model.add(name: "vps2", host: "vps2", user: "agent", check: draft))
+        XCTAssertEqual(try XCTUnwrap(reg.machines.first).admin, .rootSSH)
     }
 
     @MainActor
@@ -448,6 +460,38 @@ final class MachinesWindowTests: XCTestCase {
         let call = try XCTUnwrap(ssh(runner).last)
         XCTAssertNil(call.stdin, "as root there is no password")
         XCTAssertTrue(call.argv.contains("root@vps-sing-1"))
+    }
+
+    /// C1 / ruling M12: the sheet of an admin step on a Linux machine whose admin is the worker account says why it
+    /// can't run, asks for no password and runs nothing.
+    @MainActor
+    func testALinuxAdminSheetAsTheWorkerIsBlockedWithItsReason() async throws {
+        let runner = ScriptedRunner()
+        let model = makeModel(TestRegistry(machines: [TestMachines.linux()]), runner: runner, steps: { _, _ in [self.adminStep()] })
+        await model.open()
+        model.requestSetUp(.staysAwake, on: "vps-sing-1")
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
+        let reason = "On Linux the worker account can't be the admin: its own shell files could read the password. Use root over SSH or another admin account."
+        XCTAssertEqual(prompt.blocked, reason)
+        XCTAssertNil(prompt.warning)
+        XCTAssertFalse(prompt.root)
+        let before = ssh(runner).count
+        await model.confirm(prompt, password: "typed-anyway").value
+        XCTAssertEqual(model.outcomes["vps-sing-1"]?.ok, false)
+        XCTAssertEqual(model.outcomes["vps-sing-1"]?.text, reason)
+        XCTAssertEqual(ssh(runner).count, before, "nothing ran")
+
+        // a plain step, a Mac and root over ssh are not blocked
+        var root = TestMachines.linux()
+        root.admin = .rootSSH
+        let model2 = makeModel(TestRegistry(machines: [TestMachines.mac(), root]), steps: { _, _ in [self.adminStep()] })
+        await model2.open()
+        for machine in ["m1", "vps-sing-1"] {
+            model2.requestSetUp(.staysAwake, on: machine)
+            guard case .fix(let p)? = model2.setupSheet else { return XCTFail("no sheet") }
+            XCTAssertNil(p.blocked, machine)
+            model2.cancel(p)
+        }
     }
 
     @MainActor
@@ -615,7 +659,10 @@ final class MachinesWindowTests: XCTestCase {
         let runner = ScriptedRunner()
         let running = SetupStep(id: .running, title: "Running", needs: [], cadence: .everyRefresh,
                                 probe: .local { _ in CheckResult(state: .fail("off")) }, fix: .toggle(needsAdmin: true))
-        let model = makeModel(TestRegistry(machines: [TestMachines.linux()]), runner: runner, steps: { _, _ in [running] })
+        // a Linux machine's admin is root over ssh
+        var vps = TestMachines.linux()
+        vps.admin = .rootSSH
+        let model = makeModel(TestRegistry(machines: [vps]), runner: runner, steps: { _, _ in [running] })
         await model.open()
         model.requestToggle(on: "vps-sing-1", to: true)
         guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
@@ -623,7 +670,7 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertEqual(prompt.display, SDWorkerSteps.toggleScript(linux: true, on: true))
         XCTAssertTrue(prompt.needsAdmin)
         XCTAssertTrue(ssh(runner).isEmpty)
-        await model.confirm(prompt, password: "pw-toggle").value
+        await model.confirm(prompt, password: nil).value
         let call = try XCTUnwrap(ssh(runner).first)
         XCTAssertTrue(call.argv.last?.contains("systemctl enable --now sd-worker.service") == true)
         XCTAssertEqual(model.outcomes["vps-sing-1"]?.ok, true)

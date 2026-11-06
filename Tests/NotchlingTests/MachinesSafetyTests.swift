@@ -15,6 +15,13 @@ final class MachinesSafetyTests: XCTestCase {
         FixContext.test(StepContext.test(machine: machine, runner: runner), adminPassword: password)
     }
 
+    /// A Linux machine runs its admin steps as root over ssh (sudo as the worker is refused); a Mac as its own account.
+    private func adminRunnable(_ machine: Machine) -> Machine {
+        var m = machine
+        if m.os == .linux { m.admin = .rootSSH }
+        return m
+    }
+
     /// The base64 blobs a script carries (the files an admin step installs), decoded and appended.
     private func withDecodedBlobs(_ text: String) -> String {
         var out = text
@@ -46,7 +53,7 @@ final class MachinesSafetyTests: XCTestCase {
                 texts.append((label + " display", plan.display))
                 guard !opensThisMac.contains(step.id) else { break }
                 let runner = ScriptedRunner()
-                _ = await plan.run(fixContext(machine, runner: runner))
+                _ = await plan.run(fixContext(adminRunnable(machine), runner: runner))
                 for call in runner.calls { texts.append((label + " run", call.argv.joined(separator: " "))) }
             }
         }
@@ -84,6 +91,52 @@ final class MachinesSafetyTests: XCTestCase {
         }
         XCTAssertGreaterThan(seenAdmin, 6, "the admin steps were looked at")
         XCTAssertGreaterThanOrEqual(seenSystemctl, 3, "the systemctl commands were looked at")
+    }
+
+    /// C1: every admin command of the catalog (the Fixes and the Running switch) goes out through the absolute
+    /// `/usr/bin/sudo` (or as root over ssh, with no sudo), runs its script under `env -i` with a fixed PATH, and
+    /// carries nothing of the worker account's own: no user prelude, `~/.local/bin`, cargo or mise.
+    func testEveryAdminCommandUsesTheAbsoluteSudoAndAFixedEnvironment() async {
+        var seen = 0
+        for machine in machines {
+            let m = adminRunnable(machine)
+            var commands: [(String, [String])] = []
+            for step in catalog(m) {
+                switch step.fix {
+                case .run(let plan) where plan.needsAdmin:
+                    let runner = ScriptedRunner()
+                    _ = await plan.run(fixContext(m, runner: runner))
+                    commands += runner.calls.map { ("\(m.name)/\(step.id.raw)", $0.argv) }
+                case .toggle(true):
+                    for on in [true, false] {
+                        let runner = ScriptedRunner()
+                        _ = await MachineRun.admin(SDWorkerSteps.toggleScript(linux: m.os == .linux, on: on),
+                                                   ctx: fixContext(m, runner: runner))
+                        commands += runner.calls.map { ("\(m.name)/\(step.id.raw) \(on)", $0.argv) }
+                    }
+                default: break
+                }
+            }
+            for (label, argv) in commands {
+                seen += 1
+                let text = argv.joined(separator: "\n")
+                for needle in [RemoteShell.prelude, "export PATH", "$HOME", ".local/bin", ".cargo", "mise", "/opt/homebrew", "/usr/local"] {
+                    XCTAssertFalse(text.contains(needle), "\(label) carries \(needle)")
+                }
+                XCTAssertTrue(text.contains("/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="), "\(label) has no fixed environment")
+                if m.admin == .rootSSH {
+                    XCTAssertTrue(argv.contains("root@\(m.host)"), label)
+                    XCTAssertFalse(text.contains("sudo"), "\(label) uses sudo as root")
+                } else {
+                    XCTAssertTrue(text.contains("/usr/bin/sudo -S -k"), "\(label) doesn't call the absolute sudo")
+                    // every sudo is the absolute one
+                    XCTAssertEqual(text.components(separatedBy: "sudo").count - 1, text.components(separatedBy: "/usr/bin/sudo").count - 1,
+                                   "\(label) has a sudo found by PATH")
+                }
+            }
+        }
+        // Stays awake, Base tools and the Running switch both ways (Service installed needs this Mac's sd to run)
+        XCTAssertGreaterThanOrEqual(seen, 4, "the admin commands were looked at")
     }
 
     func testTheAdminStepsOfTheCatalogAreTheOnesTheSpecNames() async {

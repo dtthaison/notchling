@@ -124,7 +124,51 @@ final class MachinesMachineStepsTests: XCTestCase {
         let odd = await check(.workerUser, "")
         guard case .cantTell = odd.state else { return XCTFail("no answer is can't tell") }
         XCTAssertTrue(howTo(step(.workerUser)).contains("agent"))
-        XCTAssertEqual(script(step(.workerUser)), "id -u")
+    }
+
+    /// C1 / ruling M12: a Linux worker that can use sudo is a failure, by group or by `sudo -n -l`.
+    func testWorkerUserFailsOnLinuxWhenTheWorkerCanUseSudo() async {
+        let linux = TestMachines.linux()
+        let reason = "the worker account can use sudo; remove it from the sudo group"
+        for groups in ["agent sudo", "agent docker wheel", "admin agent"] {
+            let r = await check(.workerUser, "1001\nos=Linux\ngroups=\(groups)\nsudo_l=1\n", machine: linux)
+            XCTAssertEqual(r.state, .fail(reason), groups)
+        }
+        let byList = await check(.workerUser, "1001\nos=Linux\ngroups=agent docker\nsudo_l=0\n", machine: linux)
+        XCTAssertEqual(byList.state, .fail(reason), "sudo -n -l exited 0")
+
+        let clean = await check(.workerUser, "1001\nos=Linux\ngroups=agent docker\nsudo_l=1\n", machine: linux)
+        XCTAssertEqual(clean.state, .pass("user id 1001, not root"))
+        // a group that only contains the word is not the group
+        let near = await check(.workerUser, "1001\nos=Linux\ngroups=agent sudoku administrators\nsudo_l=1\n", machine: linux)
+        XCTAssertEqual(near.state, .pass("user id 1001, not root"))
+        // no sudo answer at all (sudo missing) is not a sudoer
+        let none = await check(.workerUser, "1001\nos=Linux\ngroups=agent\n", machine: linux)
+        XCTAssertEqual(none.state, .pass("user id 1001, not root"))
+    }
+
+    /// On a Mac the user's own login account is in `admin` and is the admin; the sudo test is Linux's.
+    func testWorkerUserOnAMacMayBeInTheAdminGroup() async {
+        let mac = await check(.workerUser, "501\nos=Darwin\ngroups=staff admin everyone\n", machine: TestMachines.mac())
+        XCTAssertEqual(mac.state, .pass("user id 501, not root"))
+    }
+
+    func testWorkerUserProbeAsksTheGroupsAndSudoOnLinuxOnly() {
+        let s = script(step(.workerUser))
+        XCTAssertTrue(s.hasPrefix("id -u"), s)
+        XCTAssertTrue(s.contains("id -nG"), s)
+        XCTAssertTrue(s.contains("sudo -n -l"), s)
+        XCTAssertTrue(s.contains("Linux"), "the sudo test is guarded for Linux")
+        XCTAssertTrue(s.contains("uname -s"))
+        XCTAssertFalse(s.contains("sudo -S"))
+        XCTAssertTrue(howTo(step(.workerUser)).contains("sudo"))
+    }
+
+    /// Root's id wins over the sudo test.
+    func testWorkerUserRootStillFailsFirst() async {
+        let r = await check(.workerUser, "0\nos=Linux\ngroups=root\nsudo_l=0\n", machine: TestMachines.linux())
+        guard case let .fail(text) = r.state else { return XCTFail("root should fail") }
+        XCTAssertTrue(text.contains("root"), text)
     }
 
     // MARK: Stays awake
@@ -246,18 +290,20 @@ final class MachinesMachineStepsTests: XCTestCase {
     }
 
     func testLinuxBaseToolsFixKeepsProductionUntouched() async {
-        let machine = TestMachines.linux()
+        var machine = TestMachines.linux()
+        machine.admin = .rootSSH                     // on Linux the admin is root over ssh
         let s = step(.baseTools, machine)
         let p = plan(s)
         XCTAssertTrue(p.needsAdmin)
         let runner = ScriptedRunner()
-        let outcome = await p.run(.test(.test(machine: machine, runner: runner), adminPassword: "pw-1234"))
+        let outcome = await p.run(.test(.test(machine: machine, runner: runner)))
         XCTAssertTrue(outcome.ok, outcome.message)
         XCTAssertEqual(runner.calls.count, 1)
         let call = runner.calls[0]
-        XCTAssertEqual(call.stdin, Data("pw-1234\n".utf8))
+        XCTAssertNil(call.stdin, "as root over ssh there is no password")
+        XCTAssertTrue(call.argv.contains("root@vps-sing-1"))
         let sent = call.argv.last!
-        XCTAssertTrue(sent.contains("sudo -S"))
+        XCTAssertFalse(sent.contains("sudo"))
         XCTAssertTrue(sent.contains("NEEDRESTART_SUSPEND=1"))
         XCTAssertTrue(sent.contains("apt-get install -y git python3 jq wget"))
         XCTAssertTrue(sent.contains("apt-get install -y gh"))
@@ -269,12 +315,16 @@ final class MachinesMachineStepsTests: XCTestCase {
         for word in ["restart", "upgrade", "systemctl"] { XCTAssertFalse(p.display.replacingOccurrences(of: "--no-upgrade", with: "").contains(word), word) }
     }
 
-    func testLinuxBaseToolsFixRefusesWithoutAPassword() async {
+    /// C1 / ruling M12: with the worker account as the admin the Fix is refused, a password or not.
+    func testLinuxBaseToolsFixAsTheWorkerIsRefusedBeforeAnyCommandRuns() async {
         let machine = TestMachines.linux()
-        let runner = ScriptedRunner()
-        let outcome = await plan(step(.baseTools, machine)).run(.test(.test(machine: machine, runner: runner)))
-        XCTAssertFalse(outcome.ok)
-        XCTAssertTrue(runner.calls.isEmpty)
+        for password in [nil, "pw-1234"] as [String?] {
+            let runner = ScriptedRunner()
+            let outcome = await plan(step(.baseTools, machine)).run(.test(.test(machine: machine, runner: runner), adminPassword: password))
+            XCTAssertFalse(outcome.ok)
+            XCTAssertTrue(outcome.message.contains("On Linux the worker account can't be the admin"), outcome.message)
+            XCTAssertTrue(runner.calls.isEmpty)
+        }
     }
 
     func testMacBaseToolsFixUsesHomebrewWithoutAdmin() async {

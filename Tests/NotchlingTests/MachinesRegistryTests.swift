@@ -223,6 +223,17 @@ final class MachinesRegistryTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted(), ["kind.json", "v3.json"])
     }
 
+    /// M10 / ruling M12: a Linux machine's admin can't be the worker account, so a file that doesn't say defaults it to
+    /// root over SSH. A Mac keeps sudo, and what a file says is kept.
+    func testALinuxMachineWithoutAnAdminKeyDefaultsToRootOverSSH() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("machines.json")
+        try Data(#"{"version":2,"machines":[{"name":"a","host":"a","user":"agent","os":"linux"},{"name":"b","host":"b","user":"u","os":"macos"},{"name":"c","host":"c","user":"u"},{"name":"d","host":"d","user":"u","os":"linux","admin":"sudo"}]}"#.utf8).write(to: url)
+        let machines = MachineRegistry.all(at: url)
+        XCTAssertEqual(machines.map(\.admin), [.rootSSH, .sudo, .sudo, .sudo])
+    }
+
     func testV2FieldsMayBeMissingExceptNameHostUser() throws {
         let dir = try makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }

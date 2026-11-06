@@ -158,16 +158,18 @@ final class MachinesStepCatalogTests: XCTestCase {
 
     func testAdminRunPutsThePasswordOnlyOnStdin() async {
         let password = "hunter2-Pw!"
+        let mac = TestMachines.mac()
         let runner = ScriptedRunner()
-        let result = await MachineRun.admin("apt-get install -y git", ctx: fixContext(password: password, runner: runner))
+        let result = await MachineRun.admin("pmset -a sleep 0", ctx: fixContext(mac, password: password, runner: runner))
         XCTAssertEqual(result.code, 0)
         XCTAssertEqual(runner.calls.count, 1)
         let call = runner.calls[0]
         XCTAssertEqual(call.stdin, Data("\(password)\n".utf8))
         XCTAssertFalse(call.argv.contains { $0.contains(password) }, "the password is in argv")
         XCTAssertFalse(call.env.values.contains { $0.contains(password) }, "the password is in the environment")
-        XCTAssertEqual(call.argv, SSH.admin(TestMachines.linux(), "apt-get install -y git", asRoot: false))
-        XCTAssertTrue(call.argv.contains("agent@vps-sing-1"))
+        XCTAssertEqual(call.argv, SSH.admin(mac, "pmset -a sleep 0", asRoot: false))
+        XCTAssertTrue(call.argv.contains("sondoan@m1"))
+        XCTAssertTrue(call.argv.last!.contains("/usr/bin/sudo -S"), "the absolute sudo")
 
         // root over ssh: no sudo, no password on stdin, even if one was given
         var root = TestMachines.linux()
@@ -179,14 +181,38 @@ final class MachinesStepCatalogTests: XCTestCase {
             XCTAssertNil(rootRunner.calls[0].stdin)
             XCTAssertTrue(rootRunner.calls[0].argv.contains("root@vps-sing-1"))
             XCTAssertFalse(rootRunner.calls[0].argv.contains { $0.contains(password) })
+            XCTAssertEqual(rootRunner.calls[0].argv, SSH.admin(root, "apt-get update", asRoot: true))
+            XCTAssertFalse(rootRunner.calls[0].argv.last!.contains("sudo"), "root over ssh has no sudo")
         }
 
         // sudo without a password: refused before anything runs
         let idle = ScriptedRunner()
-        let refused = await MachineRun.admin("true", ctx: fixContext(password: nil, runner: idle))
+        let refused = await MachineRun.admin("true", ctx: fixContext(mac, password: nil, runner: idle))
         XCTAssertEqual(refused.code, 126)
         XCTAssertEqual(refused.err, "needs the admin password")
         XCTAssertTrue(idle.calls.isEmpty)
+    }
+
+    /// C1 / ruling M12: on Linux the worker account can't be the admin, so sudo as the worker is refused before a
+    /// command runs, with or without a password.
+    func testALinuxAdminStepAsTheWorkerIsRefusedBeforeAnyCommandRuns() async {
+        let linux = TestMachines.linux()
+        XCTAssertEqual(linux.admin, .sudo)
+        for given in [nil, "hunter2-Pw!"] as [String?] {
+            let idle = ScriptedRunner()
+            let refused = await MachineRun.admin("apt-get update", ctx: fixContext(linux, password: given, runner: idle))
+            XCTAssertEqual(refused.code, 126)
+            XCTAssertEqual(refused.err, "On Linux the worker account can't be the admin: its own shell files could read the password. Use root over SSH or another admin account.")
+            XCTAssertTrue(idle.calls.isEmpty, "no command ran")
+        }
+        // an unknown OS is not Linux; a Mac's own login account is the admin there
+        var mac = TestMachines.mac()
+        XCTAssertNil(SSH.adminRefusal(mac))
+        mac.os = nil
+        XCTAssertNil(SSH.adminRefusal(mac))
+        var root = linux
+        root.admin = .rootSSH
+        XCTAssertNil(SSH.adminRefusal(root))
     }
 
     func testScriptAndLocalStreamTheirOutputToTheLog() async {

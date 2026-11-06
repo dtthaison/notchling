@@ -15,8 +15,8 @@ enum MachineSteps {
                       probe: .remote(script: reachableScript, parse: parseReachable),
                       fix: .howTo("Turn the machine on and check it from this Mac with `tailscale ping \(machine.host)`. For a new Linux user, add the user to the Tailscale ACL's ssh users. Then check again.")),
             SetupStep(id: .workerUser, title: "Worker user", needs: [.reachable], cadence: .everyRefresh,
-                      probe: .remote(script: "id -u", parse: parseWorkerUser),
-                      fix: .howTo("Use the worker account (agent on vps-sing-1). Root is only for steps marked needs admin. Then check again.")),
+                      probe: .remote(script: workerUserScript, parse: parseWorkerUser),
+                      fix: .howTo("Use the worker account (agent on vps-sing-1). Root is only for steps marked needs admin. On Linux the worker account must not be able to use sudo: remove it from the sudo group (admin steps run as root over SSH). Then check again.")),
             SetupStep(id: .staysAwake, title: "Stays awake", needs: [.reachable], cadence: .everyRefresh,
                       probe: .remote(script: "pmset -g", parse: parseStaysAwake),
                       fix: .run(staysAwakeFix)),
@@ -139,6 +139,18 @@ enum MachineSteps {
 
     // MARK: 2 Worker user
 
+    /// The user id, then (keyed) the OS, the groups, and on Linux whether `sudo -n -l` works. Read-only: `sudo -n`
+    /// never asks for a password.
+    private static let workerUserScript = """
+    id -u
+    echo "os=$(uname -s)"
+    echo "groups=$(id -nG 2>/dev/null)"
+    if [ "$(uname -s)" = Linux ]; then sudo -n -l >/dev/null 2>&1; echo "sudo_l=$?"; fi
+    """
+
+    /// The groups that let a Linux account use sudo.
+    private static let sudoGroups: Set<String> = ["sudo", "wheel", "admin"]
+
     private static func parseWorkerUser(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
         let uid = out.text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -146,6 +158,15 @@ enum MachineSteps {
         guard let uid, let number = Int(uid) else { return CheckResult(state: .cantTell("the machine did not say who this is")) }
         if number == 0 {
             return CheckResult(state: .fail("signed in as root; use the worker account. Root is only for steps marked needs admin"))
+        }
+        // On Linux the worker account must not be able to use sudo: the admin password would pass through shell
+        // files it owns, and it could sudo as itself. On a Mac the user's own account is the admin.
+        let kv = keyed(out.text, keys: ["os", "groups", "sudo_l"])
+        if kv["os"] == "Linux" {
+            let groups = Set((kv["groups"] ?? "").split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init))
+            if !groups.isDisjoint(with: sudoGroups) || kv["sudo_l"] == "0" {
+                return CheckResult(state: .fail("the worker account can use sudo; remove it from the sudo group"))
+            }
         }
         return CheckResult(state: .pass("user id \(number), not root"))
     }

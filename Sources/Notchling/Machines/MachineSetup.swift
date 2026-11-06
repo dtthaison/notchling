@@ -152,9 +152,11 @@ enum MachineRun {
 
     /// A script with admin rights. Through sudo the password is the first line of stdin and nothing else carries
     /// it; with no password the call is refused (126) before anything runs. As root over ssh there is no sudo and
-    /// no stdin. The script runs with root's `~`, so it takes absolute paths (`MachinePaths.absolute`).
+    /// no stdin. The script runs with root's `~`, so it takes absolute paths (`MachinePaths.absolute`). On Linux
+    /// the worker account itself is never the admin (`SSH.adminRefusal`): that call is refused (126) too.
     static func admin(_ s: String, ctx: FixContext, timeout: TimeInterval = 900) async -> CommandResult {
         let machine = ctx.step.machine
+        if let why = SSH.adminRefusal(machine) { return CommandResult(code: 126, out: "", err: why) }
         let asRoot = machine.admin == .rootSSH
         var stdin: Data?
         if !asRoot {

@@ -667,7 +667,7 @@ private struct FixConfirmSheet: View {
     let cancel: () -> Void
     @State private var password = ""
 
-    private var needsPassword: Bool { prompt.needsAdmin && !prompt.root }
+    private var needsPassword: Bool { prompt.needsAdmin && !prompt.root && prompt.blocked == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -681,7 +681,10 @@ private struct FixConfirmSheet: View {
             .frame(minHeight: 80, maxHeight: 300)
             .padding(10)
             .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.sidebar))
-            if let warning = prompt.warning {
+            if let blocked = prompt.blocked {
+                Label(blocked, systemImage: "xmark.octagon.fill").kitType(.label).foregroundColor(Danger.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let warning = prompt.warning {
                 Label(warning, systemImage: "exclamationmark.triangle.fill").kitType(.label).foregroundColor(KitInk.accentText)
             } else if needsPassword {
                 SecureField("Admin password for \(prompt.user)@\(prompt.host)", text: $password)
@@ -696,7 +699,7 @@ private struct FixConfirmSheet: View {
                     run(needsPassword ? given : nil)
                 }
                 .buttonStyle(.kit(.primary)).keyboardShortcut(.defaultAction)
-                .disabled(needsPassword && password.isEmpty)
+                .disabled(prompt.blocked != nil || (needsPassword && password.isEmpty))
             }
         }
         .padding(20)

@@ -74,6 +74,9 @@ struct FixPrompt: Identifiable, Equatable {
     var root: Bool
     /// Set up all: the steps the sheet listed, and the only ones the run may run.
     var approved: [ApprovedStep] = []
+    /// Why an admin step can't run on this machine at all (Linux, the worker account as admin): the sheet says so
+    /// and asks for no password.
+    var blocked: String?
 
     var warning: String? { needsAdmin && root ? "Admin steps run as root over SSH on \(host)." : nil }
 }
@@ -412,6 +415,7 @@ final class MachinesModel: ObservableObject {
         guard check.inputs == [name, host, user] else { return "Check again; the details changed" }
         var machine = Machine(name: name, host: host, user: user)
         machine.os = check.detected.os
+        if machine.os == .linux { machine.admin = .rootSSH }    // sudo as the worker account is refused on Linux
         if let fileVault = check.detected.fileVault { machine.fileVault = fileVault }
         if var abilities = check.detected.abilities {
             if let home = check.detected.home, RemoteShell.isSafeMachinePath(home) { abilities.home = home }
@@ -430,7 +434,7 @@ final class MachinesModel: ObservableObject {
 
     private func prompt(_ m: Machine, kind: FixPrompt.Kind, title: String, display: String, needsAdmin: Bool) -> FixPrompt {
         FixPrompt(machine: m.name, host: m.host, user: m.user, kind: kind, title: title, display: display,
-                  needsAdmin: needsAdmin, root: m.admin == .rootSSH)
+                  needsAdmin: needsAdmin, root: m.admin == .rootSSH, blocked: needsAdmin ? SSH.adminRefusal(m) : nil)
     }
 
     /// Set up on one step: shows its commands. Runs nothing.

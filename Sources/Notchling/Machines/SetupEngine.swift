@@ -509,6 +509,7 @@ final class SetupEngine: ObservableObject {
             }
         }
         if needsAdmin {
+            if let why = SSH.adminRefusal(m) { return why }
             if m.admin == .rootSSH {
                 if !approval.asRootConfirmed { return "needs your confirmation to run as root on \(m.name)" }
             } else if (approval.adminPassword ?? "").isEmpty {
@@ -622,6 +623,8 @@ final class SetupEngine: ObservableObject {
             }
             var approval = FixApproval(adminPassword: nil, asRootConfirmed: false)
             if plan.needsAdmin {
+                // refused for good (Linux, the worker as admin): don't ask for a password that would be refused
+                if let why = SSH.adminRefusal(m) { return FixOutcome(ok: false, message: "\(step.title): \(why)") }
                 switch await askAdmin(step) {
                 case .cancelled: return FixOutcome(ok: false, message: "Set up all stopped before \(step.title): cancelled")
                 case .password(let p): approval = FixApproval(adminPassword: p, asRootConfirmed: false)

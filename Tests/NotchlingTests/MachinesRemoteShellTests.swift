@@ -12,21 +12,44 @@ final class MachinesRemoteShellTests: XCTestCase {
                         "/bin/sh -c 'export PATH=\"\(path)\"; echo hi'"])
     }
 
-    func testAdminThroughSudoReadsThePasswordFromStdin() {
-        let argv = SSH.admin(machine, "apt-get install -y git", asRoot: false)
-        XCTAssertEqual(argv[argv.count - 2], "agent@vps.tail")
-        // the brief's quoting turns the empty prompt '' into '\'''\'' in the outer word, so the exact string below is the check
-        XCTAssertTrue(argv.last!.contains("sudo -S -k -p "), argv.last!)
-        XCTAssertTrue(argv.last!.contains("exec </dev/null; apt-get"), argv.last!)
-        XCTAssertEqual(argv.last, "/bin/sh -c " + LaneStore.quote(RemoteShell.prelude + "sudo -S -k -p '' /bin/sh -c "
-                       + LaneStore.quote("exec </dev/null; apt-get install -y git")))
+    /// The sudo binary and the PATH of the script it runs are fixed: nothing the worker account owns decides
+    /// either (C1). A shell file, a `~/.local/bin/sudo` or a planted `pmset` is never reached.
+    private func assertNothingOfTheWorkersOwn(_ argv: [String], file: StaticString = #filePath, line: UInt = #line) {
+        let text = argv.joined(separator: "\n")
+        for needle in [RemoteShell.prelude, "export PATH", "$HOME", ".local/bin", ".cargo", "mise", "/opt/homebrew", "/usr/local"] {
+            XCTAssertFalse(text.contains(needle), "an admin command carries \(needle): \(text)", file: file, line: line)
+        }
     }
 
-    func testAdminAsRootOverSSH() {
-        let argv = SSH.admin(machine, "apt-get update", asRoot: true)
+    func testAdminThroughSudoCallsTheAbsoluteSudoWithAFixedEnvironment() {
+        var mac = machine
+        mac.os = .macOS
+        let argv = SSH.admin(mac, "pmset -a sleep 0", asRoot: false)
+        XCTAssertEqual(argv[argv.count - 2], "agent@vps.tail")
+        let inner = "/usr/bin/sudo -S -k -p '' /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/var/root /bin/sh -c "
+            + LaneStore.quote("exec </dev/null; pmset -a sleep 0")
+        XCTAssertEqual(argv.last, "/bin/sh -c " + LaneStore.quote(inner))
+        assertNothingOfTheWorkersOwn(argv)
+    }
+
+    func testAdminThroughSudoOnLinuxUsesRootsHome() {
+        var linux = machine
+        linux.os = .linux
+        let argv = SSH.admin(linux, "apt-get install -y git", asRoot: false)
+        XCTAssertTrue(argv.last!.contains("/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root /bin/sh -c"), argv.last!)
+        XCTAssertTrue(argv.last!.contains("/usr/bin/sudo -S -k -p "), argv.last!)
+        assertNothingOfTheWorkersOwn(argv)
+    }
+
+    func testAdminAsRootOverSSHHasNoSudoAndAFixedEnvironment() {
+        var linux = machine
+        linux.os = .linux
+        let argv = SSH.admin(linux, "apt-get update", asRoot: true)
         XCTAssertEqual(argv[argv.count - 2], "root@vps.tail")
         XCTAssertFalse(argv.last!.contains("sudo"))
-        XCTAssertEqual(argv.last, "/bin/sh -c " + LaneStore.quote(RemoteShell.prelude + "exec </dev/null; apt-get update"))
+        let inner = "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root /bin/sh -c " + LaneStore.quote("exec </dev/null; apt-get update")
+        XCTAssertEqual(argv.last, "/bin/sh -c " + LaneStore.quote(inner))
+        assertNothingOfTheWorkersOwn(argv)
     }
 
     func testRemotePathQuoting() {

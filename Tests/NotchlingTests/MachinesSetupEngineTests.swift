@@ -569,6 +569,46 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertFalse(w.runner.calls.contains { FakeSSH.isAdmin($0) })
     }
 
+    /// C1 / ruling M12: sudo as the worker account on Linux is refused before any command runs, a password or not.
+    /// Set up all doesn't even ask for the password of such a step.
+    func testALinuxAdminStepAsTheWorkerIsRefusedBeforeAnyCommandRuns() async {
+        let refusal = "On Linux the worker account can't be the admin: its own shell files could read the password. Use root over SSH or another admin account."
+        let w = world([TestMachines.linux("vps")]) { _, _ in [self.adminStep()] }
+        for approval in [admin(password: "hunter2-Pw!"), admin(), admin(root: true)] {
+            let out = await w.engine.runFix(StepID(raw: "adm"), on: "vps", approval: approval)
+            XCTAssertEqual(out, FixOutcome(ok: false, message: refusal))
+        }
+        XCTAssertEqual(w.runner.calls.count, 0, "refused before any command ran")
+        XCTAssertNil(w.engine.logs["vps"])
+
+        // Set up all reaches the step, and stops there without asking
+        w.answers.value = ["echo probe-adm": ("bad", 1)]
+        await w.engine.refresh(["vps"])
+        let asked = Counter()
+        let plan = w.engine.setUpAllPlan(for: "vps")
+        XCTAssertEqual(plan.map(\.id.raw), ["adm"])
+        let all = await w.engine.setUpAll(on: "vps", approved: plan) { _ in asked.add("asked"); return .password("hunter2-Pw!") }
+        XCTAssertFalse(all.ok)
+        XCTAssertTrue(all.message.contains(refusal), all.message)
+        XCTAssertEqual(asked.count, 0, "the password was not asked for")
+        XCTAssertFalse(w.runner.calls.contains { FakeSSH.isAdmin($0) })
+    }
+
+    /// Root over SSH is the Linux admin: the ssh goes to root, with no sudo and no password.
+    func testALinuxAdminStepOverRootSSHRunsAsRootWithoutSudo() async {
+        var vps = TestMachines.linux("vps")
+        vps.admin = .rootSSH
+        let w = world([vps]) { _, _ in [self.adminStep()] }
+        echoStdin(w)
+        let out = await w.engine.runFix(StepID(raw: "adm"), on: "vps", approval: admin(root: true))
+        XCTAssertTrue(out.ok, out.message)
+        let calls = w.runner.calls.filter { $0.argv.contains("root@vps") }
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].argv, SSH.admin(vps, "echo installing", asRoot: true))
+        XCTAssertNil(calls[0].stdin)
+        XCTAssertFalse(calls[0].argv.last!.contains("sudo"))
+    }
+
     func testANonAdminStepNeverGetsThePassword() async {
         let seen = Box<String?>("untouched")
         let fix = StepFix.run(FixPlan(display: "plain", needsAdmin: false) { ctx in
@@ -1273,24 +1313,42 @@ final class MachinesSetupEngineTests: XCTestCase {
     // MARK: toggle
 
     func testToggleRunningTurnsTheWorkerOnAndOff() async {
-        let w = world([TestMachines.linux("vps")]) { _, _ in [
+        // on a Linux machine the admin is root over ssh (sudo as the worker is refused)
+        var vps = TestMachines.linux("vps")
+        vps.admin = .rootSSH
+        let w = world([vps]) { _, _ in [
             step("sd-check", title: "sd check"),
             step("running", needs: ["sd-check"], fix: .toggle(needsAdmin: true)),
         ] }
         echoStdin(w)
         await w.engine.refresh(["vps"])
         let refused = await w.engine.toggleRunning(on: "vps", to: true, approval: admin())
-        XCTAssertFalse(refused.ok)
-        XCTAssertFalse(w.runner.calls.contains { FakeSSH.isAdmin($0) })
+        XCTAssertFalse(refused.ok, "root needs the user's confirmation")
+        XCTAssertEqual(w.runner.calls.filter { $0.argv.contains("root@vps") }.count, 0)
 
-        let on = await w.engine.toggleRunning(on: "vps", to: true, approval: admin(password: "hunter2-Pw!"))
+        let on = await w.engine.toggleRunning(on: "vps", to: true, approval: admin(root: true))
         XCTAssertTrue(on.ok, on.message)
-        XCTAssertTrue(w.runner.calls.last { FakeSSH.isAdmin($0) }?.argv.last?.contains("systemctl enable --now sd-worker.service") == true)
-        let off = await w.engine.toggleRunning(on: "vps", to: false, approval: admin(password: "hunter2-Pw!"))
+        XCTAssertTrue(w.runner.calls.last { $0.argv.contains("root@vps") }?.argv.last?.contains("systemctl enable --now sd-worker.service") == true)
+        let off = await w.engine.toggleRunning(on: "vps", to: false, approval: admin(root: true))
         XCTAssertTrue(off.ok, off.message)
-        XCTAssertTrue(w.runner.calls.last { FakeSSH.isAdmin($0) }?.argv.last?.contains("systemctl disable --now sd-worker.service") == true)
-        XCTAssertFalse((w.engine.logs["vps"] ?? []).joined().contains("hunter2-Pw!"))
+        XCTAssertTrue(w.runner.calls.last { $0.argv.contains("root@vps") }?.argv.last?.contains("systemctl disable --now sd-worker.service") == true)
         XCTAssertNil(w.engine.running["vps"])
+    }
+
+    /// On a Linux machine whose admin is the worker account, the Running switch is refused like any admin step.
+    func testToggleRunningOnLinuxAsTheWorkerIsRefusedBeforeAnyCommandRuns() async {
+        let w = world([TestMachines.linux("vps")]) { _, _ in [
+            step("sd-check", title: "sd check"),
+            step("running", needs: ["sd-check"], fix: .toggle(needsAdmin: true)),
+        ] }
+        await w.engine.refresh(["vps"])
+        let before = w.runner.calls.count
+        for on in [true, false] {
+            let out = await w.engine.toggleRunning(on: "vps", to: on, approval: admin(password: "hunter2-Pw!"))
+            XCTAssertFalse(out.ok)
+            XCTAssertTrue(out.message.hasPrefix("On Linux the worker account can't be the admin"), out.message)
+        }
+        XCTAssertEqual(w.runner.calls.count, before, "nothing ran")
     }
 
     func testToggleRunningOnAMacUsesLaunchctlWithoutAdmin() async {
@@ -1313,15 +1371,17 @@ final class MachinesSetupEngineTests: XCTestCase {
             XCTAssertTrue(w.runner.calls.contains { $0.argv == SSH.script(mac, SDWorkerSteps.toggleScript(linux: false, on: on)) },
                           "Mac, on: \(on)")
         }
-        // a Linux machine's switch needs admin; the step says so
-        let v = world([vps]) { _, _ in [
+        // a Linux machine's switch needs admin, which there is root over ssh; the step says so
+        var root = vps
+        root.admin = .rootSSH
+        let v = world([root]) { _, _ in [
             step("sd-check"), step("running", needs: ["sd-check"], fix: .toggle(needsAdmin: true)),
         ] }
         await v.engine.refresh()
         for on in [true, false] {
-            _ = await v.engine.toggleRunning(on: "vps", to: on, approval: admin(password: "hunter2-Pw!"))
+            _ = await v.engine.toggleRunning(on: "vps", to: on, approval: admin(root: true))
             XCTAssertTrue(v.runner.calls.contains {
-                $0.argv == SSH.admin(vps, SDWorkerSteps.toggleScript(linux: true, on: on), asRoot: false)
+                $0.argv == SSH.admin(root, SDWorkerSteps.toggleScript(linux: true, on: on), asRoot: true)
             }, "Linux, on: \(on)")
         }
     }
