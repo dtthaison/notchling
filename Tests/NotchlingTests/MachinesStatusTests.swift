@@ -110,6 +110,20 @@ final class MachinesStatusTests: XCTestCase {
         XCTAssertNil(s.tokenExpiresInDays)
     }
 
+    func testOneBadHealthValueDropsOnlyThatKey() throws {
+        let s = try status(#"{"health": {"github": "ok", "claude": 3, "host": "paused: load"}}"#)
+        XCTAssertEqual(s.health, ["github": "ok", "host": "paused: load"])
+        XCTAssertEqual(try status(#"{"health": "ok"}"#).health, [:])
+    }
+
+    func testEntryTypesAreTopLevel() {
+        // Tasks 3 and 4 name these types without the WorkerStatus prefix.
+        let ready: ReadyEntry = .init(repo: "o/r", issue: 1)
+        let needs: NeedsYouEntry = .init(repo: "o/r", issue: 2)
+        let stuck: StuckEntry = .init(repo: "o/r", issue: 3)
+        XCTAssertEqual([ready.issue, needs.issue, stuck.issue], [1, 2, 3])
+    }
+
     func testNotAnObjectDoesNotDecode() {
         XCTAssertNil(WorkerStatus.decode(Data("[1, 2]".utf8)))
         XCTAssertNil(WorkerStatus.decode(Data("not json".utf8)))
