@@ -74,16 +74,18 @@ enum TokenScope {
         case .success(let l): otherReqs = requests(l.others, suffix: "", query: nil)
         case .failure: otherReqs = []
         }
+        // The token's own list of private repos, before the other probes so that at most 4 requests run at once.
+        let view = await tokenView(token: token, http: ctx.http)
         let answers = await fetchAll((issuesReqs + commitsReqs + otherReqs).map(\.url), token: token, http: ctx.http)
 
         // A 401 anywhere means nothing else it said can be trusted.
-        if answers.values.contains(where: { $0.status == 401 }) {
+        if view.refused || answers.values.contains(where: { $0.status == 401 }) {
             return CheckResult(state: .fail(refused))
         }
 
         var outcomes: [(String, Outcome)] = []
         outcomes.append(("Reaches issues", issuesOutcome(issuesReqs, answers)))
-        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherReqs, answers)))
+        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherReqs, answers, view: view, served: served)))
         outcomes.append(("No code access", contentsOutcome(commitsReqs, answers)))
         outcomes.append(("Distinct token", distinctOutcome(token: token, secretName: secretName, ctx: ctx)))
 
@@ -128,36 +130,125 @@ enum TokenScope {
         return .ok("can read issues of \(reqs.count) repo\(reqs.count == 1 ? "" : "s")")
     }
 
+    /// Two independent views of "no other private repo": a probe of each repo gh lists, and the token's own list.
+    /// Either one seeing an unserved repo is a fail; a doubt in either (and no fail) is can't tell.
     private static func deniedOutcome(_ listing: Result<Listing, ListingError>, _ reqs: [(name: String, url: URL)],
-                                      _ answers: [URL: HTTPAnswer]) -> Outcome {
-        let l: Listing
+                                      _ answers: [URL: HTTPAnswer], view: TokenView, served: [String]) -> Outcome {
+        var fails: [String] = [], unknowns: [String] = []
+
         switch listing {
-        case .failure(let e): return .unknown(e.message)
-        case .success(let value): l = value
-        }
-        var visible: [String] = [], unknown = 0
-        for (name, url) in reqs {
-            guard let a = answers[url] else { unknown += 1; continue }
-            switch a.status {
-            case 200: visible.append(name)
-            case _ where isDenial(a): break
-            default: unknown += 1
+        case .failure(let e): unknowns.append(e.message)
+        case .success(let l):
+            var visible: [String] = [], unknown = 0
+            for (name, url) in reqs {
+                guard let a = answers[url] else { unknown += 1; continue }
+                switch a.status {
+                case 200: visible.append(name)
+                case _ where isDenial(a): break
+                default: unknown += 1
+                }
+            }
+            if !visible.isEmpty {
+                fails.append("can see \(visible.count) other private repo\(visible.count == 1 ? "" : "s") (\(shown(visible)))")
+            }
+            // gh must list the served repos (they are private): if it doesn't, it is looking at the wrong account or
+            // cannot see private repos, and an empty "others" list would prove nothing.
+            if !l.servedMissing.isEmpty {
+                unknowns.append("gh doesn't list \(l.servedMissing.joined(separator: ", ")) among the private repos it can see")
+            } else if l.skippedLines > 0 {
+                unknowns.append("gh listed \(l.skippedLines) lines that are not repo names")
+            } else if l.maybeCut {
+                unknowns.append("gh may have cut its list of private repos at \(listLimit)")
+            } else if unknown > 0 {
+                unknowns.append("couldn't check \(unknown) of \(reqs.count) other private repos")
             }
         }
-        // Seeing a repo is a fail whatever else is doubtful.
-        if !visible.isEmpty {
-            let shown = visible.prefix(namedRepos).joined(separator: ", ") + (visible.count > namedRepos ? "…" : "")
-            return .fail("can see \(visible.count) other private repo\(visible.count == 1 ? "" : "s") (\(shown))")
+
+        // The token's own list: a fine-grained token lists only the repos it can reach.
+        let servedKeys = Set(served.map { $0.lowercased() })
+        let extra = view.names.filter { !servedKeys.contains($0.lowercased()) }.sorted()
+        if !extra.isEmpty {
+            fails.append("token reaches \(extra.count) other private repo\(extra.count == 1 ? "" : "s") (e.g. \(shown(extra))); set Only select repositories")
+        } else if let doubt = view.incomplete {
+            unknowns.append(doubt)
         }
-        // gh must list the served repos (they are private): if it doesn't, it is looking at the wrong account or
-        // cannot see private repos, and an empty "others" list would prove nothing.
-        if !l.servedMissing.isEmpty {
-            return .unknown("gh doesn't list \(l.servedMissing.joined(separator: ", ")) among the private repos it can see")
+
+        if !fails.isEmpty { return .fail(fails.joined(separator: "; ")) }
+        if !unknowns.isEmpty { return .unknown(unknowns.joined(separator: "; ")) }
+        return .ok("denied \(reqs.count) other private repo\(reqs.count == 1 ? "" : "s"); the token lists only the served repos")
+    }
+
+    /// At most `namedRepos` names, then `…` when there are more.
+    private static func shown(_ names: [String]) -> String {
+        names.prefix(namedRepos).joined(separator: ", ") + (names.count > namedRepos ? "…" : "")
+    }
+
+    // MARK: the token's own view
+
+    /// What `GET /user/repos?visibility=private` showed.
+    private struct TokenView {
+        var names: [String] = []
+        /// Why the list may not be the whole of it: an error, a rate limit, a cut-off body, too many pages.
+        var incomplete: String?
+        var refused = false
+    }
+
+    private static let viewPages = 10
+    private static let viewDoubt = "couldn't read the private repos the token reaches"
+
+    /// Follows the `Link` header's `next` page only while it stays on `https://api.github.com/user/repos`, up to
+    /// `viewPages` pages. The token goes through `http` only; nothing of it is kept.
+    private static func tokenView(token: String, http: HTTPFetching) async -> TokenView {
+        var view = TokenView()
+        guard var url = apiURL("/user/repos", query: "visibility=private&per_page=100") else {
+            view.incomplete = viewDoubt
+            return view
         }
-        if l.skippedLines > 0 { return .unknown("gh listed \(l.skippedLines) lines that are not repo names") }
-        if l.maybeCut { return .unknown("gh may have cut its list of private repos at \(listLimit)") }
-        if unknown > 0 { return .unknown("couldn't check \(unknown) of \(reqs.count) other private repos") }
-        return .ok("denied \(reqs.count) other private repo\(reqs.count == 1 ? "" : "s")")
+        for page in 1...viewPages {
+            let a = await http.get(url, bearer: token)
+            if a.status == 401 { view.refused = true; return view }
+            guard a.status == 200 else { view.incomplete = viewDoubt; return view }
+            let cut = a.body.count >= URLSessionFetcher.bodyCap
+            if let names = repoNames(inPage: a.body, cut: cut) {
+                view.names += names
+            } else {
+                view.incomplete = viewDoubt
+                return view
+            }
+            if cut { view.incomplete = "the token's list of private repos was cut off"; return view }
+            guard let link = a.headers["link"], link.contains(#"rel="next""#) else { return view }
+            guard let next = nextLink(link), URLSessionFetcher.allows(next), next.path == "/user/repos" else {
+                view.incomplete = viewDoubt
+                return view
+            }
+            if page == viewPages { view.incomplete = "the token lists more than \(viewPages) pages of private repos"; return view }
+            url = next
+        }
+        return view
+    }
+
+    /// The `full_name` of each repo on a page. A whole page is parsed as JSON; a page the body cap cut cannot be,
+    /// so its names are read where they stand, which is enough to show a repo but never to show there is none
+    /// (the caller treats a cut page as doubtful).
+    private static func repoNames(inPage body: Data, cut: Bool) -> [String]? {
+        if !cut {
+            guard let list = try? JSONSerialization.jsonObject(with: body) as? [Any] else { return nil }
+            return list.compactMap { ($0 as? [String: Any])?["full_name"] as? String }.filter(isRepoName)
+        }
+        let text = String(decoding: body, as: UTF8.self)
+        guard let regex = try? NSRegularExpression(pattern: #""full_name"\s*:\s*"([^"]+)""#) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { m in
+            Range(m.range(at: 1), in: text).map { String(text[$0]) }
+        }.filter(isRepoName)
+    }
+
+    /// The URL of `rel="next"` in a `Link` header, if any.
+    private static func nextLink(_ header: String) -> URL? {
+        guard let regex = try? NSRegularExpression(pattern: #"<([^>]*)>\s*;\s*rel="next""#) else { return nil }
+        let range = NSRange(header.startIndex..., in: header)
+        guard let m = regex.firstMatch(in: header, range: range), let r = Range(m.range(at: 1), in: header) else { return nil }
+        return URL(string: String(header[r]))
     }
 
     private static func contentsOutcome(_ reqs: [(name: String, url: URL)], _ answers: [URL: HTTPAnswer]) -> Outcome {
