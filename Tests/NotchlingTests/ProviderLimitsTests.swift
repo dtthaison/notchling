@@ -211,7 +211,8 @@ final class ProviderLimitsTests: XCTestCase {
         w.check(now: now)
         wait(for: [switched], timeout: 2)
         XCTAssertEqual(provider.switched, ["other"])
-        XCTAssertTrue(said.isEmpty, "the switch announcement comes after it, not the climb: \(said)")
+        // The switch's own announcement may already be in (it races the assert); the climb's must not be.
+        XCTAssertTrue(said.allSatisfy { $0.contains("switched") }, "the switch announcement comes after it, not the climb: \(said)")
     }
 
     func testNotifyAndSwitchOnlyNotifiesWhileBusyAndSaysSo() {
