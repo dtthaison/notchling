@@ -103,8 +103,83 @@ final class MachinesPollerTests: XCTestCase {
         XCTAssertEqual(calls.count, 2)
         for name in ["a", "b"] {
             let call = calls.first { $0.contains("agent@\(name).tail") }
-            XCTAssertEqual(call?.last, "'python3' '/opt/sd dir/sd.py' 'worker' 'status' '--json'")
+            let m = machine(name)
+            XCTAssertEqual(call, SSH.script(m, "'python3' '/opt/sd dir/sd.py' worker status --json"))
         }
+    }
+
+    func testPollsOnlyMachinesWithAnSDWorkerJob() async {
+        let runner = FakeRunner()
+        let idle = Machine(name: "idle", host: "idle.tail", user: "agent")
+        XCTAssertEqual(idle.sdPath, "", "a machine with no job has no sd path")
+        let p = poller(runner, [machine("a"), idle])
+        await p.refresh()
+        XCTAssertEqual(runner.calls.count, 1)
+        XCTAssertFalse(runner.calls.contains { $0.contains("agent@idle.tail") })
+        XCTAssertNotNil(p.reports["a"])
+        XCTAssertNil(p.reports["idle"])
+    }
+
+    func testAJobWithoutAnSdPathIsNotPolledYet() async {
+        let runner = FakeRunner()
+        let p = poller(runner, [Machine(name: "early", host: "early.tail", user: "agent", sdPath: "", fileVault: false, repos: [])])
+        await p.refresh()
+        XCTAssertEqual(runner.calls.count, 0, "Plugins installed has not told the sd path yet")
+        XCTAssertNil(p.reports["early"])
+    }
+
+    func testAMachineWhoseJobWasRemovedLosesItsReport() async {
+        let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a"), err: "") }
+        var list = [machine("a")]
+        let p = MachinePoller(runner: runner, machines: { list }, clock: { self.now }, observeSleep: false)
+        await p.refresh()
+        XCTAssertNotNil(p.reports["a"])
+        list[0].sdWorker = nil
+        await p.refresh()
+        XCTAssertNil(p.reports["a"])
+        XCTAssertEqual(runner.calls.count, 1)
+    }
+
+    func testStatusCommandExpandsATildePath() async {
+        let runner = FakeRunner()
+        var m = machine("a")
+        m.sdWorker?.sdPath = "~/sd/sd.py"
+        let p = poller(runner, [m])
+        await p.refresh()
+        // the script is `'python3' "$HOME"/'sd/sd.py' worker status --json`, quoted once more for `sh -c`
+        XCTAssertEqual(runner.calls.first, SSH.script(m, "'python3' \"$HOME\"/'sd/sd.py' worker status --json"))
+        XCTAssertTrue(runner.calls.first?.last?.contains("\"$HOME\"/") == true)
+    }
+
+    func testRemote127IsNotSshNotFound() async {
+        let runner = FakeRunner { argv in
+            if argv.contains("agent@gone.tail") { return CommandResult(code: 127, out: "", err: "/usr/bin/ssh not found") }
+            return CommandResult(code: 127, out: "", err: "sh: 1: /opt/sd dir/sd.py: not found\nsecond line\n")
+        }
+        let p = poller(runner, [machine("gone"), machine("nosd")])
+        await p.refresh()
+        XCTAssertEqual(p.reports["gone"]?.error, "ssh not found")
+        XCTAssertEqual(p.reports["nosd"]?.error, "not found on the machine: sh: 1: /opt/sd dir/sd.py: not found")
+    }
+
+    func testATimerOfAFreedPollerStopsItself() {
+        let timer = Timer(timeInterval: 3600, repeats: true) { _ in }
+        RunLoop.main.add(timer, forMode: .common)
+        XCTAssertTrue(timer.isValid)
+        MachinePoller.tick(timer, poller: nil)
+        XCTAssertFalse(timer.isValid)
+    }
+
+    func testATimerTickOfALivePollerPollsAndKeepsTheTimer() async {
+        let runner = FakeRunner()
+        let p = poller(runner, [machine("a")])
+        let timer = Timer(timeInterval: 3600, repeats: true) { _ in }
+        RunLoop.main.add(timer, forMode: .common)
+        MachinePoller.tick(timer, poller: p)
+        XCTAssertTrue(timer.isValid)
+        for _ in 0..<100 where runner.calls.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertEqual(runner.calls.count, 1)
+        timer.invalidate()
     }
 
     func testRefreshStoresStatusAndError() async {
@@ -133,7 +208,7 @@ final class MachinesPollerTests: XCTestCase {
 
     func testTimeoutAndMissingSSHHaveReadableErrors() async {
         let runner = FakeRunner { argv in
-            argv.contains("agent@slow.tail") ? CommandResult(code: 124, out: "", err: "") : CommandResult(code: 127, out: "", err: "")
+            argv.contains("agent@slow.tail") ? CommandResult(code: 124, out: "", err: "") : CommandResult(code: 127, out: "", err: "/usr/bin/ssh not found")
         }
         let p = poller(runner, [machine("slow"), machine("gone")])
         await p.refresh()
