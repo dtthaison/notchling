@@ -778,16 +778,38 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "a")]?.state, .cantTell("m1 is not reachable"))
     }
 
-    /// M2: only the facts steps are built from (os, home, python, sdPath) start a second pass.
+    /// M2: only the facts steps are built from (os, home, python, sdPath, and the token expiry that worker.json's
+    /// check is built from) start a second pass; FileVault does not, and a fact already known does not repeat it.
     func testFactsNoStepIsBuiltFromDoNotRepeatTheChecks() async {
         let w = world { _, _ in [
-            step("reachable", parse: { _, _ in
-                CheckResult(state: .pass("up"), detected: Detected(fileVault: true, tokenExpires: "2027-02-01"))
-            }),
+            step("reachable", parse: { _, _ in CheckResult(state: .pass("up"), detected: Detected(fileVault: true)) }),
         ] }
         await w.engine.refresh(["m1"])
         XCTAssertEqual(w.runner.batches.count, 1)
         XCTAssertTrue(w.store.saves.last?[0].fileVault == true)
+
+        let expiry = world { _, _ in [
+            step("reachable", parse: { _, _ in CheckResult(state: .pass("up"), detected: Detected(tokenExpires: "2027-02-01")) }),
+        ] }
+        await expiry.engine.refresh(["m1"])
+        XCTAssertEqual(expiry.runner.batches.count, 2, "a newly learned expiry builds the steps again, once")
+        await expiry.engine.refresh(["m1"])
+        XCTAssertEqual(expiry.runner.batches.count, 3, "the next refresh finds the expiry known and checks once")
+    }
+
+    /// A fact the checks learn about the token's expiry reaches the checks of the same refresh (worker.json's
+    /// `token_expires` is built from it).
+    func testANewlyLearnedTokenExpiryReachesTheChecksOfTheSameRefresh() async {
+        let seen = Box<[String?]>([])
+        let w = world { _, _ in [
+            step("a", parse: { _, _ in CheckResult(state: .pass("a"), detected: Detected(tokenExpires: "2027-02-01")) }),
+            step("b", parse: { _, ctx in
+                seen.value.append(ctx.machine.sdWorker?.tokenExpires)
+                return CheckResult(state: .pass("b"))
+            }),
+        ] }
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(seen.value.last ?? nil, "2027-02-01", "the second pass is built from the learned expiry: \(seen.value)")
     }
 
     /// M4: a renewed value that arrives while the update runs keeps its own offer.

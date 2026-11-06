@@ -329,7 +329,9 @@ enum MachineSteps {
     xcrun simctl list devices available -j 2>/dev/null
     """
 
-    /// The runner keeps the last 64 KiB of a probe's output and says so with this first line.
+    /// `ProcessRunner` keeps the last `ProcessRunner.outputCap` (2 MiB) of a command's output and says so with this
+    /// first line. The 64 KiB check below guards the other cut: the `head -c 65536` the engine's batch wrapper
+    /// puts on each probe's output on the machine.
     private static let outputCap = 65_536
     private static let cutNotice = "[earlier output cut]"
 

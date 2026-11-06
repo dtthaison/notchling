@@ -518,9 +518,11 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let runner = ScriptedRunner()
         let outcome = await plan.run(.test(.test(machine: m1, runner: runner, mac: facts)))
         XCTAssertTrue(outcome.ok, outcome.message)
-        // the label is disabled first, so a failure leaves no plist for a login to start
-        XCTAssertEqual(runner.calls.first?.argv.last?.contains(SDWorkerSteps.macDisableScript), true)
-        XCTAssertNil(runner.calls.first?.stdin)
+        // it looks at whether Running is on, then the label is disabled first, so a failure leaves no plist for a
+        // login to start
+        XCTAssertEqual(runner.calls.first?.argv.last?.contains("print-disabled"), true)
+        XCTAssertEqual(runner.calls[1].argv.last?.contains(SDWorkerSteps.macDisableScript), true)
+        XCTAssertNil(runner.calls[1].stdin)
         let call = try XCTUnwrap(runner.calls.last)
         XCTAssertTrue(try XCTUnwrap(call.argv.last).contains("com.sd.worker.plist"))
         XCTAssertTrue(try XCTUnwrap(call.argv.last).contains("chmod 644"))
@@ -530,7 +532,7 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         // the plist is sd's own (RunAtLoad and KeepAlive stay), so the Fix disables the label until Running is turned on
         XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
         XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
-        XCTAssertEqual(runner.calls.count, 2)
+        XCTAssertEqual(runner.calls.count, 3, "the state probe, the disable, the write")
         // never loads or enables it
         let all = runner.calls.map { $0.argv.joined(separator: " ") }.joined(separator: "\n")
         for verb in ["bootstrap", "load", "enable", "kickstart", "bootout"] {
@@ -552,8 +554,8 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertFalse(outcome.ok)
         XCTAssertTrue(outcome.message.contains("no GUI domain"), outcome.message)
         XCTAssertTrue(outcome.message.contains("no service file was written"), outcome.message)
-        XCTAssertEqual(runner.calls.count, 1, "stopped before the write")
-        XCTAssertNil(runner.calls[0].stdin)
+        XCTAssertEqual(runner.calls.count, 2, "the state probe and the failed disable; stopped before the write")
+        XCTAssertTrue(runner.calls.allSatisfy { $0.stdin == nil })
         XCTAssertFalse(runner.calls.contains { $0.argv.joined().contains("LaunchAgents") })
     }
 
@@ -731,6 +733,60 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let json = try await plan(.workerJSON, machine: m1).run(.test(.test(machine: m1, runner: read, mac: facts, mask: mask)))
         XCTAssertFalse(json.ok)
         assertNoFragment(of: token, in: json.message)
+    }
+
+    // MARK: Service Fix while Running is on
+
+    private func macServiceFix(running probe: CommandResult) async throws -> (FixOutcome, ScriptedRunner) {
+        let sdDir = temp.appendingPathComponent("sd-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sdDir.appendingPathComponent("templates"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try templatesDir, to: sdDir.appendingPathComponent("templates/worker"))
+        let facts = MacFacts(plugins: ["sd@system-design": InstalledPlugin(version: "1.19.2", path: sdDir.path)], marketplaceJSON: [:])
+        let m1 = TestMachines.mac()
+        let runner = ScriptedRunner()
+        // the Running probe: `loaded`/`notloaded`, then the label's `print-disabled` line
+        runner.on({ $0.last?.contains("print-disabled") == true }, result: probe)
+        let outcome = try await plan(.service, machine: m1).run(.test(.test(machine: m1, runner: runner, mac: facts)))
+        return (outcome, runner)
+    }
+
+    private func calls(_ runner: ScriptedRunner, containing text: String) -> Int {
+        runner.calls.filter { $0.argv.last?.contains(text) == true }.count
+    }
+
+    /// With the label loaded and enabled, Running is on: the Fix rewrites the plist and leaves the label enabled.
+    func testServiceFixLeavesTheLabelEnabledWhileRunningIsOn() async throws {
+        let (outcome, runner) = try await macServiceFix(running: CommandResult(code: 1, out: "loaded\n", err: ""))
+        XCTAssertTrue(outcome.ok, outcome.message)
+        XCTAssertEqual(calls(runner, containing: "launchctl disable"), 0, "Running would turn off")
+        XCTAssertEqual(calls(runner, containing: "launchctl bootout"), 0)
+        let write = try XCTUnwrap(runner.calls.last)
+        XCTAssertTrue(try XCTUnwrap(write.argv.last).contains("com.sd.worker.plist"))
+        XCTAssertNotNil(write.stdin, "the plist is written")
+        XCTAssertEqual(runner.calls.count, 2, "the state probe, then the write")
+    }
+
+    /// Anything but loaded-and-enabled disables the label before the plist is written.
+    func testServiceFixDisablesFirstUnlessRunningIsOn() async throws {
+        let disabledLine = "\t\"com.sd.worker\" => disabled\n"
+        let states: [(String, CommandResult)] = [
+            ("not loaded, unlisted", CommandResult(code: 1, out: "notloaded\n", err: "")),
+            ("not loaded, enabled", CommandResult(code: 0, out: "notloaded\n\t\"com.sd.worker\" => enabled\n", err: "")),
+            ("loaded but disabled", CommandResult(code: 0, out: "loaded\n" + disabledLine, err: "")),
+            ("the probe failed", CommandResult(code: 255, out: "", err: "ssh: connect timed out")),
+            ("nothing printed", CommandResult(code: 0, out: "", err: "")),
+        ]
+        for (name, probe) in states {
+            let (outcome, runner) = try await macServiceFix(running: probe)
+            XCTAssertTrue(outcome.ok, "\(name): \(outcome.message)")
+            let order = runner.calls.map { call -> String in
+                let script = call.argv.last ?? ""
+                if script.contains("launchctl disable") { return "disable" }
+                if script.contains("com.sd.worker.plist") { return "write" }
+                return script.contains("print-disabled") ? "probe" : "other"
+            }
+            XCTAssertEqual(order, ["probe", "disable", "write"], name)
+        }
     }
 
     func testSetupCheckCommandUsesAbsolutePathsAndNeverLive() throws {

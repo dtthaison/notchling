@@ -546,9 +546,10 @@ enum SDWorkerSteps {
 
     private static func serviceDisplay(linux: Bool) -> String {
         guard linux else {
-            return "Write the LaunchAgent (mode 644) with the plist on stdin:\n"
+            return "First, keep it from starting at login until you turn Running on (skipped when Running is already on):\n"
+                + macDisableScript
+                + "\nThen write the LaunchAgent (mode 644) with the plist on stdin:\n"
                 + RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644")
-                + "\nThen keep it from starting at login until you turn Running on:\n" + macDisableScript
         }
         let lines = ServiceFiles.linuxNames.flatMap { name -> [String] in
             let path = "\(ServiceFiles.unitDirectory)/\(name)"
@@ -572,14 +573,25 @@ enum SDWorkerSteps {
         // The plist has RunAtLoad, so launchd would start it at the next login. Disable the label first (launchd keeps
         // that without a plist or a loaded job), so a failure leaves no plist behind. This never loads it: no
         // bootstrap, no enable.
-        let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
-        guard off.code == 0 else {
-            return FixOutcome(ok: false, message: "couldn't disable \(macLabel) (exit \(off.code)): \(firstLine(off.err, ctx.mask)); no service file was written")
+        //
+        // One state skips that: Running is on (the label is loaded and enabled, the Running check's own test). The
+        // plist is then rewritten under the running job and the label stays enabled, or this Fix would turn Running
+        // off. A state that can't be read counts as not running: the label is disabled.
+        let state = await MachineRun.script(runningProbe(linux: false), ctx: ctx, timeout: 60)
+        let stateLines = state.out.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let runningIsOn = stateLines.first == "loaded" && !labelDisabled(stateLines)
+        if !runningIsOn {
+            let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
+            guard off.code == 0 else {
+                return FixOutcome(ok: false, message: "couldn't disable \(macLabel) (exit \(off.code)): \(firstLine(off.err, ctx.mask)); no service file was written")
+            }
         }
         let run = await MachineRun.script(RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644"),
                                           stdin: Data(files[0].content.utf8), ctx: ctx, timeout: 60)
         return run.code == 0
-            ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written; \(macLabel) stays disabled until Running is turned on")
+            ? FixOutcome(ok: true, message: runningIsOn
+                ? "\(ServiceFiles.plistName) written; Running stays on"
+                : "\(ServiceFiles.plistName) written; \(macLabel) stays disabled until Running is turned on")
             : FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err, ctx.mask))")
     }
 

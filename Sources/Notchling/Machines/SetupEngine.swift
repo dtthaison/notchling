@@ -264,9 +264,10 @@ final class SetupEngine: ObservableObject {
     /// the machine, the steps are built again from it and checked once more; later refreshes find nothing new.
     private func evaluate(_ m: Machine, slow: Bool, usePrior: Bool = true) async -> Evaluation {
         let first = await evaluateOnce(m, slow: slow, usePrior: usePrior)
-        // only what the steps are built from starts another pass (not the token expiry or FileVault)
+        // only what the steps are built from starts another pass (not FileVault). The token expiry is one of them:
+        // worker.json's check compares the file with a `token_expires` built from it.
         let buildFacts = Detected(os: first.detected.os, home: first.detected.home, python: first.detected.python,
-                                  sdPath: first.detected.sdPath)
+                                  sdPath: first.detected.sdPath, tokenExpires: first.detected.tokenExpires)
         let learned = Self.applying(buildFacts, to: m)
         guard !first.unreachable, learned != m else { return first }
         var second = await evaluateOnce(learned, slow: slow, usePrior: usePrior)
@@ -428,12 +429,12 @@ final class SetupEngine: ObservableObject {
 
         // output the machine (`head -c`) or ProcessRunner (2 MiB) cut ends or starts in a half line that can hold a
         // piece of a value: mask it, then drop that line
-        var masks: SetupMasks?
+        var machineMasks: SetupMasks?
         for (i, out) in answers where out.text.hasPrefix(ProcessRunner.cutNotice) || out.text.utf8.count >= Self.probeCap {
-            let m = masks ?? self.masks(for: m)
-            masks = m
-            answers[i] = RemoteOutput(text: m.applyToCut(out.text, headCut: out.text.hasPrefix(ProcessRunner.cutNotice),
-                                                         tailCut: out.text.utf8.count >= Self.probeCap), code: out.code)
+            let cutMasks = machineMasks ?? masks(for: m)
+            machineMasks = cutMasks
+            answers[i] = RemoteOutput(text: cutMasks.applyToCut(out.text, headCut: out.text.hasPrefix(ProcessRunner.cutNotice),
+                                                                tailCut: out.text.utf8.count >= Self.probeCap), code: out.code)
         }
 
         var parsed: [StepID: CheckResult] = [:]

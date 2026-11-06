@@ -168,10 +168,16 @@ enum TokenScope {
         // The token's own list: a fine-grained token lists only the repos it can reach.
         let servedKeys = Set(served.map { $0.lowercased() })
         let extra = view.names.filter { !servedKeys.contains($0.lowercased()) }.sorted()
+        let seenKeys = Set(view.names.map { $0.lowercased() })
+        let notShown = served.filter { !seenKeys.contains($0.lowercased()) }
         if !extra.isEmpty {
             fails.append("token reaches \(extra.count) other private repo\(extra.count == 1 ? "" : "s") (e.g. \(shown(extra))); set Only select repositories")
         } else if let doubt = view.incomplete {
             unknowns.append(doubt)
+        } else if !notShown.isEmpty {
+            // The served repos are private and the issues probe reaches them, so a whole list that leaves one out is
+            // not the whole truth: it proves nothing about the others either.
+            unknowns.append("the token's list of private repos doesn't show \(notShown.joined(separator: ", "))")
         }
 
         if !fails.isEmpty { return .fail(fails.joined(separator: "; ")) }
@@ -201,7 +207,8 @@ enum TokenScope {
     /// `viewPages` pages. The token goes through `http` only; nothing of it is kept.
     private static func tokenView(token: String, http: HTTPFetching) async -> TokenView {
         var view = TokenView()
-        guard var url = apiURL("/user/repos", query: "visibility=private&per_page=100") else {
+        // 50 a page: a page of full repo objects is about 400 KB, which leaves room under the 1 MiB body cap.
+        guard var url = apiURL("/user/repos", query: "visibility=private&per_page=50") else {
             view.incomplete = viewDoubt
             return view
         }
@@ -210,8 +217,13 @@ enum TokenScope {
             if a.status == 401 { view.refused = true; return view }
             guard a.status == 200 else { view.incomplete = viewDoubt; return view }
             let cut = a.body.count >= URLSessionFetcher.bodyCap
-            if let names = repoNames(inPage: a.body, cut: cut) {
-                view.names += names
+            if let found = repoNames(inPage: a.body, cut: cut) {
+                view.names += found.names
+                // a repo whose name can't be read could be the leak: doubt, not something to drop. Later pages are
+                // still read, since a leak they show is a fail.
+                if found.unreadable > 0, view.incomplete == nil {
+                    view.incomplete = "the token's list of private repos has \(found.unreadable) name\(found.unreadable == 1 ? "" : "s") this check can't read"
+                }
             } else {
                 view.incomplete = viewDoubt
                 return view
@@ -228,20 +240,30 @@ enum TokenScope {
         return view
     }
 
-    /// The `full_name` of each repo on a page. A whole page is parsed as JSON; a page the body cap cut cannot be,
+    /// The `full_name` of each repo on a page, and how many entries had none the check can read (not an object, no
+    /// string `full_name`, or not `owner/name`). A whole page is parsed as JSON; a page the body cap cut cannot be,
     /// so its names are read where they stand, which is enough to show a repo but never to show there is none
     /// (the caller treats a cut page as doubtful).
-    private static func repoNames(inPage body: Data, cut: Bool) -> [String]? {
+    private static func repoNames(inPage body: Data, cut: Bool) -> (names: [String], unreadable: Int)? {
         if !cut {
             guard let list = try? JSONSerialization.jsonObject(with: body) as? [Any] else { return nil }
-            return list.compactMap { ($0 as? [String: Any])?["full_name"] as? String }.filter(isRepoName)
+            var names: [String] = [], unreadable = 0
+            for item in list {
+                if let name = (item as? [String: Any])?["full_name"] as? String, isRepoName(name) {
+                    names.append(name)
+                } else {
+                    unreadable += 1
+                }
+            }
+            return (names, unreadable)
         }
         let text = String(decoding: body, as: UTF8.self)
         guard let regex = try? NSRegularExpression(pattern: #""full_name"\s*:\s*"([^"]+)""#) else { return nil }
         let range = NSRange(text.startIndex..., in: text)
-        return regex.matches(in: text, range: range).compactMap { m in
+        let found = regex.matches(in: text, range: range).compactMap { m in
             Range(m.range(at: 1), in: text).map { String(text[$0]) }
-        }.filter(isRepoName)
+        }
+        return (found.filter(isRepoName), found.filter { !isRepoName($0) }.count)
     }
 
     /// The URL of `rel="next"` in a `Link` header, if any.

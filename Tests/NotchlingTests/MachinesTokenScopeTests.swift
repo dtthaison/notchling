@@ -39,7 +39,7 @@ final class MachinesTokenScopeTests: XCTestCase {
         return r
     }
 
-    private let viewKey = "/user/repos?visibility=private&per_page=100"
+    private let viewKey = "/user/repos?visibility=private&per_page=50"
 
     /// What GET /user/repos answers: a page of repos, with an optional Link header.
     private func viewAnswer(_ names: [String], status: Int = 200, link: String? = nil) -> HTTPAnswer {
@@ -250,16 +250,44 @@ final class MachinesTokenScopeTests: XCTestCase {
     func testATokenThatListsOnlyTheServedRepoPasses() async {
         let result = await check(ctx(http: http(view: viewAnswer([repo])), runner: runner()))
         guard case .pass = result.state else { return XCTFail("got \(result.state)") }
-        // A subset that no longer includes the served repo is not this check's concern either.
-        let none = await check(ctx(http: http(view: viewAnswer([])), runner: runner()))
-        guard case .pass = none.state else { return XCTFail("empty view gave \(none.state)") }
+    }
+
+    /// The issues probe passes, so the token reaches the served repo; a private-repo list that does not show it is
+    /// not the whole truth, so the result is can't tell, never a pass.
+    func testAViewThatLacksAServedRepoCantTell() async {
+        let result = await check(ctx(http: http(view: viewAnswer([])), runner: runner()))
+        guard case let .cantTell(text) = result.state else { return XCTFail("got \(result.state)") }
+        XCTAssertTrue(text.contains(repo), text)
+        XCTAssertFalse(result.rows.first { $0.name == "Denied elsewhere" }!.ok)
+        // another repo in the list is a fail, which wins over the missing one
+        let other = await check(ctx(http: http(view: viewAnswer(["dtthaison/something-else"])), runner: runner()))
+        guard case .fail = other.state else { return XCTFail("got \(other.state)") }
+        // the served repo's name is compared without regard to case
+        let upper = await check(ctx(http: http(view: viewAnswer([repo.uppercased()])), runner: runner()))
+        guard case .pass = upper.state else { return XCTFail("got \(upper.state)") }
+    }
+
+    /// A name that is not owner/name is doubt, not something to drop: the repo it names could be a leak.
+    func testARepoNameTheCheckCantReadMakesTheViewDoubtful() async {
+        let json = #"[{"full_name":"\#(repo)"},{"full_name":"bad name with spaces"}]"#
+        let odd = await check(ctx(http: http(view: HTTPAnswer(status: 200, headers: [:], body: Data(json.utf8))), runner: runner()))
+        guard case .cantTell = odd.state else { return XCTFail("a bad name gave \(odd.state)") }
+        for body in [#"[{"full_name":"\#(repo)"},{"full_name":42}]"#, #"[{"full_name":"\#(repo)"},{"id":2}]"#,
+                     #"[{"full_name":"\#(repo)"},"dtthaison/x"]"#, #"[{"full_name":"\#(repo)"},{"full_name":"a/../b"}]"#] {
+            let result = await check(ctx(http: http(view: HTTPAnswer(status: 200, headers: [:], body: Data(body.utf8))), runner: runner()))
+            guard case .cantTell = result.state else { return XCTFail("\(body) gave \(result.state)") }
+        }
+        // a leak that can be read still fails, whatever else is odd
+        let leak = #"[{"full_name":"\#(repo)"},{"full_name":"dtthaison/leaked"},{"full_name":"bad name"}]"#
+        let failed = await check(ctx(http: http(view: HTTPAnswer(status: 200, headers: [:], body: Data(leak.utf8))), runner: runner()))
+        guard case .fail = failed.state else { return XCTFail("got \(failed.state)") }
     }
 
     func testTheViewCallIsPrivateOnlyAndPaged() async {
         let h = http()
         _ = await check(ctx(http: h, runner: runner()))
         XCTAssertEqual(h.requests.filter { $0.0.path == "/user/repos" }.map { $0.0.absoluteString },
-                       ["https://api.github.com/user/repos?visibility=private&per_page=100"])
+                       ["https://api.github.com/user/repos?visibility=private&per_page=50"])
     }
 
     func testAnErrorOnTheViewCantTell() async {
@@ -278,9 +306,9 @@ final class MachinesTokenScopeTests: XCTestCase {
     }
 
     func testTheViewFollowsLinkPagesOnApiGithubComAndSeesTheLaterOnes() async {
-        let next = "https://api.github.com/user/repos?visibility=private&per_page=100&page=2"
+        let next = "https://api.github.com/user/repos?visibility=private&per_page=50&page=2"
         var a = table(view: viewAnswer([repo], link: "<\(next)>; rel=\"next\", <\(next)>; rel=\"last\""))
-        a["/user/repos?visibility=private&per_page=100&page=2"] = viewAnswer(["dtthaison/secret-other"])
+        a["/user/repos?visibility=private&per_page=50&page=2"] = viewAnswer(["dtthaison/secret-other"])
         let h = FakeHTTP(answers: a)
         let result = await check(ctx(http: h, runner: runner()))
         XCTAssertEqual(result.state, .fail("token reaches 1 other private repo (e.g. dtthaison/secret-other); set Only select repositories"))
@@ -301,9 +329,9 @@ final class MachinesTokenScopeTests: XCTestCase {
 
     func testTheViewStopsAfterTenPagesAndCantTell() async {
         var a = table()
-        let base = "https://api.github.com/user/repos?visibility=private&per_page=100"
+        let base = "https://api.github.com/user/repos?visibility=private&per_page=50"
         a[viewKey] = viewAnswer([repo], link: "<\(base)&page=2>; rel=\"next\"")
-        for n in 2...30 { a["/user/repos?visibility=private&per_page=100&page=\(n)"] = viewAnswer([repo], link: "<\(base)&page=\(n + 1)>; rel=\"next\"") }
+        for n in 2...30 { a["/user/repos?visibility=private&per_page=50&page=\(n)"] = viewAnswer([repo], link: "<\(base)&page=\(n + 1)>; rel=\"next\"") }
         let h = FakeHTTP(answers: a)
         let result = await check(ctx(http: h, runner: runner()))
         guard case .cantTell = result.state else { return XCTFail("got \(result.state)") }
