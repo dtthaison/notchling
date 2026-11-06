@@ -19,6 +19,21 @@ final class VaultStore {
     private let lock = NSLock()
     private var cache: [String: VaultValue]?
 
+    /// Where the list and the values live. The defaults are the real index file and the Keychain item; tests pass
+    /// their own, so they never touch either.
+    struct Backend {
+        var readIndex: () -> [VaultEntry] = { SecretVault.all() }
+        var writeIndex: ([VaultEntry]) throws -> Void = { try SecretVault.write($0) }
+        /// nil: the Keychain item.
+        var loadValues: (() throws -> [String: VaultValue])?
+        var writeValues: (([String: VaultValue]) throws -> Void)?
+        var center: NotificationCenter = .default
+    }
+
+    private let backend: Backend
+
+    init(backend: Backend = Backend()) { self.backend = backend }
+
     func value(for entry: VaultEntry) throws -> VaultValue? {
         lock.lock(); defer { lock.unlock() }
         return try load()[entry.id]
@@ -28,15 +43,16 @@ final class VaultStore {
     /// Renaming moves the stored value to the new name.
     func save(_ entry: VaultEntry, value: VaultValue?, replacing old: VaultEntry? = nil) throws {
         lock.lock(); defer { lock.unlock() }
-        var list = SecretVault.all()
+        var list = backend.readIndex()
         if let problem = SecretVault.problem(saving: entry, in: list, replacing: old) { throw AccountError(problem) }
         var values = try load()
         var stored = value
-        if stored == nil, let old { stored = values[old.id] }
+        // a rename whose index write failed left the value under the new id: finding it there makes a retry finish
+        if stored == nil, let old { stored = values[old.id] ?? values[entry.id] }
         guard let stored, !stored.secret.isEmpty else {
             throw AccountError(entry.kind == .login ? "Enter the password." : "Enter the token.")
         }
-        let before = values[old?.id ?? entry.id]
+        let before = values[old?.id ?? entry.id] ?? values[entry.id]
         if let old { values[old.id] = nil }
         values[entry.id] = stored
         try write(values)
@@ -44,8 +60,8 @@ final class VaultStore {
         var saved = entry
         saved.updated = Date()
         list.append(saved)
-        try SecretVault.write(list)
-        Self.announce(name: entry.name, before: before, after: stored)
+        try backend.writeIndex(list)
+        Self.announce(name: entry.name, before: before, after: stored, center: backend.center)
     }
 
     /// Tells the app a value changed: on the main queue, with the name only, never the value. Machine management
@@ -102,6 +118,7 @@ final class VaultStore {
 
     /// Call with the lock held.
     private func load() throws -> [String: VaultValue] {
+        if let loadValues = backend.loadValues { return try loadValues() }
         if let cache { return cache }
         var q = query
         q[kSecReturnData as String] = true
@@ -131,6 +148,7 @@ final class VaultStore {
 
     /// Call with the lock held.
     private func write(_ values: [String: VaultValue]) throws {
+        if let writeValues = backend.writeValues { return try writeValues(values) }
         let data = try JSONEncoder().encode(values)
         var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
