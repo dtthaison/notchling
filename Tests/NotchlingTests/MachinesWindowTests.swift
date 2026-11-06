@@ -760,6 +760,49 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertTrue(model.updateOffers.isEmpty)
     }
 
+    /// M2: the Run click runs the commands the sheet showed; if a refresh changed them meanwhile, nothing runs.
+    @MainActor
+    func testRunningASingleFixNeedsTheCommandsTheSheetShowed() async throws {
+        let order = Order()
+        let step = { (_: Machine, _: [Machine]) -> [SetupStep] in [
+            SetupStep(id: .baseTools, title: "Base tools", needs: [], cadence: .everyRefresh,
+                      probe: .local { _ in CheckResult(state: .fail("no")) },
+                      fix: .run(FixPlan(display: "run with \(order.items.count) notes", needsAdmin: false) { _ in
+                          order.add("ran")
+                          return FixOutcome(ok: true, message: "done")
+                      })),
+        ] }
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), steps: step)
+        await model.open()
+        model.requestSetUp(.baseTools, on: "m1")
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertEqual(prompt.display, "run with 0 notes")
+        order.add("a refresh learned something")          // the commands are now different
+        await model.confirm(prompt, password: nil).value
+        XCTAssertEqual(order.items, ["a refresh learned something"], "the Fix did not run")
+        XCTAssertEqual(model.outcomes["m1"]?.text, "Base tools needs a look; Set up again")
+        XCTAssertEqual(model.outcomes["m1"]?.guidance, true)
+
+        // a second click on the new sheet runs it
+        model.requestSetUp(.baseTools, on: "m1")
+        guard case .fix(let again)? = model.setupSheet else { return XCTFail("no sheet") }
+        await model.confirm(again, password: nil).value
+        XCTAssertEqual(order.items, ["a refresh learned something", "ran"])
+    }
+
+    /// M8: removing a machine also drops what the engine held for it.
+    @MainActor
+    func testRemovingAMachineDropsItsEngineState() async throws {
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac("m1"), TestMachines.mac("m2")]),
+                              steps: { _, _ in [SetupStep(id: .reachable, title: "Reachable", needs: [], cadence: .everyRefresh,
+                                                         probe: .local { _ in CheckResult(state: .pass("up")) }, fix: .howTo("x"))] })
+        await model.open()
+        XCTAssertNotNil(model.engine.results["m1"])
+        model.remove("m1")
+        XCTAssertNil(model.engine.results["m1"])
+        XCTAssertNotNil(model.engine.results["m2"])
+    }
+
     /// I3: every delivered-secret row offers Send again, an OK one too; it shows the same confirmation as any Fix and
     /// sends nothing until Run.
     @MainActor

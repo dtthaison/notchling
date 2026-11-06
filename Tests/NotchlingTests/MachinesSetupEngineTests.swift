@@ -542,12 +542,22 @@ final class MachinesSetupEngineTests: XCTestCase {
         }
     }
 
-    func testAShortAdminPasswordIsMaskedToo() async {
-        let w = world { _, _ in [self.adminStep()] }
-        echoStdin(w)
-        let out = await w.engine.runFix(StepID(raw: "adm"), on: "m1", approval: admin(password: "ab"))
-        XCTAssertTrue(out.message.contains("[admin password]"), out.message)
-        XCTAssertFalse((w.engine.logs["m1"] ?? []).joined().contains("ab\n"))
+    /// M6: a password is masked from 4 characters up. Under that, replacing it as text would turn ordinary words of the
+    /// log into `[admin password]` and hint at the password; `sudo -S -p ''` never echoes it anyway.
+    func testAnAdminPasswordIsMaskedFromFourCharactersUp() async {
+        let four = world { _, _ in [self.adminStep()] }
+        echoStdin(four)
+        let masked = await four.engine.runFix(StepID(raw: "adm"), on: "m1", approval: admin(password: "abcd"))
+        XCTAssertTrue(masked.message.contains("[admin password]"), masked.message)
+        XCTAssertFalse((four.engine.logs["m1"] ?? []).joined().contains("abcd"))
+
+        let short = world { _, _ in [self.adminStep()] }
+        echoStdin(short)
+        let plain = await short.engine.runFix(StepID(raw: "adm"), on: "m1", approval: admin(password: "ab"))
+        XCTAssertFalse(plain.message.contains("[admin password]"), plain.message)
+        XCTAssertEqual(SetupMasks(vault: [:], adminPassword: "ab").apply("a table and abc"), "a table and abc")
+        XCTAssertEqual(SetupMasks(vault: [:], adminPassword: "abc").apply("abc"), "abc")
+        XCTAssertEqual(SetupMasks(vault: [:], adminPassword: "abcd").apply("x abcd y"), "x [admin password] y")
     }
 
     func testAdminStepRefusesWithoutAPassword() async {
@@ -1208,6 +1218,130 @@ final class MachinesSetupEngineTests: XCTestCase {
         let outcomes = await w.engine.updateMachines(for: "claude-worker", approval: admin())
         XCTAssertEqual(outcomes.first?.message, "echo [secret:claude-worker]")
         XCTAssertEqual(w.engine.logs["m1"]?.contains("wrote [secret:claude-worker]"), true)
+    }
+
+    // MARK: M2: a single Fix runs the commands the sheet showed
+
+    func testRunFixRefusesWhenItsCommandsChangedAfterTheSheetShowedThem() async {
+        let fixes = Counter()
+        let display = Box("do it with python A")
+        let w = world { _, _ in [
+            step("a", fix: .run(FixPlan(display: display.value, needsAdmin: false) { _ in
+                fixes.add("a")
+                return FixOutcome(ok: true, message: "did a")
+            })),
+        ] }
+        w.answers.value = ["echo probe-a": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        // a background refresh learned another python between the sheet and the click
+        display.value = "do it with python B"
+        let refused = await w.engine.runFix(StepID(raw: "a"), on: "m1", approval: admin(), expectedDisplay: "do it with python A")
+        XCTAssertEqual(refused, FixOutcome(ok: false, message: "A needs a look; Set up again"))
+        XCTAssertEqual(fixes.count, 0)
+        XCTAssertNil(w.engine.logs["m1"], "nothing ran")
+        let same = await w.engine.runFix(StepID(raw: "a"), on: "m1", approval: admin(), expectedDisplay: "do it with python B")
+        XCTAssertTrue(same.ok, same.message)
+        XCTAssertEqual(fixes.all, ["a"])
+    }
+
+    // MARK: M3: a refresh that is out of date is dropped
+
+    /// Answers a batched probe from `answer` as it is when the call arrives; the first call then waits for `gate`.
+    private final class StaleRunner: CommandRunning, @unchecked Sendable {
+        let gate = Gate()
+        let answer = Box("old")
+        private let lock = NSLock()
+        private var calls = 0
+        var holdFirst = true
+        var seen: Int { lock.withLock { calls } }
+
+        func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
+            await run(argv, cwd: cwd, env: [:], stdin: nil, timeout: timeout, onOutput: nil)
+        }
+
+        func run(_ argv: [String], cwd: String?, env: [String: String], stdin: Data?, timeout: TimeInterval,
+                 onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
+            let number = lock.withLock { () -> Int in calls += 1; return calls }
+            let said = answer.value
+            if number == 1 && holdFirst { await gate.wait() }
+            let call = RecordedCall(argv: argv, env: env, stdin: stdin, cwd: cwd)
+            return FakeSSH.batch(call, reply: { _ in (out: said, code: 0) }) ?? CommandResult(code: 0, out: "", err: "")
+        }
+    }
+
+    private func staleWorld(_ machines: [Machine] = [TestMachines.mac("m1")], steps: [SetupStep]) -> (SetupEngine, StaleRunner, Store) {
+        let runner = StaleRunner()
+        let store = Store(machines)
+        let engine = SetupEngine(runner: runner, secrets: FakeSecrets(), http: FakeHTTP(), mac: { .empty },
+                                 machines: { store.machines }, save: { store.save($0) }, clock: { self.t0 },
+                                 steps: { _, _ in steps }, observeVault: false)
+        return (engine, runner, store)
+    }
+
+    private func waitUntil(_ what: String, _ ok: () -> Bool) async {
+        for _ in 0..<300 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(ok(), what)
+    }
+
+    func testARefreshThatBeganBeforeAFixEndedDoesNotOverwriteTheFixesOwn() async {
+        let fix = Counter()
+        let (engine, runner, _) = staleWorld(steps: [step("a", fix: runFix(fix, "a"))])
+        let old = Task { await engine.refresh(["m1"]) }
+        await waitUntil("the first refresh asked the machine") { runner.seen == 1 }
+        runner.answer.value = "new"
+        let out = await engine.runFix(StepID(raw: "a"), on: "m1", approval: admin())
+        XCTAssertTrue(out.ok, out.message)
+        XCTAssertEqual(engine.results["m1"]?[StepID(raw: "a")]?.state, .pass("new"), "the Fix's own check")
+        runner.gate.open()
+        await old.value
+        XCTAssertEqual(engine.results["m1"]?[StepID(raw: "a")]?.state, .pass("new"), "the old answer was dropped")
+    }
+
+    func testAnOlderRefreshNeverPublishesOverANewerOne() async {
+        let (engine, runner, _) = staleWorld(steps: [step("a")])
+        let old = Task { await engine.refresh(["m1"]) }
+        await waitUntil("the first refresh asked the machine") { runner.seen == 1 }
+        runner.answer.value = "new"
+        await engine.refresh(["m1"])
+        XCTAssertEqual(engine.results["m1"]?[StepID(raw: "a")]?.state, .pass("new"))
+        runner.gate.open()
+        await old.value
+        XCTAssertEqual(engine.results["m1"]?[StepID(raw: "a")]?.state, .pass("new"))
+    }
+
+    func testARefreshOfAMachineRemovedMeanwhilePublishesNothing() async {
+        let (engine, runner, store) = staleWorld(steps: [step("a")])
+        let old = Task { await engine.refresh(["m1"]) }
+        await waitUntil("the refresh asked the machine") { runner.seen == 1 }
+        _ = store.save([])
+        runner.gate.open()
+        await old.value
+        XCTAssertNil(engine.results["m1"])
+    }
+
+    // MARK: M8: a removed machine leaves nothing behind
+
+    func testForgetDropsWhatTheEngineHoldsForAMachine() async {
+        var m = TestMachines.mac("m1")
+        m.os = nil
+        let usage = claudeUsage("m1")
+        let facts = Detected(os: .macOS, home: "/Users/other", python: "/opt/other/bin/python3")
+        let w = world([m, TestMachines.mac("m2")], steps: { _, _ in [self.detectingStep(detected: facts)] }, usages: { _ in [usage, self.claudeUsage("m2")] })
+        w.store.saveOK = false          // the learned facts stay in the engine's overlay
+        await w.engine.refresh()
+        w.engine.vaultValueChanged(name: "claude-worker")
+        XCTAssertNotNil(w.engine.results["m1"])
+        XCTAssertEqual(w.engine.updateOffers["claude-worker"]?.count, 2)
+        XCTAssertNotEqual(w.engine.overlaid(TestMachines.mac("m1")), TestMachines.mac("m1"), "the overlay holds m1's facts")
+
+        w.engine.forget("m1")
+        XCTAssertNil(w.engine.results["m1"])
+        XCTAssertNil(w.engine.logs["m1"])
+        XCTAssertEqual(w.engine.updateOffers["claude-worker"]?.map(\.machine), ["m2"], "no offer for a machine that is gone")
+        XCTAssertNotNil(w.engine.results["m2"], "the other machine is untouched")
+        // a machine of that name added again starts clean: nothing is laid over it
+        let fresh = TestMachines.mac("m1")
+        XCTAssertEqual(w.engine.overlaid(fresh), fresh)
     }
 
     // MARK: I3: the offer survives a relaunch; Send again

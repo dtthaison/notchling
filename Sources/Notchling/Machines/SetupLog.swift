@@ -8,6 +8,7 @@ struct SetupMasks {
     var adminPassword: String?
 
     static let adminMask = "[admin password]"
+    private static let minimumMasked = 4
 
     func apply(_ text: String) -> String {
         guard !text.isEmpty else { return text }
@@ -18,8 +19,9 @@ struct SetupMasks {
             data.append(redactor.finish())
             text = String(decoding: data, as: UTF8.self)
         }
-        // `Redactor` leaves out strings under 4 bytes; the admin password is masked whatever its length
-        if let pw = adminPassword, !pw.isEmpty { text = text.replacingOccurrences(of: pw, with: Self.adminMask) }
+        // Plain replacement, from 4 characters up like `Redactor`: a shorter one would turn ordinary words of the log
+        // into the mask and hint at the password. (`sudo -S -p ''` never echoes it.)
+        if let pw = adminPassword, pw.utf8.count >= Self.minimumMasked { text = text.replacingOccurrences(of: pw, with: Self.adminMask) }
         return text
     }
 

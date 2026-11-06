@@ -395,12 +395,14 @@ final class MachinesModel: ObservableObject {
 
     /// Removes the record only. Nothing on the machine changes.
     func remove(_ machine: String) {
-        _ = commit { list in
+        let problem = commit { list in
             guard list.contains(where: { $0.name == machine }) else { return false }
             list.removeAll { $0.name == machine }
             return true
         }
         outcomes[machine] = nil
+        // gone from the registry: the engine drops its results, log and learned facts too
+        if problem == nil { engine.forget(machine) }
     }
 
     /// Adds or replaces the machine's sd worker job. Nil when saved, else why not.
@@ -527,12 +529,13 @@ final class MachinesModel: ObservableObject {
         }
         if case .fix(let shown)? = setupSheet, shown.id == prompt.id { setupSheet = nil }
         let machine = prompt.machine
+        let display = prompt.display
         switch prompt.kind {
         case .step(let id):
             let approval = FixApproval(adminPassword: prompt.root ? nil : password, asRootConfirmed: prompt.root)
             return Task { [weak self] in
                 guard let self else { return }
-                self.record(await self.engine.runFix(id, on: machine, approval: approval), for: machine)
+                self.record(await self.engine.runFix(id, on: machine, approval: approval, expectedDisplay: display), for: machine)
             }
         case .toggle(let on):
             let approval = FixApproval(adminPassword: prompt.root ? nil : password, asRootConfirmed: prompt.root)

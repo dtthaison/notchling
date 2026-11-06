@@ -65,6 +65,11 @@ final class SetupEngine: ObservableObject {
     private var expirySent: [String: String] = [:]
     /// How often the offer of a secret was made; an update that finds it changed leaves the newer offer alone.
     private var offerRevision: [String: Int] = [:]
+    /// Per machine: the refreshes started, the newest one that published, and the Fixes that ended. A refresh that
+    /// was overtaken by a newer one, or that began before a Fix ended, would show a state from before; it is dropped.
+    private var refreshStarted: [String: Int] = [:]
+    private var refreshPublished: [String: Int] = [:]
+    private var fixesEnded: [String: Int] = [:]
 
     private static let logLimit = 2000
     private static let logBatch: UInt64 = 100_000_000
@@ -218,7 +223,12 @@ final class SetupEngine: ObservableObject {
         // each machine's vault values are read once for the whole refresh: the contexts of both passes, the batch
         // cuts and the published results all use them
         var maskOf: [String: SetupMasks] = [:]
-        for m in targets { maskOf[m.name] = masks(for: m) }
+        var began: [String: (ticket: Int, fixes: Int)] = [:]
+        for m in targets {
+            maskOf[m.name] = masks(for: m)
+            refreshStarted[m.name, default: 0] += 1
+            began[m.name] = (refreshStarted[m.name] ?? 0, fixesEnded[m.name, default: 0])
+        }
         var evaluations: [String: Evaluation] = [:]
         await withTaskGroup(of: (String, Evaluation).self) { group in
             for m in targets {
@@ -238,6 +248,10 @@ final class SetupEngine: ObservableObject {
         var learned = false
         for m in targets {
             guard var e = evaluations[m.name] else { continue }
+            // dropped: the machine was removed meanwhile, a newer refresh already published, or a Fix ended since this began
+            guard let start = began[m.name], machineList().contains(where: { $0.name == m.name }),
+                  start.ticket > refreshPublished[m.name, default: 0], start.fixes == fixesEnded[m.name, default: 0] else { continue }
+            refreshPublished[m.name] = start.ticket
             if offline, e.results[.reachable] != nil {
                 e.results[.reachable] = CheckResult(state: .cantTell("no machine answered; this Mac may be offline"))
             }
@@ -526,7 +540,9 @@ final class SetupEngine: ObservableObject {
         return nil
     }
 
-    func runFix(_ id: StepID, on machine: String, approval: FixApproval) async -> FixOutcome {
+    /// - Parameter expectedDisplay: the commands the sheet showed. When the step's commands are different now (a
+    ///   refresh learned another home or python between the sheet and the click), nothing runs.
+    func runFix(_ id: StepID, on machine: String, approval: FixApproval, expectedDisplay: String? = nil) async -> FixOutcome {
         guard let m = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
         guard let step = stepList(m, currentMachines()).first(where: { $0.id == id }) else {
             return FixOutcome(ok: false, message: "\(machine) has no step \(id.raw)")
@@ -536,6 +552,9 @@ final class SetupEngine: ObservableObject {
         case .howTo(let text): return FixOutcome(ok: false, message: "\(step.title) has no Fix. \(text)")
         case .toggle: return FixOutcome(ok: false, message: "\(step.title) is a switch, not a Fix")
         case .run(let p): plan = p
+        }
+        if let expectedDisplay, expectedDisplay != plan.display {
+            return FixOutcome(ok: false, message: "\(step.title) needs a look; Set up again")
         }
         if let why = refusal(for: step, on: m, approval: approval, needsAdmin: plan.needsAdmin) {
             return FixOutcome(ok: false, message: why)
@@ -593,6 +612,7 @@ final class SetupEngine: ObservableObject {
         let message = masks.apply(raw.message)
         appendLog(m.name, message.components(separatedBy: "\n").enumerated().map { $0.offset == 0 ? "\(raw.ok ? "✓" : "✗") \($0.element)" : $0.element })
         running[m.name] = nil
+        fixesEnded[m.name, default: 0] += 1
         return FixOutcome(ok: raw.ok, message: message)
     }
 
@@ -691,6 +711,22 @@ final class SetupEngine: ObservableObject {
         }
         await refresh([machine])
         return outcome
+    }
+
+    /// A machine was removed from the registry: drops everything held for it (results, log, learned facts, the update
+    /// offers), so one added later under the same name starts clean. The refresh and Fix counters stay: they only
+    /// grow, and a refresh still in flight for it is dropped when it ends (the machine is gone).
+    func forget(_ machine: String) {
+        results[machine] = nil
+        logs[machine] = nil
+        lastSlow[machine] = nil
+        facts[machine] = nil
+        savedState[machine] = nil
+        expirySent[machine] = nil
+        for (name, usages) in updateOffers where usages.contains(where: { $0.machine == machine }) {
+            let rest = usages.filter { $0.machine != machine }
+            setOffer(name, rest.isEmpty ? nil : rest)
+        }
     }
 
     // MARK: renewed secrets
