@@ -70,10 +70,26 @@ enum WorkerJSON {
     /// The most a probe reads.
     static let readCap = 262_144
 
+    /// What sd accepts for `machine`: `^[a-z0-9][a-z0-9-]*$`.
+    private static func isValidMachineName(_ name: String) -> Bool {
+        guard let first = name.first, first.isASCII, first.isLowercase || first.isNumber else { return false }
+        return name.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }
+    }
+
     /// The keys Notchling writes for `machine`: its name, the token and Claude login files, the expiry and health
     /// URL, and each served repo with the machine that runs each kind (from every machine whose job serves the repo).
     static func owned(machine: Machine, job: SDWorkerSettings, all: [Machine]) -> Result<[String: Any], StepFailure> {
+        guard isValidMachineName(machine.name) else {
+            return .failure("the machine name \(machine.name) must be lowercase letters, digits and hyphens")
+        }
         guard !job.kinds.isEmpty else { return .failure("no kinds chosen for \(machine.name)") }
+        if let bad = job.kinds.first(where: { !["ios", "backend"].contains($0) }) {
+            return .failure("kind \(bad) must be ios or backend")
+        }
+        guard !job.repos.isEmpty else { return .failure("no repos chosen for \(machine.name)") }
+        if let repo = job.repos.first(where: { $0.checkCommand.trimmingCharacters(in: .whitespaces).isEmpty }) {
+            return .failure("no check command for \(repo.github)")
+        }
         guard job.python.hasPrefix("/"), job.sdPath.hasPrefix("/") else {
             return .failure("python or sd.py is not an absolute path yet")
         }
@@ -342,7 +358,9 @@ enum SDWorkerSteps {
         rm -rf "$d.new"; mkdir -p "$d.new/plugin" "$d.new/.claude-plugin"
         tar -xzf - -C "$d.new/plugin"
         printf '%s' \(LaneStore.quote(marketplace)) > "$d.new/.claude-plugin/marketplace.json"
-        rm -rf "$d"; mv "$d.new" "$d"
+        rm -rf "$d.old"; [ ! -e "$d" ] || mv "$d" "$d.old"
+        mv "$d.new" "$d" || { [ ! -e "$d.old" ] || mv "$d.old" "$d"; exit 1; }
+        rm -rf "$d.old"
         claude plugin marketplace add "$d" >/dev/null 2>&1 || claude plugin marketplace update system-design
         claude plugin install sd@system-design || claude plugin update sd@system-design
         claude plugin marketplace add anthropics/claude-plugins-official >/dev/null 2>&1 || claude plugin marketplace update claude-plugins-official
@@ -366,7 +384,10 @@ enum SDWorkerSteps {
         }
         defer { try? FileManager.default.removeItem(at: temp) }
         let archive = temp.appendingPathComponent("sd-plugin.tgz").path
-        let tar = await MachineRun.local(["/usr/bin/tar", "-czf", archive, "-C", sd.path, "."], ctx: ctx)
+        // COPYFILE_DISABLE keeps macOS tar from adding `._*` metadata entries that GNU tar would unpack as files.
+        // `MachineRun.local` takes no environment, so this one local command goes to the runner directly.
+        let tar = await ctx.step.runner.run(["/usr/bin/tar", "-czf", archive, "-C", sd.path, "."], cwd: nil,
+                                            env: ["COPYFILE_DISABLE": "1"], stdin: nil, timeout: 120, onOutput: ctx.log)
         guard tar.code == 0, let data = FileManager.default.contents(atPath: archive), !data.isEmpty else {
             return FixOutcome(ok: false, message: "couldn't pack sd \(sd.version) on this Mac: \(firstLine(tar.err))")
         }
@@ -379,6 +400,9 @@ enum SDWorkerSteps {
     // MARK: worker.json written
 
     private static let workerJSONProbe = #"head -c \#(WorkerJSON.readCap) "$HOME/.config/sd/worker.json" 2>/dev/null"#
+
+    /// The Fix's read keeps stderr, so a real failure has a reason; a missing file prints nothing.
+    private static let workerJSONRead = #"[ -f "$HOME/.config/sd/worker.json" ] || exit 0; head -c \#(WorkerJSON.readCap) "$HOME/.config/sd/worker.json""#
 
     private static func workerJSONCheck(_ out: RemoteOutput, _ ctx: StepContext) -> CheckResult {
         let machine = ctx.machine
@@ -414,8 +438,13 @@ enum SDWorkerSteps {
         case let .failure(why): return FixOutcome(ok: false, message: why.message)
         case let .success(value): owned = value
         }
-        let read = await MachineRun.script(workerJSONProbe, ctx: ctx, timeout: 60)
-        guard read.code == 0 else { return FixOutcome(ok: false, message: "couldn't read worker.json: \(firstLine(read.err))") }
+        let read = await MachineRun.script(workerJSONRead, ctx: ctx, timeout: 60)
+        // A fresh machine has no worker.json: `head` exits 1 with nothing printed, and that is "missing", not an error.
+        let missing = read.out.isEmpty && (read.code == 0 || read.code == 1)
+        guard read.code == 0 || missing else {
+            let why = firstLine(read.err)
+            return FixOutcome(ok: false, message: "couldn't read worker.json (exit \(read.code))" + (why.isEmpty ? "" : ": \(why)"))
+        }
         let remote = Data(read.out.utf8)
         if !read.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, WorkerJSON.parse(remote) == nil {
             return FixOutcome(ok: false, message: "worker.json on the machine isn't a JSON object; fix or remove it first")
@@ -428,6 +457,10 @@ enum SDWorkerSteps {
     }
 
     // MARK: Service installed
+
+    private static let macTarget = #""gui/$(id -u)/com.sd.worker""#
+    /// After the plist is written: the label stays disabled (launchd keeps that across logins) until Running turns on.
+    static let macDisableScript = "launchctl disable \(macTarget)"
 
     private static func serviceTarget(_ name: String, linux: Bool) -> String {
         linux ? "\(ServiceFiles.unitDirectory)/\(name)" : ServiceFiles.plistPath
@@ -486,7 +519,9 @@ enum SDWorkerSteps {
     static func installScript(files: [ServiceFile]) -> String {
         var lines = ["set -e", "umask 022"]
         for file in files {
-            lines.append("printf '%s' '\(Data(file.content.utf8).base64EncodedString())' | base64 -d > \(file.remotePath)")
+            // a temp file, then a move, on its own line so `set -e` stops on a failed decode
+            lines.append("printf '%s' '\(Data(file.content.utf8).base64EncodedString())' | base64 -d > \(file.remotePath).new")
+            lines.append("mv -f \(file.remotePath).new \(file.remotePath)")
         }
         lines.append("systemctl daemon-reload")
         return lines.joined(separator: "\n")
@@ -496,8 +531,12 @@ enum SDWorkerSteps {
         guard linux else {
             return "Write the LaunchAgent (mode 644) with the plist on stdin:\n"
                 + RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644")
+                + "\nThen keep it from starting at login until you turn Running on:\n" + macDisableScript
         }
-        let lines = ServiceFiles.linuxNames.map { "printf '%s' '<base64 of \($0)>' | base64 -d > \(ServiceFiles.unitDirectory)/\($0)" }
+        let lines = ServiceFiles.linuxNames.flatMap { name -> [String] in
+            let path = "\(ServiceFiles.unitDirectory)/\(name)"
+            return ["printf '%s' '<base64 of \(name)>' | base64 -d > \(path).new", "mv -f \(path).new \(path)"]
+        }
         return (["set -e", "umask 022"] + lines + ["systemctl daemon-reload", "(nothing is enabled or started)"]).joined(separator: "\n")
     }
 
@@ -515,9 +554,13 @@ enum SDWorkerSteps {
         }
         let run = await MachineRun.script(RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644"),
                                           stdin: Data(files[0].content.utf8), ctx: ctx, timeout: 60)
-        return run.code == 0
-            ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written")
-            : FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err))")
+        guard run.code == 0 else { return FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err))") }
+        // The plist has RunAtLoad, so launchd would start it at the next login. Disabled, it waits for the Running click.
+        // This never loads it: no bootstrap, no enable.
+        let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
+        return off.code == 0
+            ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written and disabled until Running is turned on")
+            : FixOutcome(ok: false, message: "wrote \(ServiceFiles.plistName) but couldn't disable it (exit \(off.code)): \(firstLine(off.err))")
     }
 
     // MARK: sd worker setup --check
@@ -573,13 +616,15 @@ enum SDWorkerSteps {
     private static func runningProbe(linux: Bool) -> String {
         linux
             ? "systemctl is-enabled sd-worker.service; systemctl is-active sd-worker.service"
-            : #"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 && echo on || echo off"#
+            : #"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 && echo loaded || echo notloaded; launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep '"com.sd.worker" =>'"#
     }
 
     private static func runningCheck(_ out: RemoteOutput, linux: Bool) -> CheckResult {
         let lines = out.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let on = linux ? lines == ["enabled", "active"] : lines == ["on"]
-        return CheckResult(state: on ? .pass("on") : .fail("off"))
+        if linux { return CheckResult(state: lines == ["enabled", "active"] ? .pass("on") : .fail("off")) }
+        // macOS: loaded, and not disabled. A label `print-disabled` doesn't list is enabled.
+        let disabled = lines.contains { $0.contains(#""com.sd.worker" =>"#) && ($0.hasSuffix("disabled") || $0.hasSuffix("true")) }
+        return CheckResult(state: lines.first == "loaded" && !disabled ? .pass("on") : .fail("off"))
     }
 
     /// What the Running switch runs: enable and start, or disable and stop, the worker's own service only.
@@ -588,9 +633,15 @@ enum SDWorkerSteps {
         case (true, true): return "systemctl enable --now sd-worker.service"
         case (true, false): return "systemctl disable --now sd-worker.service"
         case (false, true):
-            return #"launchctl enable "gui/$(id -u)/com.sd.worker"; launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sd.worker.plist""#
+            // already loaded is fine: bootstrap only when the label isn't loaded
+            return #"launchctl enable "gui/$(id -u)/com.sd.worker" || exit 1; "#
+                + #"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 || "#
+                + #"launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sd.worker.plist""#
         case (false, false):
-            return #"launchctl bootout "gui/$(id -u)/com.sd.worker"; launchctl disable "gui/$(id -u)/com.sd.worker""#
+            // not loaded is fine: bootout only when it is loaded
+            return #"if launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1; then "#
+                + #"launchctl bootout "gui/$(id -u)/com.sd.worker" || exit 1; fi; "#
+                + #"launchctl disable "gui/$(id -u)/com.sd.worker""#
         }
     }
 }

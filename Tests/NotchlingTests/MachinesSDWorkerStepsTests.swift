@@ -169,6 +169,7 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let tar = try XCTUnwrap(runner.tarCalls.first)
         XCTAssertEqual(tar.argv.first, "/usr/bin/tar")
         XCTAssertTrue(tar.argv.contains(sdDir.path))
+        XCTAssertEqual(tar.env["COPYFILE_DISABLE"], "1", "no ._ metadata entries in the archive")
         let ssh = try XCTUnwrap(runner.sshCalls.first)
         XCTAssertEqual(ssh.argv.first, "/usr/bin/ssh")
         let tgz = try XCTUnwrap(runner.producedArchive)
@@ -177,6 +178,10 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let text = ssh.argv.last ?? ""
         XCTAssertTrue(text.contains("claude plugin install sd@system-design"))
         XCTAssertTrue(text.contains("claude plugin install superpowers@claude-plugins-official"))
+        // the old folder is set aside, not deleted, before the new one goes in; a failed move puts it back
+        XCTAssertFalse(text.contains(#"rm -rf "$d"; "#))
+        XCTAssertTrue(text.contains(#"mv "$d" "$d.old""#))
+        XCTAssertTrue(text.contains(#"mv "$d.old" "$d""#))
         // the temp archive is gone
         XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(runner.archivePath)))
     }
@@ -280,6 +285,21 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(WorkerJSON.owned(machine: vps, job: vps.sdWorker!, all: [vps]).failure, "no kinds chosen for vps-sing-1")
     }
 
+    func testOwnedRefusesWhatSdRejects() {
+        func failure(_ edit: (inout Machine) -> Void) -> StepFailure? {
+            var vps = TestMachines.linux()
+            edit(&vps)
+            return WorkerJSON.owned(machine: vps, job: vps.sdWorker!, all: [vps]).failure
+        }
+        XCTAssertEqual(failure { $0.jobs[0].sdWorker?.repos = [] }, "no repos chosen for vps-sing-1")
+        XCTAssertEqual(failure { $0.jobs[0].sdWorker?.repos[0].checkCommand = "  " }, "no check command for \(repo)")
+        XCTAssertEqual(failure { $0.jobs[0].sdWorker?.kinds = ["ios", "web"] }, "kind web must be ios or backend")
+        for name in ["VPS", "-vps", "vps_1", "vps sing", ""] {
+            XCTAssertNotNil(failure { $0.name = name }, name)
+        }
+        XCTAssertNil(failure { $0.name = "vps-2" })
+    }
+
     func testWorkerJSONNeedsAbsolutePythonAndSdPath() {
         var vps = TestMachines.linux()
         vps.jobs[0].sdWorker?.python = "python3"
@@ -317,6 +337,36 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let written = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(write.stdin)) as? [String: Any])
         XCTAssertEqual(written["claude_env"] as? String, "~/.config/agents/claude.env")
         XCTAssertNotNil(written["budget"])
+    }
+
+    func testWorkerJSONFixWritesANewFileWhenTheMachineHasNone() async throws {
+        let vps = TestMachines.linux()
+        for code: Int32 in [0, 1] {
+            let runner = ScriptedRunner()
+            runner.on({ $0.last?.contains("head -c 262144") == true }, result: CommandResult(code: code, out: "", err: ""))
+            let outcome = try await plan(.workerJSON).run(.test(.test(machine: vps, runner: runner)))
+            XCTAssertTrue(outcome.ok, "\(code): \(outcome.message)")
+            XCTAssertEqual(runner.calls.count, 2, "read, then write")
+            let written = try XCTUnwrap(WorkerJSON.parse(runner.calls.last?.stdin))
+            XCTAssertEqual(written["machine"] as? String, "vps-sing-1")
+        }
+    }
+
+    func testWorkerJSONFixShowsTheReasonOfARealReadError() async throws {
+        let runner = ScriptedRunner()
+        runner.on({ $0.last?.contains("head -c 262144") == true },
+                  result: CommandResult(code: 1, out: "{\"half\":", err: "head: I/O error\n"))
+        var outcome = try await plan(.workerJSON).run(.test(.test(runner: runner)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("head: I/O error"), outcome.message)
+        XCTAssertEqual(runner.calls.count, 1)
+
+        let ssh = ScriptedRunner()
+        ssh.on({ $0.last?.contains("head -c 262144") == true }, result: CommandResult(code: 255, out: "", err: "ssh: connect timed out\n"))
+        outcome = try await plan(.workerJSON).run(.test(.test(runner: ssh)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("connect timed out"), outcome.message)
+        XCTAssertEqual(ssh.calls.count, 1, "nothing was written")
     }
 
     func testWorkerJSONFixRefusesToOverwriteAFileItCantRead() async throws {
@@ -417,7 +467,14 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(lines.filter { $0.contains("base64 -d > /etc/systemd/system/") }.count, 4)
         XCTAssertTrue(script.contains("systemctl daemon-reload"))
         XCTAssertTrue(script.hasPrefix("set -e\numask 022\n"))
-        for word in ["enable", "start", "restart", "stop", "disable"] { XCTAssertFalse(script.contains(word), word) }
+        // the words are looked for outside the base64 payloads
+        let outside = lines.map { $0.replacingOccurrences(of: "'[A-Za-z0-9+/=]*'", with: "''", options: .regularExpression) }
+        XCTAssertTrue(outside.contains("printf '%s' '' | base64 -d > /etc/systemd/system/sd-worker.service.new"), outside.joined(separator: "\n"))
+        for word in ["enable", "start", "restart", "stop", "disable"] {
+            XCTAssertFalse(outside.joined(separator: "\n").contains(word), word)
+        }
+        // each unit goes through a temp file and a move
+        XCTAssertEqual(lines.filter { $0.hasPrefix("mv -f /etc/systemd/system/") }.count, 4)
         for service in MachineSafety.productionServices { XCTAssertFalse(script.contains(service), service) }
         XCTAssertEqual(script.components(separatedBy: "systemctl").count - 1, 1)
 
@@ -455,7 +512,31 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(call.argv.last).contains("launchctl"))
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: try XCTUnwrap(call.stdin), format: nil) as? [String: Any])
         XCTAssertEqual((plist["ProgramArguments"] as? [String])?.first, "/opt/homebrew/bin/python3")
-        XCTAssertEqual(runner.calls.count, 1)
+        // the plist is sd's own (RunAtLoad and KeepAlive stay), so the Fix disables the label until Running is turned on
+        XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
+        XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
+        XCTAssertEqual(runner.calls.count, 2)
+        XCTAssertEqual(runner.calls[1].argv.last?.contains(SDWorkerSteps.macDisableScript), true)
+        // never loads or enables it
+        let all = runner.calls.map { $0.argv.joined(separator: " ") }.joined(separator: "\n")
+        for verb in ["bootstrap", "load", "enable", "kickstart", "bootout"] {
+            XCTAssertNil(all.range(of: "launchctl \(verb)"), verb)
+        }
+        XCTAssertEqual(SDWorkerSteps.macDisableScript, #"launchctl disable "gui/$(id -u)/com.sd.worker""#)
+        XCTAssertTrue(plan.display.contains(SDWorkerSteps.macDisableScript))
+    }
+
+    func testServiceFixOnAMacFailsWhenTheLabelCantBeDisabled() async throws {
+        let sdDir = temp.appendingPathComponent("sd")
+        try FileManager.default.createDirectory(at: sdDir.appendingPathComponent("templates"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try templatesDir, to: sdDir.appendingPathComponent("templates/worker"))
+        let facts = MacFacts(plugins: ["sd@system-design": InstalledPlugin(version: "1.19.2", path: sdDir.path)], marketplaceJSON: [:])
+        let runner = ScriptedRunner()
+        runner.on({ $0.last?.contains("launchctl disable") == true }, result: CommandResult(code: 1, out: "", err: "no GUI domain\n"))
+        let m1 = TestMachines.mac()
+        let outcome = try await plan(.service, machine: m1).run(.test(.test(machine: m1, runner: runner, mac: facts)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("no GUI domain"))
     }
 
     func testServiceProbeComparesTheDigestsOfTheRenderedUnits() async throws {
@@ -553,13 +634,57 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
 
     // MARK: Running
 
+    /// Runs the macOS toggle scripts with `/bin/sh` and a fake `launchctl` that logs its arguments.
+    private func runToggle(on: Bool, loaded: Bool) throws -> [String] {
+        let bin = temp.appendingPathComponent("bin-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let log = bin.appendingPathComponent("log").path
+        let fake = """
+        #!/bin/sh
+        echo "$*" >> '\(log)'
+        if [ "$1" = print ]; then [ \(loaded ? "1" : "0") = 1 ]; exit $?; fi
+        exit 0
+        """
+        let path = bin.appendingPathComponent("launchctl")
+        try fake.write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", SDWorkerSteps.toggleScript(linux: false, on: on)]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "HOME": "/Users/x"]
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        let text = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    func testMacToggleOnEnablesThenBootstrapsOnlyWhenNotLoaded() throws {
+        let uid = String(getuid())
+        let fresh = try runToggle(on: true, loaded: false)
+        XCTAssertEqual(fresh, ["enable gui/\(uid)/com.sd.worker", "print gui/\(uid)/com.sd.worker",
+                               "bootstrap gui/\(uid) /Users/x/Library/LaunchAgents/com.sd.worker.plist"])
+        let already = try runToggle(on: true, loaded: true)
+        XCTAssertEqual(already, ["enable gui/\(uid)/com.sd.worker", "print gui/\(uid)/com.sd.worker"], "already loaded is ok")
+    }
+
+    func testMacToggleOffBootsOutOnlyWhenLoadedThenDisables() throws {
+        let uid = String(getuid())
+        let loaded = try runToggle(on: false, loaded: true)
+        XCTAssertEqual(loaded, ["print gui/\(uid)/com.sd.worker", "bootout gui/\(uid)/com.sd.worker", "disable gui/\(uid)/com.sd.worker"])
+        let idle = try runToggle(on: false, loaded: false)
+        XCTAssertEqual(idle, ["print gui/\(uid)/com.sd.worker", "disable gui/\(uid)/com.sd.worker"], "not loaded is ok")
+    }
+
     func testRunningToggleScriptsAndState() async throws {
         XCTAssertEqual(SDWorkerSteps.toggleScript(linux: true, on: true), "systemctl enable --now sd-worker.service")
         XCTAssertEqual(SDWorkerSteps.toggleScript(linux: true, on: false), "systemctl disable --now sd-worker.service")
-        XCTAssertEqual(SDWorkerSteps.toggleScript(linux: false, on: true),
-                       #"launchctl enable "gui/$(id -u)/com.sd.worker"; launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sd.worker.plist""#)
-        XCTAssertEqual(SDWorkerSteps.toggleScript(linux: false, on: false),
-                       #"launchctl bootout "gui/$(id -u)/com.sd.worker"; launchctl disable "gui/$(id -u)/com.sd.worker""#)
+        let macOnScript = SDWorkerSteps.toggleScript(linux: false, on: true)
+        XCTAssertTrue(macOnScript.hasPrefix(#"launchctl enable "gui/$(id -u)/com.sd.worker""#))
+        XCTAssertTrue(macOnScript.hasSuffix(#"launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sd.worker.plist""#))
+        let macOffScript = SDWorkerSteps.toggleScript(linux: false, on: false)
+        XCTAssertTrue(macOffScript.contains(#"launchctl bootout "gui/$(id -u)/com.sd.worker""#))
+        XCTAssertTrue(macOffScript.hasSuffix(#"launchctl disable "gui/$(id -u)/com.sd.worker""#))
         for linux in [true, false] {
             for on in [true, false] {
                 let s = SDWorkerSteps.toggleScript(linux: linux, on: on)
@@ -570,17 +695,24 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
 
         XCTAssertEqual(try script(.running), "systemctl is-enabled sd-worker.service; systemctl is-active sd-worker.service")
         XCTAssertEqual(try script(.running, machine: TestMachines.mac()),
-                       #"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 && echo on || echo off"#)
+                       #"launchctl print "gui/$(id -u)/com.sd.worker" >/dev/null 2>&1 && echo loaded || echo notloaded; launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep '"com.sd.worker" =>'"#)
         let on = try await check(.running, out: "enabled\nactive\n")
         XCTAssertEqual(on.state, .pass("on"))
         for off in ["disabled\ninactive\n", "enabled\ninactive\n", "disabled\nactive\n", "", "enabled\nfailed\n"] {
             let r = try await check(.running, out: off)
             XCTAssertEqual(r.state, .fail("off"), off)
         }
-        let macOn = try await check(.running, machine: TestMachines.mac(), out: "on\n")
+        // macOS: on is loaded and not disabled; a label print-disabled doesn't list counts as enabled
+        let line = { (state: String) in "\t\"com.sd.worker\" => \(state)\n" }
+        let macOn = try await check(.running, machine: TestMachines.mac(), out: "loaded\n")
         XCTAssertEqual(macOn.state, .pass("on"))
-        let macOff = try await check(.running, machine: TestMachines.mac(), out: "off\n")
-        XCTAssertEqual(macOff.state, .fail("off"))
+        let macOn2 = try await check(.running, machine: TestMachines.mac(), out: "loaded\n" + line("enabled"))
+        XCTAssertEqual(macOn2.state, .pass("on"))
+        for off in ["notloaded\n", "notloaded\n" + line("disabled"), "loaded\n" + line("disabled"), "loaded\n" + line("true"),
+                    "notloaded\n" + line("enabled"), ""] {
+            let r = try await check(.running, machine: TestMachines.mac(), out: off)
+            XCTAssertEqual(r.state, .fail("off"), off)
+        }
 
         // the toggle is a click's switch, not a Fix
         guard case let .toggle(admin) = try step(.running, TestMachines.linux()).fix else { return XCTFail() }
