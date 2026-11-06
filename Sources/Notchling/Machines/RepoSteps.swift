@@ -27,8 +27,8 @@ enum RepoSteps {
             SetupStep(id: .clone(github), title: "Clone (\(github))", needs: [.deployKey(github)],
                       cadence: .everyRefresh, probe: cloneProbe(repo), fix: .run(cloneFix(repo))),
             SetupStep(id: .pushRefused(github), title: "Push is refused (\(github))", needs: [.clone(github)],
-                      cadence: .slow, probe: pushProbe(repo),
-                      fix: .howTo("A push GitHub accepted means the key can write. Remove it on GitHub (Settings > Deploy keys) and run Deploy key's Set up again; it adds the key read-only.")),
+                      cadence: .slow, probe: pushProbe(repo, linux: machine.os == .linux),
+                      fix: .howTo("A push GitHub accepted means the key can write. Remove it on GitHub (Settings > Deploy keys) and run Deploy key's Set up again; it adds the key read-only.\nA login of the worker account itself (gh, a default ssh key, the keychain, ~/.git-credentials) is a second way to push: log it out or remove it on the machine, then Check again.")),
         ]
     }
 
@@ -320,19 +320,107 @@ enum RepoSteps {
 
     /// `git push --dry-run` talks to GitHub's receive-pack and sends nothing: with a read-only key GitHub closes
     /// the connection first, and with a writable one git only lists what it would do. No ref is ever created.
-    private static func pushProbe(_ repo: MachineRepo) -> Probe {
+    /// After the dry run, the worker account's own ways into GitHub (I5). The dry run goes through the `github-agents-*`
+    /// alias with `IdentitiesOnly yes`, so it never sees a personal `gh` login, a default ssh key, a keychain password
+    /// or a stored credential of the account. Each check keeps what its tool printed on the machine and says only a
+    /// token line: an exit code, or for ssh the account name GitHub greeted (cut to GitHub's own name characters).
+    /// None of them writes: `ssh -T` only authenticates, and no host key is added.
+    private static func loginChecks(linux: Bool) -> String {
+        var lines = [
+            "if command -v gh >/dev/null 2>&1; then gh auth status --hostname github.com >/dev/null 2>&1; echo \"gh=$?\"; else echo gh=none; fi",
+            "r=$(ssh -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1); "
+                + "n=$(printf '%s\\n' \"$r\" | sed -n 's|^Hi \\([A-Za-z0-9._/-]*\\)!.*|\\1|p' | head -n 1); "
+                + "if [ -n \"$n\" ]; then echo \"ssh=hi:$n\"; else case \"$r\" in *denied*) echo ssh=denied;; *) echo ssh=unknown;; esac; fi",
+        ]
+        if !linux { lines.append("security find-internet-password -s github.com >/dev/null 2>&1; echo \"keychain=$?\"") }
+        lines.append("grep -q 'github.com' ~/.git-credentials 2>/dev/null; echo \"credfile=$?\"")
+        return lines.joined(separator: "\n")
+    }
+
+    private static func pushProbe(_ repo: MachineRepo, linux: Bool) -> Probe {
         let path = RemoteShell.path(checkoutPath(repo))
         let script = "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=8' "
-            + "git -c core.hooksPath=/dev/null -C \(path) push --dry-run origin HEAD:refs/heads/agents-push-test </dev/null 2>&1"
+            + "git -c core.hooksPath=/dev/null -C \(path) push --dry-run origin HEAD:refs/heads/agents-push-test </dev/null 2>&1\n"
+            + "echo \"@@push $?\"\n" + loginChecks(linux: linux)
         return .remote(script: script) { out, ctx in
-            if out.code != 0 && out.text.contains("marked as read only") {
-                return CheckResult(state: .pass("GitHub refuses a push with this key"))
+            // git's output, then its exit code on the marker line, then the login checks' token lines
+            let lines = out.text.components(separatedBy: "\n")
+            guard let marker = lines.firstIndex(where: { $0.hasPrefix("@@push ") }), let code = Int(lines[marker].dropFirst(7)) else {
+                let line = firstLine(out.text, ctx.mask)
+                return CheckResult(state: .fail(line.isEmpty ? "the push check failed (code \(out.code))" : line))
             }
-            if out.code == 0 {
+            let git = lines[..<marker].joined(separator: "\n")
+            if code == 0 {
                 return CheckResult(state: .fail("this machine can push to \(repo.github); the deploy key can write"))
             }
-            let line = firstLine(out.text, ctx.mask)
-            return CheckResult(state: .fail(line.isEmpty ? "the push check failed (code \(out.code))" : line))
+            guard git.contains("marked as read only") else {
+                let line = firstLine(git, ctx.mask)
+                return CheckResult(state: .fail(line.isEmpty ? "the push check failed (code \(code))" : line))
+            }
+            return loginResult(Array(lines[(marker + 1)...]))
         }
+    }
+
+    /// The verdict of the login checks' token lines. A login is a ✗ with its reason; a check that couldn't tell is
+    /// can't tell, never a pass.
+    private static func loginResult(_ tokens: [String]) -> CheckResult {
+        var values: [String: String] = [:]
+        for line in tokens {
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            values[String(line[..<eq])] = String(line[line.index(after: eq)...])
+        }
+        var rows: [SubRow] = [SubRow(name: "Push with the deploy key", ok: true, detail: "GitHub refuses it")]
+        var reasons: [String] = [], doubts: [String] = []
+
+        switch values["gh"] {
+        case "0":
+            reasons.append("gh is logged in as the worker; run gh auth logout")
+            rows.append(SubRow(name: "gh login", ok: false, detail: "logged in"))
+        case "none", "1": rows.append(SubRow(name: "gh login", ok: true, detail: "not logged in"))
+        default:
+            doubts.append("couldn't check gh")
+            rows.append(SubRow(name: "gh login", ok: false, detail: "couldn't check"))
+        }
+
+        let ssh = values["ssh"] ?? ""
+        if ssh.hasPrefix("hi:") {
+            let name = String(ssh.dropFirst(3))
+            if name.contains("/") {
+                // a deploy key greets with owner/repo: scoped to one repo, and a writable one fails the dry run above
+                rows.append(SubRow(name: "Default ssh key", ok: true, detail: "a deploy key for one repo"))
+            } else {
+                let plain = name.range(of: #"^[A-Za-z0-9-]{1,39}$"#, options: .regularExpression) != nil
+                reasons.append("a default ssh key logs in to GitHub" + (plain ? " as \(name)" : ""))
+                rows.append(SubRow(name: "Default ssh key", ok: false, detail: plain ? "logs in as \(name)" : "logs in"))
+            }
+        } else if ssh == "denied" {
+            rows.append(SubRow(name: "Default ssh key", ok: true, detail: "GitHub does not know it"))
+        } else {
+            doubts.append("couldn't ask GitHub about a default ssh key")
+            rows.append(SubRow(name: "Default ssh key", ok: false, detail: "no answer from GitHub"))
+        }
+
+        if let keychain = values["keychain"] {
+            switch keychain {
+            case "0":
+                reasons.append("the keychain holds a github.com password")
+                rows.append(SubRow(name: "Keychain", ok: false, detail: "holds a github.com password"))
+            case "44": rows.append(SubRow(name: "Keychain", ok: true, detail: "no github.com password"))
+            default:
+                doubts.append("couldn't read the keychain")
+                rows.append(SubRow(name: "Keychain", ok: false, detail: "couldn't read it"))
+            }
+        }
+
+        if values["credfile"] == "0" {
+            reasons.append("~/.git-credentials holds a github.com login")
+            rows.append(SubRow(name: "~/.git-credentials", ok: false, detail: "holds a github.com login"))
+        } else {
+            rows.append(SubRow(name: "~/.git-credentials", ok: true, detail: "no github.com login"))
+        }
+
+        if !reasons.isEmpty { return CheckResult(state: .fail(reasons.joined(separator: "; ")), rows: rows) }
+        if !doubts.isEmpty { return CheckResult(state: .cantTell(doubts.joined(separator: "; ")), rows: rows) }
+        return CheckResult(state: .pass("GitHub refuses a push with this key; no other GitHub login on this account"), rows: rows)
     }
 }

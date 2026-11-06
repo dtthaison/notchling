@@ -376,18 +376,127 @@ final class MachinesRepoStepsTests: XCTestCase {
 
     // MARK: Push is refused
 
+    private let readOnly = "ERROR: The key you are authenticating with has been marked as read only.\nfatal: Could not read from remote repository."
+
+    /// What the probe prints: git's output, its exit code on a marker line, then one token line per login check.
+    private func pushOutput(git: String, code: Int = 128, checks: [String] = ["gh=1", "ssh=denied", "keychain=44", "credfile=1"]) -> RemoteOutput {
+        RemoteOutput(text: ([git, "@@push \(code)"] + checks).joined(separator: "\n") + "\n", code: 0)
+    }
+
     func testPushRefusedNeedsGitHubsReadOnlyMessage() async {
         let id = StepID.pushRefused(repo)
         let p = probe(id)
         XCTAssertTrue(p.script.contains("push --dry-run origin HEAD:refs/heads/agents-push-test"))
         let ctx = StepContext.test()
-        let refused = await p.parse(RemoteOutput(text: "ERROR: The key you are authenticating with has been marked as read only.\nfatal: Could not read from remote repository.\n", code: 128), ctx)
-        guard case .pass = refused.state else { return XCTFail("\(refused.state)") }
-        let accepted = await p.parse(RemoteOutput(text: "To github:x\n * [new branch] HEAD -> agents-push-test\n", code: 0), ctx)
+        let refused = await p.parse(pushOutput(git: readOnly), ctx)
+        XCTAssertEqual(refused.state, .pass("GitHub refuses a push with this key; no other GitHub login on this account"))
+        let accepted = await p.parse(pushOutput(git: "To github:x\n * [new branch] HEAD -> agents-push-test", code: 0), ctx)
         guard case let .fail(why) = accepted.state else { return XCTFail("\(accepted.state)") }
         XCTAssertTrue(why.contains("can push"), why)
-        let other = await p.parse(RemoteOutput(text: "fatal: not a git repository\nmore\n", code: 128), ctx)
+        let other = await p.parse(pushOutput(git: "fatal: not a git repository\nmore", code: 128), ctx)
         XCTAssertEqual(other.state, .fail("fatal: not a git repository"))
+        // an output without the marker (the script was cut) is a failure with its first line, not a pass
+        let cut = await p.parse(RemoteOutput(text: "fatal: something\n", code: 1), ctx)
+        XCTAssertEqual(cut.state, .fail("fatal: something"))
+    }
+
+    /// I5: the worker's own GitHub logins. Each check's output stays on the machine; only a token line comes back.
+    func testPushRefusedFailsWhenTheWorkerHasItsOwnGitHubLogin() async {
+        let p = probe(.pushRefused(repo))
+        let ctx = StepContext.test()
+        let cases: [(check: String, why: String)] = [
+            ("gh=0", "gh is logged in as the worker; run gh auth logout"),
+            ("ssh=hi:sondoan", "a default ssh key logs in to GitHub as sondoan"),
+            ("keychain=0", "the keychain holds a github.com password"),
+            ("credfile=0", "~/.git-credentials holds a github.com login"),
+        ]
+        for (check, why) in cases {
+            let name = String(check.prefix { $0 != "=" })
+            var checks = ["gh=1", "ssh=denied", "keychain=44", "credfile=1"]
+            checks[checks.firstIndex { $0.hasPrefix(name + "=") }!] = check
+            let result = await p.parse(pushOutput(git: readOnly, checks: checks), ctx)
+            XCTAssertEqual(result.state, .fail(why), check)
+            XCTAssertTrue(result.rows.contains { !$0.ok }, "the failing check has a row: \(check)")
+        }
+        // two at once: both reasons
+        let both = await p.parse(pushOutput(git: readOnly, checks: ["gh=0", "ssh=denied", "keychain=0", "credfile=1"]), ctx)
+        XCTAssertEqual(both.state, .fail("gh is logged in as the worker; run gh auth logout; the keychain holds a github.com password"))
+    }
+
+    func testAnSshKeyThatAnswersForARepoOrNotAtAllIsNotALogin() async {
+        let p = probe(.pushRefused(repo))
+        let ctx = StepContext.test()
+        // a deploy key answers "Hi owner/repo!": it is repo-scoped, and a writable one is caught by the dry run
+        let deploy = await p.parse(pushOutput(git: readOnly, checks: ["gh=1", "ssh=hi:dtthaison/lingeva-mono", "keychain=44", "credfile=1"]), ctx)
+        guard case .pass = deploy.state else { return XCTFail("\(deploy.state)") }
+        // no GitHub answer at all (offline, host key unknown): can't tell, and not a pass
+        let unknown = await p.parse(pushOutput(git: readOnly, checks: ["gh=1", "ssh=unknown", "keychain=44", "credfile=1"]), ctx)
+        guard case .cantTell = unknown.state else { return XCTFail("\(unknown.state)") }
+        // a keychain that can't be read is not "no password"
+        let locked = await p.parse(pushOutput(git: readOnly, checks: ["gh=1", "ssh=denied", "keychain=36", "credfile=1"]), ctx)
+        guard case .cantTell = locked.state else { return XCTFail("\(locked.state)") }
+        // gh not installed: nothing to log out of
+        let noGH = await p.parse(pushOutput(git: readOnly, checks: ["gh=none", "ssh=denied", "keychain=44", "credfile=1"]), ctx)
+        guard case .pass = noGH.state else { return XCTFail("\(noGH.state)") }
+        // a name that is not a GitHub login is not shown
+        let odd = await p.parse(pushOutput(git: readOnly, checks: ["gh=1", "ssh=hi:$(touch x)", "keychain=44", "credfile=1"]), ctx)
+        XCTAssertEqual(odd.state, .fail("a default ssh key logs in to GitHub"))
+        XCTAssertFalse("\(odd.state) \(odd.rows)".contains("touch"))
+    }
+
+    /// The login checks read exit codes and a name only: no `-g`/`-w` on the keychain, no output kept, nothing writes.
+    func testTheLoginChecksKeepNoOutputAndWriteNothing() {
+        for machine in [TestMachines.mac(), TestMachines.linux()] {
+            let script = probe(.pushRefused(repo), machine: machine).script
+            XCTAssertTrue(script.contains("gh auth status --hostname github.com >/dev/null 2>&1"), script)
+            XCTAssertTrue(script.contains("ssh -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com"), script)
+            XCTAssertTrue(script.contains("grep -q 'github.com' ~/.git-credentials 2>/dev/null"), script)
+            XCTAssertFalse(script.contains("gh auth token"), "the token is never printed")
+            XCTAssertFalse(script.contains("gh auth login") || script.contains("gh auth logout") || script.contains("gh auth setup-git"))
+            XCTAssertFalse(script.contains("credential fill") || script.contains("credential approve"))
+            XCTAssertFalse(script.contains(" -g") || script.contains(" -w"), "no keychain secret is asked for")
+            XCTAssertFalse(script.contains("StrictHostKeyChecking"), "a check must not write known_hosts")
+            XCTAssertEqual(script.components(separatedBy: " push ").count, 2, "the only push is the dry run")
+        }
+        XCTAssertTrue(probe(.pushRefused(repo), machine: TestMachines.mac()).script.contains("security find-internet-password -s github.com >/dev/null 2>&1"))
+        XCTAssertFalse(probe(.pushRefused(repo), machine: TestMachines.linux()).script.contains("security "), "no keychain on Linux")
+    }
+
+    /// Run in a real shell with stubs for gh, ssh and security: only token lines come back, never what they printed.
+    func testTheLoginChecksRunToTokenLinesAndNeverPrintTheToolsOutput() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("notchling-login-\(UUID().uuidString)", isDirectory: true)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true), home = dir.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        func stub(_ name: String, _ body: String) throws {
+            let url = bin.appendingPathComponent(name)
+            try ("#!/bin/sh\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        try stub("gh", "echo 'Logged in to github.com account sondoan (token gho_SECRETSECRET)'; exit 0")
+        try stub("ssh", "echo 'Hi sondoan! You have successfully authenticated, but GitHub does not provide shell access.' >&2; exit 1")
+        try stub("security", "echo 'keychain: \"srvr\"<blob>=\"github.com\" password: SECRETSECRET'; exit 0")
+        try stub("git", "echo 'remote: ERROR: The key you are authenticating with has been marked as read only.' >&2; exit 128")
+        try "https://sondoan:SECRETSECRET@github.com\n".write(to: home.appendingPathComponent(".git-credentials"), atomically: true, encoding: .utf8)
+        let script = probe(.pushRefused(repo), machine: TestMachines.mac()).script
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "HOME": home.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let out = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(out.contains("SECRETSECRET"), out)
+        XCTAssertFalse(out.contains("gho_"), out)
+        XCTAssertFalse(out.contains("blob"), out)
+        for token in ["@@push 128", "gh=0", "ssh=hi:sondoan", "keychain=0", "credfile=0"] {
+            XCTAssertTrue(out.contains(token), "\(token) in:\n\(out)")
+        }
     }
 
     func testPushRefusedNeverSendsAPush() {
