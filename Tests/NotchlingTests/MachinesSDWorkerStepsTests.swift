@@ -427,7 +427,7 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         old["sd-worker.service"] = old["sd-worker.service"]! + "EnvironmentFile=/home/agent/.config/agents/claude.env\n"
         XCTAssertEqual(ServiceFiles.render(templates: old, linux: true, user: "agent", home: "/home/agent",
                                            python: "/usr/bin/python3", sdPath: sd).failure,
-                       "sd on this Mac is older than 1.19.2; update it first")
+                       "sd on this Mac is older than 1.19.3; update it first")
         var leftover = try templates()
         leftover["sd-worker.slice"] = leftover["sd-worker.slice"]! + "Foo=@MYSTERY_1@\n"
         guard case .failure = ServiceFiles.render(templates: leftover, linux: true, user: "agent", home: "/home/agent",
@@ -799,11 +799,96 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         }
     }
 
+    // MARK: sd 1.19.3: the check is read-only, its Fix creates the labels
+
+    private let sd1193 = InstalledPlugin(version: "1.19.3", path: "/Users/x/.claude/plugins/cache/system-design/sd/1.19.3")
+
+    private var mac1193: MacFacts {
+        MacFacts(plugins: ["sd@system-design": sd1193, "superpowers@claude-plugins-official": spHere],
+                 marketplaceJSON: ["system-design": #"{"name":"system-design"}"#])
+    }
+
+    private let labelRows = #"""
+    [{"name":"tools","ok":true,"detail":"claude, git, gh"},
+     {"name":"labels dtthaison/lingeva-mono","ok":true,"detail":"created sd:ready, sd:claimed; the token can write issues"},
+     {"name":"com.sd.worker","ok":false,"detail":"the LaunchAgent is not loaded"}]
+    """#
+
+    func testTheSetupCheckKeepsItsReadOnlyCommandAndItsFixCreatesTheLabels() throws {
+        let m1 = TestMachines.mac()
+        let sd = MachinePaths.sdPy(home: "/Users/sondoan")
+        let check = try script(.sdCheck, machine: m1)
+        XCTAssertTrue(check.contains("'/opt/homebrew/bin/python3' -B '\(sd)' worker setup --check --json"), check)
+        XCTAssertFalse(check.contains("--create-labels"), "the check never creates anything")
+        let p = try plan(.sdCheck, machine: m1)
+        XCTAssertFalse(p.needsAdmin)
+        XCTAssertTrue(p.display.contains("'/opt/homebrew/bin/python3' -B '\(sd)' worker setup --create-labels --json"), p.display)
+        XCTAssertFalse(p.display.contains("--check"), p.display)
+        XCTAssertFalse(p.display.contains("--live"))
+    }
+
+    func testTheCreateLabelsFixRunsOnlyThatCommandAndReportsTheLabelRows() async throws {
+        let m1 = TestMachines.mac()
+        let runner = ScriptedRunner()
+        runner.on({ $0.last?.contains("--create-labels") == true }, result: CommandResult(code: 0, out: "\(labelRows)\n@@exit 4\n", err: ""))
+        let out = await (try plan(.sdCheck, machine: m1)).run(.test(.test(machine: m1, runner: runner, mac: mac1193)))
+        XCTAssertEqual(runner.calls.count, 1)
+        let sent = runner.calls[0].argv.last ?? ""
+        XCTAssertTrue(sent.contains("worker setup --create-labels --json"), sent)
+        XCTAssertFalse(sent.contains("--live"))
+        XCTAssertEqual(out.ok, true, out.message)
+        XCTAssertTrue(out.message.contains("created sd:ready, sd:claimed"), out.message)
+    }
+
+    func testTheCreateLabelsFixFailsOnALabelRowAndAsksForACheckWhenOtherRowsFail() async throws {
+        let m1 = TestMachines.mac()
+        let cannot = #"[{"name":"labels dtthaison/lingeva-mono","ok":false,"detail":"cannot create labels: HTTP 403"}]"#
+        let denied = ScriptedRunner()
+        denied.on({ _ in true }, result: CommandResult(code: 0, out: "\(cannot)\n@@exit 4\n", err: ""))
+        let no = try await plan(.sdCheck, machine: m1).run(.test(.test(machine: m1, runner: denied, mac: mac1193)))
+        XCTAssertFalse(no.ok)
+        XCTAssertTrue(no.message.contains("cannot create labels: HTTP 403"), no.message)
+
+        let others = #"[{"name":"labels dtthaison/lingeva-mono","ok":true,"detail":"6 labels present"},{"name":"token expiry","ok":false,"detail":"9 days left"}]"#
+        let partly = ScriptedRunner()
+        partly.on({ _ in true }, result: CommandResult(code: 0, out: "\(others)\n@@exit 4\n", err: ""))
+        let some = try await plan(.sdCheck, machine: m1).run(.test(.test(machine: m1, runner: partly, mac: mac1193)))
+        XCTAssertFalse(some.ok)
+        XCTAssertTrue(some.message.contains("Check again"), some.message)
+
+        let broken = ScriptedRunner()
+        broken.on({ _ in true }, result: CommandResult(code: 0, out: "\n@@exit 2\nsd: worker setup needs --check, --create-labels or both\n", err: ""))
+        let bad = try await plan(.sdCheck, machine: m1).run(.test(.test(machine: m1, runner: broken, mac: mac1193)))
+        XCTAssertFalse(bad.ok)
+        XCTAssertTrue(bad.message.contains("worker setup needs"), bad.message)
+    }
+
+    /// sd 1.19.3 is the first with `--create-labels`: an older sd on this Mac (which is the one copied to the machine)
+    /// stops the Fix before any command.
+    func testTheCreateLabelsFixNeedsSd1193OnThisMac() async throws {
+        let m1 = TestMachines.mac()
+        for facts in [mac, MacFacts.empty] {
+            let runner = ScriptedRunner()
+            let out = try await plan(.sdCheck, machine: m1).run(.test(.test(machine: m1, runner: runner, mac: facts)))
+            XCTAssertFalse(out.ok)
+            XCTAssertTrue(runner.calls.isEmpty, "nothing ran")
+        }
+        let old = try await plan(.sdCheck, machine: m1).run(.test(.test(machine: m1, runner: ScriptedRunner(), mac: mac)))
+        XCTAssertEqual(old.message, "sd on this Mac is older than 1.19.3; update it first")
+        XCTAssertTrue(SDWorkerSteps.isAtLeast("1.19.3", "1.19.3"))
+        XCTAssertTrue(SDWorkerSteps.isAtLeast("1.20.0", "1.19.3"))
+        XCTAssertTrue(SDWorkerSteps.isAtLeast("2.0", "1.19.3"))
+        XCTAssertTrue(SDWorkerSteps.isAtLeast("1.19.10", "1.19.3"), "numbers, not text")
+        XCTAssertFalse(SDWorkerSteps.isAtLeast("1.19.2", "1.19.3"))
+        XCTAssertFalse(SDWorkerSteps.isAtLeast("1.9.9", "1.19.3"))
+        XCTAssertFalse(SDWorkerSteps.isAtLeast("(unreadable version)", "1.19.3"))
+    }
+
     func testSetupCheckCommandUsesAbsolutePathsAndNeverLive() throws {
         let vps = TestMachines.linux()
         let s = try script(.sdCheck, machine: vps)
         let sd = MachinePaths.sdPy(home: "/home/agent")
-        XCTAssertTrue(s.contains("'/usr/bin/python3' '\(sd)' worker setup --check --json"), s)
+        XCTAssertTrue(s.contains("'/usr/bin/python3' -B '\(sd)' worker setup --check --json"), s)
         XCTAssertFalse(s.contains("--live"))
         if case .remote = try step(.sdCheck, vps).probe {} else { XCTFail("not remote") }
         XCTAssertEqual(try step(.sdCheck, vps).cadence, .slow)

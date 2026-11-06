@@ -90,7 +90,8 @@ final class MachinesStepCatalogTests: XCTestCase {
 
     func testCheckOnlyStepsHaveAHowTo() {
         let steps = catalog(TestMachines.mac())
-        for id in ["reachable", "worker-user", "filevault", "xcode", "push-refused:\(repo)", "sd-check"] {
+        // (sd-check has a click-run Fix since sd 1.19.3: it creates the labels the read-only check reports missing)
+        for id in ["reachable", "worker-user", "filevault", "xcode", "push-refused:\(repo)"] {
             let step = steps.first { $0.id.raw == id }!
             guard case let .howTo(text) = step.fix else { return XCTFail("\(id) is not a how-to") }
             XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, id)
@@ -123,7 +124,7 @@ final class MachinesStepCatalogTests: XCTestCase {
             ("token-scope", "Token scope", [], "run"),
             ("worker-json", "worker.json written", ["plugins", "issues-token", "claude-login", "clone:\(r)"], "run"),
             ("service", "Service installed", ["worker-json", "base-tools"], "run"),
-            ("sd-check", "sd worker setup --check", ["service"], "howTo"),
+            ("sd-check", "sd worker setup --check", ["service"], "run"),
             ("running", "Running", ["reachable"], "toggle"),
         ]
         let steps = catalog(TestMachines.mac())

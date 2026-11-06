@@ -214,7 +214,7 @@ enum ServiceFiles {
             guard let template = templates[name] else { return .failure("sd on this Mac has no \(name) template") }
             let hasEnvironmentFile = template.components(separatedBy: "\n")
                 .contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("EnvironmentFile=") }
-            if hasEnvironmentFile { return .failure("sd on this Mac is older than 1.19.2; update it first") }
+            if hasEnvironmentFile { return .failure("sd on this Mac is older than \(SDWorkerSteps.minimumSD); update it first") }
             var text = template
                 .replacingOccurrences(of: "@SD_PY@", with: sdPath)
                 .replacingOccurrences(of: "@PYTHON3@", with: python)
@@ -296,9 +296,11 @@ enum SDWorkerSteps {
             SetupStep(id: .service, title: "Service installed", needs: [.workerJSON, .baseTools], cadence: .everyRefresh,
                       probe: .remote(script: serviceProbe(linux: linux), parse: { out, ctx in serviceCheck(out, ctx) }),
                       fix: .run(FixPlan(display: serviceDisplay(linux: linux), needsAdmin: linux, run: installService))),
+            // The check is read-only (sd 1.19.3: it reports missing labels and creates none). Its Fix, on a click, is the
+            // one thing that writes: it creates the missing issue labels, and the engine checks again after it.
             SetupStep(id: .sdCheck, title: "sd worker setup --check", needs: [.service], cadence: .slow,
-                      probe: .remote(script: setupCheckScript(job), parse: { out, ctx in setupCheckResult(out, mask: ctx.mask) }),
-                      fix: .howTo("Read the rows under this step. Fix what they name, then check again.")),
+                      probe: .remote(script: setupScript(job, flag: "--check"), parse: { out, ctx in setupCheckResult(out, mask: ctx.mask) }),
+                      fix: .run(FixPlan(display: createLabelsDisplay(job), needsAdmin: false) { ctx in await createLabels(job, ctx) })),
             // Its state is the switch's own probe: only a reachable machine is needed to read it. Turning it ON
             // waits for every step before it (SetupEngine.turnOnBlocker); turning it OFF waits for none.
             SetupStep(id: .running, title: "Running", needs: [.reachable], cadence: .everyRefresh,
@@ -601,13 +603,75 @@ enum SDWorkerSteps {
 
     private static let rowCap = 200, textCap = 300, notCounted = "com.sd.worker"
 
+    /// The first sd with `worker setup --create-labels` and a read-only `--check`.
+    static let minimumSD = "1.19.3"
+
+    /// Whether the dotted number `version` is `minimum` or newer, compared number by number (1.19.10 > 1.19.3).
+    /// Anything that isn't dotted numbers is older.
+    static func isAtLeast(_ version: String, _ minimum: String) -> Bool {
+        func parts(_ s: String) -> [Int]? {
+            let numbers = s.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+            return numbers.contains { $0 == nil } || numbers.isEmpty ? nil : numbers.compactMap { $0 }
+        }
+        guard let have = parts(version), let want = parts(minimum) else { return false }
+        for i in 0..<max(have.count, want.count) {
+            let a = i < have.count ? have[i] : 0, b = i < want.count ? want[i] : 0
+            if a != b { return a > b }
+        }
+        return true
+    }
+
     /// Stdout, then `@@exit N`, then stderr, so the parse tells the two apart whatever the engine does with `code`.
-    private static func setupCheckScript(_ job: SDWorkerSettings) -> String {
+    /// `python -B` keeps the interpreter from writing `.pyc` files next to sd.py: a check changes nothing on the machine.
+    private static func setupScript(_ job: SDWorkerSettings, flag: String) -> String {
         guard RemoteShell.isSafeMachinePath(job.python), RemoteShell.isSafeMachinePath(job.sdPath) else {
             return "echo; echo '@@exit 2'; echo 'python or sd.py is not an absolute path yet'"
         }
-        return "e=$(mktemp); \(LaneStore.quote(job.python)) \(LaneStore.quote(job.sdPath)) worker setup --check --json 2>\"$e\"; "
+        return "e=$(mktemp); \(LaneStore.quote(job.python)) -B \(LaneStore.quote(job.sdPath)) worker setup \(flag) --json 2>\"$e\"; "
             + "c=$?; echo; echo \"@@exit $c\"; head -c 4096 \"$e\"; rm -f \"$e\""
+    }
+
+    private static func createLabelsDisplay(_ job: SDWorkerSettings) -> String {
+        guard RemoteShell.isSafeMachinePath(job.python), RemoteShell.isSafeMachinePath(job.sdPath) else {
+            return "python or sd.py is not an absolute path yet; nothing can run"
+        }
+        return "\(LaneStore.quote(job.python)) -B \(LaneStore.quote(job.sdPath)) worker setup --create-labels --json\n"
+            + "This makes the issue labels that are missing on GitHub, with the issues token: the one GitHub write sd makes. "
+            + "The check runs again after it."
+    }
+
+    /// The click-run Fix of the setup check. It runs `--create-labels` only; the engine checks again after it.
+    private static func createLabels(_ job: SDWorkerSettings, _ ctx: FixContext) async -> FixOutcome {
+        // the sd on the machine is the one copied from this Mac (Plugins installed compares them), so this Mac's decides
+        guard let sd = ctx.step.mac.plugins[sdPlugin] else {
+            return FixOutcome(ok: false, message: "this Mac has no sd plugin; install sd \(minimumSD) or newer first")
+        }
+        guard isAtLeast(sd.version, minimumSD) else {
+            return FixOutcome(ok: false, message: "sd on this Mac is older than \(minimumSD); update it first")
+        }
+        guard RemoteShell.isSafeMachinePath(job.python), RemoteShell.isSafeMachinePath(job.sdPath) else {
+            return FixOutcome(ok: false, message: "python or sd.py is not an absolute path yet")
+        }
+        let run = await MachineRun.script(setupScript(job, flag: "--create-labels"), ctx: ctx)
+        guard run.code == 0 else {
+            let why = firstLine(run.err.isEmpty ? run.out : run.err, ctx.mask)
+            return FixOutcome(ok: false, message: why.isEmpty ? "the label step exited \(run.code)" : why)
+        }
+        let result = setupCheckResult(RemoteOutput(text: run.out, code: 0), mask: ctx.mask)
+        let labels = result.rows.filter { $0.name.hasPrefix("labels") }
+        if let bad = labels.first(where: { !$0.ok }) {
+            return FixOutcome(ok: false, message: "\(bad.name): \(bad.detail)")
+        }
+        if labels.isEmpty {
+            // no label row: the command itself failed, and its state holds the reason
+            if case .fail(let why) = result.state { return FixOutcome(ok: false, message: why) }
+            return FixOutcome(ok: false, message: "setup printed no label row")
+        }
+        let done = labels.map(\.detail).joined(separator: "; ")
+        if case .fail = result.state {
+            return FixOutcome(ok: false, message: "The labels are in place (\(done)). Fix what the other failing rows name, then Check again.")
+        }
+        return FixOutcome(ok: true, message: "The labels are in place (\(done))")
     }
 
     /// Machine text for a message: masked first (`mask` is the context's), then cut, so a cut can't leave a piece of
