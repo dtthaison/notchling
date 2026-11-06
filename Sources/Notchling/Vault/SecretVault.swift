@@ -155,11 +155,29 @@ extension VaultEntry {
 /// passed value differs from the saved one, and a change of the URL's host. The form marks these so the user
 /// sees what the request did before pressing Save.
 struct VaultPrefillChanges: Equatable {
-    enum Field: Hashable { case note, url, howTo, expires }
+    enum Field: Hashable {
+        case note, url, howTo, expires
 
+        /// The badge text, naming the field so each marker sits unmistakably under its own.
+        var marker: String {
+            switch self {
+            case .note: return "Note changed by the request"
+            case .url: return "URL changed by the request"
+            case .howTo: return "How-to changed by the request"
+            case .expires: return "Expiry changed by the request"
+            }
+        }
+    }
+
+    /// The URL's origin (scheme, host, non-default port) before and after, when it differs: that is where
+    /// the secret is sent, so an https to http downgrade or another port counts, not only another host.
     struct HostChange: Equatable {
         let from: String?
         let to: String?
+
+        var warning: String {
+            "The request changes where this secret is sent: \(from ?? "none") → \(to ?? "none")"
+        }
     }
 
     /// The saved value of each changed field ("" when it had none).
@@ -171,13 +189,25 @@ struct VaultPrefillChanges: Equatable {
 }
 
 extension VaultEntry {
+    /// `https://api.github.com`, `http://localhost:8080`: scheme, host without `www.`, and the port unless it is
+    /// the scheme's default. A URL without a scheme is https, as Renew and the form treat it. Nil when it has no host.
+    static func origin(of text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard let host = host(of: text),
+              let url = URL(string: text.contains("://") ? text : "https://" + text) else { return nil }
+        let scheme = url.scheme?.lowercased() ?? "https"
+        var origin = "\(scheme)://\(host)"
+        if let port = url.port, port != (scheme == "https" ? 443 : scheme == "http" ? 80 : -1) { origin += ":\(port)" }
+        return origin
+    }
+
     static func prefillChanges(of saved: VaultEntry, by request: VaultRequest) -> VaultPrefillChanges {
         var changes = VaultPrefillChanges()
         func trimmed(_ text: String?) -> String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
         if let note = request.note, trimmed(note) != trimmed(saved.note) { changes.old[.note] = saved.note }
         if let url = request.url, trimmed(url) != trimmed(saved.url) {
             changes.old[.url] = saved.url ?? ""
-            let from = saved.url.flatMap(host(of:)), to = host(of: url)
+            let from = saved.url.flatMap(origin(of:)), to = origin(of: url)
             if from != to { changes.hostChange = .init(from: from, to: to) }
         }
         if let howTo = request.howTo, trimmed(howTo) != trimmed(saved.howTo) { changes.old[.howTo] = saved.howTo ?? "" }

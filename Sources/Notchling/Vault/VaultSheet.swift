@@ -345,6 +345,11 @@ private struct VaultFormView: View {
         .part("Secret Form")
     }
 
+    /// The how-to's "changed by the request" marker, right under whichever of the help box and the editor shows.
+    @ViewBuilder private var howToMarker: some View {
+        if let old = form.changes.old[.howTo] { VaultChangedNote(field: .howTo, old: old).padding(.leading, 92) }
+    }
+
     private var hasHowTo: Bool { !form.howTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private var fields: some View {
@@ -371,7 +376,7 @@ private struct VaultFormView: View {
                     .modifier(KitField(focused: focus == .url))
             }
             if let old = form.changes.old[.url] {
-                VaultChangedNote(old: old, empty: "no URL", host: form.changes.hostChange, showHost: true).padding(.leading, 92)
+                VaultChangedNote(field: .url, old: old, empty: "no URL", host: form.changes.hostChange).padding(.leading, 92)
             }
             if form.renewing, let refused = form.renewRefusal {
                 Text("This address isn't http or https, so Renew won't open it: \(refused)")
@@ -394,6 +399,7 @@ private struct VaultFormView: View {
             }
             if form.renewing, hasHowTo, !howToOpen {
                 VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
+                howToMarker
             }
             row(form.kind == .login ? "Password" : "Token") {
                 SecureField(form.original == nil ? "" : form.renewing ? "New value" : "Unchanged", text: $form.secret)
@@ -402,12 +408,13 @@ private struct VaultFormView: View {
             }
             if !form.renewing, hasHowTo, !howToOpen {
                 VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
+                howToMarker
             }
             row("Note", top: true) {
                 VaultTextArea(text: $form.note, placeholder: "What it's for, e.g. GitHub API for my repos")
                     .part("Note Field")
             }
-            if let old = form.changes.old[.note] { VaultChangedNote(old: old).padding(.leading, 92) }
+            if let old = form.changes.old[.note] { VaultChangedNote(field: .note, old: old).padding(.leading, 92) }
             if howToOpen || !hasHowTo {
                 row("How to get or renew", top: true) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -419,8 +426,8 @@ private struct VaultFormView: View {
                         }
                     }
                 }
+                howToMarker
             }
-            if let old = form.changes.old[.howTo] { VaultChangedNote(old: old).padding(.leading, 92) }
             row(form.renewing ? "New expiry" : "Expires") {
                 if !form.expiryChosen {
                     HStack(spacing: 8) {
@@ -444,7 +451,7 @@ private struct VaultFormView: View {
                     .part("Expires Field")
                 }
             }
-            if let old = form.changes.old[.expires] { VaultChangedNote(old: old, empty: "no expiry").padding(.leading, 92) }
+            if let old = form.changes.old[.expires] { VaultChangedNote(field: .expires, old: old, empty: "no expiry").padding(.leading, 92) }
             row("") {
                 Toggle("Ask me before an agent uses it", isOn: $form.ask)
                     .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
@@ -564,22 +571,18 @@ struct VaultHelpView: View {
 /// Marks a field an agent's request changed: a badge and the saved value it replaced. For the URL it also
 /// shows the old host next to the new one, and warns when the host changed.
 struct VaultChangedNote: View {
+    let field: VaultPrefillChanges.Field
     let old: String
     var empty = "nothing"
     var host: VaultPrefillChanges.HostChange?
-    var showHost = false
-
-    private func name(_ host: String?) -> String { host ?? "none" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Label("Changed by the request", systemImage: "sparkles").kitType(.meta).foregroundColor(KitInk.accentText)
+            Label(field.marker, systemImage: "sparkles").kitType(.meta).foregroundColor(KitInk.accentText)
             Text(old.isEmpty ? "Was: \(empty)" : "Was: \(old)").kitType(.meta).foregroundColor(KitInk.textMuted)
                 .lineLimit(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            if showHost, let host {
-                Text("Host: \(name(host.from)) → \(name(host.to))").kitType(.meta).foregroundColor(KitInk.text)
-                Label("The request changes where this secret is used: \(name(host.from)) → \(name(host.to))",
-                      systemImage: "exclamationmark.triangle.fill")
+            if let host {
+                Label(host.warning, systemImage: "exclamationmark.triangle.fill")
                     .kitType(.label).foregroundColor(KitInk.expired).fixedSize(horizontal: false, vertical: true)
             }
         }

@@ -338,7 +338,7 @@ final class SecretVaultTests: XCTestCase {
         XCTAssertEqual(c.old[.url], "https://api.github.com/v3")
         XCTAssertEqual(c.old[.howTo], "old steps")
         XCTAssertEqual(c.old[.expires], "2026-01-01")
-        XCTAssertEqual(c.hostChange, VaultPrefillChanges.HostChange(from: "api.github.com", to: "api.github-cdn.io"))
+        XCTAssertEqual(c.hostChange, VaultPrefillChanges.HostChange(from: "https://api.github.com", to: "https://api.github-cdn.io"))
         // The path alone moving is a change, but not of host.
         let path = VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: "https://api.github.com/v4"))
         XCTAssertNotNil(path.old[.url])
@@ -348,7 +348,7 @@ final class SecretVaultTests: XCTestCase {
         // A secret that had no URL gets one: that is a host change from nothing.
         let bare = VaultEntry(name: "gh", kind: .token, secretVar: "GH_TOKEN")
         let from = VaultEntry.prefillChanges(of: bare, by: VaultRequest(op: .request, name: "gh", url: "https://evil.io"))
-        XCTAssertEqual(from.hostChange, VaultPrefillChanges.HostChange(from: nil, to: "evil.io"))
+        XCTAssertEqual(from.hostChange, VaultPrefillChanges.HostChange(from: nil, to: "https://evil.io"))
         XCTAssertEqual(from.old[.url], "")
         // The merged entry is still what prefilled() gives.
         XCTAssertEqual(saved.prefilled(by: VaultRequest(op: .request, name: "gh", note: "n")).note, "n")
@@ -364,5 +364,30 @@ final class SecretVaultTests: XCTestCase {
         let ok = VaultHelp.attributed("Open [Tokens](https://github.com/settings/tokens) and https://example.com/new, not http://example.org/x")
         XCTAssertEqual(ok.runs.compactMap(\.link).map(\.absoluteString), ["https://github.com/settings/tokens", "https://example.com/new"])
         XCTAssertTrue(String(ok.characters).hasPrefix("Open Tokens (github.com) and"))
+    }
+
+    func testSchemeDowngradeAndPortChangeCountAsMovingTheSecret() {
+        let saved = VaultEntry(name: "gh", kind: .token, url: "https://github.com", secretVar: "GH_TOKEN")
+        func change(_ url: String) -> VaultPrefillChanges.HostChange? {
+            VaultEntry.prefillChanges(of: saved, by: VaultRequest(op: .request, name: "gh", url: url)).hostChange
+        }
+        let down = change("http://github.com")
+        XCTAssertEqual(down, VaultPrefillChanges.HostChange(from: "https://github.com", to: "http://github.com"))
+        XCTAssertEqual(down?.warning, "The request changes where this secret is sent: https://github.com → http://github.com")
+        XCTAssertEqual(change("https://github.com:8080")?.to, "https://github.com:8080")
+        XCTAssertNil(change("https://github.com:443"), "the default port is the same place")
+        XCTAssertNil(change("github.com/v3"), "a URL without a scheme is https")
+        XCTAssertNil(change("https://GitHub.com/other/path"))
+        // http to https on the same host is not a downgrade, but it is still another origin.
+        let plain = VaultEntry(name: "gh", kind: .token, url: "http://github.com", secretVar: "GH_TOKEN")
+        XCTAssertEqual(VaultEntry.prefillChanges(of: plain, by: VaultRequest(op: .request, name: "gh", url: "https://github.com")).hostChange?.to,
+                       "https://github.com")
+    }
+
+    func testEachChangeMarkerNamesItsField() {
+        XCTAssertEqual(VaultPrefillChanges.Field.note.marker, "Note changed by the request")
+        XCTAssertEqual(VaultPrefillChanges.Field.howTo.marker, "How-to changed by the request")
+        XCTAssertEqual(VaultPrefillChanges.Field.url.marker, "URL changed by the request")
+        XCTAssertEqual(VaultPrefillChanges.Field.expires.marker, "Expiry changed by the request")
     }
 }
