@@ -64,7 +64,8 @@ struct SessionDetail: View {
                     Rectangle().fill(KitInk.hairline).frame(width: 1)
                     SessionInspector(agent: agent, conversation: model.conversation,
                                      subagents: model.subagents, viewing: model.subagentID,
-                                     openSubagent: { id in model.subagentID = id })
+                                     openSubagent: { id in model.subagentID = id },
+                                     openFile: { url in withAnimation(KitMotion.appear) { model.file = url } })
                         .part("Details Panel", .topTrailing)
                         .id(agent.id)
                         .frame(width: 250)
@@ -113,6 +114,12 @@ struct SessionDetail: View {
                 }
             }
             Spacer(minLength: 8)
+            ShellsChip(shells: model.conversation.shells, finished: model.conversation.finishedAgents) {
+                model.page = nil
+                model.file = nil
+                withAnimation(KitMotion.appear) { model.showInspector = true }
+            }
+            .id(agent.id)
             SessionMeters(context: model.conversation.facts.contextTokens,
                           window: ChatFormat.contextWindow(model: model.conversation.facts.model),
                           limits: model.limits(for: agent))

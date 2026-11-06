@@ -511,6 +511,8 @@ struct SessionInspector: View {
     /// The subagent shown in place of the conversation, highlighted in the list.
     var viewing: String?
     var openSubagent: (String) -> Void = { _ in }
+    /// Opens a file in the panel beside the conversation (a background shell's output).
+    var openFile: (URL) -> Void = { _ in }
     /// The folder's working copy, read every few seconds while the panel is open.
     @State private var git: GitInfo?
     @State private var showRemote = false
@@ -527,6 +529,10 @@ struct SessionInspector: View {
                     fact(agent.canReply ? "moon.stars" : "terminal", agent.host)
                 }
                 if !subagents.isEmpty { subagentsSection.part("Subagents", .leading) }
+                if !conversation.shells.isEmpty {
+                    BackgroundShellsSection(shells: conversation.shells, finished: conversation.finishedAgents, openOutput: openFile)
+                        .part("Background Shells", .leading)
+                }
                 if let git { gitSection(git).part("Git Status", .leading) }
                 if let git, git.branches.count > 1 { branchesSection(git).part("Git Branches", .leading) }
                 section("Activity") {

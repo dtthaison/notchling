@@ -83,6 +83,8 @@ struct Conversation: Equatable {
     /// How subagents ended, by agent id (a background agent's task notification) or by the Agent call's
     /// tool use id (a foreground agent's result). For `Subagents.list`.
     var finishedAgents: [String: String] = [:]
+    /// Bash calls run in the background, oldest first; how each ended is in `finishedAgents` by its id.
+    var shells: [BackgroundShell] = []
 
     var lastUserText: [String] {
         items.suffix(8).compactMap { if case .user(let t, _) = $0.kind { return t } else { return nil } }
@@ -319,6 +321,11 @@ enum ConversationReader {
                             if result?["type"] as? String == "create" { call.title = call.title.replacingOccurrences(of: "Wrote ", with: "Created ") }
                         }
                         if call.kind == .edit || call.kind == .write { call.output = nil }
+                        if call.kind == .shell, let launch = BackgroundShells.launch(in: resultText(block["content"])),
+                           !c.shells.contains(where: { $0.id == launch.id }) {
+                            c.shells.append(BackgroundShell(id: launch.id, command: call.input, title: call.title,
+                                                            outputPath: launch.path, started: date))
+                        }
                         calls[at.call] = call
                         c.items[at.item].kind = .tools(calls)
                         applyTaskResult(call.name, result: result, input: nil, to: &c)

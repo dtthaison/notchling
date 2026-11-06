@@ -104,9 +104,6 @@ struct SessionSidebar: View {
             HStack {
                 KitPartsButton()
                 Spacer()
-                footerButton("arrow.triangle.branch", "Lanes", "Lanes: Claude Code config folders, each signed in to its own account") {
-                    model.lanesMenu?()?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-                }
                 footerButton("server.rack", "Machines", "Machines: the overnight worker Macs and servers") { model.openMachines?() }
                 footerButton("doc.richtext", "Artifacts", "Artifacts saved on this Mac") { model.openArtifacts?() }
                 footerButton("key", "Secret Vault", "Secret Vault: passwords and tokens agents can use without seeing them") {

@@ -70,10 +70,9 @@ final class ChatModel: ObservableObject {
     let appTab = TabModel()
     var appView: (() -> AnyView)?
     var onAppSheetClosed: (() -> Void)?
-    /// The sidebar footer's other places: the Machines window, the Artifacts window, the Lanes menu.
+    /// The sidebar footer's other places: the Machines window and the Artifacts window.
     var openMachines: (() -> Void)?
     var openArtifacts: (() -> Void)?
-    var lanesMenu: (() -> NSMenu?)?
     /// The New Session sheet (`NewSessionSheet`): account, folder, Start.
     @Published var newSessionSheet = false {
         didSet { if !newSessionSheet { closeAccounts() } }

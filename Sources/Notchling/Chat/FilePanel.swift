@@ -29,7 +29,7 @@ enum FilePreviewKind: Equatable {
         "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "jsonl", "yaml", "yml", "toml", "ini", "env", "lock",
         "swift", "go", "rs", "py", "rb", "java", "kt", "c", "h", "cc", "cpp", "hpp", "m", "mm", "cs", "php",
         "sh", "zsh", "bash", "fish", "sql", "graphql", "proto", "css", "scss", "less", "vue", "svelte", "astro",
-        "txt", "log", "csv", "tsv", "xml", "plist", "gradle", "dockerfile", "makefile", "gitignore", "conf", "cfg",
+        "txt", "log", "output", "csv", "tsv", "xml", "plist", "gradle", "dockerfile", "makefile", "gitignore", "conf", "cfg",
     ]
 
     static func of(_ url: URL, sniff: (URL) -> Data? = { try? FileHandle(forReadingFrom: $0).read(upToCount: 8192) }) -> Self {

@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return self != nil
         }
         // Everything the menu bar used to hold lives in Chat: the app sheet (accounts, token cost,
-        // settings) and the sidebar footer's Lanes, Machines and Artifacts.
+        // settings) and the sidebar footer's Machines and Artifacts.
         let model = chat.chatModel
         model.appView = { [weak self, weak model] in
             guard let self, let model else { return AnyView(EmptyView()) }
@@ -82,7 +82,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.onAppSheetClosed = { [weak self] in self?.providers.accountsWindowClosed() }
         model.openMachines = { [weak self] in self?.openMachines() }
         model.openArtifacts = { [weak self] in self?.openAllPages() }
-        model.lanesMenu = { [weak self] in self?.lanesMenu.item().submenu }
         return chat
     }()
     private var statusItem: NSStatusItem!
