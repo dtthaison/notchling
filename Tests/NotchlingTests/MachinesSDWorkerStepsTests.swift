@@ -352,10 +352,22 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         }
     }
 
+    func testAReadErrorIsNeverTreatedAsAMissingFile() async throws {
+        // exit 1 with nothing on stdout, but a reason on stderr: the file exists and can't be read
+        for (code, err) in [(Int32(1), "head: /home/agent/.config/sd/worker.json: Permission denied\n"), (0, "sh: Permission denied\n")] {
+            let runner = ScriptedRunner()
+            runner.on({ $0.last?.contains("head -c 262144") == true }, result: CommandResult(code: code, out: "", err: err))
+            let outcome = try await plan(.workerJSON).run(.test(.test(runner: runner)))
+            XCTAssertFalse(outcome.ok, "\(code)")
+            XCTAssertTrue(outcome.message.contains("Permission denied"), outcome.message)
+            XCTAssertEqual(runner.calls.count, 1, "the file was not overwritten")
+        }
+    }
+
     func testWorkerJSONFixShowsTheReasonOfARealReadError() async throws {
         let runner = ScriptedRunner()
         runner.on({ $0.last?.contains("head -c 262144") == true },
-                  result: CommandResult(code: 1, out: "{\"half\":", err: "head: I/O error\n"))
+                  result: CommandResult(code: 1, out: "", err: "head: I/O error\n"))
         var outcome = try await plan(.workerJSON).run(.test(.test(runner: runner)))
         XCTAssertFalse(outcome.ok)
         XCTAssertTrue(outcome.message.contains("head: I/O error"), outcome.message)
@@ -506,7 +518,10 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let runner = ScriptedRunner()
         let outcome = await plan.run(.test(.test(machine: m1, runner: runner, mac: facts)))
         XCTAssertTrue(outcome.ok, outcome.message)
-        let call = try XCTUnwrap(runner.calls.first)
+        // the label is disabled first, so a failure leaves no plist for a login to start
+        XCTAssertEqual(runner.calls.first?.argv.last?.contains(SDWorkerSteps.macDisableScript), true)
+        XCTAssertNil(runner.calls.first?.stdin)
+        let call = try XCTUnwrap(runner.calls.last)
         XCTAssertTrue(try XCTUnwrap(call.argv.last).contains("com.sd.worker.plist"))
         XCTAssertTrue(try XCTUnwrap(call.argv.last).contains("chmod 644"))
         XCTAssertFalse(try XCTUnwrap(call.argv.last).contains("launchctl"))
@@ -516,7 +531,6 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
         XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
         XCTAssertEqual(runner.calls.count, 2)
-        XCTAssertEqual(runner.calls[1].argv.last?.contains(SDWorkerSteps.macDisableScript), true)
         // never loads or enables it
         let all = runner.calls.map { $0.argv.joined(separator: " ") }.joined(separator: "\n")
         for verb in ["bootstrap", "load", "enable", "kickstart", "bootout"] {
@@ -526,7 +540,7 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertTrue(plan.display.contains(SDWorkerSteps.macDisableScript))
     }
 
-    func testServiceFixOnAMacFailsWhenTheLabelCantBeDisabled() async throws {
+    func testServiceFixOnAMacLeavesNoPlistWhenTheDisableFails() async throws {
         let sdDir = temp.appendingPathComponent("sd")
         try FileManager.default.createDirectory(at: sdDir.appendingPathComponent("templates"), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: try templatesDir, to: sdDir.appendingPathComponent("templates/worker"))
@@ -536,7 +550,49 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         let m1 = TestMachines.mac()
         let outcome = try await plan(.service, machine: m1).run(.test(.test(machine: m1, runner: runner, mac: facts)))
         XCTAssertFalse(outcome.ok)
-        XCTAssertTrue(outcome.message.contains("no GUI domain"))
+        XCTAssertTrue(outcome.message.contains("no GUI domain"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("no service file was written"), outcome.message)
+        XCTAssertEqual(runner.calls.count, 1, "stopped before the write")
+        XCTAssertNil(runner.calls[0].stdin)
+        XCTAssertFalse(runner.calls.contains { $0.argv.joined().contains("LaunchAgents") })
+    }
+
+    private func macServiceCheck(digestMatches: Bool = true, extra: String) async throws -> CheckResult {
+        let sdDir = temp.appendingPathComponent("sd-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sdDir.appendingPathComponent("templates"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try templatesDir, to: sdDir.appendingPathComponent("templates/worker"))
+        let facts = MacFacts(plugins: ["sd@system-design": InstalledPlugin(version: "1.19.2", path: sdDir.path)], marketplaceJSON: [:])
+        let m1 = TestMachines.mac()
+        let files = try ServiceFiles.render(templates: templates(), linux: false, user: "sondoan", home: "/Users/sondoan",
+                                            python: "/opt/homebrew/bin/python3", sdPath: MachinePaths.sdPy(home: "/Users/sondoan")).get()
+        let digest = SHA256.hash(data: Data((digestMatches ? files[0].content : "other").utf8)).map { String(format: "%02x", $0) }.joined()
+        return try await check(.service, machine: m1, out: "\(digest)  /x/com.sd.worker.plist\n" + extra, mac: facts)
+    }
+
+    func testMacServiceCheckFailsWhenInstalledButNotDisabled() async throws {
+        let probe = try script(.service, machine: TestMachines.mac())
+        XCTAssertTrue(probe.contains(#"launchctl print-disabled "gui/$(id -u)""#), probe)
+        XCTAssertTrue(probe.contains(#"launchctl print "gui/$(id -u)/com.sd.worker""#), probe)
+        let line = { (state: String) in "\t\"com.sd.worker\" => \(state)\n" }
+
+        // plist present, label not disabled (unlisted or enabled), not loaded: a login would start it
+        for extra in ["notloaded\n", "notloaded\n" + line("enabled")] {
+            let r = try await macServiceCheck(extra: extra)
+            XCTAssertEqual(r.state, .fail("installed but not disabled; a login would start it"), extra)
+        }
+        // plist present and disabled: pass, loaded or not
+        for extra in ["notloaded\n" + line("disabled"), "notloaded\n" + line("true"), "loaded\n" + line("disabled")] {
+            let r = try await macServiceCheck(extra: extra)
+            XCTAssertEqual(r.state, .pass("com.sd.worker.plist matches"), extra)
+        }
+        // Running is on: enabled and loaded
+        for extra in ["loaded\n", "loaded\n" + line("enabled")] {
+            let r = try await macServiceCheck(extra: extra)
+            XCTAssertEqual(r.state, .pass("com.sd.worker.plist matches"), extra)
+        }
+        // a plist that differs still says so first
+        let differs = try await macServiceCheck(digestMatches: false, extra: "notloaded\n")
+        XCTAssertEqual(differs.state, .fail("differs: com.sd.worker.plist"))
     }
 
     func testServiceProbeComparesTheDigestsOfTheRenderedUnits() async throws {

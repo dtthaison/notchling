@@ -439,9 +439,10 @@ enum SDWorkerSteps {
         case let .success(value): owned = value
         }
         let read = await MachineRun.script(workerJSONRead, ctx: ctx, timeout: 60)
-        // A fresh machine has no worker.json: `head` exits 1 with nothing printed, and that is "missing", not an error.
-        let missing = read.out.isEmpty && (read.code == 0 || read.code == 1)
-        guard read.code == 0 || missing else {
+        // Missing means nothing on stdout, nothing on stderr and exit 0 or 1. Any stderr (Permission denied, an I/O
+        // error) is a real read error, and the Fix must not overwrite a file it couldn't read.
+        let missing = read.out.isEmpty && read.err.isEmpty && (read.code == 0 || read.code == 1)
+        guard missing || (read.code == 0 && read.err.isEmpty) else {
             let why = firstLine(read.err)
             return FixOutcome(ok: false, message: "couldn't read worker.json (exit \(read.code))" + (why.isEmpty ? "" : ": \(why)"))
         }
@@ -461,6 +462,12 @@ enum SDWorkerSteps {
     private static let macTarget = #""gui/$(id -u)/com.sd.worker""#
     /// After the plist is written: the label stays disabled (launchd keeps that across logins) until Running turns on.
     static let macDisableScript = "launchctl disable \(macTarget)"
+    private static let macLabel = "com.sd.worker"
+
+    /// The `launchctl print-disabled` line for the label says disabled (`disabled`, or `true` on older macOS).
+    private static func labelDisabled(_ lines: [String]) -> Bool {
+        lines.contains { $0.contains(#""com.sd.worker" =>"#) && ($0.hasSuffix("disabled") || $0.hasSuffix("true")) }
+    }
 
     private static func serviceTarget(_ name: String, linux: Bool) -> String {
         linux ? "\(ServiceFiles.unitDirectory)/\(name)" : ServiceFiles.plistPath
@@ -468,10 +475,13 @@ enum SDWorkerSteps {
 
     private static func serviceProbe(linux: Bool) -> String {
         let digest = linux ? "sha256sum" : "shasum -a 256"
-        return (linux ? ServiceFiles.linuxNames : [ServiceFiles.plistName]).map { name in
+        let files = (linux ? ServiceFiles.linuxNames : [ServiceFiles.plistName]).map { name in
             let path = RemoteShell.path(serviceTarget(name, linux: linux))
             return "if [ -f \(path) ]; then \(digest) \(path); else echo \(LaneStore.quote("missing " + name)); fi"
-        }.joined(separator: "; ")
+        }
+        // On a Mac, then whether the label is loaded and disabled: a plist that is neither would start at login.
+        let mac = linux ? [] : [runningProbe(linux: false)]
+        return (files + mac).joined(separator: "; ")
     }
 
     private static func hex(_ text: String) -> String {
@@ -504,6 +514,13 @@ enum SDWorkerSteps {
             if line.hasPrefix("missing") { missing.append(file.name); continue }
             let word = line.split(separator: " ").first.map(String.init) ?? ""
             if word != hex(file.content) { differ.append(file.name) }
+        }
+        if differ.isEmpty && missing.isEmpty && files.count == 1 && files[0].name == ServiceFiles.plistName {
+            // line 0 is the digest; then `loaded`/`notloaded` and the print-disabled line. Running on (loaded, enabled) is fine.
+            let rest = lines.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }
+            if !(rest.first == "loaded") && !labelDisabled(Array(rest)) {
+                return CheckResult(state: .fail("installed but not disabled; a login would start it"))
+            }
         }
         if differ.isEmpty && missing.isEmpty {
             return CheckResult(state: .pass(files.count == 1 ? "\(files[0].name) matches" : "\(files.count) units match"))
@@ -552,15 +569,18 @@ enum SDWorkerSteps {
                 ? FixOutcome(ok: true, message: "\(files.count) units written")
                 : FixOutcome(ok: false, message: "couldn't write the units (exit \(run.code)): \(firstLine(run.err))")
         }
+        // The plist has RunAtLoad, so launchd would start it at the next login. Disable the label first (launchd keeps
+        // that without a plist or a loaded job), so a failure leaves no plist behind. This never loads it: no
+        // bootstrap, no enable.
+        let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
+        guard off.code == 0 else {
+            return FixOutcome(ok: false, message: "couldn't disable \(macLabel) (exit \(off.code)): \(firstLine(off.err)); no service file was written")
+        }
         let run = await MachineRun.script(RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644"),
                                           stdin: Data(files[0].content.utf8), ctx: ctx, timeout: 60)
-        guard run.code == 0 else { return FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err))") }
-        // The plist has RunAtLoad, so launchd would start it at the next login. Disabled, it waits for the Running click.
-        // This never loads it: no bootstrap, no enable.
-        let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
-        return off.code == 0
-            ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written and disabled until Running is turned on")
-            : FixOutcome(ok: false, message: "wrote \(ServiceFiles.plistName) but couldn't disable it (exit \(off.code)): \(firstLine(off.err))")
+        return run.code == 0
+            ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written; \(macLabel) stays disabled until Running is turned on")
+            : FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err))")
     }
 
     // MARK: sd worker setup --check
@@ -623,8 +643,7 @@ enum SDWorkerSteps {
         let lines = out.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         if linux { return CheckResult(state: lines == ["enabled", "active"] ? .pass("on") : .fail("off")) }
         // macOS: loaded, and not disabled. A label `print-disabled` doesn't list is enabled.
-        let disabled = lines.contains { $0.contains(#""com.sd.worker" =>"#) && ($0.hasSuffix("disabled") || $0.hasSuffix("true")) }
-        return CheckResult(state: lines.first == "loaded" && !disabled ? .pass("on") : .fail("off"))
+        return CheckResult(state: lines.first == "loaded" && !labelDisabled(lines) ? .pass("on") : .fail("off"))
     }
 
     /// What the Running switch runs: enable and start, or disable and stop, the worker's own service only.
