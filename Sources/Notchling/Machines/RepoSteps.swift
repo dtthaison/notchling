@@ -60,7 +60,7 @@ enum RepoSteps {
     /// `owner/name` with plain characters only and no leading dash or dot, so it can sit in a path, a host alias,
     /// an ssh config and a `gh` argument.
     static func isValidRepo(_ github: String) -> Bool {
-        github.range(of: #"\A[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*\z"#, options: .regularExpression) != nil
+        github.range(of: #"\A[A-Za-z0-9][A-Za-z0-9._-]*/(?!\.{1,2}\z)[A-Za-z0-9._][A-Za-z0-9._-]*\z"#, options: .regularExpression) != nil
     }
 
     static func isValidMachineName(_ name: String) -> Bool {
@@ -95,6 +95,28 @@ enum RepoSteps {
 
     private static var gh: String { MachineTools.path("gh") }
 
+    /// The repo's deploy keys, all pages merged into one array (`--paginate`; not `--slurp`, which nests them).
+    private static func listArgv(_ github: String) -> [String] { [gh, "api", "--paginate", "repos/\(github)/keys"] }
+
+    /// The keys in gh's answer, or nil when it is not a JSON array of objects.
+    private static func parseKeys(_ text: String) -> [[String: Any]]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+    }
+
+    /// The entry for `pub` (its first two fields), if GitHub lists it.
+    private static func listed(_ pub: String, in keys: [[String: Any]]) -> [String: Any]? {
+        let mine = keyBody(pub)
+        return keys.first { ($0["key"] as? String).map(keyBody) == mine }
+    }
+
+    /// A line `Host <alias>` in the ssh config, indented or followed by spaces or more host names.
+    static func aliasPattern(_ alias: String) -> String { "^[[:space:]]*Host[[:space:]]+\(alias)([[:space:]]|$)" }
+
+    private static func canWrite(_ github: String) -> String {
+        "the key can write to \(github); remove it in Settings > Deploy keys on GitHub, then set up again"
+    }
+
     // MARK: Deploy key
 
     /// The remote part prints the key, then `@@config` with the alias check, then `@@ssh` with what GitHub said.
@@ -103,8 +125,8 @@ enum RepoSteps {
         let alias = alias(github)
         let pub = RemoteShell.path(keyFile(github) + ".pub")
         let script = "f=\(pub); if [ -f \"$f\" ]; then head -c 1024 \"$f\"; fi; echo; "
-            + "echo @@config; if grep -qx \(LaneStore.quote("Host \(alias)")) \"$HOME/.ssh/config\" 2>/dev/null; then echo alias=yes; else echo alias=no; fi; "
-            + "echo @@ssh; ssh -T -o BatchMode=yes -o ConnectTimeout=8 \(alias) 2>&1 || true"
+            + "echo @@config; if grep -Eq \(LaneStore.quote(aliasPattern(alias))) \"$HOME/.ssh/config\" 2>/dev/null; then echo alias=yes; else echo alias=no; fi; "
+            + "echo @@ssh; ssh -T -o BatchMode=yes -o ConnectTimeout=8 \(alias) </dev/null 2>&1 || true"
         return .remote(script: script) { out, ctx in
             await parseDeployKey(out, github: github, ctx: ctx)
         }
@@ -127,22 +149,20 @@ enum RepoSteps {
             return CheckResult(state: .fail("unexpected public key on \(machine)"))
         }
 
-        let listed = await ctx.runner.run([gh, "api", "repos/\(github)/keys"], cwd: nil, timeout: 30)
-        guard listed.code == 0 else {
-            let why = firstLine(listed.err.isEmpty ? listed.out : listed.err)
+        let answer = await ctx.runner.run(listArgv(github), cwd: nil, timeout: 30)
+        guard answer.code == 0 else {
+            let why = firstLine(answer.err.isEmpty ? answer.out : answer.err)
             return CheckResult(state: .cantTell("gh could not list the deploy keys of \(github)" + (why.isEmpty ? "" : ": \(why)")))
         }
-        guard let data = listed.out.data(using: .utf8),
-              let keys = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+        guard let keys = parseKeys(answer.out) else {
             return CheckResult(state: .cantTell("can't read GitHub's list of deploy keys"))
         }
-        let mine = keyBody(pub)
-        guard let entry = keys.first(where: { ($0["key"] as? String).map(keyBody) == mine }) else {
+        guard let entry = listed(pub, in: keys) else {
             return CheckResult(state: .fail("the key is not on \(github) yet"),
                                rows: [SubRow(name: "Key on GitHub", ok: false, detail: "not listed")])
         }
         guard (entry["read_only"] as? Bool) == true else {
-            return CheckResult(state: .fail("the key can write to \(github); remove it in Settings > Deploy keys on GitHub, then set up again"),
+            return CheckResult(state: .fail(canWrite(github)),
                                rows: [SubRow(name: "Key on GitHub", ok: false, detail: "can write")])
         }
         var rows = [SubRow(name: "Key on GitHub", ok: true, detail: "read-only")]
@@ -174,7 +194,7 @@ enum RepoSteps {
         let keygen = "set -e; mkdir -p \"$HOME/.ssh\"; chmod 700 \"$HOME/.ssh\"\n"
             + "[ -f \(key) ] || ssh-keygen -q -t ed25519 -N '' -C \(LaneStore.quote("agents-\(name)")) -f \(key)\n"
             + "touch \"$HOME/.ssh/config\"; chmod 600 \"$HOME/.ssh/config\"\n"
-            + "grep -qx \(LaneStore.quote("Host \(alias)")) \"$HOME/.ssh/config\" || printf \(LaneStore.quote(configBlock)) >> \"$HOME/.ssh/config\"\n"
+            + "grep -Eq \(LaneStore.quote(aliasPattern(alias))) \"$HOME/.ssh/config\" || printf \(LaneStore.quote(configBlock)) >> \"$HOME/.ssh/config\"\n"
             + "cat \(keyPub)"
         let keyscan = "ssh-keyscan -t ed25519 github.com 2>/dev/null"
         let metaArgv = [gh, "api", "meta", "--jq", ".ssh_keys[]"]
@@ -189,6 +209,7 @@ enum RepoSteps {
         let display = "On \(name):\n\(keygen)\n\nOn this Mac:\n\(metaArgv.joined(separator: " "))\n\n"
             + "On \(name):\n\(keyscan)\n(its key must be one of the keys from gh api meta)\n\n"
             + "On \(name): add GitHub's key from gh api meta to ~/.ssh/known_hosts unless it is already there\n\n"
+            + "On this Mac:\n\(listArgv(github).joined(separator: " "))\n(the key is not added again if GitHub already lists it)\n\n"
             + "On this Mac:\n\(addArgv("<the public key file>").joined(separator: " "))\n(read-only: the key is added without write access)"
 
         return FixPlan(display: display, needsAdmin: false) { ctx in
@@ -234,7 +255,19 @@ enum RepoSteps {
                 return FixOutcome(ok: false, message: "could not write known_hosts on \(name): \(firstLine(trust.err))")
             }
 
-            // 5. the public key goes to GitHub through the user's gh, read-only
+            // 5. a key GitHub already lists is not added again: read-only is a repair that worked, writable stops
+            let current = await MachineRun.local(listArgv(github), ctx: ctx)
+            guard current.code == 0, let keys = parseKeys(current.out) else {
+                return FixOutcome(ok: false, message: "gh could not list the deploy keys of \(github): \(firstLine(current.err.isEmpty ? current.out : current.err))")
+            }
+            if let entry = listed(pub, in: keys) {
+                if (entry["read_only"] as? Bool) == true {
+                    return FixOutcome(ok: true, message: "the read-only deploy key is already on \(github); the machine is set up")
+                }
+                return FixOutcome(ok: false, message: canWrite(github))
+            }
+
+            // 6. the public key goes to GitHub through the user's gh, read-only
             let dir = (NSTemporaryDirectory() as NSString).appendingPathComponent("notchling-keys")
             let file = (dir as NSString).appendingPathComponent("\(name)-\(slug(github)).pub")
             do {
@@ -271,7 +304,7 @@ enum RepoSteps {
         let path = RemoteShell.path(checkoutPath(repo))
         let url = remoteURL(repo.github)
         let script = "set -e; p=\(path); if [ -e \"$p\" ]; then echo \"$p already exists; Notchling won't touch it\" >&2; exit 1; fi; "
-            + "mkdir -p \"$(dirname \"$p\")\"; GIT_SSH_COMMAND='ssh -o BatchMode=yes' git clone \(url) \"$p\""
+            + "mkdir -p \"$(dirname \"$p\")\"; GIT_SSH_COMMAND='ssh -o BatchMode=yes' git clone -- \(url) \"$p\""
         return FixPlan(display: script, needsAdmin: false) { ctx in
             let result = await MachineRun.script(script, ctx: ctx)
             guard result.code == 0 else {
@@ -288,7 +321,7 @@ enum RepoSteps {
     private static func pushProbe(_ repo: MachineRepo) -> Probe {
         let path = RemoteShell.path(checkoutPath(repo))
         let script = "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=8' "
-            + "git -C \(path) push --dry-run origin HEAD:refs/heads/agents-push-test 2>&1"
+            + "git -c core.hooksPath=/dev/null -C \(path) push --dry-run origin HEAD:refs/heads/agents-push-test </dev/null 2>&1"
         return .remote(script: script) { out, _ in
             if out.code != 0 && out.text.contains("marked as read only") {
                 return CheckResult(state: .pass("GitHub refuses a push with this key"))

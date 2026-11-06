@@ -61,6 +61,38 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(RepoSteps.remoteURL(repo), "git@\(alias):dtthaison/lingeva-mono.git")
     }
 
+    func testRepoNamesFollowGitHubsRules() {
+        for ok in ["dtthaison/lingeva-mono", "org/.github", "org/_x", "a/b.c_d-e", "Me/My.App", "org/...x"] {
+            XCTAssertTrue(RepoSteps.isValidRepo(ok), ok)
+        }
+        for bad in ["org/.", "org/..", "org/-x", "-org/x", ".org/x", "a/b/c", "a/b; touch x", "a", "/b", "a/", "a/b\nc", "a/$(id)"] {
+            XCTAssertFalse(RepoSteps.isValidRepo(bad), bad)
+        }
+    }
+
+    func testTheAliasGuardMatchesIndentedAndPaddedHostLinesOnly() throws {
+        let pattern = RepoSteps.aliasPattern(alias)
+        let dir = NSTemporaryDirectory() + "repo-steps-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        func matches(_ line: String) throws -> Bool {
+            let file = dir + "/config"
+            try (line + "\n").write(toFile: file, atomically: true, encoding: .utf8)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/grep")
+            p.arguments = ["-Eq", pattern, file]
+            try p.run()
+            p.waitUntilExit()
+            return p.terminationStatus == 0
+        }
+        for line in ["Host \(alias)", "  Host \(alias)", "\tHost  \(alias)", "Host \(alias)  ", "Host \(alias) other"] {
+            XCTAssertTrue(try matches(line), line)
+        }
+        for line in ["Host \(alias)-2", "Host other", "# Host \(alias)", "Hostname \(alias)", "Host x\(alias)"] {
+            XCTAssertFalse(try matches(line), line)
+        }
+    }
+
     func testTheCheckoutDefaultsToSrcName() {
         var r = MachineRepo(github: repo, localPath: "/x", checkCommand: "true")
         XCTAssertEqual(RepoSteps.checkoutPath(r), "~/src/lingeva-mono")
@@ -73,7 +105,7 @@ final class MachinesRepoStepsTests: XCTestCase {
     func testDeployKeyPassesOnlyWhenGitHubListsItReadOnlyAndSshTWorks() async {
         let (ok, runner) = await check(text: remoteText(pub: pub, ssh: welcome), keys: ghKeys("ssh-ed25519 \(body)", readOnly: true))
         XCTAssertEqual(ok.state, .pass("read-only key on \(repo)"))
-        XCTAssertEqual(runner.calls.map(\.argv), [[gh, "api", "repos/\(repo)/keys"]])
+        XCTAssertEqual(runner.calls.map(\.argv), [[gh, "api", "--paginate", "repos/\(repo)/keys"]])
 
         let (writable, _) = await check(text: remoteText(pub: pub, ssh: welcome), keys: ghKeys("ssh-ed25519 \(body)", readOnly: false))
         guard case let .fail(why) = writable.state else { return XCTFail("\(writable.state)") }
@@ -125,8 +157,7 @@ final class MachinesRepoStepsTests: XCTestCase {
         ]
         for text in cases {
             let runner = ScriptedRunner()
-            let pubPart = text.contains("@@config") ? text : text
-            let full = text.contains("@@config") ? "\(pubPart)\n@@config\nalias=no\n@@ssh\nPermission denied" : remoteText(pub: text, ssh: welcome)
+            let full = text.contains("@@config") ? "\(text)\n@@config\nalias=no\n@@ssh\nPermission denied" : remoteText(pub: text, ssh: welcome)
             let result = await probe(.deployKey(repo)).parse(RemoteOutput(text: full, code: 0), .test(runner: runner))
             guard case let .fail(why) = result.state else { return XCTFail("\(text): \(result.state)") }
             XCTAssertTrue(why.contains("unexpected public key"), "\(text): \(why)")
@@ -138,8 +169,8 @@ final class MachinesRepoStepsTests: XCTestCase {
     func testTheProbeOnlyReadsAndAsksGitHubWithSshT() {
         let script = probe(.deployKey(repo)).script
         XCTAssertTrue(script.contains("head -c 1024"))
-        XCTAssertTrue(script.contains("ssh -T -o BatchMode=yes -o ConnectTimeout=8 \(alias)"))
-        XCTAssertTrue(script.contains("grep -qx 'Host \(alias)'"))
+        XCTAssertTrue(script.contains("ssh -T -o BatchMode=yes -o ConnectTimeout=8 \(alias) </dev/null"))
+        XCTAssertTrue(script.contains("grep -Eq '\(RepoSteps.aliasPattern(alias))'"))
         XCTAssertFalse(script.contains("ssh-keygen"))
         XCTAssertFalse(script.contains(">>"))
         // the private key is never printed
@@ -149,8 +180,9 @@ final class MachinesRepoStepsTests: XCTestCase {
     // MARK: Deploy key Fix
 
     private let ghMeta = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6\n"
-    private func fixRunner(scanned: String? = nil, addCode: Int32 = 0) -> ScriptedRunner {
+    private func fixRunner(scanned: String? = nil, addCode: Int32 = 0, onGitHub: String = "[]") -> ScriptedRunner {
         let runner = ScriptedRunner()
+        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: onGitHub, err: ""))
         runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
         runner.on({ $0.contains("meta") }, result: CommandResult(code: 0, out: ghMeta + "ssh-ed25519 \(githubHostBody)\n", err: ""))
         runner.on({ $0.last?.contains("ssh-keyscan") == true },
@@ -164,7 +196,7 @@ final class MachinesRepoStepsTests: XCTestCase {
         let outcome = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
         XCTAssertEqual(outcome.ok, true, outcome.message)
         let calls = runner.calls.map(\.argv)
-        XCTAssertEqual(calls.count, 5)
+        XCTAssertEqual(calls.count, 6)
         XCTAssertEqual(calls[0].first, "/usr/bin/ssh")
         XCTAssertTrue(unquoted(calls[0].last!).contains("ssh-keygen -q -t ed25519 -N ''"))
         XCTAssertTrue(unquoted(calls[0].last!).contains("-C 'agents-m1'"))
@@ -177,10 +209,46 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertTrue(calls[3].last!.contains("known_hosts"))
         XCTAssertTrue(calls[3].last!.contains("github.com ssh-ed25519 \(githubHostBody)"))
         XCTAssertFalse(calls[3].last!.contains(otherBody))
-        XCTAssertEqual(Array(calls[4].prefix(4)), [gh, "repo", "deploy-key", "add"])
-        XCTAssertTrue(calls[4][4].hasSuffix("m1-dtthaison-lingeva-mono.pub"), calls[4][4])
-        XCTAssertEqual(Array(calls[4].suffix(4)), ["-R", repo, "--title", "agents-m1"])
-        XCTAssertEqual(calls[4].count, 9)
+        // a key GitHub does not list yet is added, after the list call
+        XCTAssertEqual(calls[4], [gh, "api", "--paginate", "repos/\(repo)/keys"])
+        XCTAssertEqual(Array(calls[5].prefix(4)), [gh, "repo", "deploy-key", "add"])
+        XCTAssertTrue(calls[5][4].hasSuffix("m1-dtthaison-lingeva-mono.pub"), calls[5][4])
+        XCTAssertEqual(Array(calls[5].suffix(4)), ["-R", repo, "--title", "agents-m1"])
+        XCTAssertEqual(calls[5].count, 9)
+    }
+
+    func testAKeyAlreadyListedReadOnlyIsNotAddedAgain() async {
+        let runner = fixRunner(onGitHub: ghKeys("ssh-ed25519 \(body)", readOnly: true))
+        let outcome = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+        let calls = runner.calls.map(\.argv)
+        XCTAssertFalse(calls.contains { $0.contains("deploy-key") })
+        // the machine was still repaired first
+        XCTAssertTrue(calls[0].last!.contains("ssh-keygen"))
+        XCTAssertTrue(calls.contains { $0.last?.contains("known_hosts") == true })
+    }
+
+    func testAKeyAlreadyListedAsWritableStopsWithoutAdding() async {
+        let runner = fixRunner(onGitHub: ghKeys("ssh-ed25519 \(body)", readOnly: false))
+        let outcome = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("can write"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("Settings > Deploy keys"), outcome.message)
+        XCTAssertFalse(runner.calls.map(\.argv).contains { $0.contains("deploy-key") })
+    }
+
+    func testAnotherKeyOnGitHubStillGetsOursAdded() async {
+        let runner = fixRunner(onGitHub: ghKeys("ssh-ed25519 \(otherBody)", readOnly: true))
+        let outcome = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+        XCTAssertTrue(runner.calls.map(\.argv).contains { $0.contains("deploy-key") })
+    }
+
+    func testAListThatCannotBeReadAddsNothing() async {
+        let runner = fixRunner(onGitHub: "not json")
+        let outcome = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
+        XCTAssertFalse(outcome.ok)
+        XCTAssertFalse(runner.calls.map(\.argv).contains { $0.contains("deploy-key") })
     }
 
     func testTheWriteFlagCanNeverAppear() async {
@@ -188,6 +256,7 @@ final class MachinesRepoStepsTests: XCTestCase {
         _ = await plan(.deployKey(repo)).run(.test(.test(runner: runner)))
         for argv in runner.calls.map(\.argv) {
             XCTAssertFalse(argv.contains { $0.contains("allow-write") }, "\(argv)")
+            XCTAssertFalse(argv.contains("-w"), "\(argv)")
         }
         XCTAssertFalse(plan(.deployKey(repo)).display.contains("allow-write"))
         // and not in the source either
@@ -275,7 +344,7 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(same.state, .pass("~/src/lingeva-mono"))
 
         let fix = plan(id)
-        XCTAssertTrue(fix.display.contains("git clone git@\(alias):dtthaison/lingeva-mono.git"))
+        XCTAssertTrue(fix.display.contains("git clone -- git@\(alias):dtthaison/lingeva-mono.git"))
         XCTAssertTrue(fix.display.contains("if [ -e \"$p\" ]; then echo \"$p already exists; Notchling won't touch it\" >&2; exit 1; fi"))
         XCTAssertFalse(fix.needsAdmin)
 
@@ -284,7 +353,7 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(outcome.ok, true)
         XCTAssertEqual(runner.calls.count, 1)
         XCTAssertEqual(runner.calls[0].argv.first, "/usr/bin/ssh")
-        XCTAssertTrue(runner.calls[0].argv.last!.contains("git clone git@\(alias):dtthaison/lingeva-mono.git"))
+        XCTAssertTrue(runner.calls[0].argv.last!.contains("git clone -- git@\(alias):dtthaison/lingeva-mono.git"))
     }
 
     func testCloneRefusesAnExistingFolderWithTheMachinesMessage() async {
@@ -327,6 +396,9 @@ final class MachinesRepoStepsTests: XCTestCase {
         guard case let .remote(script, _) = step.probe else { return XCTFail() }
         XCTAssertEqual(script.components(separatedBy: " push ").count, 2)
         XCTAssertTrue(script.contains("push --dry-run"))
+        // a checkout's own pre-push hook must not run, and the push reads no stdin
+        XCTAssertTrue(script.contains("git -c core.hooksPath=/dev/null -C"))
+        XCTAssertTrue(script.contains("</dev/null 2>&1"))
         guard case let .howTo(text) = step.fix else { return XCTFail() }
         XCTAssertTrue(text.contains("Settings > Deploy keys"))
         XCTAssertEqual(step.cadence == .slow, true)
