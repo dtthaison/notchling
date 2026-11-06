@@ -101,7 +101,8 @@ final class MachinesStepCatalogTests: XCTestCase {
 
     func testSlowSteps() {
         let slow = catalog(TestMachines.mac()).filter { $0.cadence == .slow }.map(\.id.raw)
-        XCTAssertEqual(slow, ["deploy-key:\(repo)", "push-refused:\(repo)", "token-scope", "sd-check"])
+        // Worker user is slow because its `sudo -n -l` must not run on every 60 s refresh (it writes the sudo auth log)
+        XCTAssertEqual(slow, ["worker-user", "deploy-key:\(repo)", "push-refused:\(repo)", "token-scope", "sd-check"])
     }
 
     /// The table of the spec: the steps' probes and Fixes never change this.

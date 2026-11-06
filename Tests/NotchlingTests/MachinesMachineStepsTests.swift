@@ -164,6 +164,21 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertTrue(howTo(step(.workerUser)).contains("sudo"))
     }
 
+    /// Re-review Minor: `sudo -n -l` can write a line to the sudo auth log. The poller refreshes every 60 s, so the
+    /// probe that holds it is in the slow set (on click and about every 10 minutes), never in the cheap batch.
+    func testTheSudoCheckRunsOnlyInTheSlowSetNeverOnEveryRefresh() {
+        var seen = 0
+        for machine in [TestMachines.linux(), TestMachines.mac()] {
+            for s in StepCatalog.steps(for: machine, all: [machine]) {
+                guard case .remote(let script, _) = s.probe, script.contains("sudo -n") else { continue }
+                seen += 1
+                XCTAssertEqual(s.cadence, .slow, "\(machine.name)/\(s.id.raw) runs sudo -n on every refresh")
+            }
+        }
+        XCTAssertGreaterThanOrEqual(seen, 2, "the Worker user probe was looked at")
+        XCTAssertEqual(step(.workerUser, TestMachines.linux()).cadence, .slow)
+    }
+
     /// Root's id wins over the sudo test.
     func testWorkerUserRootStillFailsFirst() async {
         let r = await check(.workerUser, "0\nos=Linux\ngroups=root\nsudo_l=0\n", machine: TestMachines.linux())

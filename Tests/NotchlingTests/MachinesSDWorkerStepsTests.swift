@@ -134,6 +134,31 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         XCTAssertEqual(newerSd.state, .fail("sd 1.19.3 here, 1.19.2 on this Mac"))
     }
 
+    /// Re-review I4 residual: an sd older than 1.19.3 on the machine would run `--check` of that version, which
+    /// creates labels. Plugins installed reports the machine's sd version; the setup check holds back on it.
+    func testPluginsReportsTheMachinesSdVersion() async throws {
+        let ok = try await check(.plugins, out: pluginsJSON(sd: "1.19.2") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(ok.detected.sdVersion, "1.19.2")
+        let old = try await check(.plugins, out: pluginsJSON(sd: "1.19.1") + "\n@@sd\n" + sdLine)
+        XCTAssertEqual(old.detected.sdVersion, "1.19.1", "reported whether or not it passes")
+        let none = try await check(.plugins, out: "\n@@sd\n" + sdLine)
+        XCTAssertNil(none.detected.sdVersion)
+        let odd = try await check(.plugins, out: pluginsJSON(sd: "1.19;touch x") + "\n@@sd\n" + sdLine)
+        XCTAssertNil(odd.detected.sdVersion, "an unreadable version is not reported")
+    }
+
+    func testTheSetupCheckHoldsBackWhileTheMachinesSdIsOlderThanTheMinimum() throws {
+        let machine = TestMachines.linux("vps-sing-1")
+        let hold = try XCTUnwrap(step(.sdCheck, machine).holdWhen)
+        let why = "sd on vps-sing-1 is older than \(SDWorkerSteps.minimumSD); update plugins first"
+        XCTAssertEqual(hold(Detected(sdVersion: "1.19.2")), why)
+        XCTAssertEqual(hold(Detected(sdVersion: "1.18.9")), why)
+        XCTAssertNil(hold(Detected(sdVersion: "1.19.3")))
+        XCTAssertNil(hold(Detected(sdVersion: "1.19.10")), "number by number, not text")
+        XCTAssertNil(hold(Detected(sdVersion: "2.0.0")))
+        XCTAssertNil(hold(Detected()), "no version known: the steps before it say why")
+    }
+
     func testPluginsCantTellWhenThisMacLacksOne() async throws {
         let bare = MacFacts(plugins: ["sd@system-design": sdHere], marketplaceJSON: [:])
         let result = try await check(.plugins, out: pluginsJSON(sd: "1.19.2") + "\n@@sd\n" + sdLine, mac: bare)

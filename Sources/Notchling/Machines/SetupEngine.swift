@@ -66,11 +66,13 @@ final class SetupEngine: ObservableObject {
     private var expirySent: [String: String] = [:]
     /// How often the offer of a secret was made; an update that finds it changed leaves the newer offer alone.
     private var offerRevision: [String: Int] = [:]
-    /// Per machine: the refreshes started, the newest one that published, and the Fixes that ended. A refresh that
-    /// was overtaken by a newer one, or that began before a Fix ended, would show a state from before; it is dropped.
+    /// Per machine: the refreshes started and the Fixes that ended. A refresh that began before a Fix ended would
+    /// show a state from before the Fix; it is dropped.
     private var refreshStarted: [String: Int] = [:]
-    private var refreshPublished: [String: Int] = [:]
     private var fixesEnded: [String: Int] = [:]
+    /// Per machine and step: the newest refresh that published that step. An older refresh skips only the steps a
+    /// newer one already published, and still publishes the rest (the slow steps a cheap refresh never computed).
+    private var stepPublished: [String: [StepID: Int]] = [:]
 
     private static let logLimit = 2000
     private static let logBatch: UInt64 = 100_000_000
@@ -165,6 +167,7 @@ final class SetupEngine: ObservableObject {
         if let v = new.sdPath { d.sdPath = v }
         if let v = new.abilities { d.abilities = v }
         if let v = new.tokenExpires { d.tokenExpires = v }
+        if let v = new.sdVersion { d.sdVersion = v }
         return d
     }
 
@@ -215,6 +218,9 @@ final class SetupEngine: ObservableObject {
         var unreachable = false
         var connectError = false
         var slowRan = false
+        /// Slow steps this refresh did not run: their result is what was published when it began. It is never
+        /// published again (it could lay old state over a slow result that was published meanwhile).
+        var carried: Set<StepID> = []
     }
 
     /// Checks only, never a Fix. `names` nil means every machine.
@@ -249,17 +255,27 @@ final class SetupEngine: ObservableObject {
         var learned = false
         for m in targets {
             guard var e = evaluations[m.name] else { continue }
-            // dropped: the machine was removed meanwhile, a newer refresh already published, or a Fix ended since this began
+            // dropped whole: the machine was removed meanwhile, or a Fix ended since this began
             guard let start = began[m.name], machineList().contains(where: { $0.name == m.name }),
-                  start.ticket > refreshPublished[m.name, default: 0], start.fixes == fixesEnded[m.name, default: 0] else { continue }
-            refreshPublished[m.name] = start.ticket
+                  start.fixes == fixesEnded[m.name, default: 0] else { continue }
             if offline, e.results[.reachable] != nil {
                 e.results[.reachable] = CheckResult(state: .cantTell("no machine answered; this Mac may be offline"))
             }
             let masks = maskOf[m.name] ?? SetupMasks()
             let known = Set(stepList(m, currentMachines()).map(\.id))
             var published = (results[m.name] ?? [:]).filter { known.contains($0.key) }
-            for (id, r) in e.results { published[id] = masks.apply(r) }
+            var tickets = stepPublished[m.name] ?? [:]
+            for (id, r) in e.results {
+                if e.carried.contains(id) {
+                    if published[id] == nil { published[id] = masks.apply(r) }     // nothing there yet: "not checked yet"
+                    continue
+                }
+                // skipped: a newer refresh already published this step
+                guard tickets[id, default: 0] < start.ticket else { continue }
+                tickets[id] = start.ticket
+                published[id] = masks.apply(r)
+            }
+            stepPublished[m.name] = tickets
             results[m.name] = published
             if e.slowRan { lastSlow[m.name] = clock() }
             if e.detected != Detected() {
@@ -380,6 +396,10 @@ final class SetupEngine: ObservableObject {
                     final[s.id] = CheckResult(state: .cantTell("waits for \(need)"))
                     continue
                 }
+                if let hold = s.holdWhen, let why = hold(detections.reduce(Detected()) { Self.merged($0, $1) }) {
+                    final[s.id] = CheckResult(state: .cantTell(why))
+                    continue
+                }
                 switch (s.probe, s.cadence) {
                 case (.remote, .everyRefresh):
                     let r = raw[s.id] ?? CheckResult(state: .cantTell("no answer from the machine"))
@@ -387,6 +407,7 @@ final class SetupEngine: ObservableObject {
                     detections.append(r.detected)
                 case (_, .slow) where !slow:
                     final[s.id] = prior[s.id] ?? CheckResult(state: .cantTell("not checked yet"))
+                    e.carried.insert(s.id)
                 case (.remote, .slow):
                     slowRemote.append(s)
                 case (.local, _):

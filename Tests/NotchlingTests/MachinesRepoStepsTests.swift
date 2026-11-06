@@ -449,13 +449,14 @@ final class MachinesRepoStepsTests: XCTestCase {
         for machine in [TestMachines.mac(), TestMachines.linux()] {
             let script = probe(.pushRefused(repo), machine: machine).script
             XCTAssertTrue(script.contains("gh auth status --hostname github.com >/dev/null 2>&1"), script)
-            XCTAssertTrue(script.contains("ssh -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com"), script)
+            // a user's ssh config with StrictHostKeyChecking accept-new would let this check add a known_hosts entry
+            XCTAssertTrue(script.contains("ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes -T git@github.com"), script)
             XCTAssertTrue(script.contains("grep -q 'github.com' ~/.git-credentials 2>/dev/null"), script)
             XCTAssertFalse(script.contains("gh auth token"), "the token is never printed")
             XCTAssertFalse(script.contains("gh auth login") || script.contains("gh auth logout") || script.contains("gh auth setup-git"))
             XCTAssertFalse(script.contains("credential fill") || script.contains("credential approve"))
             XCTAssertFalse(script.contains(" -g") || script.contains(" -w"), "no keychain secret is asked for")
-            XCTAssertFalse(script.contains("StrictHostKeyChecking"), "a check must not write known_hosts")
+            XCTAssertFalse(script.contains("accept-new") || script.contains("StrictHostKeyChecking=no"), "a check must not write known_hosts")
             XCTAssertEqual(script.components(separatedBy: " push ").count, 2, "the only push is the dry run")
         }
         XCTAssertTrue(probe(.pushRefused(repo), machine: TestMachines.mac()).script.contains("security find-internet-password -s github.com >/dev/null 2>&1"))
@@ -859,12 +860,20 @@ final class MachinesRepoStepsTests: XCTestCase {
         let keyPath = home.appendingPathComponent(".ssh/agents-dtthaison-lingeva-mono").path
         try "OLD-PRIVATE".write(toFile: keyPath, atomically: true, encoding: .utf8)
         try pub.write(toFile: keyPath + ".pub", atomically: true, encoding: .utf8)
+        // no network even if a script reached them: git and ssh are stubs that fail, first in the PATH
+        let bin = home.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for tool in ["git", "ssh"] {
+            let url = bin.appendingPathComponent(tool)
+            try "#!/bin/sh\nexit 255\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
 
         func shell(_ script: String) throws -> (Int32, String) {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
             p.arguments = ["-c", script]
-            p.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path]
+            p.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "HOME": home.path]
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = pipe

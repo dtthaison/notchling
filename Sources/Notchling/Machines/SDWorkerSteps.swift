@@ -300,7 +300,12 @@ enum SDWorkerSteps {
             // one thing that writes: it creates the missing issue labels, and the engine checks again after it.
             SetupStep(id: .sdCheck, title: "sd worker setup --check", needs: [.service], cadence: .slow,
                       probe: .remote(script: setupScript(job, flag: "--check"), parse: { out, ctx in setupCheckResult(out, mask: ctx.mask) }),
-                      fix: .run(FixPlan(display: createLabelsDisplay(job), needsAdmin: false) { ctx in await createLabels(job, ctx) })),
+                      fix: .run(FixPlan(display: createLabelsDisplay(job), needsAdmin: false) { ctx in await createLabels(job, ctx) }),
+                      // an sd older than 1.19.3 runs `--check` and makes labels: never run it, say what to update
+                      holdWhen: { detected in
+                          guard let version = detected.sdVersion, !isAtLeast(version, minimumSD) else { return nil }
+                          return "sd on \(machine.name) is older than \(minimumSD); update plugins first"
+                      }),
             // Its state is the switch's own probe: only a reachable machine is needed to read it. Turning it ON
             // waits for every step before it (SetupEngine.turnOnBlocker); turning it OFF waits for none.
             SetupStep(id: .running, title: "Running", needs: [.reachable], cadence: .everyRefresh,
@@ -344,6 +349,8 @@ enum SDWorkerSteps {
             return CheckResult(state: .cantTell("this Mac doesn't have both superpowers and sd installed"), detected: detected)
         }
         let here = machineVersions(json)
+        // reported whether or not the step passes: the setup check holds back on it (an older sd's --check makes labels)
+        if let version = here[sdPlugin], version != unreadableVersion { detected.sdVersion = version }
         var wrong: [String] = []
         // sd must match this Mac exactly (the worker and the Mac speak one protocol). superpowers only has to be as
         // new: a newer one on the machine is not a reason to push this Mac's older copy over it.

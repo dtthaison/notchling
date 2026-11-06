@@ -136,11 +136,12 @@ private final class Store: @unchecked Sendable {
 
 private func step(_ raw: String, title: String? = nil, needs: [String] = [], cadence: Cadence = .everyRefresh,
                   fix: StepFix = .howTo("do it by hand"),
+                  holdWhen: (@Sendable (Detected) -> String?)? = nil,
                   parse: @escaping @Sendable (RemoteOutput, StepContext) async -> CheckResult = { out, _ in
                       out.code == 0 ? CheckResult(state: .pass(out.text)) : CheckResult(state: .fail(out.text))
                   }) -> SetupStep {
     SetupStep(id: StepID(raw: raw), title: title ?? raw.uppercased(), needs: needs.map { StepID(raw: $0) },
-              cadence: cadence, probe: .remote(script: "echo probe-\(raw)", parse: parse), fix: fix)
+              cadence: cadence, probe: .remote(script: "echo probe-\(raw)", parse: parse), fix: fix, holdWhen: holdWhen)
 }
 
 private func runFix(_ counter: Counter, _ name: String, ok: Bool = true, admin: Bool = false) -> StepFix {
@@ -1253,6 +1254,8 @@ final class MachinesSetupEngineTests: XCTestCase {
         private let lock = NSLock()
         private var calls = 0
         var holdFirst = true
+        /// Calls (by number) that wait for a gate of their own, instead of the first call waiting for `gate`.
+        var holds: [Int: Gate] = [:]
         var seen: Int { lock.withLock { calls } }
 
         func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
@@ -1263,17 +1266,19 @@ final class MachinesSetupEngineTests: XCTestCase {
                  onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
             let number = lock.withLock { () -> Int in calls += 1; return calls }
             let said = answer.value
-            if number == 1 && holdFirst { await gate.wait() }
+            if let own = holds[number] { await own.wait() }
+            else if number == 1 && holdFirst && holds.isEmpty { await gate.wait() }
             let call = RecordedCall(argv: argv, env: env, stdin: stdin, cwd: cwd)
             return FakeSSH.batch(call, reply: { _ in (out: said, code: 0) }) ?? CommandResult(code: 0, out: "", err: "")
         }
     }
 
-    private func staleWorld(_ machines: [Machine] = [TestMachines.mac("m1")], steps: [SetupStep]) -> (SetupEngine, StaleRunner, Store) {
+    private func staleWorld(_ machines: [Machine] = [TestMachines.mac("m1")], steps: [SetupStep],
+                            clock: @escaping () -> Date? = { nil }) -> (SetupEngine, StaleRunner, Store) {
         let runner = StaleRunner()
         let store = Store(machines)
         let engine = SetupEngine(runner: runner, secrets: FakeSecrets(), http: FakeHTTP(), mac: { .empty },
-                                 machines: { store.machines }, save: { store.save($0) }, clock: { self.t0 },
+                                 machines: { store.machines }, save: { store.save($0) }, clock: { clock() ?? self.t0 },
                                  steps: { _, _ in steps }, observeVault: false)
         return (engine, runner, store)
     }
@@ -1309,6 +1314,53 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(engine.results["m1"]?[StepID(raw: "a")]?.state, .pass("new"))
     }
 
+    /// The re-review's Important: the poller's cheap refresh every 60 s must not make a slower refresh (the window
+    /// opening, Check, the one after a Fix) lose the slow steps' results that the cheap one never computed.
+    func testASlowRefreshOvertakenByACheapOneStillPublishesItsSlowResults() async {
+        let now = Box(t0)
+        let (engine, runner, _) = staleWorld(steps: [step("a"), step("s", cadence: .slow)], clock: { now.value })
+        let a = StepID(raw: "a"), s = StepID(raw: "s")
+        let slow = Task { await engine.refresh(["m1"], includeSlow: true) }
+        await waitUntil("the slow refresh asked the machine") { runner.seen == 1 }
+        runner.answer.value = "new"
+        await engine.refresh(["m1"])
+        XCTAssertEqual(engine.results["m1"]?[a]?.state, .pass("new"))
+        XCTAssertEqual(engine.results["m1"]?[s]?.state, .cantTell("not checked yet"), "the cheap refresh ran no slow step")
+
+        runner.answer.value = "slow"
+        runner.gate.open()
+        await slow.value
+        XCTAssertEqual(engine.results["m1"]?[a]?.state, .pass("new"), "the cheap step keeps the newer value")
+        XCTAssertEqual(engine.results["m1"]?[s]?.state, .pass("slow"), "the slow step's result is published")
+
+        // the slow set ran, so it is due again after its interval: a plain refresh then runs it (2 ssh calls, not 1)
+        let before = runner.seen
+        now.value = t0.addingTimeInterval(11 * 60)
+        await engine.refresh(["m1"])
+        XCTAssertEqual(runner.seen - before, 2, "lastSlow was set when the slow results were published")
+    }
+
+    /// The other order: a cheap refresh begun before a slow one published must not lay "not checked yet" (what it
+    /// carried over for the slow steps) over the slow results when it ends later.
+    func testACheapRefreshEndingAfterASlowOneKeepsTheSlowResults() async {
+        let (engine, runner, _) = staleWorld(steps: [step("a"), step("s", cadence: .slow)])
+        let a = StepID(raw: "a"), s = StepID(raw: "s")
+        let slowGate = Gate(), cheapGate = Gate()
+        runner.holds = [2: slowGate, 3: cheapGate]          // call 2 is the slow refresh's slow batch, 3 the cheap refresh
+        runner.answer.value = "slow"
+        let slow = Task { await engine.refresh(["m1"], includeSlow: true) }
+        await waitUntil("the slow refresh reached its slow batch") { runner.seen == 2 }
+        let cheap = Task { await engine.refresh(["m1"]) }
+        await waitUntil("the cheap refresh asked the machine") { runner.seen == 3 }
+        slowGate.open()
+        await slow.value
+        XCTAssertEqual(engine.results["m1"]?[s]?.state, .pass("slow"))
+        cheapGate.open()
+        await cheap.value
+        XCTAssertEqual(engine.results["m1"]?[s]?.state, .pass("slow"), "the cheap refresh carried nothing over it")
+        XCTAssertNotNil(engine.results["m1"]?[a])
+    }
+
     func testARefreshOfAMachineRemovedMeanwhilePublishesNothing() async {
         let (engine, runner, store) = staleWorld(steps: [step("a")])
         let old = Task { await engine.refresh(["m1"]) }
@@ -1317,6 +1369,27 @@ final class MachinesSetupEngineTests: XCTestCase {
         runner.gate.open()
         await old.value
         XCTAssertNil(engine.results["m1"])
+    }
+
+    // MARK: a step that holds back on what an earlier step detected
+
+    func testAStepThatHoldsBackOnWhatEarlierStepsDetectedIsNotRun() async {
+        let facts = Box(Detected(sdVersion: "1.19.2"))
+        let check = StepID(raw: "check")
+        let w = world { _, _ in [
+            step("p", parse: { _, _ in CheckResult(state: .pass("plugins"), detected: facts.value) }),
+            step("check", needs: ["p"], cadence: .slow,
+                 holdWhen: { $0.sdVersion == "1.19.2" ? "sd is older than 1.19.3; update plugins first" : nil }),
+        ] }
+        await w.engine.refresh(["m1"], includeSlow: true)
+        XCTAssertEqual(w.engine.results["m1"]?[check]?.state, .cantTell("sd is older than 1.19.3; update plugins first"))
+        XCTAssertFalse(w.runner.calls.contains { ($0.argv.last ?? "").contains("probe-check") }, "its probe never went to the machine")
+
+        // the machine's sd is new enough now: the probe runs
+        facts.value = Detected(sdVersion: "1.19.3")
+        await w.engine.refresh(["m1"], includeSlow: true)
+        XCTAssertEqual(w.engine.results["m1"]?[check]?.state, .pass("ok"))
+        XCTAssertTrue(w.runner.calls.contains { ($0.argv.last ?? "").contains("probe-check") })
     }
 
     // MARK: M8: a removed machine leaves nothing behind
