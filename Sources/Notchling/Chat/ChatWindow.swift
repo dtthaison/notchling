@@ -48,6 +48,11 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         model.openTerminal(typing: command)
     }
 
+    /// Opens Chat on a conversation found by search (Claude Code, Codex or Antigravity CLI).
+    func showSession(_ session: SessionMeta) {
+        show(select: model.prepareSession(session))
+    }
+
     func show(select id: String? = nil, activate: Bool = true) {
         UserDefaults.standard.set(true, forKey: Self.openKey)
         if let id { model.selection = id } else if model.selected == nil { model.selection = model.notch.agents.first?.id }
@@ -736,6 +741,38 @@ final class ChatModel: ObservableObject {
     var selected: Agent? {
         guard let id = selection else { return nil }
         return allAgents.first { $0.id == id } ?? seen[id]
+    }
+
+    /// The Chat row id for a session found by search. A session in the sidebar is used as it is; one that
+    /// isn't (older, closed, or ended) is added to `seen` so it can be selected and read, and a closed
+    /// Codex or Antigravity row comes back.
+    func prepareSession(_ ref: SessionMeta) -> String {
+        let name = ref.title, project = (ref.folder as NSString).lastPathComponent
+        let agent: Agent
+        switch ref.tool {
+        case .claude:
+            if let listed = allAgents.first(where: { $0.sessionID == ref.sessionID }) { return listed.id }
+            agent = Agent(id: ref.sessionID, name: name, project: project, cwd: ref.folder, group: .completed,
+                          label: "Exited", detail: nil, since: ref.date,
+                          target: .resume(sessionID: ref.sessionID, cwd: ref.folder),
+                          transcriptPath: ref.path, configDir: ref.configDir)
+        case .codex:
+            agent = Agent(id: CodexSessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
+                          group: .completed, label: "Codex", detail: nil, since: ref.date,
+                          target: .codex(sessionID: ref.sessionID), transcriptPath: ref.path, host: "Codex")
+        case .antigravity:
+            agent = Agent(id: AntigravitySessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
+                          group: .completed, label: "Antigravity", detail: nil, since: ref.date,
+                          target: .antigravity(sessionID: ref.sessionID), host: "Antigravity")
+        }
+        if closedSessions[agent.id] != nil {
+            closedSessions[agent.id] = nil
+            UserDefaults.standard.set(closedSessions, forKey: "chatClosedSessions")
+        }
+        if allAgents.first(where: { $0.id == agent.id }) == nil { seen[agent.id] = agent }
+        if ref.tool == .codex { refreshCodex(force: true) }
+        if ref.tool == .antigravity { refreshAntigravity(force: true) }
+        return agent.id
     }
 
     /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which only Chat shows.

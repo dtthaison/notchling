@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var search: SearchPanelController = {
         let search = SearchPanelController()
         search.onOpen = { [weak self] folder in self?.chatWindow.showPage(folder: folder) }
+        search.onOpenSession = { [weak self] session in self?.chatWindow.showSession(session) }
         return search
     }()
     /// ⌘⇧P was free when Notchling started (another app may hold it).
