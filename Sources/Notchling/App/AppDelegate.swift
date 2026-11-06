@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt", "codexNetwork"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -573,7 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var costTitle: String {
-        cost.scanned == nil ? "Claude Token Cost" : "Claude Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
+        cost.scanned == nil ? "Token Cost" : "Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
     }
 
     /// Limits or cost arrived while the menu may be open: redraw what's on screen.
@@ -648,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s.launchAtLogin != login { s.launchAtLogin = login }
             if s.limitMode != limits.mode { s.limitMode = limits.mode }
             if s.limitSwitchAt != limits.switchAt { s.limitSwitchAt = limits.switchAt }
+            if s.codexNetwork != CodexRunner.allowNetwork { s.codexNetwork = CodexRunner.allowNetwork }
         }
     }
 
@@ -678,6 +679,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             limits.mode = mode
         case .limitSwitchAt(let point):
             limits.switchAt = point
+        case .codexNetwork(let on):
+            CodexRunner.allowNetwork = on
         case .launchAtLogin(let on):
             if (SMAppService.mainApp.status == .enabled) != on { toggleLogin() }
         }

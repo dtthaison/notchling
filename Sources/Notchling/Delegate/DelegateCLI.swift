@@ -95,7 +95,8 @@ enum DelegateCLI {
     }
 }
 
-/// One Codex turn: read-only sandbox unless `--write` (then workspace-write, the folder only).
+/// One Codex turn: read-only sandbox unless `--write` (then workspace-write, the folder only, with the
+/// network when Settings allows it for Codex turns).
 private struct CodexDelegate {
     let options: Delegate.Options
     init(_ options: Delegate.Options) { self.options = options }
@@ -111,7 +112,8 @@ private struct CodexDelegate {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codex)
         process.arguments = CodexRunner.arguments(prompt: options.prompt, session: options.session, folder: options.folder,
-                                                  pick: pick, sandbox: options.write ? "workspace-write" : "read-only")
+                                                  pick: pick, sandbox: options.write ? "workspace-write" : "read-only",
+                                                  network: options.write && CodexRunner.allowNetwork)
         process.currentDirectoryURL = URL(fileURLWithPath: options.folder)
         process.environment = CodexRunner.environment()
         let out = Pipe(), err = Pipe()

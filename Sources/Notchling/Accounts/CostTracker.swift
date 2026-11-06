@@ -17,8 +17,11 @@ final class CostTracker: ObservableObject {
         var projects: [(name: String, cost: Double)] = []
         /// The last 30 days by account id; "" is cost from before Notchling tracked accounts.
         var accounts: [(id: String, cost: Double)] = []
-        /// The last 30 days by channel (Claude Code, Desktop).
+        /// The last 30 days by channel (Claude Code, Desktop, Codex, Antigravity CLI).
         var channels: [(name: String, cost: Double)] = []
+        /// All tokens (input, output, cache) per channel, so a channel whose models have no known price
+        /// (cost 0) still shows what it used.
+        var channelTokens: [String: Double] = [:]
 
         /// Every field counts: a change in any of them has to reach the views.
         static func == (a: Summary, b: Summary) -> Bool {
@@ -29,6 +32,7 @@ final class CostTracker: ObservableObject {
                 && a.projects.elementsEqual(b.projects, by: { $0.name == $1.name && $0.cost == $1.cost })
                 && a.accounts.elementsEqual(b.accounts, by: { $0.id == $1.id && $0.cost == $1.cost })
                 && a.channels.elementsEqual(b.channels, by: { $0.name == $1.name && $0.cost == $1.cost })
+                && a.channelTokens == b.channelTokens
         }
     }
 
@@ -56,8 +60,10 @@ final class CostTracker: ObservableObject {
     private var seen = Set<UInt64>()
 
     private static let projectsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
+    static let codexChannel = "Codex", antigravityChannel = "Antigravity CLI"
     /// Where transcripts live, and the channel each one belongs to. Claude Code writes to ~/.claude;
-    /// the Claude desktop app writes its own Claude Code sessions under its Application Support folder.
+    /// the Claude desktop app writes its own Claude Code sessions under its Application Support folder;
+    /// Codex writes rollout files per day, Antigravity CLI one transcript per conversation.
     static let defaultRoots: [(dir: URL, channel: String)] = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let desktop = home.appendingPathComponent("Library/Application Support/Claude")
@@ -65,6 +71,8 @@ final class CostTracker: ObservableObject {
             (projectsDir, "Claude Code"),
             (desktop.appendingPathComponent("local-agent-mode-sessions"), "Desktop"),
             (desktop.appendingPathComponent("claude-code-sessions"), "Desktop"),
+            (home.appendingPathComponent(".codex/sessions"), codexChannel),
+            (home.appendingPathComponent(".gemini/antigravity-cli/brain"), antigravityChannel),
         ]
     }()
     static let defaultCacheURL = HookBridge.dir.appendingPathComponent("cost-cache.json")
@@ -156,7 +164,17 @@ final class CostTracker: ObservableObject {
 
     // MARK: Cache
 
-    private struct Mark: Codable { var size: UInt64; var offset: UInt64 }
+    /// Where reading stopped in one file. The rest is what a file's later lines depend on: Codex and
+    /// Antigravity name the model, folder and account once, before the lines that use them.
+    private struct Mark: Codable {
+        var size: UInt64
+        var offset: UInt64
+        var model: String?
+        var project: String?
+        var account: String?
+        /// Codex: `total_token_usage.total_tokens` of the last event counted, to skip a repeated one.
+        var total: Double?
+    }
 
     private struct Cache: Codable {
         var version = Cache.current
@@ -168,11 +186,14 @@ final class CostTracker: ObservableObject {
         var channels: [String: [String: Double]] = [:]
         /// Day → "account, model" → [input, output, cache read, cache write] token totals.
         var tokens: [String: [String: [Double]]] = [:]
+        /// Day → "account, channel" → all tokens, for channels whose cost is 0 (no known price).
+        var channelTokens: [String: [String: Double]] = [:]
         /// Day → hashes of the message ids counted on that day, as packed UInt64s.
         var seen: [String: Data] = [:]
 
-        /// Version 5 rebuilds from the whole history (no date filter) so All Time is complete.
-        static let current = 5
+        /// Version 5 rebuilds from the whole history (no date filter) so All Time is complete. Version 6
+        /// adds the Codex and Antigravity CLI channels, which need the whole history read again.
+        static let current = 6
     }
 
     private var log: [AccountLog.Entry] = []
@@ -215,6 +236,7 @@ final class CostTracker: ObservableObject {
             cache?.projects[day] = nil
             cache?.channels[day] = nil
             cache?.tokens[day] = nil
+            cache?.channelTokens[day] = nil
         }
     }
 
@@ -253,7 +275,7 @@ final class CostTracker: ObservableObject {
         var present = Set<String>()
         for root in roots {
             guard let walk = FileManager.default.enumerator(at: root.dir, includingPropertiesForKeys: keys) else { continue }
-            for case let url as URL in walk where url.pathExtension == "jsonl" {
+            for case let url as URL in walk where Self.accepts(url.path, channel: root.channel) {
                 guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
                       let size = values.fileSize.map(UInt64.init) else { continue }
                 present.insert(url.path)
@@ -272,7 +294,8 @@ final class CostTracker: ObservableObject {
     private func scan(_ paths: Set<String>) -> Bool {
         var dirty = false
         for path in paths {
-            guard let root = roots.first(where: { path.hasPrefix($0.dir.standardizedFileURL.path + "/") }) else { continue }
+            guard let root = roots.first(where: { path.hasPrefix($0.dir.standardizedFileURL.path + "/") }),
+                  Self.accepts(path, channel: root.channel) else { continue }
             let attrs = try? FileManager.default.attributesOfItem(atPath: path)
             guard let attrs, attrs[.type] as? FileAttributeType == .typeRegular,
                   let size = (attrs[.size] as? NSNumber)?.uint64Value else {
@@ -284,17 +307,40 @@ final class CostTracker: ObservableObject {
         return dirty
     }
 
+    /// Whether a file under a channel's root is a transcript to read: Codex's rollouts (the compressed
+    /// `.zst` ones are skipped) and Antigravity's `transcript.jsonl` (not `transcript_full.jsonl` or the
+    /// chunk files), or any `.jsonl` for the Claude channels.
+    static func accepts(_ path: String, channel: String) -> Bool {
+        guard path.hasSuffix(".jsonl") else { return false }
+        let name = (path as NSString).lastPathComponent
+        switch channel {
+        case codexChannel: return name.hasPrefix("rollout-")
+        case antigravityChannel: return name == "transcript.jsonl"
+        default: return true
+        }
+    }
+
     /// Reads what was added to one transcript since its saved offset. True when anything moved.
     private func update(_ url: URL, size: UInt64, channel: String) -> Bool {
         var mark = cache?.files[url.path] ?? Mark(size: 0, offset: 0)
         if mark.size == size { return false }
         // A file that shrank was rewritten; read it again (ids already counted are skipped).
-        if size < mark.offset { mark.offset = 0 }
+        if size < mark.offset { mark = Mark(size: 0, offset: 0) }
+        reading = mark
+        readingPath = url.path
         mark.offset = read(url, from: mark.offset, channel: channel, account: Self.account(inPath: url))
         mark.size = size
+        mark.model = reading.model
+        mark.project = reading.project
+        mark.account = reading.account
+        mark.total = reading.total
         cache?.files[url.path] = mark
         return true
     }
+
+    /// The file being read: its saved state, updated as lines name a model, folder or account.
+    private var reading = Mark(size: 0, offset: 0)
+    private var readingPath = ""
 
     /// Counts every complete line from `offset` on and returns where the last complete line ends.
     private func read(_ url: URL, from offset: UInt64, channel: String, account: String?) -> UInt64 {
@@ -313,7 +359,7 @@ final class CostTracker: ObservableObject {
                 var start = 0
                 while start < raw.count, let nl = memchr(base + start, 0x0A, raw.count - start) {
                     let end = base.distance(to: UnsafeRawPointer(nl))
-                    if end > start { line(UnsafeRawBufferPointer(rebasing: raw[start..<end]), project: project, channel: channel, accountOverride: account) }
+                    if end > start { ingest(UnsafeRawBufferPointer(rebasing: raw[start..<end]), project: project, channel: channel, accountOverride: account) }
                     start = end + 1
                 }
                 return start
@@ -325,6 +371,88 @@ final class CostTracker: ObservableObject {
     }
 
     private static let marker = Array(#""usage":{"#.utf8)
+
+    /// One line of a transcript, by the channel it came from.
+    private func ingest(_ bytes: UnsafeRawBufferPointer, project: String, channel: String, accountOverride: String?) {
+        switch channel {
+        case Self.codexChannel: codexLine(bytes)
+        case Self.antigravityChannel: antigravityLine(bytes)
+        default: line(bytes, project: project, channel: channel, accountOverride: accountOverride)
+        }
+    }
+
+    /// What names a transcript apart from the folder it is reached through (FSEvents reports
+    /// /private/var where a walk says /var, and the same file must count once): Codex's file name has the
+    /// session id in it; Antigravity's is the last four parts, `<conversation>/.system_generated/logs/transcript.jsonl`.
+    private static func fileID(_ path: String) -> String {
+        path.split(separator: "/").suffix(4).joined(separator: "/")
+    }
+
+    private static func contains(_ bytes: UnsafeRawBufferPointer, _ needle: String) -> Bool {
+        guard let base = bytes.baseAddress else { return false }
+        return Array(needle.utf8).withUnsafeBytes { memmem(base, bytes.count, $0.baseAddress, $0.count) } != nil
+    }
+
+    private func codexLine(_ bytes: UnsafeRawBufferPointer) {
+        guard Self.contains(bytes, #""token_count""#) || Self.contains(bytes, #""turn_context""#)
+                || Self.contains(bytes, #""session_meta""#),
+              let object = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
+              let event = CodexUsage.parse(object, date: Self.parseDate) else { return }
+        switch event {
+        case .session(let account):
+            if let account { reading.account = account }
+        case .turn(let model, let folder):
+            if let model { reading.model = model }
+            if let folder { reading.project = (folder as NSString).lastPathComponent }
+        case .tokens(let t):
+            // Codex repeats an event now and then; a real request always moves the running total.
+            if t.total >= 0 {
+                if t.total == reading.total { return }
+                reading.total = t.total
+            }
+            let id = t.ordinal.map { "\($0)" } ?? "\(t.date.timeIntervalSince1970)"
+            let key = Self.hash("codex|\(Self.fileID(readingPath))|\(id)")
+            let day = Self.dayKey(t.date)
+            guard seen.insert(key).inserted else { return }
+            seenToday[day, default: []].append(key)
+            let model = reading.model ?? "codex"
+            let counts = CodexUsage.counts(t)
+            record(day: day, account: reading.account ?? "", channel: Self.codexChannel, model: model,
+                   project: reading.project ?? "Codex", cost: OtherPrices.cost(model: model, counts: counts), counts: counts)
+        }
+    }
+
+    private func antigravityLine(_ bytes: UnsafeRawBufferPointer) {
+        guard Self.contains(bytes, #""input_tokens""#) || Self.contains(bytes, "Model Selection"),
+              let object = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
+              let event = AntigravityUsage.parse(object, date: Self.parseDate) else { return }
+        switch event {
+        case .model(let name):
+            reading.model = name
+        case .tokens(let t):
+            let key = Self.hash("agy|\(Self.fileID(readingPath))|\(t.step)")
+            let day = Self.dayKey(t.date)
+            guard seen.insert(key).inserted else { return }
+            seenToday[day, default: []].append(key)
+            let model = reading.model ?? "Antigravity"
+            let counts = AntigravityUsage.counts(t)
+            record(day: day, account: "agy", channel: Self.antigravityChannel, model: model, project: "Antigravity CLI",
+                   cost: OtherPrices.cost(model: model, counts: counts), counts: counts)
+        }
+    }
+
+    /// Adds one request to the day's totals. A cost of 0 still counts its tokens (a model without a price).
+    private func record(day: String, account: String, channel: String, model: String, project: String,
+                        cost: Double, counts: [Double]) {
+        let modelKey = Self.key(account, model)
+        cache?.models[day, default: [:]][modelKey, default: 0] += cost
+        cache?.projects[day, default: [:]][Self.key(account, project), default: 0] += cost
+        cache?.channels[day, default: [:]][Self.key(account, channel), default: 0] += cost
+        cache?.channelTokens[day, default: [:]][Self.key(account, channel), default: 0] += counts.reduce(0, +)
+        var sum = cache?.tokens[day]?[modelKey] ?? [0, 0, 0, 0]
+        for i in 0..<4 { sum[i] += counts[i] }
+        cache?.tokens[day, default: [:]][modelKey] = sum
+    }
 
     private func line(_ bytes: UnsafeRawBufferPointer, project: String, channel: String, accountOverride: String?) {
         guard let base = bytes.baseAddress,
@@ -345,14 +473,8 @@ final class CostTracker: ObservableObject {
         let name = (object["cwd"] as? String).map { ($0 as NSString).lastPathComponent } ?? project
         // Desktop transcripts carry the account in their path; the CLI's come from the switch log.
         let account = accountOverride ?? AccountLog.account(at: date, in: log)
-        let modelKey = Self.key(account, Self.modelKey(model))
-        cache?.models[day, default: [:]][modelKey, default: 0] += cost
-        cache?.projects[day, default: [:]][Self.key(account, name), default: 0] += cost
-        cache?.channels[day, default: [:]][Self.key(account, channel), default: 0] += cost
         let counts = Self.tokens(usage)
-        var sum = cache?.tokens[day]?[modelKey] ?? [0, 0, 0, 0]
-        for i in 0..<4 { sum[i] += counts[i] }
-        cache?.tokens[day, default: [:]][modelKey] = sum
+        record(day: day, account: account, channel: channel, model: Self.modelKey(model), project: name, cost: cost, counts: counts)
     }
 
     /// Input, output, cache-read and cache-write token counts from one message's usage.
@@ -418,6 +540,8 @@ final class CostTracker: ObservableObject {
 
     /// "claude-opus-5-5" → "Opus 5.5".
     static func displayName(_ key: String) -> String {
+        // Other tools' models ("gpt-6.1-sol", "Gemini 4 Argon") are already named.
+        guard key.hasPrefix("claude-") else { return key }
         let parts = key.replacingOccurrences(of: "claude-", with: "").split(separator: "-")
         guard let family = parts.first else { return key }
         let version = parts.dropFirst().joined(separator: ".")
@@ -459,7 +583,16 @@ final class CostTracker: ObservableObject {
         s.models = ranked(cache.models) { Self.displayName(Self.name(of: $0)) }
         s.projects = ranked(cache.projects) { Self.name(of: $0) }
         s.accounts = ranked(cache.models, name: owner)
-        s.channels = ranked(cache.channels) { Self.name(of: $0) }
+        var channelCost: [String: Double] = [:], channelTokens: [String: Double] = [:]
+        for day in windowDays {
+            for (k, v) in cache.channels[day] ?? [:] where included(k) { channelCost[Self.name(of: k), default: 0] += v }
+            for (k, v) in cache.channelTokens[day] ?? [:] where included(k) { channelTokens[Self.name(of: k), default: 0] += v }
+        }
+        // A channel with no priced model has cost 0 but tokens, and still belongs in the list.
+        s.channels = channelCost.filter { $0.value >= 0.01 || channelTokens[$0.key, default: 0] > 0 }
+            .sorted { ($0.value, channelTokens[$0.key] ?? 0) > ($1.value, channelTokens[$1.key] ?? 0) }
+            .map { ($0.key, $0.value) }
+        s.channelTokens = channelTokens
 
         // Model detail: cost share plus token totals, keyed by the model id.
         var costByModel: [String: Double] = [:]
@@ -472,7 +605,10 @@ final class CostTracker: ObservableObject {
                 tokensByModel[Self.name(of: k)] = cur
             }
         }
-        s.modelDetail = costByModel.filter { $0.value >= 0.01 }.sorted { $0.value > $1.value }.map { model, cost in
+        func tokenSum(_ model: String) -> Double { (tokensByModel[model] ?? []).reduce(0, +) }
+        // A model with no known price has cost 0 but tokens: list it by its tokens.
+        s.modelDetail = costByModel.filter { $0.value >= 0.01 || ($0.value == 0 && tokenSum($0.key) > 0) }
+            .sorted { ($0.value, tokenSum($0.key)) > ($1.value, tokenSum($1.key)) }.map { model, cost in
             let t = tokensByModel[model] ?? [0, 0, 0, 0]
             return ModelStat(name: Self.displayName(model), cost: cost, percent: s.month > 0 ? cost / s.month * 100 : 0,
                              input: t[0], output: t[1], cacheRead: t[2], cacheWrite: t[3])
