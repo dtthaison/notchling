@@ -65,8 +65,8 @@ final class SetupEngine: ObservableObject {
     private static let probeCap = 65536
     private static let connectErrors = ["Could not resolve hostname", "timed out", "No route to host", "Network is unreachable"]
 
-    /// - Parameter toggleScript: `(linux, on)` → the shell script of the Running switch. The default holds the
-    ///   scripts of plan D until `SDWorkerSteps.toggleScript` (Task 9) is merged.
+    /// - Parameter toggleScript: `(linux, on)` → the shell script of the Running switch (the default is
+    ///   `SDWorkerSteps.toggleScript`: systemd on Linux, the LaunchAgent on a Mac, the worker's own service only).
     init(runner: CommandRunning, secrets: SecretSource, http: HTTPFetching, mac: @escaping () -> MacFacts,
          machines: @escaping () -> [Machine], save: @escaping ([Machine]) -> Bool, clock: @escaping () -> Date,
          steps: @escaping (Machine, [Machine]) -> [SetupStep] = StepCatalog.steps,
@@ -74,7 +74,7 @@ final class SetupEngine: ObservableObject {
          deliver: @escaping (SecretUsage, FixContext) async -> FixOutcome = SecretSteps.deliver,
          setVaultExpiry: @escaping (String, String) -> Void = { try? SecretVault.setExpires($0, day: $1) },
          observeVault: Bool = true,
-         toggleScript: @escaping (Bool, Bool) -> String = SetupEngine.defaultToggleScript) {
+         toggleScript: @escaping (Bool, Bool) -> String = SDWorkerSteps.toggleScript) {
         self.runner = runner
         self.secrets = secrets
         self.http = http
@@ -98,15 +98,6 @@ final class SetupEngine: ObservableObject {
 
     deinit {
         if let vaultObserver { NotificationCenter.default.removeObserver(vaultObserver) }
-    }
-
-    /// The scripts of the Running switch (Linux: systemd; macOS: the LaunchAgent). Production services are never
-    /// named, and `systemctl` only enables or disables the worker's own unit.
-    nonisolated static func defaultToggleScript(linux: Bool, on: Bool) -> String {
-        if linux { return on ? "systemctl enable --now sd-worker.service" : "systemctl disable --now sd-worker.service" }
-        return on
-            ? "launchctl enable \"gui/$(id -u)/com.sd.worker\"; launchctl bootstrap \"gui/$(id -u)\" \"$HOME/Library/LaunchAgents/com.sd.worker.plist\""
-            : "launchctl bootout \"gui/$(id -u)/com.sd.worker\"; launchctl disable \"gui/$(id -u)/com.sd.worker\""
     }
 
     // MARK: machines and steps

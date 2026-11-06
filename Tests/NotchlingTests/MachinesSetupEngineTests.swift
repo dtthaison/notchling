@@ -1165,6 +1165,31 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertTrue(w.runner.calls.contains { $0.argv.last?.contains("launchctl bootstrap") == true })
     }
 
+    /// The engine's default Running switch is Task 9's, not a copy: the exact scripts, on a Mac and on Linux.
+    func testTheEnginesRunningSwitchUsesTheSDWorkerScripts() async {
+        let mac = TestMachines.mac("m1"), vps = TestMachines.linux("vps")
+        let w = world([mac]) { _, _ in [
+            step("sd-check"), step("running", needs: ["sd-check"], fix: .toggle(needsAdmin: false)),
+        ] }
+        await w.engine.refresh()
+        for on in [true, false] {
+            _ = await w.engine.toggleRunning(on: "m1", to: on, approval: admin())
+            XCTAssertTrue(w.runner.calls.contains { $0.argv == SSH.script(mac, SDWorkerSteps.toggleScript(linux: false, on: on)) },
+                          "Mac, on: \(on)")
+        }
+        // a Linux machine's switch needs admin; the step says so
+        let v = world([vps]) { _, _ in [
+            step("sd-check"), step("running", needs: ["sd-check"], fix: .toggle(needsAdmin: true)),
+        ] }
+        await v.engine.refresh()
+        for on in [true, false] {
+            _ = await v.engine.toggleRunning(on: "vps", to: on, approval: admin(password: "hunter2-Pw!"))
+            XCTAssertTrue(v.runner.calls.contains {
+                $0.argv == SSH.admin(vps, SDWorkerSteps.toggleScript(linux: true, on: on), asRoot: false)
+            }, "Linux, on: \(on)")
+        }
+    }
+
     func testTurningTheWorkerOnWaitsForTheSetupCheckButOffDoesNot() async {
         let w = world { _, _ in [
             step("sd-check", title: "sd check"),

@@ -9,10 +9,11 @@ enum TokenScope {
     /// Read-only issues access on each served repo, nothing on any other private repo, no Contents access, a
     /// value no other machine uses, and an expiry that has not passed.
     ///
-    /// `open` and `form` are the seam for the creation flow the Fix starts: tests pass their own.
+    /// `open` and `form` are the seam for the creation flow the Fix starts: tests pass their own and never open the
+    /// real form. The default form is the vault's (`VaultPrompt.open`), the one the issues-token step opens too.
     static func step(for machine: Machine, job: SDWorkerSettings,
                      open: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) },
-                     form: @escaping @Sendable (VaultRequest) -> Void = { _ in }) -> SetupStep {
+                     form: @escaping @Sendable (VaultRequest) -> Void = SecretSteps.openVaultForm) -> SetupStep {
         let repos = job.repos.map(\.github)
         let display = "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read and write, Metadata: read, nothing else) "
             + "and the vault form for \(job.issuesSecret). The new token is saved in the vault and never shown."

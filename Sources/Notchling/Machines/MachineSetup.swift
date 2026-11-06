@@ -225,14 +225,3 @@ enum StepCatalog {
         return steps
     }
 }
-
-/// What the group B stubs return until their task fills them in.
-extension Probe {
-    static var notBuilt: Probe { .local { _ in CheckResult(state: .cantTell("not built yet")) } }
-}
-
-extension StepFix {
-    static func notBuiltRun(needsAdmin: Bool = false) -> StepFix {
-        .run(FixPlan(display: "not built yet", needsAdmin: needsAdmin) { _ in FixOutcome(ok: false, message: "not built yet") })
-    }
-}

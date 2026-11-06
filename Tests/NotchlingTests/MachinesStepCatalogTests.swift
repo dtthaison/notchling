@@ -103,7 +103,7 @@ final class MachinesStepCatalogTests: XCTestCase {
         XCTAssertEqual(slow, ["deploy-key:\(repo)", "push-refused:\(repo)", "token-scope", "sd-check"])
     }
 
-    /// The table of the spec: group B fills probes and Fixes but never changes this.
+    /// The table of the spec: the steps' probes and Fixes never change this.
     func testMetadataMatchesTheSpecTable() {
         let r = repo
         let rows: [(id: String, title: String, needs: [String], kind: String)] = [
@@ -140,18 +140,12 @@ final class MachinesStepCatalogTests: XCTestCase {
         XCTAssertEqual(kind(linux.first { $0.id == .running }!), "toggle+admin")
     }
 
-    /// The two helpers every stub starts from; no catalog step is checked, so filling a stub never breaks this.
-    func testTheStubHelpersCantTellAndRefuseTheirFix() async {
-        let ctx = StepContext.test()
-        guard case let .local(probe) = Probe.notBuilt else { return XCTFail("the stub probe is local") }
-        let result = await probe(ctx)
-        XCTAssertEqual(result.state, .cantTell("not built yet"))
-        for admin in [false, true] {
-            guard let plan = plan(SetupStep(id: .running, title: "x", needs: [], cadence: .slow, probe: .notBuilt,
-                                            fix: .notBuiltRun(needsAdmin: admin))) else { return XCTFail("not a run Fix") }
-            XCTAssertEqual(plan.needsAdmin, admin)
-            let outcome = await plan.run(.test(ctx))
-            XCTAssertEqual(outcome, FixOutcome(ok: false, message: "not built yet"))
+    /// The stub helpers are gone (no step can be "not built yet"); no Fix still shows their text.
+    func testNoCatalogFixIsAStub() {
+        for machine in [TestMachines.mac(), TestMachines.linux()] {
+            for step in catalog(machine) {
+                if case let .run(plan) = step.fix { XCTAssertNotEqual(plan.display, "not built yet", step.id.raw) }
+            }
         }
     }
 
