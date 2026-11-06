@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The sd worker (macOS). A LaunchAgent, so it runs in the GUI session (the iOS simulator needs one).
+  Install as ~/Library/LaunchAgents/com.sd.worker.plist; see README.md, section Install (macOS).
+  Placeholders, replaced before loading:
+    @PYTHON3@ = a python3 of 3.10 or newer (/usr/bin/python3 on macOS is 3.9, so use a newer one, e.g. Homebrew's);
+    @SD_PY@   = the absolute path of plugin/scripts/sd.py on this Mac;
+    @HOME@    = the home folder of the account that runs the worker.
+  PATH (in EnvironmentVariables) must list where claude, git, gh, just, docker and xcrun are installed here.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.sd.worker</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@PYTHON3@</string>
+		<string>@SD_PY@</string>
+		<string>worker</string>
+		<string>run</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>60</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- Only PATH goes here. No wrapper script is needed: the worker reads the Claude login itself from the
+		     file worker.json names as claude_env (default ~/.config/sd/claude.env, mode 600). Never put a token
+		     in this file. -->
+		<key>PATH</key>
+		<string>@HOME@/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>@HOME@/Library/Logs/sd-worker.log</string>
+	<key>StandardErrorPath</key>
+	<string>@HOME@/Library/Logs/sd-worker.log</string>
+</dict>
+</plist>
