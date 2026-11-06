@@ -632,7 +632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var costTitle: String {
-        cost.scanned == nil ? "Claude Token Cost" : "Claude Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
+        cost.scanned == nil ? "Token Cost" : "Token Cost Today: \(CostChartView.dollars(cost.summary.today))"
     }
 
     /// Limits or cost arrived while the menu may be open: redraw what's on screen.

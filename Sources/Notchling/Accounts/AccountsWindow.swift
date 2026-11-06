@@ -59,7 +59,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
 }
 
 enum AccountsTab: String, CaseIterable {
-    case accounts = "Accounts", cost = "Claude Token Cost", settings = "Settings"
+    case accounts = "Accounts", cost = "Token Cost", settings = "Settings"
 }
 
 /// The menu's settings for the Settings tab. AppDelegate owns the real values: it fills these in
@@ -217,7 +217,7 @@ struct AccountsView: View {
                 case .codex: CodexPage(store: codex)
                 case .antigravity: AntigravityPage(store: antigravity)
                 }
-            case .cost: CostPage(cost: cost, accounts: accounts)
+            case .cost: CostPage(cost: cost, accounts: accounts, codex: codex)
             case .settings: SettingsPage(settings: settings)
             }
         }
@@ -580,13 +580,16 @@ private struct SignInPanel: View {
 private struct CostPage: View {
     @ObservedObject var cost: CostTracker
     @ObservedObject var accounts: AccountStore
+    @ObservedObject var codex: CodexStore
     /// "" is All Accounts; otherwise an account id, or "-" for cost from before accounts were tracked.
     @State private var filter = ""
     /// The selected range: 7, 30, or Int.max (all time).
     @State private var range = 30
 
     private func name(_ id: String) -> String {
-        id.isEmpty ? "Before Tracking" : accounts.accounts.first { $0.id == id }?.email ?? "Removed Account"
+        if id.isEmpty { return "Before Tracking" }
+        if id == "agy" { return "Antigravity" }
+        return accounts.accounts.first { $0.id == id }?.email ?? codex.accounts.first { $0.id == id }?.email ?? "Removed Account"
     }
 
 
@@ -626,11 +629,16 @@ private struct CostPage: View {
                     Breakdown(title: "By Account, \(rangeLabel)", rows: s.accounts.map { (name($0.id), $0.cost) })
                 }
                 if s.channels.count > 1 {
-                    Breakdown(title: "By Channel, \(rangeLabel)", rows: s.channels.map { ($0.name, $0.cost) })
+                    // A channel whose models have no known price shows its tokens in place of dollars.
+                    Breakdown(title: "By Channel, \(rangeLabel)", rows: s.channels.map { ($0.name, $0.cost) },
+                              labels: Dictionary(uniqueKeysWithValues: s.channels.filter { $0.cost < 0.01 }.map {
+                                  ($0.name, ModelBreakdown.abbr(s.channelTokens[$0.name] ?? 0) + " tokens")
+                              }))
                 }
                 ModelBreakdown(models: Array(s.modelDetail.prefix(8)), range: rangeLabel)
                 Breakdown(title: "By Project, \(rangeLabel)", rows: Array(s.projects.prefix(8)))
-                Text("What your tokens would cost at API prices, from Claude Code and Claude Desktop transcripts. "
+                Text("What your tokens would cost at API prices, from Claude Code, Claude Desktop, Codex and Antigravity CLI "
+                     + "transcripts. A Codex or Antigravity model without a known list price shows its tokens and no cost. "
                      + "Your plan isn't billed this way. Each message is counted once, so totals are lower than Claude "
                      + "Code's /stats, which counts a message again every time a conversation is compacted or resumed. "
                      + "Desktop only appears when you run Claude Code agents in it (normal Desktop chat has no local "
@@ -687,10 +695,12 @@ private struct DayBars: View {
 private struct Breakdown: View {
     let title: String
     let rows: [(name: String, cost: Double)]
+    /// Text to show in place of a row's dollars, by row name.
+    var labels: [String: String] = [:]
 
     var body: some View {
         if !rows.isEmpty {
-            let top = rows.first?.cost ?? 1
+            let top = max(rows.map(\.cost).max() ?? 1, 0.01)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.caption.weight(.semibold)).foregroundColor(.secondary)
                 ForEach(rows, id: \.name) { row in
@@ -701,7 +711,8 @@ private struct Breakdown: View {
                                 .frame(width: max(3, geo.size.width * row.cost / top))
                         }
                         .frame(height: 6)
-                        Text(CostChartView.dollars(row.cost)).font(.callout.monospacedDigit()).frame(width: 64, alignment: .trailing)
+                        Text(labels[row.name] ?? CostChartView.dollars(row.cost)).font(.callout.monospacedDigit())
+                            .lineLimit(1).minimumScaleFactor(0.8).frame(width: labels.isEmpty ? 64 : 92, alignment: .trailing)
                     }
                 }
             }
