@@ -46,6 +46,9 @@ struct Detected: Equatable {
     var sdPath: String?
     var abilities: MachineAbilities?
     var tokenExpires: String?
+    /// The sd version on the machine, from Plugins installed. Not saved and not a build fact: a step that must not
+    /// run an older sd reads it through `SetupStep.holdWhen`.
+    var sdVersion: String?
 }
 
 struct CheckResult: Equatable {
@@ -89,6 +92,9 @@ struct SetupStep {
     let cadence: Cadence
     let probe: Probe
     let fix: StepFix
+    /// Given what the steps before this one detected on the machine, a reason not to run this step's probe at all.
+    /// The step then reads can't-tell with that reason.
+    var holdWhen: (@Sendable (Detected) -> String?)? = nil
 }
 
 /// The vault as a step sees it. A value is read here and travels only on a process's stdin or in an HTTP header.
