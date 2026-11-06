@@ -45,6 +45,11 @@ enum MachineAlert {
         let what = !question.isEmpty ? question : entry.reason.isEmpty ? "needs you" : entry.reason
         return "\(machine) #\(entry.issue): \(what)"
     }
+
+    /// One notification for the questions that were already waiting when polling began.
+    static func waiting(count: Int) -> String {
+        count == 1 ? "1 question is waiting" : "\(count) questions are waiting"
+    }
 }
 
 // MARK: - Model
@@ -133,14 +138,16 @@ final class MachinesModel: ObservableObject {
 
     // MARK: Actions (called from buttons only)
 
-    /// Starts `action`, and when it ends polls again and notes the success on the item.
-    func perform(_ item: MorningItem, success: String, _ action: (MorningActions) -> Task<Void, Never>) {
+    /// Starts `action`, and when it ends polls again and notes the success on the item. An action that leaves its
+    /// item where it was (an undone merge) passes no `success`: the item stays open for the next action, and
+    /// the action itself leaves its note.
+    func perform(_ item: MorningItem, success: String?, _ action: (MorningActions) -> Task<Void, Never>) {
         guard !actions.running.contains(item.id) else { return }
         let task = action(actions)
         Task { [weak self] in
             await task.value
             guard let self else { return }
-            if self.actions.lastError[item.id] == nil { self.done[item.id] = success }
+            if let success, self.actions.lastError[item.id] == nil { self.done[item.id] = success }
             await self.poller.refresh()
             self.reload()
         }
@@ -415,7 +422,7 @@ private struct ActionStatus: View {
             Text(error).kitType(.meta).foregroundColor(Danger.color)
                 .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
         }
-        if let note = model.done[item.id], actions.lastError[item.id] == nil {
+        if let note = model.done[item.id] ?? actions.notes[item.id], actions.lastError[item.id] == nil {
             Label(note, systemImage: "checkmark.circle.fill").kitType(.label).foregroundColor(KitInk.done)
         }
     }
@@ -427,7 +434,10 @@ private struct NoteField: View {
     var onSubmit: () -> Void
 
     var body: some View {
-        TextField(placeholder, text: $text, onCommit: onSubmit)
+        // `.onSubmit`, not `onCommit`: on macOS `onCommit` also fires when the field only loses focus, which
+        // would post a half-typed answer to GitHub.
+        TextField(placeholder, text: $text)
+            .onSubmit(onSubmit)
             .textFieldStyle(.plain)
             .kitType(.body)
             .padding(.horizontal, 10)
@@ -463,9 +473,15 @@ private struct ReadyCard: View {
                 Button("Diff") { model.showDiff(item) }.buttonStyle(.kit(.secondary))
                 Button("Send back") { sendingBack.toggle() }.buttonStyle(.kit(.secondary))
                 Button("Close") { confirmClose = true }.buttonStyle(.kit(.ghost))
-                if let outcome, outcome.merged, !outcome.pushed {
+                // Retry push only for a merge whose check passed. A merge that sits on main without that proof (a failed
+                // check that could not be undone, an edit made during the check, a quit during the check) can only be undone.
+                if let outcome, outcome.canRetryPush {
                     Button("Retry push") { model.perform(item, success: "Pushed and closed") { $0.retryPush(item) } }
                         .buttonStyle(.kit(.primary))
+                }
+                if let outcome, outcome.canUndo {
+                    Button("Undo merge") { model.perform(item, success: nil) { $0.undoMerge(item) } }
+                        .buttonStyle(.kit(.secondary))
                 }
             }
             .disabled(busy)

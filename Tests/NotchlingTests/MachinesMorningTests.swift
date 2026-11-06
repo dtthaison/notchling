@@ -24,6 +24,34 @@ private final class MorningFakeRunner: CommandRunning, @unchecked Sendable {
     }
 }
 
+/// Holds an action open until the test lets it go.
+private actor Gate {
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+    func open() {
+        isOpen = true
+        waiting.forEach { $0.resume() }
+        waiting = []
+    }
+}
+
+/// Answers at once, except a fetch, which waits for the gate.
+private final class GatedRunner: CommandRunning, @unchecked Sendable {
+    let gate = Gate()
+    let entered = Counter()
+    func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
+        if argv.contains("fetch") {
+            entered.bump()
+            await gate.wait()
+        }
+        return CommandResult(code: 0, out: argv.contains("check-ref-format") ? "sd/7\n" : "", err: "")
+    }
+}
+
 private final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var n = 0
@@ -58,10 +86,12 @@ final class MachinesMorningTests: XCTestCase {
     }
 
     private func actions(_ runner: MorningFakeRunner, merge: MorningActions.MergeFunction? = nil,
+                         retryPush: MorningActions.MergeFunction? = nil, undo: MorningActions.MergeFunction? = nil,
                          cache: URL? = nil) -> MorningActions {
         let cacheRoot = cache ?? FileManager.default.temporaryDirectory.appendingPathComponent("morning-\(UUID().uuidString)")
         let ok: MorningActions.MergeFunction = { _, _, _, _ in MergeOutcome(pushed: true, closed: true) }
-        return MorningActions(runner: runner, machines: { [self] in [machine()] }, merge: merge ?? ok, retryPush: ok,
+        return MorningActions(runner: runner, machines: { [self] in [machine()] }, merge: merge ?? ok,
+                              retryPush: retryPush ?? ok, undoMerge: undo ?? { _, _, _, _ in MergeOutcome() },
                               cacheRoot: cacheRoot)
     }
 
@@ -228,7 +258,7 @@ final class MachinesMorningTests: XCTestCase {
         let calls = Counter()
         let ok: MorningActions.MergeFunction = { _, _, _, _ in MergeOutcome(pushed: true, closed: true) }
         let a = MorningActions(runner: runner, machines: { [self] in [machine()] },
-                               merge: { _, _, _, _ in MergeOutcome(merged: true, pushed: false) },
+                               merge: { _, _, _, _ in MergeOutcome(merged: true, checked: true, pushed: false) },
                                retryPush: { e, _, _, _ in calls.bump(); return await ok(e, self.machine(), self.machine().repos[0], runner) },
                                cacheRoot: FileManager.default.temporaryDirectory)
         let it = item(.ready)
@@ -237,6 +267,93 @@ final class MachinesMorningTests: XCTestCase {
         await a.retryPush(it).value
         XCTAssertEqual(calls.value, 1)
         XCTAssertNil(a.lastError[it.id], "a new action clears the old error")
+    }
+
+    /// C17: a merge whose check did not pass is never pushed by a retry, whatever the window shows.
+    func testRetryPushRefusesAMergeThatWasNeverChecked() async {
+        let calls = Counter()
+        let retry: MorningActions.MergeFunction = { _, _, _, _ in calls.bump(); return MergeOutcome(pushed: true, closed: true) }
+        for outcome in [MergeOutcome(merged: true, checked: false, error: "check failed and main could not be put back; fix it by hand in /work/app"),
+                        MergeOutcome(merged: true, checked: false, error: "main has local changes made during the check; nothing pushed"),
+                        MergeOutcome(error: "main has local changes in /work/app")] {
+            let a = actions(MorningFakeRunner(), merge: { _, _, _, _ in outcome }, retryPush: retry)
+            let it = item(.ready)
+            await a.merge(it).value
+            await a.retryPush(it).value
+            XCTAssertEqual(calls.value, 0, "\(outcome)")
+            XCTAssertNotNil(a.lastError[it.id])
+            XCTAssertFalse(a.running.contains(it.id))
+        }
+        // and with nothing merged at all
+        let b = actions(MorningFakeRunner(), retryPush: retry)
+        await b.retryPush(item(.ready)).value
+        XCTAssertEqual(calls.value, 0)
+    }
+
+    // MARK: undo merge
+
+    func testUndoMergeForgetsTheOutcomeAndLeavesANote() async {
+        let seen = Counter()
+        let a = actions(MorningFakeRunner(),
+                        merge: { _, _, _, _ in MergeOutcome(fetched: true, merged: true, checked: true, commit: "m", error: "push failed: rejected") },
+                        undo: { e, m, r, _ in
+                            seen.bump()
+                            XCTAssertEqual(e.issue, 7)
+                            XCTAssertEqual(m.name, "m1")
+                            XCTAssertEqual(r.github, "acme/app")
+                            return MergeOutcome()
+                        })
+        let it = item(.ready)
+        await a.merge(it).value
+        XCTAssertEqual(a.outcome(for: it)?.canUndo, true)
+        await a.undoMerge(it).value
+        XCTAssertEqual(seen.value, 1)
+        XCTAssertNil(a.outcome(for: it), "no checklist, no Retry push, no Undo for a merge that is gone")
+        XCTAssertNil(a.lastError[it.id])
+        XCTAssertNotNil(a.notes[it.id])
+        XCTAssertFalse(a.running.contains(it.id))
+
+        // a new action clears the note; an item that left loses it
+        await a.merge(it).value
+        XCTAssertNil(a.notes[it.id])
+        await a.undoMerge(it).value
+        a.pruneOutcomes(keeping: [])
+        XCTAssertTrue(a.notes.isEmpty)
+    }
+
+    func testUndoMergeThatGitRefusesKeepsTheOutcomeAndShowsTheReason() async {
+        let a = actions(MorningFakeRunner(),
+                        merge: { _, _, _, _ in MergeOutcome(fetched: true, merged: true, checked: true, error: "push failed: rejected") },
+                        undo: { _, _, _, _ in MergeOutcome(error: "cannot undo the merge: main has local changes in /work/app; put them away first") })
+        let it = item(.ready)
+        await a.merge(it).value
+        await a.undoMerge(it).value
+        XCTAssertEqual(a.lastError[it.id], "cannot undo the merge: main has local changes in /work/app; put them away first")
+        XCTAssertEqual(a.outcome(for: it)?.canUndo, true, "the merge is still there")
+        XCTAssertNil(a.notes[it.id])
+    }
+
+    func testUndoMergeIsOneActionPerItemAndOnlyForAReadyBranch() async {
+        let calls = Counter()
+        let gate = Gate()
+        let a = actions(MorningFakeRunner(), undo: { _, _, _, _ in calls.bump(); await gate.wait(); return MergeOutcome() })
+        let it = item(.ready)
+        let first = a.undoMerge(it)
+        let second = a.undoMerge(it)
+        XCTAssertTrue(a.running.contains(it.id))
+        await gate.open()
+        await first.value
+        await second.value
+        XCTAssertEqual(calls.value, 1)
+
+        let stuck = item(.stuck)
+        await a.undoMerge(stuck).value
+        XCTAssertNotNil(a.lastError[stuck.id])
+        XCTAssertEqual(calls.value, 1)
+
+        let unknown = MorningActions(runner: MorningFakeRunner(), machines: { [] }, cacheRoot: FileManager.default.temporaryDirectory)
+        await unknown.undoMerge(it).value
+        XCTAssertNotNil(unknown.lastError[it.id])
     }
 
     func testSendBackLabelsAndPrefix() async {
@@ -295,17 +412,82 @@ final class MachinesMorningTests: XCTestCase {
 
     // MARK: diff and screenshots
 
-    func testDiffFetchesIntoMachinesRefThenDiffsAgainstMain() async {
+    func testDiffFetchesWithoutTagsIntoMachinesRefThenDiffsAgainstMainByFullNames() async {
         let runner = MorningFakeRunner { argv in
-            argv.contains("diff") ? CommandResult(code: 0, out: "DIFF TEXT", err: "") : CommandResult(code: 0, out: "", err: "")
+            if argv.contains("check-ref-format") { return CommandResult(code: 0, out: "sd/7\n", err: "") }
+            return argv.contains("diff") ? CommandResult(code: 0, out: "DIFF TEXT", err: "") : CommandResult(code: 0, out: "", err: "")
         }
         let text = await actions(runner).diff(item(.ready))
         XCTAssertEqual(text, "DIFF TEXT")
         let git = runner.calls.map { Array($0.dropFirst()) }
-        XCTAssertEqual(git[0].prefix(2), ["-C", "/work/app"])
-        XCTAssertTrue(git[0].contains("ssh://agent@m1.tail/wt/7"))
-        XCTAssertTrue(git[0].contains("+sd/7:refs/machines/m1/7"))
-        XCTAssertEqual(git[1], ["-C", "/work/app", "diff", "main...refs/machines/m1/7"])
+        XCTAssertEqual(git.count, 3)
+        XCTAssertEqual(runner.calls.map { $0[0] }, Array(repeating: MachineTools.path("git"), count: 3))
+        XCTAssertEqual(git[0], ["-C", "/work/app", "check-ref-format", "--branch", "sd/7"])
+        XCTAssertEqual(git[1].prefix(2), ["-C", "/work/app"])
+        XCTAssertTrue(git[1].contains("--no-tags"), "a fetch for a diff must not bring the machine's tags")
+        XCTAssertTrue(git[1].contains("ssh://agent@m1.tail/wt/7"))
+        XCTAssertTrue(git[1].contains("+refs/heads/sd/7:refs/machines/m1/7"))
+        XCTAssertEqual(git[2], ["-C", "/work/app", "diff", "refs/heads/main...refs/machines/m1/7"])
+    }
+
+    func testDiffRefusesABranchNameGitWouldReadAsAnOption() async {
+        let runner = MorningFakeRunner()
+        var entry = ready(7)
+        entry.branch = "--upload-pack=touch /tmp/x"
+        let it = MorningItem(id: MorningItems.id(machine: "m1", repo: repo, issue: 7), kind: .ready, machine: "m1", repo: repo,
+                             issue: 7, title: "t", entry: .ready(entry), comment: nil)
+        let text = await actions(runner).diff(it)
+        XCTAssertTrue(text.contains("not a branch name"), text)
+        XCTAssertTrue(runner.calls.isEmpty, "nothing ran")
+    }
+
+    func testDiffRefusesABranchNameGitRejects() async {
+        let runner = MorningFakeRunner { argv in
+            argv.contains("check-ref-format") ? CommandResult(code: 1, out: "", err: "fatal: bad") : CommandResult(code: 0, out: "", err: "")
+        }
+        let text = await actions(runner).diff(item(.ready))
+        XCTAssertTrue(text.contains("not a branch name"), text)
+        XCTAssertEqual(runner.calls.count, 1, "only the name check ran")
+    }
+
+    /// Diff fetches into the ref a merge uses, so the two must never overlap.
+    func testDiffNeverRunsWhileAnActionHasTheItem() async {
+        let gate = Gate()
+        let entered = Counter()
+        let runner = MorningFakeRunner()
+        let a = actions(runner, merge: { _, _, _, _ in
+            entered.bump()
+            await gate.wait()
+            return MergeOutcome(pushed: true, closed: true)
+        })
+        let it = item(.ready)
+        let merge = a.merge(it)
+        while entered.value == 0 { await Task.yield() }
+        let text = await a.diff(it)
+        XCTAssertTrue(text.contains("action is running"), text)
+        XCTAssertTrue(runner.calls.isEmpty, "the diff fetched while a merge was running")
+        await gate.open()
+        await merge.value
+    }
+
+    func testAMergeCannotStartWhileADiffHoldsTheItem() async {
+        let runner = GatedRunner()
+        let mergeCalls = Counter()
+        let a = MorningActions(runner: runner, machines: { [self] in [machine()] },
+                               merge: { _, _, _, _ in mergeCalls.bump(); return MergeOutcome(pushed: true, closed: true) },
+                               cacheRoot: FileManager.default.temporaryDirectory)
+        let it = item(.ready)
+        let diff = Task { @MainActor in await a.diff(it) }
+        while runner.entered.value == 0 { await Task.yield() }   // the diff is inside its fetch
+        XCTAssertTrue(a.running.contains(it.id))
+        await a.merge(it).value
+        XCTAssertEqual(mergeCalls.value, 0, "a merge started while the diff's fetch was running")
+
+        await runner.gate.open()
+        _ = await diff.value
+        XCTAssertFalse(a.running.contains(it.id), "the diff gave the item back")
+        await a.merge(it).value
+        XCTAssertEqual(mergeCalls.value, 1)
     }
 
     func testScreenshotsCopyOnlyImagesWithQuotedSources() async throws {
@@ -323,5 +505,9 @@ final class MachinesMorningTests: XCTestCase {
         let scps = runner.calls.filter { $0[0] == "/usr/bin/scp" }
         XCTAssertEqual(scps.count, 3, "the text file is not copied; the failed copy was still tried")
         XCTAssertTrue(scps.contains { $0.contains("agent@m1.tail:'/wt/7/evidence/c d.png'") })
+        for scp in scps {
+            XCTAssertEqual(scp.firstIndex(of: "--").map { $0 < (scp.firstIndex { $0.hasPrefix("agent@") } ?? 0) }, true,
+                           "-- ends the options before the host: \(scp)")
+        }
     }
 }

@@ -21,6 +21,37 @@ private final class FakeRunner: CommandRunning, @unchecked Sendable {
     }
 }
 
+/// Answers with a status at once, except while `hold` is set: then each call waits for `release()`.
+private final class HoldingRunner: CommandRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _calls = 0
+    private var held = true
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    let answer: String
+    init(answer: String) { self.answer = answer }
+
+    var calls: Int { lock.withLock { _calls } }
+
+    func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
+        let hold = lock.withLock { () -> Bool in _calls += 1; return _calls == 1 && held }
+        if hold {
+            await withCheckedContinuation { c in
+                lock.withLock { waiting.append(c) }
+            }
+        }
+        return CommandResult(code: 0, out: answer, err: "")
+    }
+
+    func release() {
+        let list = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            held = false
+            defer { waiting = [] }
+            return waiting
+        }
+        list.forEach { $0.resume() }
+    }
+}
+
 @MainActor
 final class MachinesPollerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -157,11 +188,16 @@ final class MachinesPollerTests: XCTestCase {
 
     // MARK: onNewNeedsYou
 
+    // (The first good poll of a machine only takes stock: see "first poll" below. These start from an empty one.)
+
     func testNewNeedsYouFiresOnce() async {
-        let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a", needsYou: [("o/r", 7)]), err: "") }
+        var issues: [(String, Int)] = []
+        let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a", needsYou: issues), err: "") }
         let p = poller(runner, [machine("a")])
         var fired: [(String, Int)] = []
         p.onNewNeedsYou = { m, e in fired.append((m.name, e.issue)) }
+        await p.refresh()
+        issues = [("o/r", 7)]
         await p.refresh()
         await p.refresh()
         XCTAssertEqual(fired.count, 1)
@@ -170,11 +206,13 @@ final class MachinesPollerTests: XCTestCase {
     }
 
     func testNewNeedsYouFiresForEachNewEntryAndPerMachine() async {
-        var issues = [("o/r", 7)]
+        var issues: [(String, Int)] = []
         let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "x", needsYou: issues), err: "") }
         let p = poller(runner, [machine("a"), machine("b")])
         var fired = Set<String>()
         p.onNewNeedsYou = { m, e in fired.insert("\(m.name)/\(e.repo)#\(e.issue)") }
+        await p.refresh()
+        issues = [("o/r", 7)]
         await p.refresh()
         XCTAssertEqual(fired, ["a/o/r#7", "b/o/r#7"])
         issues = [("o/r", 7), ("o/r", 8)]
@@ -183,11 +221,13 @@ final class MachinesPollerTests: XCTestCase {
     }
 
     func testEntryThatLeavesAndComesBackDoesNotFireAgain() async {
-        var issues = [("o/r", 7)]
+        var issues: [(String, Int)] = []
         let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a", needsYou: issues), err: "") }
         let p = poller(runner, [machine("a")])
         var count = 0
         p.onNewNeedsYou = { _, _ in count += 1 }
+        await p.refresh()
+        issues = [("o/r", 7)]
         await p.refresh()
         issues = []
         await p.refresh()
@@ -202,6 +242,105 @@ final class MachinesPollerTests: XCTestCase {
         p.onNewNeedsYou = { _, _ in count += 1 }
         await p.refresh()
         XCTAssertEqual(count, 0)
+    }
+
+    // MARK: first poll
+
+    /// Notchling relaunches on every install; the questions already waiting must not each ring.
+    func testTheFirstGoodPollOfAMachineGivesOneSummaryAndNoSingleAnnouncements() async {
+        var issues = [("o/r", 7), ("o/r", 8), ("o/r", 9)]
+        let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a", needsYou: issues), err: "") }
+        let p = poller(runner, [machine("a")])
+        var single: [Int] = []
+        var summaries: [Int] = []
+        p.onNewNeedsYou = { _, e in single.append(e.issue) }
+        p.onQuestionsWaiting = { summaries.append($0) }
+        await p.refresh()
+        XCTAssertEqual(single, [], "no question rang one by one on the first poll")
+        XCTAssertEqual(summaries, [3])
+
+        await p.refresh()
+        XCTAssertEqual(summaries, [3], "the same questions are not summarised again")
+        issues.append(("o/r", 10))
+        await p.refresh()
+        XCTAssertEqual(single, [10], "a question that arrives later is announced on its own")
+        XCTAssertEqual(summaries, [3])
+    }
+
+    func testTheSummaryCountsEveryMachineOnce() async {
+        let runner = FakeRunner { argv in
+            let name = argv.contains { $0.contains("a.tail") } ? "a" : "b"
+            return CommandResult(code: 0, out: self.statusJSON(machine: name, needsYou: name == "a" ? [("o/r", 1), ("o/r", 2)] : [("o/r", 1)]), err: "")
+        }
+        let p = poller(runner, [machine("a"), machine("b")])
+        var summaries: [Int] = []
+        p.onQuestionsWaiting = { summaries.append($0) }
+        await p.refresh()
+        XCTAssertEqual(summaries, [3], "one notification for the whole first round")
+    }
+
+    func testNoQuestionsMeansNoSummary() async {
+        let p = poller(FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a"), err: "") }, [machine("a")])
+        var summaries: [Int] = []
+        p.onQuestionsWaiting = { summaries.append($0) }
+        await p.refresh()
+        await p.refresh()
+        XCTAssertEqual(summaries, [])
+    }
+
+    /// A machine that was away on the first round gets its own first poll when it shows up.
+    func testAMachineThatAnswersLaterHasItsOwnFirstPoll() async {
+        var up = false
+        let runner = FakeRunner { _ in
+            up ? CommandResult(code: 0, out: self.statusJSON(machine: "a", needsYou: [("o/r", 5), ("o/r", 6)]), err: "")
+               : CommandResult(code: 255, out: "", err: "down")
+        }
+        let p = poller(runner, [machine("a")])
+        var single = 0
+        var summaries: [Int] = []
+        p.onNewNeedsYou = { _, _ in single += 1 }
+        p.onQuestionsWaiting = { summaries.append($0) }
+        await p.refresh()
+        up = true
+        await p.refresh()
+        XCTAssertEqual(single, 0)
+        XCTAssertEqual(summaries, [2])
+    }
+
+    func testTheSummaryWords() {
+        XCTAssertEqual(MachineAlert.waiting(count: 1), "1 question is waiting")
+        XCTAssertEqual(MachineAlert.waiting(count: 4), "4 questions are waiting")
+    }
+
+    // MARK: refresh while one runs
+
+    func testAPollThatWasRunningAtSleepDoesNotSwallowTheWakeRefresh() async {
+        let runner = HoldingRunner(answer: statusJSON(machine: "a"))
+        let p = MachinePoller(runner: runner, machines: { [self] in [machine("a")] }, clock: { self.now }, observeSleep: false)
+        let inFlight = Task { await p.refresh() }
+        while runner.calls == 0 { await Task.yield() }
+
+        await p.refresh()                       // an ordinary tick while one runs is still a no-op
+        XCTAssertEqual(runner.calls, 1)
+        await p.refresh(queueIfBusy: true)      // the wake: it must be remembered, not dropped
+        XCTAssertEqual(runner.calls, 1, "it does not run beside the poll in flight")
+
+        runner.release()
+        await inFlight.value
+        XCTAssertEqual(runner.calls, 2, "the poll ran again once the first ended")
+        XCTAssertNotNil(p.reports["a"]?.status)
+    }
+
+    func testAQueuedRefreshRunsOnlyOnce() async {
+        let runner = HoldingRunner(answer: statusJSON(machine: "a"))
+        let p = MachinePoller(runner: runner, machines: { [self] in [machine("a")] }, clock: { self.now }, observeSleep: false)
+        let inFlight = Task { await p.refresh() }
+        while runner.calls == 0 { await Task.yield() }
+        await p.refresh(queueIfBusy: true)
+        await p.refresh(queueIfBusy: true)
+        runner.release()
+        await inFlight.value
+        XCTAssertEqual(runner.calls, 2)
     }
 
     // MARK: ProcessRunner (local, harmless commands only)

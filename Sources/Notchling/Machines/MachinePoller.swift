@@ -14,6 +14,11 @@ final class MachinePoller: ObservableObject {
     /// that leaves and comes back does not fire again.
     var onNewNeedsYou: ((Machine, NeedsYouEntry) -> Void)?
 
+    /// Fires once for the first good poll of each machine (all machines of one round together) with the number of
+    /// questions that were already waiting, instead of announcing them one by one: Notchling relaunches on
+    /// every install, and each launch would else ring once per open question. Not called for none.
+    var onQuestionsWaiting: ((Int) -> Void)?
+
     static let interval: TimeInterval = 60
     private static let commandTimeout: TimeInterval = 30
 
@@ -24,7 +29,11 @@ final class MachinePoller: ObservableObject {
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var refreshing = false
+    /// A refresh asked for while one was running, to run when that one ends (the wake after a sleep).
+    private var refreshQueued = false
     private var announced = Set<String>()
+    /// Machines with a good poll behind them.
+    private var baselined = Set<String>()
 
     /// - Parameter observeSleep: false in tests, so they never depend on a real sleep or wake.
     init(runner: CommandRunning, machines: @escaping () -> [Machine], clock: @escaping () -> Date,
@@ -40,12 +49,23 @@ final class MachinePoller: ObservableObject {
         for o in observers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
     }
 
-    /// Polls every machine at once. A poll that is still running makes this a no-op.
-    func refresh() async {
-        guard !refreshing else { return }
+    /// Polls every machine at once. A poll that is still running makes this a no-op, unless `queueIfBusy`: then
+    /// one more poll runs when it ends. The wake from sleep asks that way, because the poll in flight at sleep
+    /// may be stuck on a connection that died, and its answer is a stale "unreachable".
+    func refresh(queueIfBusy: Bool = false) async {
+        guard !refreshing else {
+            if queueIfBusy { refreshQueued = true }
+            return
+        }
         refreshing = true
         defer { refreshing = false }
+        repeat {
+            refreshQueued = false
+            await poll()
+        } while refreshQueued
+    }
 
+    private func poll() async {
         let list = machines()
         let runner = runner
         let results = await withTaskGroup(of: (Machine, CommandResult).self) { group in
@@ -64,12 +84,21 @@ final class MachinePoller: ObservableObject {
         let names = Set(list.map(\.name))
         reports = reports.filter { names.contains($0.key) }
         previous = previous.filter { names.contains($0.key) }
+        baselined = baselined.intersection(names)
+        var waiting = 0
         for (m, result) in results {
             let report = Self.report(from: result, at: now)
             if let old = reports[m.name], old.status != nil { previous[m.name] = old }
             reports[m.name] = report
-            if let status = report.status, report.error == nil { announceNew(status.needsYou, on: m) }
+            guard let status = report.status, report.error == nil else { continue }
+            if baselined.insert(m.name).inserted {
+                waiting += status.needsYou.count
+                for e in status.needsYou { announced.insert(Self.key(m, e)) }
+            } else {
+                announceNew(status.needsYou, on: m)
+            }
         }
+        if waiting > 0 { onQuestionsWaiting?(waiting) }
     }
 
     /// Polls now and then every 60 seconds, and follows the Mac's sleep and wake.
@@ -81,7 +110,7 @@ final class MachinePoller: ObservableObject {
                 MainActor.assumeIsolated { self?.stopTimer() }
             })
             observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.startTimer() }
+                MainActor.assumeIsolated { self?.startTimer(afterWake: true) }
             })
         }
     }
@@ -92,9 +121,9 @@ final class MachinePoller: ObservableObject {
         observers = []
     }
 
-    private func startTimer() {
+    private func startTimer(afterWake: Bool = false) {
         stopTimer()
-        Task { await refresh() }
+        Task { await refresh(queueIfBusy: afterWake) }
         let t = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
@@ -108,10 +137,12 @@ final class MachinePoller: ObservableObject {
     }
 
     private func announceNew(_ entries: [NeedsYouEntry], on m: Machine) {
-        for e in entries where announced.insert("\(m.name)\u{1F}\(e.repo)\u{1F}\(e.issue)").inserted {
+        for e in entries where announced.insert(Self.key(m, e)).inserted {
             onNewNeedsYou?(m, e)
         }
     }
+
+    private static func key(_ m: Machine, _ e: NeedsYouEntry) -> String { "\(m.name)\u{1F}\(e.repo)\u{1F}\(e.issue)" }
 
     private static func report(from result: CommandResult, at now: Date) -> LastReport {
         switch result.code {

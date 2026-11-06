@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var machines: MachinesCenter = MainActor.assumeIsolated {
         let center = MachinesCenter()
         center.poller.onNewNeedsYou = { [weak self] machine, entry in self?.announceNeedsYou(machine, entry) }
+        // the questions already open when polling starts: one notification, not one ring each
+        center.poller.onQuestionsWaiting = { UserNotifier.post("Notchling", MachineAlert.waiting(count: $0)) }
         return center
     }
     private lazy var search: SearchPanelController = {

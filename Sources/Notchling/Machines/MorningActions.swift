@@ -13,6 +13,9 @@ final class MorningActions: ObservableObject {
     /// What the last merge or push retry of an item got through, by item id (the window offers "retry push"
     /// when it merged but did not push).
     @Published private(set) var outcomes: [String: MergeOutcome] = [:]
+    /// A line for an action that worked but leaves its item where it was (an undone merge), by item id. A new
+    /// action on the item clears it.
+    @Published private(set) var notes: [String: String] = [:]
 
     /// Prefix of every comment Notchling leaves on an issue.
     static let commentPrefix = "notchling: "
@@ -24,18 +27,21 @@ final class MorningActions: ObservableObject {
     private let machines: () -> [Machine]
     private let mergeFunction: MergeFunction
     private let retryPushFunction: MergeFunction
+    private let undoFunction: MergeFunction
     private let cacheRoot: URL
 
     init(runner: CommandRunning = ProcessRunner(),
          machines: @escaping () -> [Machine] = { MachineRegistry.all() },
          merge: @escaping MergeFunction = MergePlan.merge,
          retryPush: @escaping MergeFunction = MergePlan.retryPush,
+         undoMerge: @escaping MergeFunction = MergePlan.undoMerge,
          cacheRoot: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Caches/Notchling/machines")) {
         self.runner = runner
         self.machines = machines
         self.mergeFunction = merge
         self.retryPushFunction = retryPush
+        self.undoFunction = undoMerge
         self.cacheRoot = cacheRoot
     }
 
@@ -45,7 +51,27 @@ final class MorningActions: ObservableObject {
     /// action returns a task that is already done.
     @discardableResult func merge(_ item: MorningItem) -> Task<Void, Never> { mergeLike(item, mergeFunction) }
 
-    @discardableResult func retryPush(_ item: MorningItem) -> Task<Void, Never> { mergeLike(item, retryPushFunction) }
+    /// Pushes a merge again, but only one whose check passed: the push that failed was the last step.
+    @discardableResult func retryPush(_ item: MorningItem) -> Task<Void, Never> {
+        mergeLike(item, retryPushFunction, unless: { [self] in
+            outcome(for: item)?.canRetryPush == true ? nil : "nothing to push again: no checked merge of this branch is waiting"
+        })
+    }
+
+    /// Takes this item's unpushed merge off `main` (see `MergePlan.undoMerge`), so it can be merged again. The
+    /// item's outcome goes with it; when git refuses, the outcome stays and the reason is the item's error.
+    @discardableResult func undoMerge(_ item: MorningItem) -> Task<Void, Never> {
+        start(item) { [self] in
+            guard case .ready(let entry) = item.entry else { return "\(item.id) is not a ready branch" }
+            guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
+            let undone = await undoFunction(entry, machine, repo, runner)
+            if let error = undone.error { return error }
+            outcomes[item.id] = nil
+            outcomeCommits[item.id] = nil
+            notes[item.id] = "Merge undone: main is back where it was. Merge again when you are ready."
+            return nil
+        }
+    }
 
     /// Puts the issue back in the worker's queue with a note.
     @discardableResult func sendBack(_ item: MorningItem, note: String) -> Task<Void, Never> {
@@ -92,24 +118,31 @@ final class MorningActions: ObservableObject {
             outcomes[id] = nil
             outcomeCommits[id] = nil
         }
+        let ids = Set(items.map(\.id))
+        notes = notes.filter { ids.contains($0.key) }
     }
 
     // MARK: Reading
 
-    /// The diff of the branch against `main`, or the error text. Fetches the branch into
+    /// The diff of the branch against `main`, or the error text. Fetches the branch (without its tags) into
     /// `refs/machines/<machine>/<issue>` of the repo's checkout first (the same ref a merge uses), which leaves
-    /// the work tree alone.
+    /// the work tree alone. It holds the item like an action does, so it never runs while a merge fetches into
+    /// that ref, and no merge starts while it does.
     func diff(_ item: MorningItem) async -> String {
         guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
         guard let source = branchSource(item) else { return "\(item.id) has no branch on the machine" }
+        guard !running.contains(item.id) else { return "an action is running on \(item.id); look at the diff when it ends" }
+        running.insert(item.id)
+        defer { running.remove(item.id) }
+        if let why = await MergePlan.branchError(source.branch, path: repo.localPath, runner: runner) { return why }
         let git = MachineTools.path("git")
         let ref = "refs/machines/\(machine.name)/\(item.issue)"
         let ssh = "ssh -o BatchMode=yes -o ConnectTimeout=8"
-        let fetch = await runner.run([git, "-C", repo.localPath, "-c", "core.sshCommand=\(ssh)", "fetch",
-                                      SSH.gitURL(machine, path: source.worktree), "+\(source.branch):\(ref)"],
+        let fetch = await runner.run([git, "-C", repo.localPath, "-c", "core.sshCommand=\(ssh)", "fetch", "--no-tags",
+                                      SSH.gitURL(machine, path: source.worktree), "+refs/heads/\(source.branch):\(ref)"],
                                      cwd: nil, timeout: 120)
         guard fetch.code == 0 else { return Self.failure(fetch, "git fetch") }
-        let diff = await runner.run([git, "-C", repo.localPath, "diff", "main...\(ref)"], cwd: nil, timeout: 60)
+        let diff = await runner.run([git, "-C", repo.localPath, "diff", "refs/heads/main...\(ref)"], cwd: nil, timeout: 60)
         return diff.code == 0 ? diff.out : Self.failure(diff, "git diff")
     }
 
@@ -131,7 +164,7 @@ final class MorningActions: ObservableObject {
             let remote = entry.evidenceDir.hasSuffix("/") ? entry.evidenceDir + name : entry.evidenceDir + "/" + name
             let target = dir.appendingPathComponent(name)
             // -O: the legacy protocol runs the path through the remote shell, so the quoting below holds
-            let argv = ["/usr/bin/scp", "-O", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            let argv = ["/usr/bin/scp", "-O", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--",
                         "\(machine.user)@\(machine.host):\(LaneStore.quote(remote))", target.path]
             if await runner.run(argv, cwd: nil, timeout: 60).code == 0 { copied.append(target) }
         }
@@ -140,9 +173,11 @@ final class MorningActions: ObservableObject {
 
     // MARK: Plumbing
 
-    private func mergeLike(_ item: MorningItem, _ function: @escaping MergeFunction) -> Task<Void, Never> {
+    private func mergeLike(_ item: MorningItem, _ function: @escaping MergeFunction,
+                           unless refusal: @escaping @MainActor () -> String? = { nil }) -> Task<Void, Never> {
         start(item) { [self] in
             guard case .ready(let entry) = item.entry else { return "\(item.id) is not a ready branch" }
+            if let why = refusal() { return why }
             guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
             let outcome = await function(entry, machine, repo, runner)
             outcomes[item.id] = outcome
@@ -174,6 +209,7 @@ final class MorningActions: ObservableObject {
         guard !running.contains(item.id) else { return Task {} }
         running.insert(item.id)
         lastError[item.id] = nil
+        notes[item.id] = nil
         return Task { @MainActor in
             if let error = await work() { lastError[item.id] = error }
             running.remove(item.id)
