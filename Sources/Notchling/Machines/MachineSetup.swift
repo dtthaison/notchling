@@ -112,8 +112,9 @@ struct StepContext: Sendable {
     let now: Date
     /// Hides the vault values of this machine in text that came from it (`[secret:<name>]`). A step that shows a
     /// piece of machine output masks it first and cuts it afterwards: a cut through a value leaves a piece that
-    /// no longer matches. The engine fills it; the default hides nothing, for tests that build a context by hand.
-    var mask: @Sendable (String) -> String = { $0 }
+    /// no longer matches. The engine fills it. It has no default: a context that hides nothing is a leak, so code
+    /// that builds one by hand has to say so (`{ $0 }`), and production never does.
+    let mask: @Sendable (String) -> String
 }
 
 struct FixContext: Sendable {
@@ -126,8 +127,7 @@ struct FixContext: Sendable {
     /// MainActor `Task` per line. It drops lines once the Fix has ended.
     let log: @Sendable (String) -> Void
     /// Hides the vault values of the machine and this Fix's admin password in text a step shows (a failure line, a
-    /// message). Mask first, cut afterwards. The default is the step context's own, which hides nothing until the
-    /// engine fills it.
+    /// message). Mask first, cut afterwards. Left out, it is the step context's own.
     let mask: @Sendable (String) -> String
 
     init(step: StepContext, adminPassword: String?, log: @escaping @Sendable (String) -> Void,

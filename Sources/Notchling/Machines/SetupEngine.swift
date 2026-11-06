@@ -162,12 +162,13 @@ final class SetupEngine: ObservableObject {
         return masks
     }
 
-    /// The context of one machine. A Fix gets its own machine's, never another's. Its `mask` hides the machine's
-    /// vault values, so a step masks what a machine said before it cuts it.
-    private func stepContext(_ machine: Machine) -> StepContext {
-        let masks = masks(for: machine)
-        return StepContext(machine: machine, all: currentMachines(), runner: runner, secrets: secrets, http: http,
-                           mac: mac(), now: clock(), mask: { masks.apply($0) })
+    /// The context of one machine. A Fix gets its own machine's, never another's. Its `mask` is `masks`: the
+    /// machine's vault values (and a Fix's admin password), so a step masks what a machine said before it cuts it.
+    /// The caller reads the vault once (`masks(for:)`) for a refresh or a Fix and hands the result to everything
+    /// in it.
+    private func stepContext(_ machine: Machine, masks: SetupMasks) -> StepContext {
+        StepContext(machine: machine, all: currentMachines(), runner: runner, secrets: secrets, http: http,
+                    mac: mac(), now: clock(), mask: { masks.apply($0) })
     }
 
     // MARK: checks
@@ -188,12 +189,17 @@ final class SetupEngine: ObservableObject {
     func refresh(_ names: [String]? = nil, includeSlow: Bool = false) async {
         let targets = currentMachines().filter { names?.contains($0.name) ?? true }
         guard !targets.isEmpty else { return }
+        // each machine's vault values are read once for the whole refresh: the contexts of both passes, the batch
+        // cuts and the published results all use them
+        var maskOf: [String: SetupMasks] = [:]
+        for m in targets { maskOf[m.name] = masks(for: m) }
         var evaluations: [String: Evaluation] = [:]
         await withTaskGroup(of: (String, Evaluation).self) { group in
             for m in targets {
+                let masks = maskOf[m.name] ?? SetupMasks()
                 group.addTask { @MainActor [self] in
                     let due = lastSlow[m.name].map { clock().timeIntervalSince($0) > Self.slowEvery } ?? false
-                    return (m.name, await evaluate(m, slow: includeSlow || due))
+                    return (m.name, await evaluate(m, slow: includeSlow || due, masks: masks))
                 }
             }
             for await (name, e) in group { evaluations[name] = e }
@@ -209,7 +215,7 @@ final class SetupEngine: ObservableObject {
             if offline, e.results[.reachable] != nil {
                 e.results[.reachable] = CheckResult(state: .cantTell("no machine answered; this Mac may be offline"))
             }
-            let masks = masks(for: m)
+            let masks = maskOf[m.name] ?? SetupMasks()
             let known = Set(stepList(m, currentMachines()).map(\.id))
             var published = (results[m.name] ?? [:]).filter { known.contains($0.key) }
             for (id, r) in e.results { published[id] = masks.apply(r) }
@@ -227,8 +233,8 @@ final class SetupEngine: ObservableObject {
     func check(draft: Machine) async -> [StepID: CheckResult] {
         var machine = draft
         machine.jobs = []
-        let e = await evaluate(machine, slow: false, usePrior: false)
         let masks = masks(for: machine)
+        let e = await evaluate(machine, slow: false, usePrior: false, masks: masks)
         return e.results.mapValues { masks.apply($0) }
     }
 
@@ -262,24 +268,24 @@ final class SetupEngine: ObservableObject {
     /// Checks one machine. A fact the first pass detected (the `sdPath` of Plugins installed, a home) changes the
     /// steps that come after it: their scripts and contexts are built from the machine. So when the facts changed
     /// the machine, the steps are built again from it and checked once more; later refreshes find nothing new.
-    private func evaluate(_ m: Machine, slow: Bool, usePrior: Bool = true) async -> Evaluation {
-        let first = await evaluateOnce(m, slow: slow, usePrior: usePrior)
+    private func evaluate(_ m: Machine, slow: Bool, usePrior: Bool = true, masks: SetupMasks) async -> Evaluation {
+        let first = await evaluateOnce(m, slow: slow, usePrior: usePrior, masks: masks)
         // only what the steps are built from starts another pass (not FileVault). The token expiry is one of them:
         // worker.json's check compares the file with a `token_expires` built from it.
         let buildFacts = Detected(os: first.detected.os, home: first.detected.home, python: first.detected.python,
                                   sdPath: first.detected.sdPath, tokenExpires: first.detected.tokenExpires)
         let learned = Self.applying(buildFacts, to: m)
         guard !first.unreachable, learned != m else { return first }
-        var second = await evaluateOnce(learned, slow: slow, usePrior: usePrior)
+        var second = await evaluateOnce(learned, slow: slow, usePrior: usePrior, masks: masks)
         second.slowRan = second.slowRan || first.slowRan
         return second
     }
 
     /// Runs the checks of one machine: the cheap remote probes in one ssh, then the rest in waves as their needs
     /// become known.
-    private func evaluateOnce(_ m: Machine, slow: Bool, usePrior: Bool) async -> Evaluation {
+    private func evaluateOnce(_ m: Machine, slow: Bool, usePrior: Bool, masks: SetupMasks) async -> Evaluation {
         let list = stepList(m, currentMachines())
-        let ctx = stepContext(m)
+        let ctx = stepContext(m, masks: masks)
         let prior = usePrior ? (results[m.name] ?? [:]) : [:]
         var e = Evaluation()
         var final: [StepID: CheckResult] = [:]
@@ -293,7 +299,7 @@ final class SetupEngine: ObservableObject {
         }
         if !cheap.isEmpty {
             e.tried = true
-            switch await runBatch(cheap, on: m, ctx: ctx, timeout: Self.cheapTimeout) {
+            switch await runBatch(cheap, on: m, ctx: ctx, masks: masks, timeout: Self.cheapTimeout) {
             case .unreachable(let line, let connect):
                 e.unreachable = true
                 e.connectError = connect
@@ -348,7 +354,7 @@ final class SetupEngine: ObservableObject {
             }
             if !slowRemote.isEmpty {
                 e.slowRan = true
-                switch await runBatch(slowRemote, on: m, ctx: ctx, timeout: Self.slowTimeout) {
+                switch await runBatch(slowRemote, on: m, ctx: ctx, masks: masks, timeout: Self.slowTimeout) {
                 case .unreachable:
                     for s in slowRemote { final[s.id] = CheckResult(state: .cantTell("\(m.name) is not reachable")) }
                 case .answers(let r):
@@ -383,7 +389,8 @@ final class SetupEngine: ObservableObject {
 
     /// One ssh for the probes of `steps`. Each probe's output is cut from the rest by a marker line that carries
     /// this call's random nonce and the probe's index; anything else, whatever it looks like, is probe output.
-    private func runBatch(_ steps: [SetupStep], on m: Machine, ctx: StepContext, timeout: TimeInterval) async -> BatchOutcome {
+    private func runBatch(_ steps: [SetupStep], on m: Machine, ctx: StepContext, masks: SetupMasks,
+                          timeout: TimeInterval) async -> BatchOutcome {
         let nonce = (0..<16).map { _ in String("0123456789abcdef".randomElement()!) }.joined()
         var probes: [(step: SetupStep, parse: @Sendable (RemoteOutput, StepContext) async -> CheckResult)] = []
         var wrapped: [String] = []
@@ -429,12 +436,9 @@ final class SetupEngine: ObservableObject {
 
         // output the machine (`head -c`) or ProcessRunner (2 MiB) cut ends or starts in a half line that can hold a
         // piece of a value: mask it, then drop that line
-        var machineMasks: SetupMasks?
         for (i, out) in answers where out.text.hasPrefix(ProcessRunner.cutNotice) || out.text.utf8.count >= Self.probeCap {
-            let cutMasks = machineMasks ?? masks(for: m)
-            machineMasks = cutMasks
-            answers[i] = RemoteOutput(text: cutMasks.applyToCut(out.text, headCut: out.text.hasPrefix(ProcessRunner.cutNotice),
-                                                                tailCut: out.text.utf8.count >= Self.probeCap), code: out.code)
+            answers[i] = RemoteOutput(text: masks.applyToCut(out.text, headCut: out.text.hasPrefix(ProcessRunner.cutNotice),
+                                                             tailCut: out.text.utf8.count >= Self.probeCap), code: out.code)
         }
 
         var parsed: [StepID: CheckResult] = [:]
@@ -531,7 +535,7 @@ final class SetupEngine: ObservableObject {
         }
 
         // `mask` hides the vault values and this Fix's admin password, so a step masks before it cuts a failure line
-        let ctx = FixContext(step: stepContext(m), adminPassword: adminPassword, log: { log.add($0) },
+        let ctx = FixContext(step: stepContext(m, masks: masks), adminPassword: adminPassword, log: { log.add($0) },
                              mask: { masks.apply($0) })
         let raw = await body(ctx)
         log.end()

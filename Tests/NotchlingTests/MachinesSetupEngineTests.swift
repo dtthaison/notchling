@@ -63,6 +63,21 @@ private struct LocalShellRunner: CommandRunning {
     }
 }
 
+/// A vault that counts how often each value is read (every read is a Keychain read in the app).
+private final class CountingSecrets: SecretSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private let values: [String: String]
+    private var reads: [String: Int] = [:]
+    init(_ values: [String: String]) { self.values = values }
+    func value(named name: String) -> String? {
+        lock.withLock { reads[name, default: 0] += 1 }
+        return values[name]
+    }
+    func entry(named: String) -> VaultEntry? { nil }
+    func reads(of name: String) -> Int { lock.withLock { reads[name] ?? 0 } }
+    func resetReads() { lock.withLock { reads = [:] } }
+}
+
 private final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [String] = []
@@ -159,7 +174,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         }
     }
 
-    private func world(_ machines: [Machine] = [TestMachines.mac("m1")], secrets: FakeSecrets = FakeSecrets(),
+    private func world(_ machines: [Machine] = [TestMachines.mac("m1")], secrets: SecretSource = FakeSecrets(),
                        steps: @escaping (Machine, [Machine]) -> [SetupStep],
                        usages: @escaping ([Machine]) -> [SecretUsage] = { _ in [] },
                        deliver: @escaping (SecretUsage, FixContext) async -> FixOutcome = { _, _ in FixOutcome(ok: true, message: "") },
@@ -1343,5 +1358,89 @@ final class MachinesSetupEngineTests: XCTestCase {
         let log = w.engine.logs["m1"] ?? []
         XCTAssertTrue(log.contains("out sk-a"), "\(log)")
         XCTAssertTrue(log.contains("err sk-ant"), "\(log)")
+    }
+
+    // MARK: fix round 1 (integration)
+
+    /// I1: the engine fills `StepContext.mask` for the checks. A probe that masks through `ctx.mask` and cuts after
+    /// it shows no piece of the token the machine echoed; with an identity mask the cut leaves a fragment that the
+    /// engine's own `masks.apply` at publish can no longer match.
+    func testTheEnginesCheckContextMasksBeforeAProbeCuts() async {
+        let marker = "[secret:claude-worker]"
+        let echoed = String(repeating: "f", count: 170) + longToken
+        let shown: @Sendable (String, StepContext) -> String = { text, ctx in String(ctx.mask(text).prefix(200)) }
+        let w = world(secrets: FakeSecrets(values: ["claude-worker": longToken])) { _, _ in [
+            step("remote", parse: { out, ctx in CheckResult(state: .fail(shown(out.text, ctx))) }),
+            SetupStep(id: StepID(raw: "local"), title: "Local", needs: [], cadence: .everyRefresh,
+                      probe: .local { ctx in CheckResult(state: .fail(shown(echoed, ctx))) }, fix: .howTo("x")),
+        ] }
+        w.answers.value = ["echo probe-remote": (echoed, 1)]
+        await w.engine.refresh(["m1"])
+        for id in ["remote", "local"] {
+            let reason = text(w.engine.results["m1"]?[StepID(raw: id)]?.state) ?? "no result"
+            noFragment(of: longToken, in: reason)
+            XCTAssertTrue(reason.contains(marker), "\(id): \(reason)")
+        }
+
+        // the draft check (the Add sheet) builds its contexts the same way
+        let draft = await w.engine.check(draft: TestMachines.mac("m1"))
+        for id in ["remote", "local"] {
+            let reason = text(draft[StepID(raw: id)]?.state) ?? "no result"
+            noFragment(of: longToken, in: reason)
+            XCTAssertTrue(reason.contains(marker), "draft \(id): \(reason)")
+        }
+    }
+
+    /// A refresh reads each vault value once, also when the facts it learns start a second pass; so does a Fix.
+    func testARefreshAndAFixReadTheVaultOnce() async {
+        var m = TestMachines.mac("m1")
+        m.os = nil
+        let secrets = CountingSecrets(["claude-worker": longToken])
+        let seen = Box<[Machine]>([])
+        let fix = StepFix.run(FixPlan(display: "x", needsAdmin: false) { ctx in
+            _ = ctx.mask("a"); _ = ctx.step.mask("b")
+            return FixOutcome(ok: true, message: "done")
+        })
+        let w = world([m], secrets: secrets) { _, _ in [
+            step("reachable", fix: fix, parse: { _, ctx in
+                seen.value.append(ctx.machine)
+                return CheckResult(state: .fail("up"), detected: Detected(os: .macOS))
+            }),
+        ] }
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(seen.value.count, 2, "the learned OS starts a second pass")
+        XCTAssertEqual(secrets.reads(of: "claude-worker"), 1, "one read for both passes and the published results")
+
+        secrets.resetReads()
+        _ = await w.engine.check(draft: TestMachines.mac("m1"))
+        XCTAssertEqual(secrets.reads(of: "claude-worker"), 1, "the Add sheet's check")
+
+        // a Fix: its masks, its step context, and the refresh after it
+        secrets.resetReads()
+        let out = await w.engine.runFix(StepID(raw: "reachable"), on: "m1", approval: admin())
+        XCTAssertTrue(out.ok, out.message)
+        XCTAssertEqual(secrets.reads(of: "claude-worker"), 2, "one for the Fix and one for the refresh after it")
+    }
+
+    /// I1: a Fix's step context hides the vault values too, and the admin password of that Fix.
+    func testTheEnginesFixContextMasksTheStepAndTheFixAlike() async {
+        let marker = "[secret:claude-worker]"
+        let seen = Box<[String]>([])
+        let fix = StepFix.run(FixPlan(display: "x", needsAdmin: true) { ctx in
+            let said = String(repeating: "f", count: 170) + self.longToken + " pw=hunter22"
+            seen.value = [ctx.mask(said), ctx.step.mask(said)]
+            return FixOutcome(ok: false, message: String(ctx.step.mask(said).prefix(200)))
+        })
+        let w = world(secrets: FakeSecrets(values: ["claude-worker": longToken])) { _, _ in [step("a", fix: fix)] }
+        let out = await w.engine.runFix(StepID(raw: "a"), on: "m1", approval: admin(password: "hunter22"))
+        XCTAssertEqual(seen.value.count, 2)
+        for masked in seen.value {
+            noFragment(of: longToken, in: masked)
+            XCTAssertTrue(masked.contains(marker), masked)
+            XCTAssertFalse(masked.contains("hunter22"), masked)
+            XCTAssertTrue(masked.contains("[admin password]"), masked)
+        }
+        noFragment(of: longToken, in: out.message)
+        XCTAssertTrue(out.message.contains(marker), out.message)
     }
 }
