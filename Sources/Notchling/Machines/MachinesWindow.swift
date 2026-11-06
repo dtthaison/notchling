@@ -113,6 +113,18 @@ struct DraftCheck: Equatable {
     var abilitiesLine = ""
     var problems: [String] = []
     var detected = Detected()
+    /// The name, host and user this check was made for. `add` takes the check only for the same three.
+    var inputs: [String] = []
+}
+
+/// What the machine card's log pane shows: the last lines, and a note when the rest is hidden.
+enum LogTail {
+    static let limit = 300
+
+    static func make(_ lines: [String]) -> (shown: [String], note: String?) {
+        guard lines.count > limit else { return (lines, nil) }
+        return (Array(lines.suffix(limit)), "Showing the last \(limit) of \(lines.count) lines")
+    }
 }
 
 struct UpdateOfferRow: Identifiable, Equatable {
@@ -215,9 +227,12 @@ final class MachinesModel: ObservableObject {
         refreshVault()
     }
 
-    private static func backupNote() -> String {
-        RegistryNotes.migrated(backup: MachineRegistry.backupURL(for: MachineRegistry.fileURL).path)
+    /// The note for a registry that was migrated, with the backup `load` wrote when it is known.
+    static func migrationNote(backup: URL?) -> String {
+        RegistryNotes.migrated(backup: (backup ?? MachineRegistry.backupURL(for: MachineRegistry.fileURL)).path)
     }
+
+    private static func backupNote() -> String { migrationNote(backup: MachineRegistry.lastBackup()) }
 
     // MARK: Registry
 
@@ -301,7 +316,6 @@ final class MachinesModel: ObservableObject {
         await engine.refresh(includeSlow: true)
     }
 
-    func windowOpened() { windowVisible = true }
     func windowClosed() { windowVisible = false }
 
     /// While the window is visible each poller report change checks the machines again.
@@ -335,7 +349,7 @@ final class MachinesModel: ObservableObject {
             return registryProblem
         }
         registryProblem = nil
-        reload()
+        refreshMachines()    // the record only: no GitHub fetch for a change that did not touch the repos' issues
         onRegistryChange()
         return nil
     }
@@ -374,9 +388,10 @@ final class MachinesModel: ObservableObject {
     /// An unsafe form is not checked at all.
     func checkDraft(name: String, host: String, user: String) async -> DraftCheck {
         let problems = MachineForm.problems(name: name, host: host, user: user, existing: machines.map(\.name))
-        guard problems.isEmpty else { return DraftCheck(problems: problems) }
+        let inputs = [name, host, user]
+        guard problems.isEmpty else { return DraftCheck(problems: problems, inputs: inputs) }
         let results = await engine.check(draft: Machine(name: name, host: host, user: user))
-        var check = DraftCheck()
+        var check = DraftCheck(inputs: inputs)
         if let reachable = results[.reachable] {
             check.lines = [.init(title: "Reachable", state: reachable.state)]
             if case .pass = reachable.state { check.reachable = true }
@@ -394,6 +409,7 @@ final class MachinesModel: ObservableObject {
         guard canAdd else { return "machines.json can't be read, so nothing can be added" }
         if let first = MachineForm.problems(name: name, host: host, user: user, existing: machines.map(\.name)).first { return first }
         guard check.reachable else { return "Check Reachable first" }
+        guard check.inputs == [name, host, user] else { return "Check again; the details changed" }
         var machine = Machine(name: name, host: host, user: user)
         machine.os = check.detected.os
         if let fileVault = check.detected.fileVault { machine.fileVault = fileVault }

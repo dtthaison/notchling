@@ -147,6 +147,23 @@ final class MachinesRegistryTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: dir.appendingPathComponent(extra[0])), second)
     }
 
+    /// Review minor: the window's note names the backup `load` really wrote, not the usual name.
+    func testLoadReportsTheBackupItWroteEvenWhenTheUsualNameWasTaken() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("machines.json")
+        XCTAssertNil(MachineRegistry.lastBackup(for: url))
+        try Data(v1Text.utf8).write(to: url)
+        _ = MachineRegistry.load(at: url)
+        XCTAssertEqual(MachineRegistry.lastBackup(for: url), MachineRegistry.backupURL(for: url))
+        try Data(#"[{"name":"z","host":"z","user":"u","sdPath":"/z/sd.py","fileVault":false,"repos":[]}]"#.utf8).write(to: url)
+        _ = MachineRegistry.load(at: url)
+        let second = try XCTUnwrap(MachineRegistry.lastBackup(for: url))
+        XCTAssertNotEqual(second, MachineRegistry.backupURL(for: url), "the usual name was taken")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertTrue(second.lastPathComponent.hasPrefix("machines.json.v1-backup-"))
+    }
+
     func testABackupThatCannotBeWrittenStopsTheMigration() throws {
         let dir = try makeDir()
         let url = dir.appendingPathComponent("machines.json")

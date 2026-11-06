@@ -307,7 +307,7 @@ final class MachinesWindowTests: XCTestCase {
     }
 
     @MainActor
-    func testWindowOpensWithSlowChecksAndPollerChangesRefreshOnlyWhileVisible() async throws {
+    func testOpeningTheWindowChecksAndTheModelKnowsWhileItIsVisible() async throws {
         let reg = TestRegistry(machines: [TestMachines.linux()])
         let runner = ReachableRunner(reachable: "os=Linux\narch=x86_64\nuid=1000\nuser=agent\nhome=/home/agent\nversion=Ubuntu 24.04\ndisk_kb=1048576\ndocker=none")
         let model = makeModel(reg, runner: runner)
@@ -318,8 +318,42 @@ final class MachinesWindowTests: XCTestCase {
         model.windowClosed()
         XCTAssertFalse(model.windowVisible)
         XCTAssertFalse(model.shouldRefreshOnPollerChange)
-        model.windowOpened()
+        await model.open()
         XCTAssertTrue(model.shouldRefreshOnPollerChange)
+    }
+
+    // MARK: Review minors
+
+    @MainActor
+    func testAddRefusesACheckMadeForOtherDetails() async {
+        let runner = ReachableRunner(reachable: "os=Linux\narch=x86_64\nuid=1000\nuser=agent\nhome=/home/agent\nversion=Ubuntu 24.04\ndisk_kb=1048576\ndocker=none")
+        let reg = TestRegistry(machines: [TestMachines.mac("m1")])
+        let model = makeModel(reg, runner: runner)
+        let check = await model.checkDraft(name: "m2", host: "m2.tail", user: "agent")
+        XCTAssertTrue(check.reachable)
+        XCTAssertEqual(model.add(name: "m2", host: "evil.example", user: "agent", check: check), "Check again; the details changed")
+        XCTAssertEqual(model.add(name: "m3", host: "m2.tail", user: "agent", check: check), "Check again; the details changed")
+        XCTAssertEqual(model.add(name: "m2", host: "m2.tail", user: "other", check: check), "Check again; the details changed")
+        XCTAssertEqual(reg.saves.count, 0)
+        XCTAssertNil(model.add(name: "m2", host: "m2.tail", user: "agent", check: check))
+        XCTAssertEqual(reg.saves.count, 1)
+    }
+
+    func testTheLogPaneShowsTheLast300Lines() {
+        let lines = (0..<1000).map { "line \($0)" }
+        let tail = LogTail.make(lines)
+        XCTAssertEqual(tail.shown.count, 300)
+        XCTAssertEqual(tail.shown.first, "line 700")
+        XCTAssertEqual(tail.shown.last, "line 999")
+        XCTAssertEqual(tail.note, "Showing the last 300 of 1000 lines")
+        XCTAssertEqual(LogTail.make(["a", "b"]).shown, ["a", "b"])
+        XCTAssertNil(LogTail.make(["a", "b"]).note)
+    }
+
+    @MainActor
+    func testTheMigrationNoteNamesTheBackupThatWasWritten() {
+        XCTAssertEqual(MachinesModel.migrationNote(backup: URL(fileURLWithPath: "/x/machines.json.v1-backup-1800000000")),
+                       "machines.json was upgraded to the new format. The old file is kept at /x/machines.json.v1-backup-1800000000.")
     }
 
     // MARK: The Fix flow: a Fix needs a click, the password is passed through
@@ -622,7 +656,7 @@ final class MachinesWindowTests: XCTestCase {
     // MARK: Machines and jobs
 
     @MainActor
-    func testAddingRemovingAndAdminChoiceChangeTheRecordOnly() async {
+    func testAddingRemovingAndAdminChoiceChangeTheRecordOnly() async throws {
         let runner = ScriptedRunner()
         let reg = TestRegistry(machines: [TestMachines.mac("m1"), TestMachines.linux()])
         let model = makeModel(reg, runner: runner)
@@ -630,7 +664,8 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertEqual(reg.machines.last?.admin, .rootSSH)
         model.remove("m1")
         XCTAssertEqual(reg.machines.map(\.name), ["vps-sing-1"])
-        XCTAssertTrue(runner.calls.isEmpty, "nothing on a machine changes")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(runner.calls.isEmpty, "nothing on a machine changes, and GitHub is not asked either")
         reg.refuseSaves = true
         model.remove("vps-sing-1")
         XCTAssertEqual(model.registryProblem, "Couldn't save machines.json")
@@ -690,7 +725,7 @@ final class MachinesWindowTests: XCTestCase {
     }
 
     @MainActor
-    func testSavingAJobAddsOrReplacesTheSDWorkerJobOnly() {
+    func testSavingAJobAddsOrReplacesTheSDWorkerJobOnly() async throws {
         var bare = TestMachines.mac("m3")
         bare.jobs = []
         let reg = TestRegistry(machines: [bare])
@@ -705,7 +740,8 @@ final class MachinesWindowTests: XCTestCase {
         draft.repos[0].github = "bad"
         XCTAssertEqual(model.saveJob(draft), "Repository: owner/name, like me/app")
         XCTAssertEqual(reg.saves.count, 1)
-        XCTAssertTrue(runner.calls.isEmpty)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(runner.calls.isEmpty, "saving a job does not ask GitHub for issues")
     }
 }
 

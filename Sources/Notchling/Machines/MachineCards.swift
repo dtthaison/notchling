@@ -417,7 +417,7 @@ private struct MachineCardView: View {
                     .kitType(.label).foregroundColor(KitInk.accentText)
             }
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(engine.steps(for: machine), id: \.id.raw) { step in stepRow(step) }
+                ForEach(engine.steps(for: machine, among: model.machines), id: \.id.raw) { step in stepRow(step) }
             }
             let rows = model.secretRows(for: shown)
             if !rows.isEmpty { secrets(rows) }
@@ -536,7 +536,7 @@ private struct MachineCardView: View {
         if let id = engine.running[machine.name] {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(verbatim: "Running " + (engine.steps(for: machine).first { $0.id == id }?.title ?? id.raw) + "…")
+                Text(verbatim: "Running " + (engine.steps(for: machine, among: model.machines).first { $0.id == id }?.title ?? id.raw) + "…")
                     .kitType(.label).foregroundColor(KitInk.textMuted)
             }
         }
@@ -558,9 +558,11 @@ private struct MachineCardView: View {
     @ViewBuilder private var log: some View {
         let lines = engine.logs[machine.name] ?? []
         if !lines.isEmpty {
+            let tail = LogTail.make(lines)
             DisclosureGroup("Log (\(lines.count) lines)", isExpanded: $logOpen) {
+                if let note = tail.note { Text(verbatim: note).kitType(.meta).foregroundColor(KitInk.textMuted) }
                 ScrollView {
-                    Text(verbatim: lines.joined(separator: "\n")).kitType(.mono).foregroundColor(KitInk.text)
+                    Text(verbatim: tail.shown.joined(separator: "\n")).kitType(.mono).foregroundColor(KitInk.text)
                         .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
                 }
                 .frame(maxHeight: 220)

@@ -957,6 +957,36 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(w.engine.logs["m1"], before, "a line after the Fix ended is dropped")
     }
 
+    /// Review minor: a burst of output is published in a few batches, not once per line.
+    func testABurstOfOutputIsPublishedInFewBatchesInOrder() async {
+        let fix = StepFix.run(FixPlan(display: "x", needsAdmin: false) { ctx in
+            for i in 0..<1000 { ctx.log("line \(i)\n") }
+            return FixOutcome(ok: true, message: "done")
+        })
+        let w = world { _, _ in [step("a", fix: fix)] }
+        var publishes = 0
+        let watch = w.engine.$logs.dropFirst().sink { _ in publishes += 1 }
+        _ = await w.engine.runFix(StepID(raw: "a"), on: "m1", approval: admin())
+        watch.cancel()
+        let log = w.engine.logs["m1"] ?? []
+        XCTAssertEqual(log.filter { $0.hasPrefix("line ") }.compactMap { Int($0.dropFirst(5)) }, Array(0..<1000))
+        XCTAssertEqual(log.first, "▸ A")
+        XCTAssertEqual(log.last, "✓ done")
+        XCTAssertLessThan(publishes, 60, "published \(publishes) times for 1000 lines")
+    }
+
+    /// Review minor: the cards pass the machines they hold; the engine does not read machines.json for each redraw.
+    func testStepsAmongGivenMachinesReadNoRegistry() {
+        let reads = Counter()
+        let machine = TestMachines.mac("m1")
+        let engine = SetupEngine(runner: EngineRunner(), secrets: FakeSecrets(), http: FakeHTTP(), mac: { .empty },
+                                 machines: { reads.add("read"); return [machine] }, save: { _ in true }, clock: { Date() },
+                                 steps: { _, _ in [step("a"), step("b")] }, observeVault: false)
+        for _ in 0..<20 { _ = engine.steps(for: machine, among: [machine]) }
+        XCTAssertEqual(reads.count, 0)
+        XCTAssertEqual(engine.steps(for: machine, among: [machine]).map(\.id.raw), ["a", "b"])
+    }
+
     func testTheLogKeepsTheLast2000Lines() async {
         let fix = StepFix.run(FixPlan(display: "x", needsAdmin: false) { ctx in
             ctx.log((0..<2500).map { "line \($0)\n" }.joined())

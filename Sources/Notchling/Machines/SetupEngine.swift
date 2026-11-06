@@ -65,6 +65,7 @@ final class SetupEngine: ObservableObject {
     private var offerRevision: [String: Int] = [:]
 
     private static let logLimit = 2000
+    private static let logBatch: UInt64 = 100_000_000
     private static let cheapTimeout: TimeInterval = 60
     private static let slowTimeout: TimeInterval = 180
     private static let slowEvery: TimeInterval = 10 * 60
@@ -157,6 +158,9 @@ final class SetupEngine: ObservableObject {
     }
 
     func steps(for machine: Machine) -> [SetupStep] { stepList(withFacts(machine), currentMachines()) }
+
+    /// The same from machines the caller already holds: the cards redraw often and must not read machines.json each time.
+    func steps(for machine: Machine, among all: [Machine]) -> [SetupStep] { stepList(withFacts(machine), all.map(withFacts)) }
 
     /// `machine` with the facts the checks learned laid over it (what its steps are built from).
     func overlaid(_ machine: Machine) -> Machine { withFacts(machine) }
@@ -547,8 +551,28 @@ final class SetupEngine: ObservableObject {
         let stream = AsyncStream<String> { continuation = $0 }
         let log = SetupFixLog(masks: masks, continuation: continuation)
         let name = m.name
+        // lines are published in batches (at most one publish per `logBatch`), so a chatty Fix does not redraw every card per line
         let drain = Task { @MainActor [weak self] in
-            for await line in stream { self?.appendLog(name, [line]) }
+            var pending: [String] = []
+            var timer: Task<Void, Never>?
+            @MainActor func flush() {
+                timer?.cancel()
+                timer = nil
+                guard !pending.isEmpty else { return }
+                self?.appendLog(name, pending)
+                pending = []
+            }
+            for await line in stream {
+                pending.append(line)
+                if timer == nil {
+                    timer = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: Self.logBatch)
+                        guard !Task.isCancelled else { return }
+                        flush()
+                    }
+                }
+            }
+            flush()
         }
 
         // `mask` hides the vault values and this Fix's admin password, so a step masks before it cuts a failure line

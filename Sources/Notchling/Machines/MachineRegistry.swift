@@ -237,6 +237,18 @@ enum MachineRegistry {
         url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".v1-backup")
     }
 
+    private final class BackupBook: @unchecked Sendable {
+        private let lock = NSLock()
+        private var byFile: [String: URL] = [:]
+        func set(_ backup: URL, for url: URL) { lock.withLock { byFile[url.path] = backup } }
+        func get(for url: URL) -> URL? { lock.withLock { byFile[url.path] } }
+    }
+    private static let book = BackupBook()
+
+    /// The backup the last migration of the file at `url` wrote in this run (it may carry a stamp when the usual
+    /// name was taken), or nil when this run did not migrate it.
+    static func lastBackup(for url: URL = fileURL) -> URL? { book.get(for: url) }
+
     /// `url` is injectable for tests. Migrates a v1 file once.
     static func load(at url: URL = fileURL) -> RegistryState {
         switch read(url) {
@@ -245,7 +257,10 @@ enum MachineRegistry {
         case .v2(let machines): return .loaded(machines, migrated: false)
         case .v1(let machines, let original):
             guard let backup = writeBackup(original, for: url) else { return .loaded(machines, migrated: false) }
-            if write(machines, to: url) { return .loaded(machines, migrated: true) }
+            if write(machines, to: url) {
+                book.set(backup, for: url)
+                return .loaded(machines, migrated: true)
+            }
             try? FileManager.default.removeItem(at: backup)    // the file is as it was; don't leave a stray copy
             return .loaded(machines, migrated: false)
         }
