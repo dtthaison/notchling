@@ -66,8 +66,9 @@ final class MachinePoller: ObservableObject {
     }
 
     private func poll() async {
-        // a machine without an sd worker job has no `sdPath`: `python3 '' worker status` would only fail
-        let list = machines().filter { $0.sdWorker != nil }
+        // a machine without an sd worker job, or whose job has no `sdPath` yet (Plugins installed finds it), has
+        // nothing to ask: `python3 '' worker status` would only fail
+        let list = machines().filter { $0.sdWorker != nil && !$0.sdPath.isEmpty }
         let runner = runner
         let results = await withTaskGroup(of: (Machine, CommandResult).self) { group in
             for m in list {

@@ -120,6 +120,14 @@ final class MachinesPollerTests: XCTestCase {
         XCTAssertNil(p.reports["idle"])
     }
 
+    func testAJobWithoutAnSdPathIsNotPolledYet() async {
+        let runner = FakeRunner()
+        let p = poller(runner, [Machine(name: "early", host: "early.tail", user: "agent", sdPath: "", fileVault: false, repos: [])])
+        await p.refresh()
+        XCTAssertEqual(runner.calls.count, 0, "Plugins installed has not told the sd path yet")
+        XCTAssertNil(p.reports["early"])
+    }
+
     func testAMachineWhoseJobWasRemovedLosesItsReport() async {
         let runner = FakeRunner { _ in CommandResult(code: 0, out: self.statusJSON(machine: "a"), err: "") }
         var list = [machine("a")]

@@ -11,7 +11,7 @@ private final class EngineRunner: CommandRunning, @unchecked Sendable {
 
     var calls: [RecordedCall] { lock.withLock { recorded } }
     /// The batched probe calls (one ssh each).
-    var batches: [RecordedCall] { calls.filter { $0.argv.last?.contains("out=$( ( ") == true } }
+    var batches: [RecordedCall] { calls.filter { $0.argv.last?.contains("out=$( /bin/sh -c ") == true } }
 
     func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
         await run(argv, cwd: cwd, env: [:], stdin: nil, timeout: timeout, onOutput: nil)
@@ -30,15 +30,19 @@ private final class EngineRunner: CommandRunning, @unchecked Sendable {
 /// Answers a batched probe script the way the machine would: each probe's output, then its marker line.
 private enum FakeSSH {
     static func batch(_ call: RecordedCall, reply: (String) -> (out: String, code: Int32)) -> CommandResult? {
-        guard let script = call.argv.last, script.contains("out=$( ( ") else { return nil }
+        guard let script = call.argv.last, script.contains("out=$( /bin/sh -c ") else { return nil }
         let nonceRe = try! NSRegularExpression(pattern: "@@([0-9a-f]{16}) 0 %s@@")
         guard let m = nonceRe.firstMatch(in: script, range: NSRange(script.startIndex..., in: script)),
               let r = Range(m.range(at: 1), in: script) else { return nil }
         let nonce = String(script[r])
         var out = ""
-        let segments = script.components(separatedBy: "out=$( ( ").dropFirst()
+        let segments = script.components(separatedBy: "out=$( /bin/sh -c ").dropFirst()
         for (i, segment) in segments.enumerated() {
-            let probe = segment.components(separatedBy: "\n) </dev/null").first ?? ""
+            // each probe is `/bin/sh -c '<script>' </dev/null`, quoted once more inside the ssh command line
+            var probe = segment.components(separatedBy: " </dev/null").first ?? ""
+            let q = "'\\''"
+            if probe.hasPrefix(q) { probe.removeFirst(q.count) }
+            if probe.hasSuffix(q) { probe.removeLast(q.count) }
             let (text, code) = reply(probe)
             out += text + "\n@@\(nonce) \(i) \(code)@@\n"
         }
@@ -46,6 +50,14 @@ private enum FakeSSH {
     }
 
     static func isAdmin(_ call: RecordedCall) -> Bool { call.argv.last?.contains("sudo -S") == true }
+}
+
+/// Runs what would go over ssh in a local /bin/sh instead, so a batch is parsed by a real shell.
+private struct LocalShellRunner: CommandRunning {
+    func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult {
+        guard let remote = argv.last else { return CommandResult(code: 127, out: "", err: "") }
+        return await ProcessRunner().run(["/bin/sh", "-c", remote], cwd: nil, timeout: timeout)
+    }
 }
 
 private final class Counter: @unchecked Sendable {
@@ -178,7 +190,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(w.runner.calls.count, 1)
         let script = w.runner.calls[0].argv.last ?? ""
         for p in ["echo probe-a", "echo probe-b", "echo probe-c"] { XCTAssertTrue(script.contains(p), p) }
-        XCTAssertEqual(script.components(separatedBy: "out=$( ( ").count - 1, 3)
+        XCTAssertEqual(script.components(separatedBy: "out=$( /bin/sh -c ").count - 1, 3)
         // one nonce for the call: three marker lines, all of them the same 16 hex characters
         let re = try! NSRegularExpression(pattern: "@@([0-9a-f]{16}) \\d %s@@")
         let nonces = Set(re.matches(in: script, range: NSRange(script.startIndex..., in: script)).compactMap {
@@ -349,7 +361,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         await w.engine.refresh(includeSlow: true)
         _ = await w.engine.check(draft: draft)
         XCTAssertEqual(fixes.count, 0)
-        XCTAssertEqual(w.runner.calls.filter { !(($0.argv.last ?? "").contains("out=$( ( ")) }.count, 0, "only probe calls")
+        XCTAssertEqual(w.runner.calls.filter { !(($0.argv.last ?? "").contains("out=$( /bin/sh -c ")) }.count, 0, "only probe calls")
     }
 
     func testCheckDraftRunsTheMachineStepsAndSavesNothing() async {
@@ -635,6 +647,178 @@ final class MachinesSetupEngineTests: XCTestCase {
         let r = w.engine.results["m1"]?[StepID(raw: "a")]
         noFragment(of: longToken, in: String(describing: r))
         XCTAssertTrue(String(describing: r).contains("[secret:claude-worker]"))
+    }
+
+    // MARK: fix round 1
+
+    /// I1: stdout and stderr each keep their own partial line, so a value cut between two stdout chunks is whole
+    /// again even when stderr wrote in between.
+    func testARunnerTellsWhichPipeEachChunkCameFrom() async {
+        let seen = Box<[String]>([])
+        let r = await ProcessRunner().run(
+            ["/bin/sh", "-c", "printf OUT1; sleep 0.3; printf ERR1 >&2; sleep 0.3; printf OUT2"],
+            cwd: nil, env: [:], stdin: nil, timeout: 10,
+            onOutput: { text in seen.value.append("\(OutputStreamTag.current == .stderr ? "err" : "out"):\(text)") })
+        XCTAssertEqual(r.code, 0)
+        XCTAssertEqual(seen.value, ["out:OUT1", "err:ERR1", "out:OUT2"])
+        XCTAssertEqual(OutputStreamTag.current, .stdout, "the tag is not left set on the calling thread")
+    }
+
+    func testAValueSplitOnOnePipeIsMaskedWhenTheOtherPipeWritesBetween() async {
+        let secrets = FakeSecrets(values: ["claude-worker": longToken])
+        let half = longToken.count / 2
+        let fix = StepFix.run(FixPlan(display: "x", needsAdmin: false) { ctx in
+            OutputStreamTag.with(.stdout) { ctx.log("using " + String(self.longToken.prefix(half))) }
+            OutputStreamTag.with(.stderr) { ctx.log("warning: something\n") }
+            OutputStreamTag.with(.stdout) { ctx.log(String(self.longToken.dropFirst(half)) + " done\n") }
+            OutputStreamTag.with(.stderr) { ctx.log("tail without newline") }
+            return FixOutcome(ok: true, message: "ok")
+        })
+        let w = world(secrets: secrets) { _, _ in [step("a", fix: fix)] }
+        _ = await w.engine.runFix(StepID(raw: "a"), on: "m1", approval: admin())
+        let log = w.engine.logs["m1"] ?? []
+        noFragment(of: longToken, in: log.joined(separator: "\n"))
+        XCTAssertTrue(log.contains("using [secret:claude-worker] done"), "\(log)")
+        XCTAssertTrue(log.contains("warning: something"))
+        XCTAssertTrue(log.contains("tail without newline"), "an unfinished line of either pipe is flushed at the end")
+    }
+
+    /// M1: output cut by the remote `head -c 65536` ends in a partial line that can hold the start of a value.
+    func testATailCutProbeDropsItsPartialLastLine() async {
+        let secrets = FakeSecrets(values: ["claude-worker": longToken])
+        let seen = Box<[String]>([])
+        let w = world(secrets: secrets) { _, _ in [
+            step("a", parse: { out, _ in seen.value.append(out.text); return CheckResult(state: .pass("ok")) }),
+        ] }
+        let partial = "tail " + String(longToken.prefix(50))
+        let body = String(repeating: "f", count: 65536 - partial.utf8.count - 1) + "\n"
+        w.answers.value = ["echo probe-a": (body + partial, 0)]
+        XCTAssertEqual((body + partial).utf8.count, 65536)
+        await w.engine.refresh(["m1"])
+        let text = seen.value.last ?? ""
+        noFragment(of: longToken, in: text)
+        XCTAssertTrue(text.hasPrefix("fff"), "the lines before the cut edge stay")
+        XCTAssertFalse(text.contains("tail "))
+    }
+
+    func testAShortProbeOutputKeepsItsLastLine() async {
+        let seen = Box<[String]>([])
+        let w = world { _, _ in [step("a", parse: { out, _ in seen.value.append(out.text); return CheckResult(state: .pass("ok")) })] }
+        w.answers.value = ["echo probe-a": ("first\nlast", 0)]
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(seen.value, ["first\nlast"])
+    }
+
+    /// M1: ProcessRunner's 2 MiB cut keeps the end and puts a notice first; the first line after it starts mid-line.
+    func testAHeadCutOutputDropsTheLineAfterTheNotice() async {
+        let secrets = FakeSecrets(values: ["claude-worker": longToken])
+        let seen = Box<[String]>([])
+        let w = world(secrets: secrets) { _, _ in [
+            step("a", parse: { out, _ in seen.value.append(out.text); return CheckResult(state: .pass("ok")) }),
+        ] }
+        let base = w.runner.handler
+        w.runner.handler = { call in
+            guard let r = FakeSSH.batch(call, reply: { _ in (String(self.longToken.suffix(60)) + " rest of the cut line\nreal line", 0) }) else { return base(call) }
+            return (CommandResult(code: 0, out: "[earlier output cut]\n" + r.out, err: ""), [])
+        }
+        await w.engine.refresh(["m1"])
+        let text = seen.value.last ?? ""
+        noFragment(of: longToken, in: text)
+        XCTAssertEqual(text, "[earlier output cut]\nreal line", "the notice stays (Task 5 reads it as can't tell)")
+    }
+
+    /// I2: each probe runs in a shell of its own, so one probe that does not parse cannot break the others.
+    func testAProbeThatDoesNotParseBreaksNoOtherProbe() async {
+        let seen = Box<[String: String]>([:])
+        func probe(_ id: String, _ script: String) -> SetupStep {
+            SetupStep(id: id == "reachable" ? .reachable : StepID(raw: id), title: id, needs: [], cadence: .everyRefresh,
+                      probe: .remote(script: script, parse: { out, _ in
+                          seen.value[id] = "\(out.code)|\(out.text)"
+                          return out.code == 0 ? CheckResult(state: .pass(out.text)) : CheckResult(state: .fail(out.text))
+                      }), fix: .howTo("x"))
+        }
+        let list = [
+            probe("reachable", "true"),
+            probe("one", "echo one; exit 3"),
+            // bash 3.2 (macOS /bin/sh) cannot parse this unparenthesized case inside `$( ( … ) )`
+            probe("case", "case x in x) echo from-case;; esac"),
+            probe("broken", "if then fi"),
+            probe("two", "echo \"two $((1+1))\""),
+        ]
+        let engine = SetupEngine(runner: LocalShellRunner(), secrets: FakeSecrets(), http: FakeHTTP(), mac: { .empty },
+                                 machines: { [TestMachines.mac("m1")] }, save: { _ in true }, clock: { self.t0 },
+                                 steps: { _, _ in list }, observeVault: false)
+        await engine.refresh(["m1"])
+        XCTAssertEqual(seen.value["one"], "3|one")
+        XCTAssertEqual(seen.value["case"], "0|from-case")
+        XCTAssertEqual(seen.value["two"], "0|two 2")
+        XCTAssertTrue(seen.value["broken"]?.hasPrefix("2|") == true, seen.value["broken"] ?? "nil")
+        XCTAssertEqual(engine.results["m1"]?[.reachable]?.state, .pass(""), "Reachable is not failed by another probe")
+        XCTAssertEqual(engine.results["m1"]?[StepID(raw: "two")]?.state, .pass("two 2"))
+    }
+
+    func testAProbeThatExits255ItselfIsNotAnUnreachableMachine() async {
+        let w = world { _, _ in [step("reachable", title: "Reachable"), step("a")] }
+        w.answers.value = ["echo probe-a": ("it said 255", 255)]
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.engine.results["m1"]?[.reachable]?.state, .pass("ok"))
+        XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "a")]?.state, .fail("it said 255"))
+    }
+
+    func testNoMarkerAtAllFailsReachable() async {
+        let w = world { _, _ in [step("reachable", title: "Reachable"), step("a")] }
+        w.runner.handler = { _ in (CommandResult(code: 0, out: "Welcome banner only\n", err: ""), []) }
+        await w.engine.refresh(["m1"])
+        if case .fail? = w.engine.results["m1"]?[.reachable]?.state {} else {
+            XCTFail("Reachable: \(String(describing: w.engine.results["m1"]?[.reachable]))")
+        }
+        XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "a")]?.state, .cantTell("m1 is not reachable"))
+    }
+
+    /// M2: only the facts steps are built from (os, home, python, sdPath) start a second pass.
+    func testFactsNoStepIsBuiltFromDoNotRepeatTheChecks() async {
+        let w = world { _, _ in [
+            step("reachable", parse: { _, _ in
+                CheckResult(state: .pass("up"), detected: Detected(fileVault: true, tokenExpires: "2027-02-01"))
+            }),
+        ] }
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.runner.batches.count, 1)
+        XCTAssertTrue(w.store.saves.last?[0].fileVault == true)
+    }
+
+    /// M4: a renewed value that arrives while the update runs keeps its own offer.
+    func testAValueRenewedDuringTheUpdateKeepsItsOffer() async {
+        let holder = Box<SetupEngine?>(nil)
+        let usage = SecretUsage(name: "claude-worker", machine: "m1", remotePath: MachinePaths.claudeEnv, format: .keyValue(MachinePaths.claudeKey))
+        let w = world(steps: { _, _ in [step("claude-login")] }, usages: { _ in [usage] }, deliver: { _, _ in
+            await MainActor.run { holder.value?.vaultValueChanged(name: "claude-worker") }
+            return FixOutcome(ok: true, message: "stored the old value")
+        })
+        holder.value = w.engine
+        w.engine.vaultValueChanged(name: "claude-worker")
+        _ = await w.engine.updateMachines(for: "claude-worker", approval: admin())
+        XCTAssertEqual(w.engine.updateOffers["claude-worker"], [usage], "the newer value still has to be sent")
+    }
+
+    /// M5: setUpAll looks at each step as it is when its turn comes, not as it was when the run started.
+    func testSetUpAllUsesTheStepAsItIsAtItsTurn() async {
+        let fixes = Counter()
+        let flipped = Box(false)
+        let fixA = StepFix.run(FixPlan(display: "a", needsAdmin: false) { _ in
+            flipped.value = true
+            fixes.add("a")
+            return FixOutcome(ok: true, message: "did a")
+        })
+        let w = world { _, _ in [
+            step("a", fix: fixA),
+            step("b", fix: flipped.value ? runFix(fixes, "b") : .howTo("by hand")),
+        ] }
+        w.answers.value = ["echo probe-a": ("bad", 1), "echo probe-b": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        let out = await w.engine.setUpAll(on: "m1") { _ in .cancelled }
+        XCTAssertTrue(out.ok, out.message)
+        XCTAssertEqual(fixes.all, ["a", "b"])
     }
 
     func testTheLogKeepsOrderAndDropsLinesAfterTheFixEnded() async {

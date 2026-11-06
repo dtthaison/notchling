@@ -8,98 +8,6 @@ struct FixApproval {
 
 enum AdminAnswer { case password(String), rootConfirmed, cancelled }
 
-/// What a machine's output and results must not show: the vault values its steps use, and the admin password
-/// of the Fix in flight. Built per call and never stored on the engine.
-private struct Masks {
-    /// Secret value → what shows instead (`[secret:<name>]`).
-    var vault: [String: String] = [:]
-    var adminPassword: String?
-
-    static let adminMask = "[admin password]"
-
-    func apply(_ text: String) -> String {
-        guard !text.isEmpty else { return text }
-        var text = text
-        if !vault.isEmpty {
-            let redactor = Redactor(vault)
-            var data = redactor.feed(Data(text.utf8))
-            data.append(redactor.finish())
-            text = String(decoding: data, as: UTF8.self)
-        }
-        // `Redactor` leaves out strings under 4 bytes; the admin password is masked whatever its length
-        if let pw = adminPassword, !pw.isEmpty { text = text.replacingOccurrences(of: pw, with: Self.adminMask) }
-        return text
-    }
-
-    /// The longest string that is masked: a line may be cut that far from its end without splitting a secret.
-    var longest: Int { max(vault.keys.map { $0.utf8.count }.max() ?? 0, adminPassword?.utf8.count ?? 0) }
-
-    func apply(_ result: CheckResult) -> CheckResult {
-        var r = result
-        switch r.state {
-        case .pass(let s): r.state = .pass(apply(s))
-        case .fail(let s): r.state = .fail(apply(s))
-        case .cantTell(let s): r.state = .cantTell(apply(s))
-        }
-        r.rows = r.rows.map { SubRow(name: apply($0.name), ok: $0.ok, detail: apply($0.detail)) }
-        return r
-    }
-}
-
-/// Collects the output of one Fix. `add` fires from the stdout and stderr readers at once, and for a moment
-/// after the run returned (an orphan holding the pipe). Every call takes the lock, appends to the line being
-/// built, masks and yields each complete line into one serial stream the MainActor drains, so the order is
-/// kept. A value cut between two chunks is whole again in the line. Once `end()` ran, nothing more gets in.
-private final class FixLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private let masks: Masks
-    private let continuation: AsyncStream<String>.Continuation
-    private var partial = ""
-    private var ended = false
-    /// A line this long without a newline is let out in pieces (a progress bar, a binary dump).
-    private static let longLine = 4096
-
-    init(masks: Masks, continuation: AsyncStream<String>.Continuation) {
-        self.masks = masks
-        self.continuation = continuation
-    }
-
-    func add(_ chunk: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !ended, !chunk.isEmpty else { return }
-        partial += chunk
-        var lines = partial.components(separatedBy: "\n")
-        partial = lines.removeLast()
-        for line in lines { emit(line) }
-        if partial.count > Self.longLine {
-            // mask first, cut afterwards: a cut through a secret would leave a fragment that no longer matches.
-            // The end stays back, so a secret that is still arriving is whole in the next piece.
-            let masked = masks.apply(partial)
-            let keep = min(max(masks.longest, 1), masked.count)
-            let cut = masked.index(masked.endIndex, offsetBy: -keep)
-            emit(String(masked[..<cut]))
-            partial = String(masked[cut...])
-        }
-    }
-
-    func end() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !ended else { return }
-        ended = true
-        if !partial.isEmpty { emit(partial) }
-        partial = ""
-        continuation.finish()
-    }
-
-    private func emit(_ line: String) {
-        var line = line
-        if line.hasSuffix("\r") { line.removeLast() }
-        continuation.yield(masks.apply(line))
-    }
-}
-
 /// Runs the checks and the Fixes.
 ///
 /// - A **check** is read-only. `refresh` batches the `.remote` probes of a machine into one ssh per phase (the
@@ -145,12 +53,16 @@ final class SetupEngine: ObservableObject {
     private var savedState: [String: Machine] = [:]
     /// The token expiry last given to the vault, by machine.
     private var expirySent: [String: String] = [:]
+    /// How often the offer of a secret was made; an update that finds it changed leaves the newer offer alone.
+    private var offerRevision: [String: Int] = [:]
 
     private static let logLimit = 2000
     private static let cheapTimeout: TimeInterval = 60
     private static let slowTimeout: TimeInterval = 180
     private static let slowEvery: TimeInterval = 10 * 60
     private static let localParallel = 4
+    /// The most a probe's output may be (the `head -c` in the batch wrapper).
+    private static let probeCap = 65536
     private static let connectErrors = ["Could not resolve hostname", "timed out", "No route to host", "Network is unreachable"]
 
     /// - Parameter toggleScript: `(linux, on)` → the shell script of the Running switch. The default holds the
@@ -248,11 +160,11 @@ final class SetupEngine: ObservableObject {
     func steps(for machine: Machine) -> [SetupStep] { stepList(withFacts(machine), currentMachines()) }
 
     /// The vault values of the machine's usages, each hiding as `[secret:<name>]`.
-    private func masks(for machine: Machine, adminPassword: String? = nil) -> Masks {
+    private func masks(for machine: Machine, adminPassword: String? = nil) -> SetupMasks {
         var names = Set(usageList(currentMachines()).filter { $0.machine == machine.name }.map(\.name))
         names.insert(machine.claudeSecret)
         if let issues = machine.sdWorker?.issuesSecret, !issues.isEmpty { names.insert(issues) }
-        var masks = Masks(adminPassword: adminPassword)
+        var masks = SetupMasks(adminPassword: adminPassword)
         for name in names.sorted() {
             if let value = secrets.value(named: name), !value.isEmpty { masks.vault[value] = "[secret:\(name)]" }
         }
@@ -345,7 +257,10 @@ final class SetupEngine: ObservableObject {
         guard changed else { return }
         if save(list) {
             saveRefused = false
-            for m in list where names.contains(m.name) { savedState[m.name] = m }
+            for m in list where names.contains(m.name) {
+                savedState[m.name] = m
+                facts[m.name] = nil          // the registry holds them now; a later edit there is not hidden by the overlay
+            }
         } else {
             saveRefused = true
         }
@@ -356,7 +271,10 @@ final class SetupEngine: ObservableObject {
     /// the machine, the steps are built again from it and checked once more; later refreshes find nothing new.
     private func evaluate(_ m: Machine, slow: Bool, usePrior: Bool = true) async -> Evaluation {
         let first = await evaluateOnce(m, slow: slow, usePrior: usePrior)
-        let learned = Self.applying(first.detected, to: m)
+        // only what the steps are built from starts another pass (not the token expiry or FileVault)
+        let buildFacts = Detected(os: first.detected.os, home: first.detected.home, python: first.detected.python,
+                                  sdPath: first.detected.sdPath)
+        let learned = Self.applying(buildFacts, to: m)
         guard !first.unreachable, learned != m else { return first }
         var second = await evaluateOnce(learned, slow: slow, usePrior: usePrior)
         second.slowRan = second.slowRan || first.slowRan
@@ -479,7 +397,8 @@ final class SetupEngine: ObservableObject {
             guard case .remote(let script, let parse) = s.probe else { continue }
             let index = probes.count
             probes.append((s, parse))
-            wrapped.append("out=$( ( \(script)\n) </dev/null 2>&1 ); c=$?; printf '%s' \"$out\" | head -c 65536; printf '\\n@@\(nonce) \(index) %s@@\\n' \"$c\"")
+            // a shell of its own per probe: one that does not parse cannot break the others
+            wrapped.append("out=$( /bin/sh -c \(LaneStore.quote(script)) </dev/null 2>&1 ); c=$?; printf '%s' \"$out\" | head -c 65536; printf '\\n@@\(nonce) \(index) %s@@\\n' \"$c\"")
         }
         let r = await runner.run(SSH.script(m, wrapped.joined(separator: "\n")), cwd: nil, timeout: timeout)
 
@@ -499,16 +418,29 @@ final class SetupEngine: ObservableObject {
             current.append(line)
         }
 
-        if r.code == 255 || (answers.isEmpty && r.code != 0) {
+        // not reachable: ssh said 255, timed out, or nothing of ours came back. A probe's own exit code (even 255)
+        // travels in its marker and says nothing about the machine.
+        if r.code == 255 || r.code == 124 || answers.isEmpty {
             let first = r.err.split(whereSeparator: \.isNewline).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
             let line: String
             switch r.code {
             case 124: line = first.isEmpty ? "timed out" : first
             case 127: line = first.isEmpty ? "ssh not found" : first
+            case 0: line = first.isEmpty ? "no answer from the machine" : first
             default: line = first.isEmpty ? "ssh exited \(r.code)" : first
             }
             let connect = r.code == 124 || Self.connectErrors.contains { r.err.contains($0) }
             return .unreachable(line, connect: connect)
+        }
+
+        // output the machine (`head -c`) or ProcessRunner (2 MiB) cut ends or starts in a half line that can hold a
+        // piece of a value: mask it, then drop that line
+        var masks: SetupMasks?
+        for (i, out) in answers where out.text.hasPrefix(ProcessRunner.cutNotice) || out.text.utf8.count >= Self.probeCap {
+            let m = masks ?? self.masks(for: m)
+            masks = m
+            answers[i] = RemoteOutput(text: m.applyToCut(out.text, headCut: out.text.hasPrefix(ProcessRunner.cutNotice),
+                                                         tailCut: out.text.utf8.count >= Self.probeCap), code: out.code)
         }
 
         var parsed: [StepID: CheckResult] = [:]
@@ -598,7 +530,7 @@ final class SetupEngine: ObservableObject {
 
         var continuation: AsyncStream<String>.Continuation!
         let stream = AsyncStream<String> { continuation = $0 }
-        let log = FixLog(masks: masks, continuation: continuation)
+        let log = SetupFixLog(masks: masks, continuation: continuation)
         let name = m.name
         let drain = Task { @MainActor [weak self] in
             for await line in stream { self?.appendLog(name, [line]) }
@@ -622,8 +554,10 @@ final class SetupEngine: ObservableObject {
         guard let first = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
         if running[machine] != nil { return FixOutcome(ok: false, message: "another Fix is running on \(machine)") }
         var fixed = 0
-        for step in stepList(first, currentMachines()) {
-            guard case .run(let plan) = step.fix, case .fail? = results[machine]?[step.id]?.state else { continue }
+        for id in stepList(first, currentMachines()).map(\.id) {
+            // the step as it is now: an earlier Fix may have changed what this one does
+            guard let m = self.machine(named: machine), let step = stepList(m, currentMachines()).first(where: { $0.id == id }),
+                  case .run(let plan) = step.fix, case .fail? = results[machine]?[step.id]?.state else { continue }
             var approval = FixApproval(adminPassword: nil, asRootConfirmed: false)
             if plan.needsAdmin {
                 switch await askAdmin(step) {
@@ -664,6 +598,7 @@ final class SetupEngine: ObservableObject {
 
     /// Makes the update offer from the name; sends nothing.
     func vaultValueChanged(name: String) {
+        offerRevision[name, default: 0] += 1
         let found = usageList(currentMachines()).filter { $0.name == name }
         updateOffers[name] = found.isEmpty ? nil : found
     }
@@ -673,6 +608,7 @@ final class SetupEngine: ObservableObject {
     func updateMachines(for secret: String, approval: FixApproval) async -> [FixOutcome] {
         var outcomes: [FixOutcome] = []
         var failed: [SecretUsage] = []
+        let revision = offerRevision[secret]
         for usage in updateOffers[secret] ?? [] {
             guard let m = self.machine(named: usage.machine) else {
                 outcomes.append(FixOutcome(ok: false, message: "no machine named \(usage.machine)"))
@@ -696,7 +632,8 @@ final class SetupEngine: ObservableObject {
             outcomes.append(outcome)
             if !outcome.ok { failed.append(usage) }
         }
-        updateOffers[secret] = failed.isEmpty ? nil : failed
+        // a value renewed while this ran has its own, newer offer
+        if offerRevision[secret] == revision { updateOffers[secret] = failed.isEmpty ? nil : failed }
         return outcomes
     }
 }

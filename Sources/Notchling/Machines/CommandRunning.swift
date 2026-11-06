@@ -38,6 +38,33 @@ extension CommandRunning {
     }
 }
 
+/// Which pipe a chunk of `onOutput` text came from.
+enum OutputChannel: Sendable { case stdout, stderr }
+
+/// `onOutput` is one closure for both pipes, and its callers (`FixContext.log`) keep its signature. While the
+/// runner calls it for a chunk, this says which pipe the chunk came from, so a consumer that assembles lines
+/// keeps one partial line per pipe: a value cut between two chunks of stdout must not meet stderr text.
+/// A runner that does not tell (a test double) reads as `.stdout`.
+enum OutputStreamTag {
+    private static let key = "notchling.output-channel"
+
+    /// The pipe of the chunk being delivered on this thread.
+    static var current: OutputChannel {
+        (Thread.current.threadDictionary.object(forKey: key) as? String) == "stderr" ? .stderr : .stdout
+    }
+
+    /// Runs `body` with `current` set to `channel`; a runner wraps each `onOutput` call in it.
+    static func with<T>(_ channel: OutputChannel, _ body: () -> T) -> T {
+        let dictionary = Thread.current.threadDictionary
+        let previous = dictionary.object(forKey: key)
+        dictionary.setObject(channel == .stderr ? "stderr" : "stdout", forKey: key as NSString)
+        defer {
+            if let previous { dictionary.setObject(previous, forKey: key as NSString) } else { dictionary.removeObject(forKey: key) }
+        }
+        return body()
+    }
+}
+
 extension ProcessRunner {
     /// The most output kept from one pipe; what came before is cut.
     static let outputCap = 2 * 1024 * 1024
@@ -54,7 +81,7 @@ struct ProcessRunner: CommandRunning {
     /// How long the output may keep arriving after the command ended. An orphan that kept the pipes open must not
     /// hold the result back.
     private static let drainGrace: TimeInterval = 3
-    private static let cutNotice = "[earlier output cut]\n"
+    static let cutNotice = "[earlier output cut]\n"
 
     func run(_ argv: [String], cwd: String? = nil, timeout: TimeInterval) async -> CommandResult {
         await run(argv, cwd: cwd, env: [:], stdin: nil, timeout: timeout, onOutput: nil)
@@ -109,9 +136,9 @@ struct ProcessRunner: CommandRunning {
         private var open = true
         private let sink: (@Sendable (String) -> Void)?
         init(_ sink: (@Sendable (String) -> Void)?) { self.sink = sink }
-        func send(_ text: String) {
+        func send(_ text: String, from channel: OutputChannel) {
             guard let sink, !text.isEmpty, lock.withLock({ open }) else { return }
-            sink(text)
+            OutputStreamTag.with(channel) { sink(text) }
         }
         func close() { lock.withLock { open = false } }
     }
@@ -263,7 +290,7 @@ struct ProcessRunner: CommandRunning {
         let out = Sink(), err = Sink()
         let stream = Relay(onOutput)
         let readers = DispatchGroup()
-        for (fd, sink) in [(outFDs[0], out), (errFDs[0], err)] {
+        for (fd, sink, channel) in [(outFDs[0], out, OutputChannel.stdout), (errFDs[0], err, OutputChannel.stderr)] {
             queue.async(group: readers) {
                 var buffer = [UInt8](repeating: 0, count: 65536)
                 var held = Data()                                    // the start of a character cut by the read
@@ -274,13 +301,13 @@ struct ProcessRunner: CommandRunning {
                         sink.append(chunk)
                         held.append(chunk)
                         let keep = incompleteTail(held)
-                        stream.send(String(decoding: held.dropLast(keep), as: UTF8.self))
+                        stream.send(String(decoding: held.dropLast(keep), as: UTF8.self), from: channel)
                         held = Data(held.suffix(keep))
                     }
                     else if n < 0 && errno == EINTR { continue }
                     else { break }
                 }
-                stream.send(String(decoding: held, as: UTF8.self))
+                stream.send(String(decoding: held, as: UTF8.self), from: channel)
                 close(fd)
             }
         }
