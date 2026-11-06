@@ -83,9 +83,16 @@ enum RepoSteps {
         return String(line)
     }
 
-    /// `ssh-ed25519 <body>`: the first two fields of a key line.
-    private static func keyBody(_ line: String) -> String {
-        line.split(separator: " ", omittingEmptySubsequences: true).prefix(2).joined(separator: " ")
+    /// `ssh-ed25519 <base64>` of a key line: the type and the body, the comment dropped. Nil unless `text` is a single
+    /// line that holds an ed25519 key, so a multi-line input can never be taken for a match.
+    static func normalisedKey(_ text: String) -> String? {
+        var line = Substring(text)
+        while let last = line.last, last.isWhitespace { line = line.dropLast() }
+        guard !line.contains("\n"), !line.contains("\r") else { return nil }
+        let words = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard words.count >= 2, words[0] == "ssh-ed25519" else { return nil }
+        let normal = "ssh-ed25519 \(words[1])"
+        return normal.range(of: bodyPattern, options: .regularExpression) != nil ? normal : nil
     }
 
     /// The first non-empty line of what a machine or a tool said, for a message: masked first (`mask` is the
@@ -107,10 +114,10 @@ enum RepoSteps {
         return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
     }
 
-    /// The entry for `pub` (its first two fields), if GitHub lists it.
+    /// The entry for `pub` (type and body, the comment ignored), if GitHub lists it.
     private static func listed(_ pub: String, in keys: [[String: Any]]) -> [String: Any]? {
-        let mine = keyBody(pub)
-        return keys.first { ($0["key"] as? String).map(keyBody) == mine }
+        guard let mine = normalisedKey(pub) else { return nil }
+        return keys.first { ($0["key"] as? String).flatMap(normalisedKey) == mine }
     }
 
     /// A line `Host <alias>` in the ssh config, indented or followed by spaces or more host names.
@@ -320,6 +327,15 @@ enum RepoSteps {
         return id > 0 ? id : nil
     }
 
+    /// The titles this machine gives its keys: `agents-<machine>` (Set up) or `agents-<machine>-<8 digits>` (Replace key).
+    private static func isOwnKeyTitle(_ title: String, machine: String) -> Bool {
+        let base = "agents-\(machine)"
+        if title == base { return true }
+        guard title.hasPrefix(base + "-") else { return false }
+        let tail = title.dropFirst(base.count + 1)
+        return tail.count == 8 && tail.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
     private static func addArgv(_ file: String, github: String, title: String) -> [String] {
         [gh, "repo", "deploy-key", "add", file, "-R", github, "--title", title]
     }
@@ -346,44 +362,57 @@ enum RepoSteps {
                 + "cat \(newPub)"
         }
         // -F /dev/null: the check uses the new key alone, not whatever the ssh config would offer
-        let sshCheck = "ssh -F /dev/null -i \(newKey) -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1 || true"
+        let sshCheck = "ssh -F /dev/null -i \(newKey) -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1 || true"
         // a throwaway repo, so no checkout is needed; hooks off and stdin closed, as the Push-is-refused check
         let pushCheck = "k=\(newKey); t=$(mktemp -d) || { echo '@@push 99'; exit 0; }\n"
             + "trap 'rm -rf \"$t\"' EXIT\n"
             + "git -c core.hooksPath=/dev/null init -q \"$t\" </dev/null >/dev/null 2>&1 && "
             + "git -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=notchling -c user.email=notchling@localhost "
             + "-C \"$t\" commit -q --allow-empty -m probe </dev/null >/dev/null 2>&1 || { echo '@@push 98'; exit 0; }\n"
-            + "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=\"ssh -F /dev/null -i $k -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8\" "
+            + "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=\"ssh -F /dev/null -i '$k' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=8\" "
             + "git -c core.hooksPath=/dev/null -C \"$t\" push --dry-run git@github.com:\(github).git HEAD:refs/heads/agents-push-test </dev/null 2>&1\n"
             + "echo \"@@push $?\""
-        // 3: a file is missing, 1: the private key could not move (nothing moved), 2: only the .pub could not move
+        // exit 3: a file is missing and 1: the private key could not move, so nothing moved; 2: only the .pub could not
+        // move (it is then rewritten from the private key, through a temporary file). Any other code (ssh's 255, a
+        // timeout) proves nothing about what was moved.
+        let tmpPub = RemoteShell.path(path + ".pub.tmp")
         let swap = "[ -f \(newKey) ] && [ -f \(newPub) ] || exit 3\n"
             + "mv -f \(newKey) \(key) || exit 1\n"
-            + "mv -f \(newPub) \(keyPub) || exit 2"
+            + "mv -f \(newPub) \(keyPub) || { ssh-keygen -y -f \(key) > \(tmpPub) 2>/dev/null && mv -f \(tmpPub) \(keyPub); rm -f \(tmpPub); exit 2; }"
         let cleanup = "rm -f \(newKey) \(newPub)"
 
         let display = "On \(name):\n\(readOld)\n(the old public key is read first)\n\n"
-            + "On \(name) (<yyyymmdd> is today's date):\n\(keygen("agents-\(name)-<yyyymmdd>"))\n(the new key is made next to the old one; the old key stays valid)\n\n"
+            + "On \(name) (<yyyymmdd> is today's date in UTC):\n\(keygen("agents-\(name)-<yyyymmdd>"))\n(the new key is made next to the old one; the old key stays valid)\n\n"
+            + "On this Mac:\n\(listArgv(github).joined(separator: " "))\n(the keys now on GitHub; a new key that is already there stops the run before anything is added)\n\n"
             + "On this Mac:\n\(addArgv("<the new public key file>", github: github, title: "agents-\(name)-<yyyymmdd>").joined(separator: " "))\n(read-only: the key is added without write access)\n\n"
             + "On \(name):\n\(sshCheck)\n(the new key must authenticate)\n\n"
             + "On \(name):\n\(pushCheck)\n(GitHub must refuse the push)\n\n"
             + "On this Mac:\n\(listArgv(github).joined(separator: " "))\n(GitHub must list the new key as read-only)\n\n"
             + "Only when every check above passed:\nOn \(name):\n\(swap)\n\n"
-            + "On this Mac:\n\(deleteArgv("<id of the old key>", github: github).joined(separator: " "))\n(the old key is found by its public key text)\n\n"
-            + "If a check fails, the new key is deleted from GitHub and these files from \(name); the old key stays:\n\(cleanup)"
+            + "On this Mac:\n\(deleteArgv("<id of the old key>", github: github).joined(separator: " "))\n(the old key is found by its public key text, and only deleted when its title is this machine's own: agents-\(name) or agents-\(name)-<8 digits>)\n\n"
+            + "If a check fails before the swap, these files are removed from \(name):\n\(cleanup)\n\n"
+            + "and the new key is deleted from GitHub, only a key that was not listed before the add and has the new key's title:\n"
+            + "\(listArgv(github).joined(separator: " "))\n\(deleteArgv("<id of the new key>", github: github).joined(separator: " "))"
 
         return FixPlan(display: display, needsAdmin: false) { ctx in
             guard isValidMachineName(name) else { return FixOutcome(ok: false, message: "the machine name \(name) is not a plain name") }
             let title = "agents-\(name)-\(dateStamp(ctx.step.now))"
             func said(_ r: CommandResult) -> String { firstLine(r.err.isEmpty ? r.out : r.err, ctx.mask) }
 
+            /// The ids on GitHub before the add: nothing in this list is ever deleted by this run.
+            var before = Set<Int>()
+
             /// Deletes the new key from GitHub: nil when it is gone (or was never there), else what to tell the user.
+            /// Only an entry with the new key's text that this run added is deleted: its id was not in the listing
+            /// before the add and its title is this run's own.
             func removeNewKeyFromGitHub(_ pub: String) async -> String? {
                 let still = "the new key (\(title)) is still on GitHub; remove it in Settings → Deploy keys"
                 let current = await MachineRun.local(listArgv(github), ctx: ctx)
                 guard current.code == 0, let keys = parseKeys(current.out) else { return still }
                 guard let entry = listed(pub, in: keys) else { return nil }
-                guard let id = keyID(entry) else { return still }
+                guard let id = keyID(entry), !before.contains(id), (entry["title"] as? String) == title else {
+                    return "a key with the new key's text is on GitHub, but this run did not add it under \(title), so nothing was deleted; look in Settings → Deploy keys"
+                }
                 let gone = await MachineRun.local(deleteArgv(String(id), github: github), ctx: ctx)
                 return gone.code == 0 ? nil : still
             }
@@ -407,7 +436,16 @@ enum RepoSteps {
             let made = await MachineRun.script(keygen("\(title)"), ctx: ctx)
             guard made.code == 0 else { return await undo("could not make the new key on \(name): \(said(made))") }
             guard let pub = singleEd25519Line(made.out) else { return await undo("unexpected public key from \(name); nothing was added") }
-            guard keyBody(pub) != keyBody(oldPub) else { return await undo("the new key is the old key; nothing was added") }
+            guard normalisedKey(pub) != normalisedKey(oldPub) else { return await undo("the new key is the old key; nothing was added") }
+
+            // 2b. what GitHub lists now. The new key must not be on the repo already (a machine could hand back
+            // another key's text); and nothing in this list is ever deleted by this run.
+            let prior = await MachineRun.local(listArgv(github), ctx: ctx)
+            guard prior.code == 0, let priorKeys = parseKeys(prior.out) else {
+                return await undo("gh could not list the deploy keys of \(github): \(said(prior)); nothing was added")
+            }
+            guard listed(pub, in: priorKeys) == nil else { return await undo("the new key is already on GitHub; nothing changed") }
+            before = Set(priorKeys.compactMap(keyID))
 
             // 3. read-only, through the user's gh. A failed add is looked for on GitHub too: gh may have been cut short.
             let dir = (NSTemporaryDirectory() as NSString).appendingPathComponent("notchling-keys")
@@ -460,12 +498,14 @@ enum RepoSteps {
             // the old key's id comes from GitHub's JSON and goes into an argv: it has to be an integer, and it
             // is found before the move so that a bad one stops everything while the old key is still in place
             var oldID: Int?
+            var oldIsForeign = false
             if let old = listed(oldPub, in: keys) {
                 guard let id = keyID(old) else {
                     return await undo("the old key's id on GitHub is not a number; no key was deleted and nothing was replaced",
                                       newKey: pub, onGitHub: true)
                 }
-                oldID = id
+                // the text matches; it is deleted only when the title is this machine's own as well
+                if isOwnKeyTitle((old["title"] as? String) ?? "", machine: name) { oldID = id } else { oldIsForeign = true }
             }
 
             // 5. every check passed: the new pair takes the old one's file names, so ~/.ssh/config stays as it is
@@ -473,9 +513,16 @@ enum RepoSteps {
             switch moved.code {
             case 0: break
             case 2:
-                return FixOutcome(ok: false, message: "new key in use, but its public key file could not replace the old one on \(name); the old key is still on GitHub, remove it in Settings → Deploy keys")
-            default:
+                return FixOutcome(ok: false, message: "new key in use, but the public key file on \(name) may be stale; Check again. The old key is still on GitHub: remove it in Settings → Deploy keys once the check passes")
+            case 1, 3:
+                // the script's own failures: nothing was moved
                 return await undo("could not move the new key over the old one on \(name): \(said(moved))", newKey: pub, onGitHub: true)
+            default:
+                // 255 (the connection dropped), a timeout, a kill: the move may have happened. Nothing is deleted anywhere.
+                return FixOutcome(ok: false, message: "can't tell whether the key was replaced on \(name) (code \(moved.code)); the swap may have happened; Check again before anything else. Both keys are still on GitHub and nothing was removed")
+            }
+            if oldIsForeign {
+                return FixOutcome(ok: false, message: "new key in use on \(name); the old key's title doesn't match \(name); remove it in Settings → Deploy keys if it's yours")
             }
             guard let oldID else {
                 return FixOutcome(ok: true, message: "replaced the deploy key of \(github) on \(name); the old key was not listed on GitHub, so nothing was deleted")

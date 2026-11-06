@@ -59,7 +59,7 @@ final class MachinesSafetyTests: XCTestCase {
             // Replace key is no Fix of Set up or Set up all, but its commands are held to the same scans
             if let replace = step.replace, !adminOnly {
                 texts.append((label + " replace display", replace.display))
-                let runner = replaceKeyRunner()
+                let runner = replaceKeyRunner(machine.name)
                 _ = await replace.run(fixContext(machine, runner: runner))
                 for call in runner.calls { texts.append((label + " replace run", call.argv.joined(separator: " "))) }
             }
@@ -71,11 +71,14 @@ final class MachinesSafetyTests: XCTestCase {
     private let newKeyBody = "AAAAC3NzaC1lZDI1NTE5AAAAINewKeyForReplaceTestsOnly0123456789abcdefgh"
 
     /// A machine and GitHub that let Replace key run to the end: the old key is id 11, the new one id 22.
-    private func replaceKeyRunner() -> ScriptedRunner {
+    private func replaceKeyRunner(_ machineName: String) -> ScriptedRunner {
         let runner = ScriptedRunner()
-        let keys = "[{\"id\":11,\"key\":\"ssh-ed25519 \(oldKeyBody)\",\"title\":\"agents-old\",\"read_only\":true},"
-            + "{\"id\":22,\"key\":\"ssh-ed25519 \(newKeyBody)\",\"title\":\"agents-new\",\"read_only\":true}]"
-        runner.on({ $0.contains("--paginate") }, result: CommandResult(code: 0, out: keys, err: ""))
+        // the first listing is the one before the add; it does not hold the new key
+        let old = "{\"id\":11,\"key\":\"ssh-ed25519 \(oldKeyBody)\",\"title\":\"agents-\(machineName)\",\"read_only\":true}"
+        let new = "{\"id\":22,\"key\":\"ssh-ed25519 \(newKeyBody)\",\"title\":\"agents-\(machineName)-20270115\",\"read_only\":true}"
+        let listings = Listings()
+        runner.on({ $0.contains("--paginate") && listings.next() == 1 }, result: CommandResult(code: 0, out: "[\(old)]", err: ""))
+        runner.on({ $0.contains("--paginate") }, result: CommandResult(code: 0, out: "[\(old),\(new)]", err: ""))
         runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: "ssh-ed25519 \(newKeyBody) agents-new\n", err: ""))
         runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: "ssh-ed25519 \(oldKeyBody) agents-old\n", err: ""))
         runner.on({ $0.last?.contains("-T git@github.com") == true },
@@ -207,6 +210,12 @@ final class MachinesSafetyTests: XCTestCase {
     /// GitHub says 404 and nothing is kept (`FakeHTTP` records each bearer, which a walk over the engine would find).
     private struct NoHTTP: HTTPFetching {
         func get(_ url: URL, bearer: String) async -> HTTPAnswer { HTTPAnswer(status: 404, headers: [:], body: Data()) }
+    }
+
+    private final class Listings: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func next() -> Int { lock.withLock { count += 1; return count } }
     }
 
     private final class CallLog: @unchecked Sendable {
@@ -381,7 +390,7 @@ final class MachinesSafetyTests: XCTestCase {
                                         "\(label): \(found)")
                         deployDeletes += 1
                     } else {
-                        XCTAssertTrue(found.contains("<id of the old key>"), "\(label): \(found)")
+                        XCTAssertTrue(found.contains("<id of the old key>") || found.contains("<id of the new key>"), "\(label): \(found)")
                     }
                 }
                 // neither the write flag nor its short form, anywhere
@@ -428,6 +437,11 @@ final class MachinesSafetyTests: XCTestCase {
             _ = await engine.setUpAll(on: machine.name, approved: plan, askAdmin: { _ in .cancelled })
             _ = await engine.runFix(.deployKey(TestMachines.repo), on: machine.name, approval: FixApproval(adminPassword: nil, asRootConfirmed: false))
             XCTAssertFalse(log.calls.isEmpty, "the checks did run")
+            // the Deploy key step was really reached by every path above: the engine holds a result for it (it waits for
+            // Base tools here, so its probe and Fix could not run), Set up all listed it, and Replace key is not offered
+            XCTAssertNotNil(engine.results[machine.name]?[.deployKey(TestMachines.repo)], "\(machine.name): the Deploy key step was never evaluated")
+            XCTAssertTrue(plan.contains { $0.id == .deployKey(TestMachines.repo) }, "\(machine.name): Set up all did not list the Deploy key step")
+            XCTAssertFalse(RepoSteps.offersReplace(engine.results[machine.name]?[.deployKey(TestMachines.repo)]))
             for call in log.calls {
                 let text = call.argv.joined(separator: " ")
                 XCTAssertFalse(text.contains("deploy-key delete"), "\(machine.name): a deploy key was deleted without a click: \(text)")

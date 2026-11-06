@@ -581,20 +581,28 @@ final class MachinesRepoStepsTests: XCTestCase {
     /// A machine and GitHub for Replace key: the old key is id 11 on GitHub, the new one becomes id 22.
     private func replaceRunner(sshOK: Bool = true, pushAccepted: Bool = false, newReadOnly: Bool? = true,
                                oldID: String? = "11", deleteOldCode: Int32 = 0, deleteNewCode: Int32 = 0,
-                               addCode: Int32 = 0, keygenOut: String? = nil) -> ScriptedRunner {
+                               addCode: Int32 = 0, keygenOut: String? = nil, oldTitle: String = "agents-m1",
+                               oldPubText: String? = nil, extraListed: [String] = [], newListedBeforeAdd: Bool = false,
+                               newTitleOnGitHub: String? = nil, swapCode: Int32 = 0) -> ScriptedRunner {
         let runner = ScriptedRunner()
-        var listed: [String] = []
-        if let oldID { listed.append(keyJSON(id: oldID, body: body, title: "agents-m1", readOnly: true)) }
-        if let newReadOnly { listed.append(keyJSON(id: "22", body: newBody, title: newTitle, readOnly: newReadOnly)) }
-        let list = "[" + listed.joined(separator: ",") + "]"
-        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: list, err: ""))
+        var before: [String] = extraListed
+        if let oldID { before.append(keyJSON(id: oldID, body: body, title: oldTitle, readOnly: true)) }
+        var after = before
+        if let newReadOnly { after.append(keyJSON(id: "22", body: newBody, title: newTitleOnGitHub ?? newTitle, readOnly: newReadOnly)) }
+        if newListedBeforeAdd { before = after }
+        // the first listing is the one before the add; every later one is after it
+        let listCalls = ListCalls()
+        let isList: ([String]) -> Bool = { $0.contains("repos/\(self.repo)/keys") }
+        runner.on({ argv in isList(argv) && listCalls.next() == 1 }, result: CommandResult(code: 0, out: "[" + before.joined(separator: ",") + "]", err: ""))
+        runner.on(isList, result: CommandResult(code: 0, out: "[" + after.joined(separator: ",") + "]", err: ""))
+        runner.on({ $0.last?.contains("mv -f") == true }, result: CommandResult(code: swapCode, out: "", err: ""))
         runner.on({ $0.first == self.gh && $0.contains("delete") && $0.contains("11") },
                   result: CommandResult(code: deleteOldCode, out: "", err: deleteOldCode == 0 ? "" : "delete boom"))
         runner.on({ $0.first == self.gh && $0.contains("delete") && $0.contains("22") },
                   result: CommandResult(code: deleteNewCode, out: "", err: deleteNewCode == 0 ? "" : "delete new boom"))
         runner.on({ $0.first == self.gh && $0.contains("add") }, result: CommandResult(code: addCode, out: "", err: addCode == 0 ? "" : "add boom"))
         runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: keygenOut ?? newPub + "\n", err: ""))
-        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
+        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: (oldPubText ?? pub) + "\n", err: ""))
         runner.on({ $0.last?.contains("-T git@github.com") == true },
                   result: CommandResult(code: 0, out: sshOK ? welcome + "\n" : "git@github.com: Permission denied (publickey).\n", err: ""))
         runner.on({ $0.last?.contains("push --dry-run") == true },
@@ -613,11 +621,11 @@ final class MachinesRepoStepsTests: XCTestCase {
                 return "gh list"
             }
             let script = unquoted(argv.last ?? "")
+            if script.contains("mv -f") { return "swap" }
             if script.contains("ssh-keygen") { return "keygen" }
             if script.contains("head -c 1024") { return "read old" }
             if script.contains("-T git@github.com") { return "ssh -T" }
             if script.contains("push --dry-run") { return "push" }
-            if script.contains("mv -f") { return "swap" }
             if script.contains("rm -f") { return "rm" }
             return "other"
         }
@@ -631,27 +639,30 @@ final class MachinesRepoStepsTests: XCTestCase {
         let runner = replaceRunner()
         let outcome = await run(replacePlan(), runner)
         XCTAssertEqual(outcome.ok, true, outcome.message)
-        XCTAssertEqual(kinds(runner), ["read old", "keygen", "gh add", "ssh -T", "push", "gh list", "swap", "gh delete 11"])
+        XCTAssertEqual(kinds(runner), ["read old", "keygen", "gh list", "gh add", "ssh -T", "push", "gh list", "swap", "gh delete 11"])
         let calls = runner.calls.map(\.argv)
         let keygen = unquoted(calls[1].last!)
         XCTAssertTrue(keygen.contains("ssh-keygen -q -t ed25519 -N '' -C 'agents-m1-20270115' -f"), keygen)
         XCTAssertTrue(keygen.contains(".ssh/agents-dtthaison-lingeva-mono.new'"), keygen)
         XCTAssertTrue(keygen.contains("cat \"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono.new.pub'"), keygen)
-        XCTAssertEqual(Array(calls[2].prefix(4)), [gh, "repo", "deploy-key", "add"])
-        XCTAssertEqual(Array(calls[2].suffix(4)), ["-R", repo, "--title", newTitle])
-        XCTAssertEqual(calls[2].count, 9, "no flag besides -R and --title")
-        let ssh = unquoted(calls[3].last!)
+        XCTAssertEqual(calls[2], [gh, "api", "--paginate", "repos/\(repo)/keys"], "the keys are listed before the add")
+        XCTAssertEqual(Array(calls[3].prefix(4)), [gh, "repo", "deploy-key", "add"])
+        XCTAssertEqual(Array(calls[3].suffix(4)), ["-R", repo, "--title", newTitle])
+        XCTAssertEqual(calls[3].count, 9, "no flag besides -R and --title")
+        let ssh = unquoted(calls[4].last!)
         XCTAssertTrue(ssh.contains(".ssh/agents-dtthaison-lingeva-mono.new'"), ssh)
         XCTAssertTrue(ssh.contains("IdentitiesOnly=yes") && ssh.contains("BatchMode=yes") && ssh.contains("-F /dev/null"), ssh)
+        XCTAssertTrue(ssh.contains("StrictHostKeyChecking=yes"), ssh)
         XCTAssertTrue(ssh.contains("</dev/null"), ssh)
-        let push = unquoted(calls[4].last!)
+        let push = unquoted(calls[5].last!)
         XCTAssertTrue(push.contains("core.hooksPath=/dev/null") && push.contains("push --dry-run") && push.contains("</dev/null"), push)
         XCTAssertTrue(push.contains("GIT_TERMINAL_PROMPT=0") && push.contains("IdentitiesOnly=yes") && push.contains(".new"), push)
-        XCTAssertEqual(calls[5], [gh, "api", "--paginate", "repos/\(repo)/keys"])
-        let swap = unquoted(calls[6].last!)
+        XCTAssertTrue(push.contains("StrictHostKeyChecking=yes") && push.contains("-i '$k'"), push)
+        XCTAssertEqual(calls[6], [gh, "api", "--paginate", "repos/\(repo)/keys"])
+        let swap = unquoted(calls[7].last!)
         XCTAssertTrue(swap.contains(".new.pub") && swap.contains("mv -f"), swap)
         XCTAssertFalse(swap.contains(".ssh/config"), "the alias file name is the same, so ssh config is not touched")
-        XCTAssertEqual(calls[7], [gh, "repo", "deploy-key", "delete", "11", "-R", repo])
+        XCTAssertEqual(calls[8], [gh, "repo", "deploy-key", "delete", "11", "-R", repo])
         XCTAssertTrue(runner.calls.allSatisfy { $0.stdin == nil })
         XCTAssertTrue(outcome.message.contains("old key was deleted"), outcome.message)
     }
@@ -671,6 +682,11 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertTrue(display.contains("push --dry-run"))
         XCTAssertTrue(display.contains(".new"))
         XCTAssertFalse(replacePlan().needsAdmin)
+        // every GitHub call is shown, the cleanup's too, and the date is said to be UTC
+        XCTAssertTrue(display.contains("deploy-key delete <id of the new key>"), display)
+        XCTAssertTrue(display.contains("deploy-key delete <id of the old key>"), display)
+        XCTAssertTrue(display.components(separatedBy: "\(gh) api --paginate repos/\(repo)/keys").count >= 4, "the list before the add, the check, the cleanup")
+        XCTAssertTrue(display.contains("today's date in UTC"), display)
     }
 
     private func assertCleanedUp(_ runner: ScriptedRunner, file: StaticString = #filePath, line: UInt = #line) {
@@ -773,19 +789,138 @@ final class MachinesRepoStepsTests: XCTestCase {
 
     func testReplaceKeyMatchesTheOldKeyByItsKeyTextNotByTitle() async {
         // another key with the old key's title and a lower id must not be deleted
-        let runner = ScriptedRunner()
         let decoy = keyJSON(id: "5", body: otherBody, title: "agents-m1", readOnly: true)
-        let mine = keyJSON(id: "11", body: body, title: "something else", readOnly: true)
-        let new = keyJSON(id: "22", body: newBody, title: newTitle, readOnly: true)
-        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: "[\(decoy),\(mine),\(new)]", err: ""))
-        runner.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: newPub + "\n", err: ""))
-        runner.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
-        runner.on({ $0.last?.contains("-T git@github.com") == true }, result: CommandResult(code: 0, out: welcome, err: ""))
-        runner.on({ $0.last?.contains("push --dry-run") == true }, result: CommandResult(code: 0, out: readOnly + "\n@@push 128\n", err: ""))
+        let runner = replaceRunner(extraListed: [decoy])
         let outcome = await run(replacePlan(), runner)
         XCTAssertEqual(outcome.ok, true, outcome.message)
         XCTAssertEqual(runner.calls.last?.argv, [gh, "repo", "deploy-key", "delete", "11", "-R", repo])
         XCTAssertFalse(runner.calls.map(\.argv).contains { $0.contains("delete") && $0.contains("5") })
+    }
+
+    // MARK: Replace key: a delete only removes a key of this run or of this machine (I1)
+
+    private let otherPub = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyThatIsNotGitHubs0123456789abcdef agents-m2"
+
+    func testAHostileKeygenThatReturnsAListedKeyIsRefusedAndNothingIsDeleted() async {
+        // the "new" key is m2's, already on the repo under m2's title
+        let m2 = keyJSON(id: "5", body: otherBody, title: "agents-m2", readOnly: true)
+        let runner = replaceRunner(newReadOnly: nil, keygenOut: otherPub + "\n", extraListed: [m2])
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("the new key is already on GitHub; nothing changed"), outcome.message)
+        XCTAssertEqual(kinds(runner), ["read old", "keygen", "gh list", "rm"], "no add, no GitHub delete, the .new files removed")
+    }
+
+    func testAnOldPubThatHoldsAnotherMachinesKeyIsNeverDeleted() async {
+        let m2 = keyJSON(id: "5", body: otherBody, title: "agents-m2", readOnly: true)
+        let runner = replaceRunner(oldID: nil, oldPubText: otherPub, extraListed: [m2])
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") }, "\(kinds(runner))")
+        XCTAssertTrue(kinds(runner).contains("swap"), "the new key is in use")
+        XCTAssertFalse(outcome.ok, "the old key is left on GitHub: not a silent pass")
+        XCTAssertTrue(outcome.message.contains("the old key's title doesn't match m1; remove it in Settings → Deploy keys if it's yours"), outcome.message)
+    }
+
+    func testTheOldKeyIsDeletedOnlyUnderThisMachinesOwnTitles() async {
+        for (title, deleted) in [("agents-m1", true), ("agents-m1-20261001", true), ("agents-m2", false), ("agents-m1-2026", false),
+                                 ("agents-m10", false), ("agents-m1-20261001x", false), ("agents-m1-", false), ("", false),
+                                 ("Agents-m1", false), ("deploy", false)] {
+            let runner = replaceRunner(oldTitle: title)
+            let outcome = await run(replacePlan(), runner)
+            XCTAssertEqual(kinds(runner).contains("gh delete 11"), deleted, "title '\(title)': \(kinds(runner))")
+            XCTAssertEqual(outcome.ok, deleted, "title '\(title)': \(outcome.message)")
+            XCTAssertTrue(kinds(runner).contains("swap"), title)
+        }
+    }
+
+    func testCleanupDeletesOnlyAKeyOfThisRunUnderThisRunsTitle() async {
+        // ssh fails after the add; GitHub now lists a key with the new text but another title: not ours to delete
+        let other = replaceRunner(sshOK: false, newTitleOnGitHub: "somebody-elses-title")
+        let outcome = await run(replacePlan(), other)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertFalse(kinds(other).contains { $0.hasPrefix("gh delete") }, "\(kinds(other))")
+        XCTAssertTrue(kinds(other).contains("rm"))
+        XCTAssertTrue(outcome.message.contains("nothing was deleted"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("Settings → Deploy keys"), outcome.message)
+    }
+
+    func testCleanupAfterAFailedAddDeletesNothingThatWasAlreadyListed() async {
+        // the add fails; every key GitHub lists (m2's included) was there before the add
+        let m2 = keyJSON(id: "5", body: otherBody, title: "agents-m2", readOnly: true)
+        let runner = replaceRunner(newReadOnly: nil, addCode: 1, extraListed: [m2])
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") }, "\(kinds(runner))")
+    }
+
+    func testListingFailingBeforeTheAddStopsBeforeTheAdd() async {
+        let broken = ScriptedRunner()
+        broken.on({ $0.last?.contains("head -c 1024") == true }, result: CommandResult(code: 0, out: pub + "\n", err: ""))
+        broken.on({ $0.last?.contains("ssh-keygen") == true }, result: CommandResult(code: 0, out: newPub + "\n", err: ""))
+        broken.on({ $0.contains("--paginate") }, result: CommandResult(code: 1, out: "", err: "list boom"))
+        let outcome = await run(replacePlan(), broken)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("list boom"), outcome.message)
+        XCTAssertFalse(kinds(broken).contains("gh add"))
+        XCTAssertFalse(kinds(broken).contains { $0.hasPrefix("gh delete") })
+    }
+
+    func testKeyTextIsNormalisedToTypeAndBase64OnAOneLineInput() {
+        XCTAssertEqual(RepoSteps.normalisedKey("ssh-ed25519 \(body) agents-m1"), "ssh-ed25519 \(body)")
+        XCTAssertEqual(RepoSteps.normalisedKey("ssh-ed25519 \(body) other comment here\n"), "ssh-ed25519 \(body)")
+        XCTAssertEqual(RepoSteps.normalisedKey("ssh-ed25519 \(body)"), "ssh-ed25519 \(body)")
+        for bad in ["ssh-ed25519 \(body)\nssh-ed25519 \(otherBody)", "ssh-ed25519 \(body) x\ny", "ssh-ed25519 \(body)\r\nz", "ssh-rsa \(body)",
+                    "ssh-ed25519", "ssh-ed25519 !!!notbase64!!!", "", "\n"] {
+            XCTAssertNil(RepoSteps.normalisedKey(bad), bad)
+        }
+    }
+
+    func testAMultiLineKeyFieldFromGitHubNeverMatches() async {
+        // a listed "key" that holds two lines, the first one the new key: not a match
+        let hostile = "{\"id\":7,\"key\":\"ssh-ed25519 \(newBody)\\nssh-ed25519 \(otherBody)\",\"title\":\"x\",\"read_only\":true}"
+        let runner = replaceRunner(extraListed: [hostile])
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertEqual(outcome.ok, true, outcome.message)
+    }
+
+    // MARK: Replace key: an ambiguous swap deletes nothing (I2)
+
+    func testASwapThatReturns255IsCantTellAndDeletesNothing() async {
+        for code in [255, 124, 137, 4] as [Int32] {
+            let runner = replaceRunner(swapCode: code)
+            let outcome = await run(replacePlan(), runner)
+            XCTAssertFalse(outcome.ok, "\(code)")
+            XCTAssertTrue(outcome.message.contains("can't tell whether the key was replaced on m1"), outcome.message)
+            XCTAssertTrue(outcome.message.contains("the swap may have happened; Check again before anything else"), outcome.message)
+            XCTAssertFalse(outcome.message.contains("untouched"), "never claims what it didn't prove: \(outcome.message)")
+            let k = kinds(runner)
+            XCTAssertEqual(k.last, "swap", "\(code): nothing after the swap, no delete of either key: \(k)")
+            XCTAssertFalse(k.contains("rm"), "\(code): the machine's files are left as they are")
+        }
+    }
+
+    func testASwapThatFailsWithItsOwnCodesIsUndoneAsBefore() async {
+        for code in [1, 3] as [Int32] {
+            let runner = replaceRunner(swapCode: code)
+            let outcome = await run(replacePlan(), runner)
+            XCTAssertFalse(outcome.ok, "\(code)")
+            let k = kinds(runner)
+            XCTAssertTrue(k.contains("rm"), "\(code): \(k)")
+            XCTAssertTrue(k.contains("gh delete 22"), "\(code): \(k)")
+            XCTAssertFalse(k.contains("gh delete 11"), "\(code): \(k)")
+            XCTAssertTrue(outcome.message.contains("the old key and the ssh alias are untouched"), outcome.message)
+        }
+    }
+
+    func testASwapWhoseSecondMoveFailedSaysTheKeyIsInUseAndThePubMayBeStale() async {
+        let runner = replaceRunner(swapCode: 2)
+        let outcome = await run(replacePlan(), runner)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("new key in use"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("Check again"), outcome.message)
+        XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") })
+        let swap = unquoted(runner.calls.map(\.argv).first { unquoted($0.last ?? "").contains("mv -f") }!.last!)
+        XCTAssertTrue(swap.contains("ssh-keygen -y"), "the public key file is rewritten from the private key when its move fails: \(swap)")
     }
 
     func testReplaceKeyWithAnUnreadableOldKeyChangesNothing() async {
@@ -965,7 +1100,8 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(out.components(separatedBy: "\n").last { $0.hasPrefix("@@push ") }, "@@push 128")
         let calls = try String(contentsOfFile: log, encoding: .utf8)
         XCTAssertTrue(calls.contains("push --dry-run git@github.com:\(repo).git HEAD:refs/heads/agents-push-test"), calls)
-        XCTAssertTrue(calls.contains("-F /dev/null -i \(home.path)/.ssh/agents-dtthaison-lingeva-mono.new -o IdentitiesOnly=yes"), calls)
+        XCTAssertTrue(calls.contains("-F /dev/null -i '\(home.path)/.ssh/agents-dtthaison-lingeva-mono.new' -o IdentitiesOnly=yes"), calls)
+        XCTAssertTrue(calls.contains("-o StrictHostKeyChecking=yes"), calls)
         for line in calls.split(separator: "\n") { XCTAssertTrue(line.contains("core.hooksPath=/dev/null"), String(line)) }
         XCTAssertFalse(calls.contains("github-agents-"), "the alias would lead to the old key")
     }
@@ -977,4 +1113,11 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertTrue(swap.contains("\"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono'"), swap)
         XCTAssertTrue(swap.contains("\"$HOME\"/'.ssh/agents-dtthaison-lingeva-mono.pub'"), swap)
     }
+}
+
+/// Counts the listings of a repo's keys: the first is the one before the add.
+private final class ListCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func next() -> Int { lock.withLock { count += 1; return count } }
 }
