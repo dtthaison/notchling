@@ -22,7 +22,9 @@ enum TokenScope {
             await MainActor.run {
                 TokenCreation.start(secret: job.issuesSecret, machine: machine.name, repos: repos, open: open, form: form)
             }
-            return FixOutcome(ok: true, message: "Opened GitHub's token page and the vault form for \(job.issuesSecret). Save the new token, then check again.")
+            // Only the page and the form open here. The step is not done until a check passes, so this is not ok:
+            // Set up all stops at it (and the window shows the line as guidance).
+            return FixOutcome(ok: false, message: "Opened GitHub's token page and the vault form for \(job.issuesSecret). Fix the token, save it, then Check again.")
         }
         return SetupStep(id: .tokenScope, title: "Token scope", needs: [], cadence: .slow,
                          probe: .local { ctx in await check(ctx, job: job) }, fix: .run(fix))

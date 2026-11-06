@@ -81,6 +81,32 @@ struct FixPrompt: Identifiable, Equatable {
     var warning: String? { needsAdmin && root ? "Admin steps run as root over SSH on \(host)." : nil }
 }
 
+/// What the Running switch shows and lets the user do (I1). Its position and note come from the Running probe
+/// alone; the steps before it only decide whether the worker may be turned ON.
+struct RunningSwitch: Equatable {
+    var on: Bool
+    var enabled: Bool
+    var note: String?
+
+    /// - Parameters:
+    ///   - state: the Running step's own result: ✓ is on, ✗ is off, can't tell is neither.
+    ///   - blocker: the first step before Running that isn't ✓ (it blocks turning the worker on only).
+    ///   - busy: a Fix is running on the machine.
+    static func make(state: CheckState?, blocker: String?, busy: Bool) -> RunningSwitch {
+        switch state {
+        case .pass?:
+            return RunningSwitch(on: true, enabled: !busy, note: nil)          // Off is always possible
+        case .fail?:
+            if let blocker { return RunningSwitch(on: false, enabled: false, note: "waits for \(blocker)") }
+            return RunningSwitch(on: false, enabled: !busy, note: nil)
+        case .cantTell(let why)?:
+            return RunningSwitch(on: false, enabled: false, note: why)
+        case nil:
+            return RunningSwitch(on: false, enabled: false, note: nil)
+        }
+    }
+}
+
 enum SetupSheet: Identifiable {
     case fix(FixPrompt)
     case add
@@ -460,10 +486,20 @@ final class MachinesModel: ObservableObject {
         setupSheet = .fix(asking)
     }
 
+    func runningSwitch(for machine: Machine) -> RunningSwitch {
+        RunningSwitch.make(state: engine.results[machine.name]?[.running]?.state,
+                           blocker: engine.turnOnBlocker(for: machine.name), busy: engine.running[machine.name] != nil)
+    }
+
     /// The Running switch: shows its script. Runs nothing.
     func requestToggle(on machine: String, to on: Bool) {
         guard let m = self.machine(named: machine),
               let step = engine.steps(for: m).first(where: { $0.id == .running }), case .toggle(let needsAdmin) = step.fix else { return }
+        // the switch is disabled in this case; this is the same rule for any other caller
+        if on, let blocker = engine.turnOnBlocker(for: machine) {
+            outcomes[machine] = FixLine(ok: false, text: "waits for \(blocker)", guidance: false)
+            return
+        }
         setupSheet = .fix(prompt(m, kind: .toggle(on: on), title: on ? "Turn Running on" : "Turn Running off",
                                  display: engine.toggleDisplay(on: machine, to: on) ?? "", needsAdmin: needsAdmin))
     }
@@ -517,8 +553,9 @@ final class MachinesModel: ObservableObject {
     }
 
     private func record(_ outcome: FixOutcome, for machine: String) {
-        outcomes[machine] = FixLine(ok: outcome.ok, text: outcome.message,
-                                    guidance: !outcome.ok && outcome.message.contains("Set up again"))
+        // a Fix that opened the vault form, or Set up all that finished with steps left, is guidance, not a red failure
+        let asksForAnotherRound = ["Set up again", "Check again", "still not ✓"].contains { outcome.message.contains($0) }
+        outcomes[machine] = FixLine(ok: outcome.ok, text: outcome.message, guidance: !outcome.ok && asksForAnotherRound)
     }
 
     /// Set up all reached an admin step: the sheet asks, and the answer goes back to the run.

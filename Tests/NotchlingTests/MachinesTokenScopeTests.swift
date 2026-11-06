@@ -489,7 +489,9 @@ final class MachinesTokenScopeTests: XCTestCase {
         XCTAssertFalse(plan.display.contains("read-only"), plan.display)
         XCTAssertTrue(plan.display.contains("Metadata: read"), plan.display)
         let outcome = await plan.run(.test(ctx(http: http(), runner: runner())))
-        XCTAssertTrue(outcome.ok)
+        // it only opens the page and the form: the step is not done until a check passes, so Set up all stops here
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.hasSuffix("Fix the token, save it, then Check again."), outcome.message)
         XCTAssertFalse(outcome.message.contains("SECRET123"))
     }
 }

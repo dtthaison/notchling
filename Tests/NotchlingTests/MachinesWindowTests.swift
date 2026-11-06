@@ -562,7 +562,9 @@ final class MachinesWindowTests: XCTestCase {
         await model.confirm(prompt, password: "pw-for-one-step").value
         await run.value
         XCTAssertEqual(order.items, ["first", "admin:pw-for-one-step", "last"])
-        XCTAssertEqual(model.outcomes["m1"]?.ok, true)
+        // the stubs' probes keep failing: the end names what is left, as guidance and not as a red failure
+        XCTAssertEqual(model.outcomes["m1"]?.text, "3 steps set up; still not ✓: First, Stays awake, Last")
+        XCTAssertEqual(model.outcomes["m1"]?.guidance, true)
         var seen = Set<ObjectIdentifier>()
         XCTAssertFalse(holds("pw-for-one-step", in: model, seen: &seen))
     }
@@ -674,6 +676,64 @@ final class MachinesWindowTests: XCTestCase {
         let call = try XCTUnwrap(ssh(runner).first)
         XCTAssertTrue(call.argv.last?.contains("systemctl enable --now sd-worker.service") == true)
         XCTAssertEqual(model.outcomes["vps-sing-1"]?.ok, true)
+    }
+
+    /// I1: the switch is on, off, or can't tell from its own probe. Off stays possible whatever the steps before say;
+    /// On waits for the first step that isn't ✓ and names it.
+    func testTheRunningSwitchStates() {
+        XCTAssertEqual(RunningSwitch.make(state: .pass("on"), blocker: "Plugins installed", busy: false),
+                       RunningSwitch(on: true, enabled: true, note: nil), "on, with an earlier step failing: Off is possible")
+        XCTAssertEqual(RunningSwitch.make(state: .pass("on"), blocker: nil, busy: true),
+                       RunningSwitch(on: true, enabled: false, note: nil), "a Fix is running")
+        XCTAssertEqual(RunningSwitch.make(state: .fail("off"), blocker: nil, busy: false),
+                       RunningSwitch(on: false, enabled: true, note: nil))
+        XCTAssertEqual(RunningSwitch.make(state: .fail("off"), blocker: "Token scope", busy: false),
+                       RunningSwitch(on: false, enabled: false, note: "waits for Token scope"))
+        XCTAssertEqual(RunningSwitch.make(state: .cantTell("vps is not reachable"), blocker: "Reachable", busy: false),
+                       RunningSwitch(on: false, enabled: false, note: "vps is not reachable"))
+        XCTAssertEqual(RunningSwitch.make(state: nil, blocker: nil, busy: false),
+                       RunningSwitch(on: false, enabled: false, note: nil))
+    }
+
+    @MainActor
+    func testTheWorkerCanBeTurnedOffFromTheWindowWhileAnEarlierStepFails() async throws {
+        let runner = ScriptedRunner()
+        let plugins = SetupStep(id: .plugins, title: "Plugins installed", needs: [], cadence: .everyRefresh,
+                                probe: .local { _ in CheckResult(state: .fail("sd 1.19.2 here, 1.19.3 on this Mac")) },
+                                fix: .howTo("update the plugin"))
+        let running = SetupStep(id: .running, title: "Running", needs: [], cadence: .everyRefresh,
+                                probe: .local { _ in CheckResult(state: .pass("on")) }, fix: .toggle(needsAdmin: false))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), runner: runner, steps: { _, _ in [plugins, running] })
+        await model.open()
+        XCTAssertEqual(model.runningSwitch(for: model.machines[0]), RunningSwitch(on: true, enabled: true, note: nil))
+        model.requestToggle(on: "m1", to: false)
+        guard case .fix(let prompt)? = model.setupSheet else { return XCTFail("no sheet") }
+        XCTAssertEqual(prompt.kind, .toggle(on: false))
+        XCTAssertEqual(prompt.display, SDWorkerSteps.toggleScript(linux: false, on: false))
+        XCTAssertTrue(ssh(runner).isEmpty, "the sheet runs nothing")
+        await model.confirm(prompt, password: nil).value
+        let call = try XCTUnwrap(ssh(runner).first)
+        XCTAssertEqual(call.argv, SSH.script(TestMachines.mac(), SDWorkerSteps.toggleScript(linux: false, on: false)))
+        XCTAssertEqual(model.outcomes["m1"]?.ok, true)
+    }
+
+    @MainActor
+    func testTheWorkerCannotBeTurnedOnWhileTokenScopeFails() async {
+        let runner = ScriptedRunner()
+        let scope = SetupStep(id: .tokenScope, title: "Token scope", needs: [], cadence: .everyRefresh,
+                              probe: .local { _ in CheckResult(state: .fail("token reaches 31 other private repos")) },
+                              fix: .howTo("make a new token"))
+        let running = SetupStep(id: .running, title: "Running", needs: [], cadence: .everyRefresh,
+                                probe: .local { _ in CheckResult(state: .fail("off")) }, fix: .toggle(needsAdmin: false))
+        let model = makeModel(TestRegistry(machines: [TestMachines.mac()]), runner: runner, steps: { _, _ in [scope, running] })
+        await model.open()
+        XCTAssertEqual(model.runningSwitch(for: model.machines[0]),
+                       RunningSwitch(on: false, enabled: false, note: "waits for Token scope"))
+        model.requestToggle(on: "m1", to: true)
+        XCTAssertNil(model.setupSheet, "no sheet for a switch that is blocked")
+        XCTAssertEqual(model.outcomes["m1"]?.ok, false)
+        XCTAssertEqual(model.outcomes["m1"]?.text, "waits for Token scope")
+        XCTAssertTrue(ssh(runner).isEmpty)
     }
 
     @MainActor

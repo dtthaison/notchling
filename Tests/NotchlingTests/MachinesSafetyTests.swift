@@ -221,7 +221,9 @@ final class MachinesSafetyTests: XCTestCase {
             }
             model.requestSetUpAll(on: machine.name)
             if case .fix(let all)? = model.setupSheet { shown.append(all.display); model.cancel(all) }
-            model.requestToggle(on: machine.name, to: true)
+            // Off is always possible. On waits for every step before Running to be ✓ and then shows no sheet (and
+            // leaves its own line in `outcomes`, which the check below reads).
+            model.requestToggle(on: machine.name, to: false)
             if case .fix(let toggle)? = model.setupSheet { shown.append(toggle.display); model.cancel(toggle) }
 
             // Update N machines for both renewed values

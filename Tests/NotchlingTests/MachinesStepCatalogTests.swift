@@ -124,7 +124,7 @@ final class MachinesStepCatalogTests: XCTestCase {
             ("worker-json", "worker.json written", ["plugins", "issues-token", "claude-login", "clone:\(r)"], "run"),
             ("service", "Service installed", ["worker-json", "base-tools"], "run"),
             ("sd-check", "sd worker setup --check", ["service"], "howTo"),
-            ("running", "Running", ["sd-check"], "toggle"),
+            ("running", "Running", ["reachable"], "toggle"),
         ]
         let steps = catalog(TestMachines.mac())
         XCTAssertEqual(steps.count, rows.count)

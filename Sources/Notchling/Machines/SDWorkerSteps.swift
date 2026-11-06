@@ -299,7 +299,9 @@ enum SDWorkerSteps {
             SetupStep(id: .sdCheck, title: "sd worker setup --check", needs: [.service], cadence: .slow,
                       probe: .remote(script: setupCheckScript(job), parse: { out, ctx in setupCheckResult(out, mask: ctx.mask) }),
                       fix: .howTo("Read the rows under this step. Fix what they name, then check again.")),
-            SetupStep(id: .running, title: "Running", needs: [.sdCheck], cadence: .everyRefresh,
+            // Its state is the switch's own probe: only a reachable machine is needed to read it. Turning it ON
+            // waits for every step before it (SetupEngine.turnOnBlocker); turning it OFF waits for none.
+            SetupStep(id: .running, title: "Running", needs: [.reachable], cadence: .everyRefresh,
                       probe: .remote(script: runningProbe(linux: linux), parse: { out, _ in runningCheck(out, linux: linux) }),
                       fix: .toggle(needsAdmin: linux)),
         ]

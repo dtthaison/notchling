@@ -615,13 +615,12 @@ struct JobCardView: View {
     }
 
     private func runningSwitch(_ job: SDWorkerSettings) -> some View {
-        let state = running?.state
-        let on: Bool = { if case .pass? = state { return true } else { return false } }()
-        let known: Bool = { if case .cantTell? = state { return false } else { return state != nil } }()
+        // on, off or can't tell from its own probe; only turning it ON waits for the steps before it
+        let sw = model.runningSwitch(for: machine)
         return HStack(spacing: 8) {
-            if !known, let state { Text(verbatim: text(state)).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1) }
-            Toggle("Running", isOn: Binding(get: { on }, set: { model.requestToggle(on: machine.name, to: $0) }))
-                .toggleStyle(.switch).disabled(busy || (!known && !on))
+            if let note = sw.note { Text(verbatim: note).kitType(.meta).foregroundColor(KitInk.textFaint).lineLimit(1) }
+            Toggle("Running", isOn: Binding(get: { sw.on }, set: { model.requestToggle(on: machine.name, to: $0) }))
+                .toggleStyle(.switch).disabled(!sw.enabled)
         }
     }
 

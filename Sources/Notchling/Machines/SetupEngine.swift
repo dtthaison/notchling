@@ -499,8 +499,10 @@ final class SetupEngine: ObservableObject {
     }
 
     /// Why a Fix can't run now, or nil. Nothing has run when this answers.
-    private func refusal(for step: SetupStep, on m: Machine, approval: FixApproval, needsAdmin: Bool, checkNeeds: Bool = true) -> String? {
+    private func refusal(for step: SetupStep, on m: Machine, approval: FixApproval, needsAdmin: Bool, checkNeeds: Bool = true,
+                         turningOn: Bool = false) -> String? {
         if running[m.name] != nil { return "another Fix is running on \(m.name)" }
+        if turningOn, let blocker = turnOnBlocker(m) { return "waits for \(blocker)" }
         if checkNeeds {
             let list = stepList(m, currentMachines())
             for need in step.needs {
@@ -635,7 +637,34 @@ final class SetupEngine: ObservableObject {
             guard outcome.ok else { return FixOutcome(ok: false, message: "\(step.title): \(outcome.message)") }
             fixed += 1
         }
-        return FixOutcome(ok: true, message: fixed == 0 ? "nothing to set up" : "\(fixed) step\(fixed == 1 ? "" : "s") set up")
+        let done = fixed == 0 ? "nothing to set up" : "\(fixed) step\(fixed == 1 ? "" : "s") set up"
+        // a clean finish only when every step is ✓ now; else the ones that are not (Running is a switch, not a step to fix)
+        guard let last = self.machine(named: machine) else { return FixOutcome(ok: true, message: done) }
+        let remaining = stepList(last, currentMachines()).filter { step in
+            if step.id == .running { return false }
+            if case .pass? = results[machine]?[step.id]?.state { return false }
+            return true
+        }.map(\.title)
+        guard !remaining.isEmpty else { return FixOutcome(ok: true, message: done) }
+        let shown = remaining.prefix(4).joined(separator: ", ") + (remaining.count > 4 ? " and \(remaining.count - 4) more" : "")
+        return FixOutcome(ok: false, message: "\(done); still not ✓: \(shown)")
+    }
+
+    /// The title of the first step before Running that isn't ✓, or nil. Turning the worker on waits for it.
+    func turnOnBlocker(for machine: String) -> String? {
+        guard let m = self.machine(named: machine) else { return nil }
+        return turnOnBlocker(m)
+    }
+
+    /// Every step before Running must be ✓ (Token scope and every Push is refused included); one that isn't, or that
+    /// has no answer yet, blocks turning the worker on. Turning it off and showing its state never wait for them.
+    private func turnOnBlocker(_ m: Machine) -> String? {
+        for step in stepList(m, currentMachines()) {
+            if step.id == .running { return nil }
+            if case .pass? = results[m.name]?[step.id]?.state { continue }
+            return step.title
+        }
+        return nil
     }
 
     func toggleRunning(on machine: String, to on: Bool, approval: FixApproval) async -> FixOutcome {
@@ -643,8 +672,8 @@ final class SetupEngine: ObservableObject {
         guard let step = stepList(m, currentMachines()).first(where: { $0.id == .running }), case .toggle(let needsAdmin) = step.fix else {
             return FixOutcome(ok: false, message: "\(machine) has no Running switch")
         }
-        // turning the worker off stays possible when its checks are failing
-        if let why = refusal(for: step, on: m, approval: approval, needsAdmin: needsAdmin, checkNeeds: on) {
+        // turning the worker off stays possible when its checks are failing; turning it on waits for every step before it
+        if let why = refusal(for: step, on: m, approval: approval, needsAdmin: needsAdmin, checkNeeds: false, turningOn: on) {
             return FixOutcome(ok: false, message: why)
         }
         let script = toggleScript(m.os == .linux, on)

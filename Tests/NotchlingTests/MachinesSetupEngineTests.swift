@@ -898,7 +898,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         w.answers.value = ["echo probe-a": ("bad", 1), "echo probe-b": ("bad", 1)]
         await w.engine.refresh(["m1"])
         let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
-        XCTAssertTrue(out.ok, out.message)
+        XCTAssertEqual(out.message, "2 steps set up; still not ✓: A, B", "the stubs' probes keep failing, and the end says so")
         XCTAssertEqual(fixes.all, ["a", "b"])
     }
 
@@ -1073,7 +1073,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         await w.engine.refresh(["m1"])
         XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "b")]?.state, .cantTell("waits for A"))
         let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
-        XCTAssertTrue(out.ok, out.message)
+        XCTAssertEqual(out.message, "2 steps set up; still not ✓: B", "b keeps failing until its own probe is fixed")
         XCTAssertEqual(fixes.all, ["a", "b"])
     }
 
@@ -1086,7 +1086,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         await w.engine.refresh(["m1"])
         let out = await w.engine.setUpAll(on: "m1", approved: w.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
         XCTAssertEqual(fixes.all, ["r"])
-        XCTAssertTrue(out.ok)
+        XCTAssertEqual(out.message, "1 step set up; still not ✓: H, T, R")
     }
 
     func testSetUpAllAsksForEachAdminStep() async {
@@ -1105,7 +1105,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         }
         XCTAssertEqual(asked.all, ["Admin one", "Admin two"])
         XCTAssertEqual(fixes.all, ["a1", "p", "a2"])
-        XCTAssertTrue(out.ok)
+        XCTAssertTrue(out.message.hasPrefix("3 steps set up"), out.message)
     }
 
     func testCancellingTheAdminQuestionStopsSetUpAll() async {
@@ -1135,7 +1135,7 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertFalse(pwOnly.ok, "a password is not the root confirmation")
         XCTAssertEqual(fixes.count, 0)
         let ok = await w.engine.setUpAll(on: "vps", approved: w.engine.setUpAllPlan(for: "vps")) { _ in .rootConfirmed }
-        XCTAssertTrue(ok.ok)
+        XCTAssertTrue(ok.message.hasPrefix("1 step set up"), ok.message)
         XCTAssertEqual(fixes.all, ["a1"])
     }
 
@@ -1397,6 +1397,132 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(on, FixOutcome(ok: false, message: "waits for sd check"))
         let off = await w.engine.toggleRunning(on: "m1", to: false, approval: admin())
         XCTAssertTrue(off.ok, off.message)
+    }
+
+    // MARK: I1 / I2: the Running switch
+
+    /// I1: the real Running step shows its own state whatever the steps before it say, so a worker that runs while
+    /// Plugins installed fails can be seen and turned off.
+    func testTheRealRunningStepAnswersWhileAnEarlierStepFails() async throws {
+        let mac = TestMachines.mac("m1")
+        let real = try XCTUnwrap(StepCatalog.steps(for: mac, all: [mac]).first { $0.id == .running })
+        XCTAssertEqual(real.needs, [.reachable], "only Reachable is needed to see the state")
+        // the real step's needs and Fix, with a probe the fake machine answers
+        let running = SetupStep(id: real.id, title: real.title, needs: real.needs, cadence: real.cadence,
+                                probe: .remote(script: "echo probe-running", parse: { out, _ in
+                                    CheckResult(state: out.code == 0 ? .pass("on") : .fail("off"))
+                                }), fix: real.fix)
+        let w = world([mac]) { _, _ in [step("reachable"), step("plugins", title: "Plugins installed"), running] }
+        w.answers.value = ["echo probe-plugins": ("bad", 1)]
+        await w.engine.refresh(["m1"], includeSlow: true)
+        let results = try XCTUnwrap(w.engine.results["m1"])
+        XCTAssertEqual(results[.plugins]?.state, .fail("bad"))
+        XCTAssertEqual(results[.running]?.state, .pass("on"), "Running reads the machine, not the steps before it")
+    }
+
+    /// I1: with Plugins installed failing, the state is on and turning it off is possible; off runs the off script.
+    func testTheWorkerCanBeTurnedOffWhileAnEarlierStepFails() async {
+        let w = world { _, _ in [
+            step("plugins", title: "Plugins installed"),
+            step("running", fix: .toggle(needsAdmin: false)),
+        ] }
+        w.answers.value = ["echo probe-plugins": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        XCTAssertEqual(w.engine.results["m1"]?[StepID(raw: "running")]?.state, .pass("ok"))
+        XCTAssertEqual(w.engine.turnOnBlocker(for: "m1"), "Plugins installed")
+        let off = await w.engine.toggleRunning(on: "m1", to: false, approval: admin())
+        XCTAssertTrue(off.ok, off.message)
+        XCTAssertTrue(w.runner.calls.contains { $0.argv == SSH.script(TestMachines.mac("m1"), SDWorkerSteps.toggleScript(linux: false, on: false)) })
+    }
+
+    /// I2: Token scope ✗ (the token reaches 31 other repos) blocks turning the worker on, and names the step.
+    func testTurningTheWorkerOnWaitsForTheFirstStepThatIsNotOK() async {
+        let w = world { _, _ in [
+            step("clone", title: "Clone"),
+            step("token-scope", title: "Token scope", cadence: .slow),
+            step("push", title: "Push is refused"),
+            step("running", fix: .toggle(needsAdmin: false)),
+        ] }
+        w.answers.value = ["echo probe-token-scope": ("token reaches 31 other private repos", 1), "echo probe-push": ("bad", 1)]
+        await w.engine.refresh(["m1"], includeSlow: true)
+        XCTAssertEqual(w.engine.turnOnBlocker(for: "m1"), "Token scope")
+        let on = await w.engine.toggleRunning(on: "m1", to: true, approval: admin())
+        XCTAssertEqual(on, FixOutcome(ok: false, message: "waits for Token scope"))
+        XCTAssertFalse(w.runner.calls.contains { $0.argv.last?.contains("launchctl") == true }, "nothing ran")
+
+        // once those pass, turning it on is allowed
+        w.answers.value = [:]
+        await w.engine.refresh(["m1"], includeSlow: true)
+        XCTAssertNil(w.engine.turnOnBlocker(for: "m1"))
+        let again = await w.engine.toggleRunning(on: "m1", to: true, approval: admin())
+        XCTAssertTrue(again.ok, again.message)
+    }
+
+    /// I2: a push GitHub accepted blocks turning the worker on too.
+    func testAPushThatIsNotRefusedBlocksTurningTheWorkerOn() async {
+        let repo = TestMachines.repo
+        let w = world { _, _ in [
+            step("push-refused:\(repo)", title: "Push is refused (\(repo))", cadence: .slow),
+            step("running", fix: .toggle(needsAdmin: false)),
+        ] }
+        w.answers.value = ["echo probe-push-refused:\(repo)": ("this machine can push", 1)]
+        await w.engine.refresh(["m1"], includeSlow: true)
+        let on = await w.engine.toggleRunning(on: "m1", to: true, approval: admin())
+        XCTAssertEqual(on, FixOutcome(ok: false, message: "waits for Push is refused (\(repo))"))
+    }
+
+    /// I2: Set up all stops at Token scope. Its Fix only opens the page and the form, and says so with ok:false.
+    func testSetUpAllStopsAtTokenScope() async throws {
+        let m = TestMachines.mac("m1")
+        let job = try XCTUnwrap(m.sdWorker)
+        let opened = Counter()
+        let real = TokenScope.step(for: m, job: job, open: { _ in opened.add("page") }, form: { _ in opened.add("form") })
+        let after = Counter()
+        let w = world([m]) { _, _ in [
+            step("before", title: "Before", fix: runFix(opened, "before")),
+            SetupStep(id: .tokenScope, title: "Token scope", needs: [], cadence: .everyRefresh,
+                      probe: .remote(script: "echo probe-token-scope", parse: { _, _ in CheckResult(state: .fail("token reaches 31 other private repos")) }),
+                      fix: real.fix),
+            step("after", title: "After", fix: runFix(after, "after")),
+        ] }
+        w.answers.value = ["echo probe-before": ("bad", 1), "echo probe-after": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        let plan = w.engine.setUpAllPlan(for: "m1")
+        XCTAssertEqual(plan.map(\.title), ["Before", "Token scope", "After"])
+        let out = await w.engine.setUpAll(on: "m1", approved: plan) { _ in .cancelled }
+        XCTAssertFalse(out.ok)
+        XCTAssertTrue(out.message.hasPrefix("Token scope: "), out.message)
+        XCTAssertTrue(out.message.contains("Check again"), out.message)
+        XCTAssertEqual(opened.all, ["before", "page", "form"])
+        XCTAssertEqual(after.count, 0, "the steps after Token scope did not run")
+    }
+
+    /// M4: Set up all ends with the steps that are still not ✓, so it never claims a clean finish over a step that waits.
+    func testSetUpAllEndsWithTheStepsStillNotOK() async {
+        let done = Counter()
+        let w = world { _, _ in [
+            step("a", title: "A", fix: runFix(done, "a"), parse: { _, _ in
+                CheckResult(state: done.all.contains("a") ? .pass("ok") : .fail("no"))
+            }),
+            step("hand", title: "By hand"),
+            step("waits", title: "Waits", needs: ["hand"], fix: runFix(done, "waits")),
+            step("running", fix: .toggle(needsAdmin: false)),
+        ] }
+        w.answers.value = ["echo probe-hand": ("bad", 1)]
+        await w.engine.refresh(["m1"])
+        let plan = w.engine.setUpAllPlan(for: "m1")
+        XCTAssertEqual(plan.map(\.title), ["A", "Waits"])
+        let out = await w.engine.setUpAll(on: "m1", approved: plan) { _ in .cancelled }
+        XCTAssertEqual(done.all, ["a"], "Waits had to wait for By hand")
+        XCTAssertEqual(out, FixOutcome(ok: false, message: "1 step set up; still not ✓: By hand, Waits"))
+
+        // everything ✓: the plain count
+        let clean = world { _, _ in [step("a", title: "A", fix: runFix(done, "a2"), parse: { _, _ in
+            CheckResult(state: done.all.contains("a2") ? .pass("ok") : .fail("no"))
+        })] }
+        await clean.engine.refresh(["m1"])
+        let ok = await clean.engine.setUpAll(on: "m1", approved: clean.engine.setUpAllPlan(for: "m1")) { _ in .cancelled }
+        XCTAssertEqual(ok, FixOutcome(ok: true, message: "1 step set up"))
     }
 
     // MARK: integration round
