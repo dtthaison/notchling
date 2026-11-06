@@ -1,0 +1,83 @@
+{
+  "machine": "vps-sing-1",
+  "version": "1.19.1",
+  "since": "2026-11-04T18:00:00Z",
+  "paused": null,
+  "health": {
+    "github": "error: 1 outbox items failed",
+    "claude": "ok",
+    "host": "ok"
+  },
+  "current": {
+    "repo": "dtthaison/lingeva-mono",
+    "issue": 214,
+    "branch": "sd/vps-sing-1/214-fix-login",
+    "stage": "implementation",
+    "started_at": "2026-11-06T01:02:03Z"
+  },
+  "ready": [
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 201,
+      "branch": "sd/vps-sing-1/201-search",
+      "commit": "9f3c2a1",
+      "worktree": "/home/agent/wt/201",
+      "evidence_dir": "/home/agent/evidence/201/verify",
+      "ready_at": "2026-11-06T00:15:09Z"
+    }
+  ],
+  "needs_you": [
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 207,
+      "branch": "sd/vps-sing-1/207-quota",
+      "worktree": "/home/agent/wt/207",
+      "reason": "the agent asked a question",
+      "question": "Cap at 50 or 100?",
+      "recommend": "50",
+      "options": [
+        "50",
+        "100"
+      ]
+    },
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 230,
+      "branch": null,
+      "worktree": null,
+      "reason": "triage: needs a design call",
+      "question": null,
+      "recommend": "split it",
+      "options": []
+    }
+  ],
+  "stuck": [
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 190,
+      "branch": "sd/vps-sing-1/190-export",
+      "worktree": "/home/agent/wt/190",
+      "reason": "autopilot exited 1: tests failed",
+      "report_tail": "line one\nline two"
+    }
+  ],
+  "jobs_tonight": 3,
+  "weekly_pct": 42.5,
+  "token_expires_in_days": 14,
+  "booted_at": "2026-11-05T22:10:31Z",
+  "claim_hold_until": null,
+  "triage": [],
+  "unrouted": [
+    "ios"
+  ],
+  "testflight": {
+    "quiet": false,
+    "last_new_at": "2026-11-05T20:00:00Z",
+    "failed": {
+      "count": 1,
+      "newest_id": "sub1",
+      "error": "GitHub refused: 422",
+      "at": "2026-11-06T01:00:00Z"
+    }
+  }
+}
