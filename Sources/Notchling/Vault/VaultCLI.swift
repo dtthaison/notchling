@@ -17,7 +17,7 @@ enum VaultCLI {
             print("If none of them is the one, ask the user with --secret-request.")
             exit(1)
         }
-        print(shown.map(SecretVault.describe).joined(separator: "\n"))
+        print(shown.map { SecretVault.describe($0) }.joined(separator: "\n"))
         exit(0)
     }
 
@@ -37,20 +37,44 @@ enum VaultCLI {
         exit(SecretRunner.run(command, extra: env, hide: reply.hide ?? [:]))
     }
 
-    /// `--secret-request name [--kind token|login] [--url U] [--note N] [--reason R]`: opens the form for
-    /// the user, filled in, and waits. Prints the saved secret, or exits 1 when the user cancels.
-    static func request(_ args: [String]) -> Never {
-        guard args.count > 2, !args[2].hasPrefix("--") else {
-            fail("Usage: Notchling --secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--reason <why now>]")
-        }
+    struct UsageError: Error { let message: String }
+
+    static let requestUsage = "Usage: Notchling --secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>]"
+
+    /// The request `--secret-request` sends, or what is wrong with the arguments. `--note` and `--how` keep
+    /// their newlines.
+    static func parseRequest(_ args: [String]) -> Result<VaultRequest, UsageError> {
+        guard args.count > 2, !args[2].hasPrefix("--") else { return .failure(UsageError(message: requestUsage)) }
         func option(_ flag: String) -> String? {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
             return args[i + 1]
         }
         let kind = option("--kind")
-        if let kind, VaultEntry.Kind(rawValue: kind) == nil { fail("--kind is token or login.") }
-        let reply = VaultClient.send(VaultRequest(op: .request, name: args[2], kind: kind, url: option("--url"),
-                                                  note: option("--note"), reason: option("--reason")))
+        if let kind, VaultEntry.Kind(rawValue: kind) == nil { return .failure(UsageError(message: "--kind is token or login.")) }
+        var expires: String?
+        if let given = option("--expires") {
+            guard let day = VaultExpiry.parse(given) else {
+                return .failure(UsageError(message: "--expires takes a day as YYYY-MM-DD, like 2026-12-06 (got \"\(given)\")."))
+            }
+            expires = day
+        } else if args.contains("--expires") {
+            return .failure(UsageError(message: "--expires takes a day as YYYY-MM-DD, like 2026-12-06."))
+        }
+        return .success(VaultRequest(op: .request, name: args[2], kind: kind, url: option("--url"),
+                                     note: option("--note"), reason: option("--reason"),
+                                     howTo: option("--how"), expires: expires))
+    }
+
+    /// `--secret-request name [--kind token|login] [--url U] [--note N] [--how H] [--expires D] [--reason R]`:
+    /// opens the form for the user, filled in, and waits. For a name that exists, each field passed replaces
+    /// the saved one in the form. Prints the saved secret, or exits 1 when the user cancels.
+    static func request(_ args: [String]) -> Never {
+        let message: VaultRequest
+        switch parseRequest(args) {
+        case .success(let request): message = request
+        case .failure(let error): fail(error.message)
+        }
+        let reply = VaultClient.send(message)
         guard reply.ok, let entry = reply.entry else {
             fail(reply.error ?? "The vault didn't answer.", code: reply.denied == true ? 1 : 2)
         }
@@ -69,7 +93,7 @@ enum VaultCLI {
         fail("""
         Usage: Notchling --secret <name>[,<name>…] -- <command> [args…]   (one argument runs through sh -c)
                Notchling --secrets [url | host | words]
-               Notchling --secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--reason <why now>]
+               \(requestUsage.replacingOccurrences(of: "Usage: ", with: ""))
         """)
     }
 

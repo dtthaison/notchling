@@ -70,6 +70,8 @@ enum KitInk {
     static let onShell = Color(light: KitPalette.paper0, dark: KitPalette.night0)
     /// Part labels (the ? button): blue, so they read as a guide over the UI, not part of it.
     static let guide = Color(light: KitPalette.blue600, dark: KitPalette.blue400)
+    /// A secret past its last day.
+    static let expired = Color(light: Color(hex: 0xC4281C), dark: Color(hex: 0xFF6B5E))
     static let onGuide = Color(light: KitPalette.paper0, dark: KitPalette.night0)
     /// The terminal sheet is dark in both appearances: Claude Code picks its colors for a dark terminal.
     static let terminal = KitPalette.night0

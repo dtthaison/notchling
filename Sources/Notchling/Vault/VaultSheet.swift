@@ -26,7 +26,7 @@ struct VaultSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "key").foregroundColor(KitInk.textMuted)
-                Text(form == nil ? "Secret Vault" : form?.original == nil ? "Add Secret" : "Edit Secret")
+                Text(form == nil ? "Secret Vault" : form?.renewing == true ? "Renew Secret" : form?.original == nil ? "Add Secret" : "Edit Secret")
                     .kitType(.heading).foregroundColor(KitInk.text)
                 Spacer()
                 if form == nil {
@@ -59,7 +59,7 @@ struct VaultSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 540, height: 520)
+        .frame(width: 540, height: form == nil ? 520 : 640)
         .background(KitInk.window)
         .part("Secret Vault Sheet")
         .alert("Remove \(confirmRemove?.name ?? "")?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } })) {
@@ -102,6 +102,7 @@ struct VaultSheet: View {
                 ForEach(entries) { entry in
                     VaultRow(entry: entry,
                              edit: { form = VaultForm(entry) },
+                             renew: { VaultRenew.openPage(for: entry); form = VaultForm(entry, renew: true) },
                              remove: { confirmRemove = entry })
                 }
                 usage.padding(.top, 6)
@@ -114,6 +115,7 @@ struct VaultSheet: View {
 private struct VaultRow: View {
     let entry: VaultEntry
     let edit: () -> Void
+    let renew: () -> Void
     let remove: () -> Void
 
     var body: some View {
@@ -137,8 +139,13 @@ private struct VaultRow: View {
                 if !entry.note.isEmpty {
                     Text(entry.note).kitType(.meta).foregroundColor(KitInk.textMuted).fixedSize(horizontal: false, vertical: true)
                 }
+                if let day = entry.expires { VaultExpiryLabel(day: day) }
             }
             Spacer(minLength: 8)
+            if entry.expires != nil || !(entry.howTo ?? "").isEmpty {
+                Button("Renew…", action: renew).buttonStyle(.kit(.ghost))
+                    .help("Open the page for a new value, then enter it here")
+            }
             Button("Edit", action: edit).buttonStyle(.kit(.ghost))
             Button(action: remove) { Image(systemName: "trash") }
                 .buttonStyle(.kit(.ghost))
@@ -156,12 +163,24 @@ final class VaultForm: ObservableObject {
     let original: VaultEntry?
     /// Why an agent asked for this secret, shown above the form.
     let reason: String?
+    /// Opened by Renew…: the value field is empty and focused, the how-to sits above it, and Save waits for a
+    /// new value and a chosen expiry (a date or "No expiry").
+    let renewing: Bool
+    /// An ordinary edit needs no choice; a renewal starts with none made.
+    @Published var expiryChosen: Bool
+    /// What an agent's request changed in this saved secret, marked in the form with the old values.
+    private(set) var changes = VaultPrefillChanges()
     @Published var name: String { didSet { followName() } }
     @Published var kind: VaultEntry.Kind { didSet { followName() } }
     @Published var username = ""
     @Published var secret = ""
     @Published var note: String
     @Published var url: String
+    /// How to get or renew the secret; shown under the value field and kept with the entry.
+    @Published var howTo: String
+    /// The optional last day: off means "No expiry".
+    @Published var hasExpiry: Bool
+    @Published var expiryDate: Date
     @Published var userVar: String
     @Published var secretVar: String
     @Published var ask: Bool
@@ -171,13 +190,22 @@ final class VaultForm: ObservableObject {
     /// The variable names were changed from the ones made from the name; the form then opens Advanced.
     private(set) var customVars: Bool
 
-    init(_ entry: VaultEntry?, reason: String? = nil) {
+    init(_ entry: VaultEntry?, reason: String? = nil, renew: Bool = false) {
         original = entry
         self.reason = reason
+        renewing = renew && entry != nil
         name = entry?.name ?? ""
         kind = entry?.kind ?? .token
         note = entry?.note ?? ""
         url = entry?.url ?? ""
+        howTo = entry?.howTo ?? ""
+        let day = entry?.expires.flatMap { VaultExpiry.date(from: $0) }
+        let renewal = renew && entry != nil
+        // Editing keeps the saved day (an expired one shows in red). A renewal starts with no day chosen,
+        // and "No expiry" unless the user picks one; the picker then starts 30 days out.
+        expiryChosen = !renewal
+        hasExpiry = !renewal && day != nil
+        expiryDate = (renewal ? nil : day) ?? Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()
         ask = entry?.asks ?? false
         let vars = VaultEntry.defaultVars(name: entry?.name ?? "", kind: entry?.kind ?? .token)
         userVar = entry?.kind == .login ? entry?.userVar ?? vars.user : vars.user
@@ -187,15 +215,50 @@ final class VaultForm: ObservableObject {
     }
 
     /// An agent's request: the saved secret by that name if there is one (to update), else a new one
-    /// filled in with what the agent said.
+    /// filled in with what the agent said. For a saved one, each of note, URL, how-to and expiry the agent
+    /// passed replaces the saved text in the form (`VaultEntry.prefilled`); nothing is saved until the user
+    /// presses Save.
     convenience init(request: VaultRequest) {
-        let existing = request.name.flatMap(SecretVault.entry)
+        self.init(saved: request.name.flatMap(SecretVault.entry), request: request)
+    }
+
+    /// `init(request:)` with the saved secret given (so a render or a test needn't read the real vault).
+    convenience init(saved existing: VaultEntry?, request: VaultRequest) {
         self.init(existing, reason: request.reason)
-        guard existing == nil else { return }
-        name = request.name ?? ""
-        if let kind = request.kind.flatMap(VaultEntry.Kind.init(rawValue:)) { self.kind = kind }
-        url = request.url ?? ""
-        note = request.note ?? ""
+        if existing == nil {
+            name = request.name ?? ""
+            if let kind = request.kind.flatMap(VaultEntry.Kind.init(rawValue:)) { self.kind = kind }
+        }
+        let merged = (existing ?? VaultEntry(name: request.name ?? "", kind: .token)).prefilled(by: request)
+        if let existing { changes = VaultEntry.prefillChanges(of: existing, by: request) }
+        note = merged.note
+        url = merged.url ?? ""
+        howTo = merged.howTo ?? ""
+        if let day = merged.expires.flatMap({ VaultExpiry.date(from: $0) }) {
+            hasExpiry = true
+            expiryDate = day
+        }
+    }
+
+    /// The secret's URL when Renew won't open it (not http or https), shown as plain text.
+    var renewRefusal: String? { original.flatMap(VaultRenew.refusal(for:)) }
+
+    /// The chosen day, or nil for "No expiry".
+    var expiresDay: String? { hasExpiry ? VaultExpiry.day(of: expiryDate) : nil }
+
+    /// A renewal's choice of expiry: a date (the picker starts 30 days out) or none.
+    func chooseExpiry(date: Bool) {
+        expiryChosen = true
+        hasExpiry = date
+        if date { expiryDate = Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date() }
+    }
+
+    /// Whether Save is allowed. A renewal needs the new value (an empty one would keep the dead value) and a
+    /// chosen expiry, so a Save can't extend the date of a secret that was never replaced.
+    var canSave: Bool {
+        guard !name.isEmpty else { return false }
+        if renewing { return !secret.isEmpty && expiryChosen }
+        return original != nil || !secret.isEmpty
     }
 
     private static func defaults(_ name: String, _ kind: VaultEntry.Kind) -> [String] {
@@ -220,10 +283,17 @@ final class VaultForm: ObservableObject {
     }
 
     func save() -> Bool {
+        if renewing, !canSave {
+            error = secret.isEmpty ? "Enter the new value." : "Pick the new expiry date, or No expiry."
+            return false
+        }
         let name = name.trimmingCharacters(in: .whitespaces)
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let howTo = howTo.trimmingCharacters(in: .whitespacesAndNewlines)
         var entry = VaultEntry(name: name, kind: kind, note: note.trimmingCharacters(in: .whitespacesAndNewlines),
                                url: url.isEmpty ? nil : url,
+                               howTo: howTo.isEmpty ? nil : howTo,
+                               expires: expiresDay,
                                userVar: kind == .login ? userVar.trimmingCharacters(in: .whitespaces) : "",
                                secretVar: secretVar.trimmingCharacters(in: .whitespaces),
                                ask: ask)
@@ -237,6 +307,8 @@ final class VaultForm: ObservableObject {
             }
             try VaultStore.shared.save(entry, value: value, replacing: original)
             saved = entry
+            // A new value starts the reminders over.
+            if !secret.isEmpty, let original { VaultReminders.clearSent(ids: [original.id, entry.id]) }
             return true
         } catch {
             self.error = error.localizedDescription
@@ -249,12 +321,38 @@ private struct VaultFormView: View {
     @ObservedObject var form: VaultForm
     let close: (_ saved: Bool) -> Void
     @FocusState private var focus: Field?
+    /// The how-to is in one place at a time: the rendered help box, or its editor. The editor starts open
+    /// when there is no how-to yet, and stays open while it is typed in.
+    @State private var howToOpen: Bool
+
+    init(form: VaultForm, close: @escaping (_ saved: Bool) -> Void) {
+        _form = ObservedObject(wrappedValue: form)
+        self.close = close
+        _howToOpen = State(initialValue: form.howTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
     /// Variable names are made from the name; most people never change them, so they sit behind this.
     @State private var advanced = false
 
-    private enum Field { case name, url, username, secret, userVar, secretVar, note }
+    private enum Field { case name, url, username, secret, userVar, secretVar }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ScrollView { fields.padding(.vertical, 2).padding(.trailing, 4) }
+            footer
+        }
+        .padding(20)
+        .onAppear { advanced = form.customVars; focus = form.original == nil && form.name.isEmpty ? .name : (form.kind == .login && form.username.isEmpty && !form.renewing ? .username : .secret) }
+        .part("Secret Form")
+    }
+
+    /// The how-to's "changed by the request" marker, right under whichever of the help box and the editor shows.
+    @ViewBuilder private var howToMarker: some View {
+        if let old = form.changes.old[.howTo] { VaultChangedNote(field: .howTo, old: old).padding(.leading, 92) }
+    }
+
+    private var hasHowTo: Bool { !form.howTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private var fields: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let reason = form.reason, !reason.isEmpty {
                 HStack(alignment: .top, spacing: 8) {
@@ -277,6 +375,14 @@ private struct VaultFormView: View {
                     .focused($focus, equals: .url)
                     .modifier(KitField(focused: focus == .url))
             }
+            if let old = form.changes.old[.url] {
+                VaultChangedNote(field: .url, old: old, empty: "no URL", host: form.changes.hostChange).padding(.leading, 92)
+            }
+            if form.renewing, let refused = form.renewRefusal {
+                Text("This address isn't http or https, so Renew won't open it: \(refused)")
+                    .kitType(.meta).foregroundColor(KitInk.textMuted).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 92)
+            }
             row("Kind") {
                 Picker("", selection: $form.kind) {
                     Text("Token").tag(VaultEntry.Kind.token)
@@ -291,16 +397,61 @@ private struct VaultFormView: View {
                         .modifier(KitField(focused: focus == .username))
                 }
             }
+            if form.renewing, hasHowTo, !howToOpen {
+                VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
+                howToMarker
+            }
             row(form.kind == .login ? "Password" : "Token") {
-                SecureField(form.original == nil ? "" : "Unchanged", text: $form.secret)
+                SecureField(form.original == nil ? "" : form.renewing ? "New value" : "Unchanged", text: $form.secret)
                     .focused($focus, equals: .secret)
                     .modifier(KitField(focused: focus == .secret))
             }
-            row("Note") {
-                TextField("What it's for, e.g. GitHub API for my repos", text: $form.note)
-                    .focused($focus, equals: .note)
-                    .modifier(KitField(focused: focus == .note))
+            if !form.renewing, hasHowTo, !howToOpen {
+                VaultHelpView(text: form.howTo) { howToOpen = true }.padding(.leading, 92)
+                howToMarker
             }
+            row("Note", top: true) {
+                VaultTextArea(text: $form.note, placeholder: "What it's for, e.g. GitHub API for my repos")
+                    .part("Note Field")
+            }
+            if let old = form.changes.old[.note] { VaultChangedNote(field: .note, old: old).padding(.leading, 92) }
+            if howToOpen || !hasHowTo {
+                row("How to get or renew", top: true) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        VaultTextArea(text: $form.howTo, placeholder: "Where to click and which scopes, e.g. GitHub > Settings > Developer settings > Tokens. Links work (https only).")
+                            .part("How To Field")
+                        if hasHowTo {
+                            Button("Done") { howToOpen = false }.buttonStyle(.kit(.ghost))
+                                .help("Show the how-to as help text under the value field")
+                        }
+                    }
+                }
+                howToMarker
+            }
+            row(form.renewing ? "New expiry" : "Expires") {
+                if !form.expiryChosen {
+                    HStack(spacing: 8) {
+                        Button("Pick a date") { form.chooseExpiry(date: true) }.buttonStyle(.kit(.secondary))
+                        Button("No expiry") { form.chooseExpiry(date: false) }.buttonStyle(.kit(.secondary))
+                        Text("Choose one to save").kitType(.meta).foregroundColor(KitInk.textMuted)
+                        Spacer(minLength: 0)
+                    }
+                    .part("Expires Choice")
+                } else {
+                    HStack(spacing: 10) {
+                        Toggle("No expiry", isOn: Binding(get: { !form.hasExpiry }, set: { form.hasExpiry = !$0 }))
+                            .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
+                        if form.hasExpiry {
+                            DatePicker("", selection: $form.expiryDate, displayedComponents: .date)
+                                .datePickerStyle(.field).labelsHidden().fixedSize()
+                            if let day = form.expiresDay { VaultExpiryLabel(day: day) }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .part("Expires Field")
+                }
+            }
+            if let old = form.changes.old[.expires] { VaultChangedNote(field: .expires, old: old, empty: "no expiry").padding(.leading, 92) }
             row("") {
                 Toggle("Ask me before an agent uses it", isOn: $form.ask)
                     .toggleStyle(.checkbox).kitType(.label).foregroundColor(KitInk.text)
@@ -335,8 +486,14 @@ private struct VaultFormView: View {
                     }
                 }
             }
-            Text("Agents see the name, URL, variables and note. Only Notchling can read the value.")
+        }
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Agents see the name, URL, variables, note, how-to and expiry. Only Notchling can read the value.")
                 .kitType(.meta).foregroundColor(KitInk.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 92)
             if let error = form.error {
                 HStack(alignment: .top, spacing: 8) {
@@ -345,26 +502,256 @@ private struct VaultFormView: View {
                 }
                 .padding(.leading, 92)
             }
-            Spacer(minLength: 0)
             HStack {
                 Spacer()
                 Button("Cancel") { close(false) }
                     .buttonStyle(.kit(.secondary)).keyboardShortcut(.cancelAction)
                 Button("Save") { if form.save() { close(true) } }
                     .buttonStyle(.kit(.primary)).keyboardShortcut(.defaultAction)
-                    .disabled(form.name.isEmpty || (form.original == nil && form.secret.isEmpty))
+                    .disabled(!form.canSave)
                     .part("Save Secret Button", .top)
             }
         }
-        .padding(20)
-        .onAppear { advanced = form.customVars; focus = form.original == nil && form.name.isEmpty ? .name : (form.kind == .login && form.username.isEmpty ? .username : .secret) }
-        .part("Secret Form")
     }
 
-    private func row<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 12) {
-            Text(label).kitType(.label).foregroundColor(KitInk.textMuted).frame(width: 80, alignment: .trailing)
+    private func row<Content: View>(_ label: String, top: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: top ? .firstTextBaseline : .center, spacing: 12) {
+            Text(label).kitType(.label).foregroundColor(KitInk.textMuted).multilineTextAlignment(.trailing)
+                .frame(width: 80, alignment: .trailing)
             content()
         }
+    }
+}
+
+/// "Expired" in red once the day has passed, else "in 30 days".
+struct VaultExpiryLabel: View {
+    let day: String
+    var now: Date = Date()
+
+    var body: some View {
+        if VaultExpiry.status(of: day, now: now) == .expired {
+            Label("Expired \(day)", systemImage: "exclamationmark.circle.fill")
+                .kitType(.label).foregroundColor(KitInk.expired)
+        } else if let phrase = VaultExpiry.phrase(of: day, now: now) {
+            Text("Expires \(day) (\(phrase))").kitType(.meta).foregroundColor(KitInk.textMuted)
+        } else {
+            Text("Expires \(day)").kitType(.meta).foregroundColor(KitInk.textMuted)
+        }
+    }
+}
+
+/// The how-to under the value field: selectable, with Markdown links and bare URLs clickable.
+struct VaultHelpView: View {
+    let text: String
+    var edit: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "questionmark.circle").foregroundColor(KitInk.accentText).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("How to get or renew").kitType(.section).foregroundColor(KitInk.textFaint)
+                    Spacer(minLength: 0)
+                    if let edit { Button("Edit", action: edit).buttonStyle(.kit(.ghost)) }
+                }
+                Text(VaultHelp.attributed(text))
+                    .font(.system(size: 12)).foregroundColor(KitInk.text)
+                    .tint(KitInk.accentText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.accentWash))
+        .part("How To Help")
+    }
+}
+
+/// Marks a field an agent's request changed: a badge and the saved value it replaced. For the URL it also
+/// shows the old host next to the new one, and warns when the host changed.
+struct VaultChangedNote: View {
+    let field: VaultPrefillChanges.Field
+    let old: String
+    var empty = "nothing"
+    var host: VaultPrefillChanges.HostChange?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label(field.marker, systemImage: "sparkles").kitType(.meta).foregroundColor(KitInk.accentText)
+            Text(old.isEmpty ? "Was: \(empty)" : "Was: \(old)").kitType(.meta).foregroundColor(KitInk.textMuted)
+                .lineLimit(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            if let host {
+                Label(host.warning, systemImage: "exclamationmark.triangle.fill")
+                    .kitType(.label).foregroundColor(KitInk.expired).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .part("Request Change")
+    }
+}
+
+/// Help text as the form shows it.
+enum VaultHelp {
+    /// Inline Markdown (links, bold, code) with the line breaks kept, plus bare `https://…` links made
+    /// clickable. Only https links are links; any other scheme is plain text. A link written as Markdown
+    /// shows its real host after the text, so a label can't pass for another site.
+    static func attributed(_ text: String) -> AttributedString {
+        var out = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
+        let written = out.runs.compactMap { run in run.link.map { (run.range, $0) } }
+        for (range, url) in written.reversed() {
+            guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), !host.isEmpty else {
+                out[range].link = nil
+                continue
+            }
+            if String(out[range].characters).trimmingCharacters(in: .whitespaces) != url.absoluteString {
+                var shown = AttributedString(" (\(host))")
+                shown.foregroundColor = KitInk.textMuted
+                out.insert(shown, at: range.upperBound)
+            }
+        }
+        let plain = String(out.characters)
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        for match in detector?.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) ?? [] {
+            guard let url = match.url, url.scheme?.lowercased() == "https", let r = Range(match.range, in: plain),
+                  let lower = AttributedString.Index(r.lowerBound, within: out),
+                  let upper = AttributedString.Index(r.upperBound, within: out) else { continue }
+            let range = lower..<upper
+            if out[range].runs.allSatisfy({ $0.link == nil }) { out[range].link = url }
+        }
+        return out
+    }
+}
+
+/// A multi-line text field: `minLines` tall, growing with its text up to `maxLines`, then scrolling.
+/// Tab moves on to the next field; Return starts a new line.
+struct VaultTextArea: View {
+    @Binding var text: String
+    var placeholder = ""
+    var minLines = 3
+    var maxLines = 6
+    @State private var contentHeight: CGFloat = 0
+    @State private var focused = false
+
+    private static let font = NSFont.systemFont(ofSize: 13)
+    private static let inset = CGSize(width: 8, height: 6)
+
+    private var lineHeight: CGFloat {
+        let manager = NSLayoutManager()
+        return ceil(manager.defaultLineHeight(for: Self.font))
+    }
+
+    var body: some View {
+        let area = VaultTextView(text: $text, font: Self.font, inset: Self.inset,
+                                 onHeight: { contentHeight = $0 }, onFocus: { focused = $0 })
+        let height = min(max(contentHeight, lineHeight * CGFloat(minLines)), lineHeight * CGFloat(maxLines)) + Self.inset.height * 2
+        area
+            .frame(height: height)
+            .background(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous).fill(KitInk.card))
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder).kitType(.body).foregroundColor(KitInk.textFaint)
+                        .padding(.horizontal, Self.inset.width + 5).padding(.vertical, Self.inset.height)
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous)
+                .strokeBorder(focused ? KitInk.accent : KitInk.hairline, lineWidth: focused ? 1.5 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: KitMetric.radiusSm, style: .continuous))
+    }
+}
+
+private struct VaultTextView: NSViewRepresentable {
+    @Binding var text: String
+    let font: NSFont
+    let inset: CGSize
+    let onHeight: (CGFloat) -> Void
+    let onFocus: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let view = FocusTextView()
+        view.delegate = context.coordinator
+        view.onFocus = { context.coordinator.parent.onFocus($0) }
+        view.font = font
+        view.textColor = NSColor(KitInk.text)
+        view.insertionPointColor = NSColor(KitInk.accent)
+        view.drawsBackground = false
+        view.isRichText = false
+        view.allowsUndo = true
+        view.isAutomaticQuoteSubstitutionEnabled = false
+        view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
+        view.textContainerInset = inset
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        view.textContainer?.widthTracksTextView = true
+        view.string = text
+        view.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.measure),
+                                               name: NSView.frameDidChangeNotification, object: view)
+        let scroll = NSScrollView()
+        scroll.documentView = view
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        context.coordinator.textView = view
+        DispatchQueue.main.async { context.coordinator.measure() }
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
+        view.string = text
+        DispatchQueue.main.async { context.coordinator.measure() }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: VaultTextView
+        weak var textView: NSTextView?
+
+        init(_ parent: VaultTextView) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView else { return }
+            parent.text = view.string
+            measure()
+        }
+
+        /// Tab leaves the field instead of typing a tab.
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.insertTab(_:)): textView.window?.selectNextKeyView(nil); return true
+            case #selector(NSResponder.insertBacktab(_:)): textView.window?.selectPreviousKeyView(nil); return true
+            default: return false
+            }
+        }
+
+        @objc func measure() {
+            guard let view = textView, let container = view.textContainer, let manager = view.layoutManager else { return }
+            manager.ensureLayout(for: container)
+            let height = ceil(manager.usedRect(for: container).height)
+            DispatchQueue.main.async { [parent] in parent.onHeight(height) }
+        }
+    }
+}
+
+private final class FocusTextView: NSTextView {
+    var onFocus: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onFocus?(true) }
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { onFocus?(false) }
+        return ok
     }
 }

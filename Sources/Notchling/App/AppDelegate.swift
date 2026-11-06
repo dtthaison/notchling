@@ -43,6 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
     private lazy var accountsWindow = AccountsWindowController(registry: providers, accounts: accounts, cost: cost, settings: settings)
     private lazy var pagesWindow = PagesWindowController(accounts: accounts)
+    /// The overnight worker machines: polled over SSH once `machines.json` lists one, shown in the Machines window.
+    private lazy var machines: MachinesCenter = MainActor.assumeIsolated {
+        let center = MachinesCenter()
+        center.poller.onNewNeedsYou = { [weak self] machine, entry in self?.announceNeedsYou(machine, entry) }
+        // the questions already open when polling starts: one notification, not one ring each
+        center.poller.onQuestionsWaiting = { UserNotifier.post("Notchling", MachineAlert.waiting(count: $0)) }
+        return center
+    }
     private lazy var search: SearchPanelController = {
         let search = SearchPanelController()
         search.onOpen = { [weak self] folder in self?.chatWindow.showPage(folder: folder) }
@@ -99,6 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HookBridge.beat()
         // The vault's socket for `Notchling --secret`, and its skill (rewritten if the app moved).
         VaultServer.shared.start()
+        // Reminders before a saved secret expires (7 days, 1 day, the day), with a Renew… button.
+        VaultReminders.shared.start()
         DispatchQueue.global(qos: .utility).async { VaultSkill.update(); DelegateSkill.update() }
         // The phone bridge, the session host connection and the sessions a phone can reach.
         Task { @MainActor [weak self] in
@@ -141,6 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.providers.syncAll()
             self?.cost.refresh()
         }
+        // The poller starts only when machines.json lists a machine; it follows the Mac's sleep and wake itself
+        // (a refresh on wake). The first poll runs here, never an action.
+        Task { @MainActor [weak self] in self?.machines.startIfNeeded() }
         // An install relaunches Notchling: bring Chat back if it was open, once sessions are listed.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.chatWindow.restore() }
     }
@@ -347,6 +360,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let chatItem = action("Chat…", #selector(openChat))
         chatItem.toolTip = "Read every Claude Code session and reply to background ones."
         menu.addItem(chatItem)
+        let machinesItem = action("Machines…", #selector(openMachines))
+        machinesItem.toolTip = "What the overnight worker machines left for you: branches to merge, questions, stuck jobs."
+        menu.addItem(machinesItem)
         let searchItem = action("Search Artifacts…", #selector(openSearch))
         if searchShortcut {
             searchItem.keyEquivalent = "p"
@@ -857,6 +873,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openChat() {
         chatWindow.show()
+    }
+
+    @objc private func openMachines() {
+        MainActor.assumeIsolated { machines.show() }
+    }
+
+    /// A worker machine has a new question: a peek in the notch, or a notification while the notch is hidden
+    /// (or no agent is there to borrow a peek slot from, or the notch is open).
+    private func announceNeedsYou(_ machine: Machine, _ entry: NeedsYouEntry) {
+        let text = MachineAlert.text(machine: machine.name, entry: entry)
+        NSSound(named: "Tink")?.play()
+        // The peek is skipped while the notch is open or hovered; the notification then keeps the question from being lost.
+        if notch.isVisible, let agent = agents.first, notch.model.peekNotice(text, using: agent) { return }
+        UserNotifier.post("Notchling", text)
     }
 
     @objc private func openSearch() {
