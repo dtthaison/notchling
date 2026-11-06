@@ -130,7 +130,8 @@ enum TokenScope {
         }
         if !failed.isEmpty { return .fail("no issues access to \(failed.joined(separator: ", "))") }
         if unknown { return .unknown("couldn't read the issues of every served repo") }
-        return .ok("can read issues of \(reqs.count) repo\(reqs.count == 1 ? "" : "s")")
+        // the check reads; a write would change GitHub. sd's labels row proves the write once the labels exist.
+        return .ok("can read issues of \(reqs.count) repo\(reqs.count == 1 ? "" : "s") (a write is not tried here)")
     }
 
     /// Two independent views of "no other private repo": a probe of each repo gh lists, and the token's own list.

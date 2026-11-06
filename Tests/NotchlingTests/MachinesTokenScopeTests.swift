@@ -88,6 +88,14 @@ final class MachinesTokenScopeTests: XCTestCase {
         XCTAssertEqual(result.detected.tokenExpires, "2027-02-01")
     }
 
+    /// M9: the check reads; it does not try a write. The row says so, so a ✓ is not read as "can write issues".
+    func testTheIssuesRowStatesThatWriteIsNotTriedHere() async {
+        let result = await check(ctx(http: http(), runner: runner()))
+        let row = result.rows.first { $0.name == "Reaches issues" }
+        XCTAssertTrue(row?.detail.hasPrefix("can read issues of ") == true, row?.detail ?? "")
+        XCTAssertTrue(row?.detail.contains("a write is not tried here") == true, row?.detail ?? "")
+    }
+
     func testTheProbeIsLocalAndHasAFix() {
         let step = TokenScope.step(for: m1, job: job)
         XCTAssertEqual(step.id, .tokenScope)
