@@ -4,22 +4,63 @@ import XCTest
 /// The real `ProcessRunner`, with harmless local commands only: the environment a check runs in, and what a
 /// timeout leaves behind.
 final class MachinesRunnerTests: XCTestCase {
-    private func pgrep(_ pattern: String) -> Bool {
+    /// Whether the process is running. A zombie (ended, waiting to be reaped) is not.
+    private func isRunning(_ pid: pid_t) -> Bool {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        p.arguments = ["-f", pattern]
-        p.standardOutput = FileHandle.nullDevice
-        try? p.run()
+        p.executableURL = URL(fileURLWithPath: "/bin/ps")
+        p.arguments = ["-o", "stat=", "-p", String(pid)]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return false }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return p.terminationStatus == 0
+        let stat = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !stat.isEmpty && !stat.hasPrefix("Z")
     }
 
-    private func pkill(_ pattern: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        p.arguments = ["-f", pattern]
-        try? p.run()
-        p.waitUntilExit()
+    /// The pids of `pids` still running after they had up to `seconds` to go.
+    private func stillRunning(_ pids: [pid_t], within seconds: TimeInterval = 5) -> [pid_t] {
+        let end = Date().addingTimeInterval(seconds)
+        var alive = pids.filter(isRunning)
+        while !alive.isEmpty && Date() < end {
+            Thread.sleep(forTimeInterval: 0.1)
+            alive = alive.filter(isRunning)
+        }
+        return alive
+    }
+
+    /// What a test script wrote about its own processes. The tests find their children by these pids and never by
+    /// a process name, which another `swift test` run on the same machine can share.
+    private struct Spawned {
+        var shell: pid_t?
+        var children: [(pid: pid_t, group: pid_t?)] = []
+        var all: [pid_t] { (shell.map { [$0] } ?? []) + children.map(\.pid) }
+    }
+
+    /// `shell <pid>` and `child <pid> [<process group>]` lines, as the scripts below write them.
+    private func spawned(_ file: URL) -> Spawned {
+        var found = Spawned()
+        let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        for line in text.split(separator: "\n") {
+            let words = line.split(separator: " ").map(String.init)
+            if words.count == 2, words[0] == "shell", let pid = pid_t(words[1]) { found.shell = pid }
+            if words.count >= 2, words[0] == "child", let pid = pid_t(words[1]) {
+                found.children.append((pid, words.count > 2 ? pid_t(words[2]) : nil))
+            }
+        }
+        return found
+    }
+
+    private func pidFile() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("runner-test-\(UUID().uuidString).pids")
+    }
+
+    /// Writes the shell's pid, then starts two sleeps in the background and writes each one's pid and process group.
+    private func twoSleeps(_ file: URL, prefix: String = "") -> String {
+        let f = "'\(file.path)'"
+        let note = #"echo "child $! $(ps -o pgid= -p $! | tr -d ' ')""#
+        return "\(prefix)echo \"shell $$\" >> \(f); sleep 30 & \(note) >> \(f); sleep 30 & \(note) >> \(f); wait"
     }
 
     func testEnvironmentIsLaidOverTheAppsOwn() async {
@@ -45,30 +86,44 @@ final class MachinesRunnerTests: XCTestCase {
     }
 
     func testTimeoutKillsTheWholeProcessGroup() async {
-        let marker = "sleep 30.8217"
+        let file = pidFile()
+        defer { try? FileManager.default.removeItem(at: file) }
         let start = Date()
-        let r = await ProcessRunner().run(["/bin/sh", "-c", "\(marker) & \(marker)"], cwd: nil, timeout: 0.5)
+        let r = await ProcessRunner().run(["/bin/sh", "-c", twoSleeps(file)], cwd: nil, timeout: 2)
+        let seen = spawned(file)
+        defer { seen.all.forEach { kill($0, SIGKILL) } }
         XCTAssertEqual(r.code, 124)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 5, "the run waited for the sleeps to end")
-        XCTAssertFalse(pgrep(marker), "a sleep outlived its timeout")
-        pkill(marker)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 10, "the run waited for the sleeps to end")
+        XCTAssertEqual(seen.children.count, 2, "both sleeps started")
+        // the sleeps are in the group the runner made for the shell, so a kill of the group reaches them
+        XCTAssertNotNil(seen.shell)
+        XCTAssertTrue(seen.children.allSatisfy { $0.group == seen.shell }, "a sleep is outside the shell's group: \(seen)")
+        XCTAssertEqual(stillRunning(seen.all), [], "a process of the group outlived its timeout")
     }
 
     func testTimeoutKillsAGroupThatIgnoresTerm() async {
-        let marker = "sleep 30.6419"
+        let file = pidFile()
+        defer { try? FileManager.default.removeItem(at: file) }
         let start = Date()
-        let r = await ProcessRunner().run(["/bin/sh", "-c", "trap '' TERM; \(marker) & \(marker)"], cwd: nil, timeout: 0.5)
+        let r = await ProcessRunner().run(["/bin/sh", "-c", twoSleeps(file, prefix: "trap '' TERM; ")], cwd: nil, timeout: 2)
+        let seen = spawned(file)
+        defer { seen.all.forEach { kill($0, SIGKILL) } }
         XCTAssertEqual(r.code, 124)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 8)
-        XCTAssertFalse(pgrep(marker), "a sleep that ignores SIGTERM outlived its timeout")
-        pkill(marker)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 12)
+        XCTAssertEqual(seen.children.count, 2, "both sleeps started")
+        XCTAssertNotNil(seen.shell)
+        XCTAssertTrue(seen.children.allSatisfy { $0.group == seen.shell }, "a sleep is outside the shell's group: \(seen)")
+        // SIGTERM is ignored by the shell and (inherited) by its sleeps: only the kill that follows ends them
+        XCTAssertEqual(stillRunning(seen.all), [], "a process that ignores SIGTERM outlived its timeout")
     }
 
     func testAnOrphanHoldingThePipeDoesNotHoldTheResult() async {
-        let marker = "sleep 12.3071"
+        let file = pidFile()
+        defer { try? FileManager.default.removeItem(at: file) }
         let start = Date()
-        let r = await ProcessRunner().run(["/bin/sh", "-c", "(\(marker) &) ; echo done"], cwd: nil, timeout: 60)
-        pkill(marker)
+        let r = await ProcessRunner().run(["/bin/sh", "-c", "(sleep 12 & echo \"child $!\" >> '\(file.path)') ; echo done"],
+                                          cwd: nil, timeout: 60)
+        spawned(file).all.forEach { kill($0, SIGKILL) }
         XCTAssertEqual(r.code, 0)
         XCTAssertEqual(r.out, "done\n")
         XCTAssertLessThan(Date().timeIntervalSince(start), 8)
@@ -138,12 +193,15 @@ final class MachinesRunnerTests: XCTestCase {
     }
 
     func testOrphansOfANormalExitAreEnded() async {
-        let marker = "30.6481"
-        let r = await ProcessRunner().run(["/bin/sh", "-c", "sleep \(marker) & exit 0"], cwd: nil, timeout: 10)
-        let leftover = pgrep(marker)
-        pkill(marker)
+        let file = pidFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let r = await ProcessRunner().run(["/bin/sh", "-c", "sleep 30 & echo \"child $!\" >> '\(file.path)'; exit 0"],
+                                          cwd: nil, timeout: 10)
+        let seen = spawned(file)
+        defer { seen.all.forEach { kill($0, SIGKILL) } }
         XCTAssertEqual(r.code, 0)
-        XCTAssertFalse(leftover, "an orphan of a finished command is still running")
+        XCTAssertEqual(seen.children.count, 1, "the sleep started")
+        XCTAssertEqual(stillRunning(seen.all), [], "an orphan of a finished command is still running")
     }
 
     func testALostExitStatusIsNotSuccess() async {
