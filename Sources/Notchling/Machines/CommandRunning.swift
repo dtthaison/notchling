@@ -6,8 +6,9 @@ struct CommandResult: Equatable {
     let err: String
 }
 
-/// Runs one command and waits for it. Injectable so tests never start ssh.
-protocol CommandRunning {
+/// Runs one command and waits for it. Injectable so tests never start ssh. `Sendable`, because a setup step's
+/// context carries the runner across tasks.
+protocol CommandRunning: Sendable {
     /// `argv[0]` is the executable's path. A timeout returns code 124, a missing executable code 127.
     func run(_ argv: [String], cwd: String?, timeout: TimeInterval) async -> CommandResult
 
