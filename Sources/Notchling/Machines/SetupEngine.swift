@@ -150,6 +150,15 @@ final class SetupEngine: ObservableObject {
 
     func steps(for machine: Machine) -> [SetupStep] { stepList(withFacts(machine), currentMachines()) }
 
+    /// `machine` with the facts the checks learned laid over it (what its steps are built from).
+    func overlaid(_ machine: Machine) -> Machine { withFacts(machine) }
+
+    /// The script the Running switch would run, for the confirmation that shows it first. Runs nothing.
+    func toggleDisplay(on machine: String, to on: Bool) -> String? {
+        guard let m = self.machine(named: machine) else { return nil }
+        return toggleScript(m.os == .linux, on)
+    }
+
     /// The vault values of the machine's usages, each hiding as `[secret:<name>]`.
     private func masks(for machine: Machine, adminPassword: String? = nil) -> SetupMasks {
         var names = Set(usageList(currentMachines()).filter { $0.machine == machine.name }.map(\.name))
