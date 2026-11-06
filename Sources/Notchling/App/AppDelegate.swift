@@ -896,15 +896,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// A worker machine has a new question: a peek in the notch, or a notification while the notch is hidden
-    /// (or no agent is there to borrow a peek slot from, like a usage limit).
+    /// (or no agent is there to borrow a peek slot from, or the notch is open).
     private func announceNeedsYou(_ machine: Machine, _ entry: NeedsYouEntry) {
         let text = MachineAlert.text(machine: machine.name, entry: entry)
         NSSound(named: "Tink")?.play()
-        if notch.isVisible, let agent = agents.first {
-            notch.model.peekNotice(text, using: agent)
-        } else {
-            UserNotifier.post("Notchling", text)
-        }
+        // The peek is skipped while the notch is open or hovered; the notification then keeps the question from being lost.
+        if notch.isVisible, let agent = agents.first, notch.model.peekNotice(text, using: agent) { return }
+        UserNotifier.post("Notchling", text)
     }
 
     @objc private func openSearch() {

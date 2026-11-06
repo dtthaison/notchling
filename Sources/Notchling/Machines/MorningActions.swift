@@ -17,6 +17,9 @@ final class MorningActions: ObservableObject {
     /// Prefix of every comment Notchling leaves on an issue.
     static let commentPrefix = "notchling: "
 
+    /// The branch commit each outcome was made for, by item id.
+    private var outcomeCommits: [String: String] = [:]
+
     private let runner: CommandRunning
     private let machines: () -> [Machine]
     private let mergeFunction: MergeFunction
@@ -75,6 +78,22 @@ final class MorningActions: ObservableObject {
     /// Same as `close`: the worker removes the worktree when the issue closes.
     @discardableResult func drop(_ item: MorningItem) -> Task<Void, Never> { close(item) }
 
+    /// The outcome of this item's last merge or push retry, only while the item still has the commit it was made
+    /// for. A branch sent back and returned with a new commit starts clean.
+    func outcome(for item: MorningItem) -> MergeOutcome? {
+        guard case .ready(let entry) = item.entry, outcomeCommits[item.id] == entry.commit else { return nil }
+        return outcomes[item.id]
+    }
+
+    /// Forgets the outcome of every item that left `items` or now has another commit.
+    func pruneOutcomes(keeping items: [MorningItem]) {
+        for id in Array(outcomes.keys) {
+            if let item = items.first(where: { $0.id == id }), outcome(for: item) != nil { continue }
+            outcomes[id] = nil
+            outcomeCommits[id] = nil
+        }
+    }
+
     // MARK: Reading
 
     /// The diff of the branch against `main`, or the error text. Fetches the branch into
@@ -127,6 +146,7 @@ final class MorningActions: ObservableObject {
             guard let (machine, repo) = lookup(item) else { return Self.unknownMachine(item) }
             let outcome = await function(entry, machine, repo, runner)
             outcomes[item.id] = outcome
+            outcomeCommits[item.id] = entry.commit
             return Self.failure(of: outcome)
         }
     }

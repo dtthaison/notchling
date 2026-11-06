@@ -73,6 +73,8 @@ final class MachinesModel: ObservableObject {
     private let machineList: () -> [Machine]
     private let runner: CommandRunning
     private var issues: [String: [GHIssue]] = [:]
+    /// Set while the last fetch from GitHub failed for some repo (the titles and notes shown are the last good ones).
+    @Published private(set) var githubNote: String?
     private var generation = 0
     private var shotsRequested = Set<String>()
     private var bag = Set<AnyCancellable>()
@@ -101,9 +103,11 @@ final class MachinesModel: ObservableObject {
         guard !repos.isEmpty else { return }
         let runner = runner
         Task { [weak self] in
-            let fetched = await MorningItems.fetchIssues(repos: repos, runner: runner)
+            let result = await MorningItems.fetchIssuesChecked(repos: repos, runner: runner)
             guard let self, mine == self.generation else { return }
-            self.issues = fetched
+            self.issues = MorningItems.merged(old: self.issues, fetched: result.issues, failed: result.failed)
+            self.githubNote = result.failed.isEmpty ? nil
+                : "Couldn't refresh from GitHub (\(result.failed.sorted().joined(separator: ", "))). Titles and notes may be out of date."
             self.rebuild()
         }
     }
@@ -118,6 +122,7 @@ final class MachinesModel: ObservableObject {
         items = MorningItems.build(reports: reports, issues: issues)
         let ids = Set(items.map(\.id))
         done = done.filter { ids.contains($0.key) }
+        actions.pruneOutcomes(keeping: items)
     }
 
     func chip(for machine: Machine) -> MachineChip {
@@ -279,6 +284,9 @@ struct MachinesView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
                 ForEach(model.machines, id: \.name) { ChipView(chip: model.chip(for: $0)) }
             }
+            if let note = model.githubNote {
+                Label(note, systemImage: "exclamationmark.triangle").kitType(.label).foregroundColor(KitInk.textMuted)
+            }
             ForEach(model.tokenWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .kitType(.label).foregroundColor(KitInk.accentText)
@@ -438,7 +446,7 @@ private struct ReadyCard: View {
     @State private var confirmClose = false
 
     private var busy: Bool { actions.running.contains(item.id) || model.done[item.id] != nil }
-    private var outcome: MergeOutcome? { actions.outcomes[item.id] }
+    private var outcome: MergeOutcome? { actions.outcome(for: item) }
 
     var body: some View {
         Card {

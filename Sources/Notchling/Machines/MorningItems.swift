@@ -147,19 +147,35 @@ enum MorningItems {
     /// Asks GitHub for the open issues under each label of each repo and merges them by issue number.
     /// A failing call leaves that label out; the items then show `#<n>` for a title.
     static func fetchIssues(repos: [String], runner: CommandRunning) async -> [String: [GHIssue]] {
+        await fetchIssuesChecked(repos: repos, runner: runner).issues
+    }
+
+    /// Like `fetchIssues`, and also names the repos where any `gh` call failed (their issues are then partial,
+    /// so a caller that holds older issues for them should keep those).
+    static func fetchIssuesChecked(repos: [String], runner: CommandRunning) async
+        -> (issues: [String: [GHIssue]], failed: Set<String>) {
         var all: [String: [GHIssue]] = [:]
+        var failed = Set<String>()
         for repo in Set(repos).sorted() {
             var byNumber: [Int: GHIssue] = [:]
             for label in labels {
                 let argv = [MachineTools.path("gh"), "issue", "list", "-R", repo, "--label", label,
                             "--json", "number,title,labels,comments", "--limit", "100"]
                 let result = await runner.run(argv, cwd: nil, timeout: 30)
-                guard result.code == 0 else { continue }
+                guard result.code == 0 else { failed.insert(repo); continue }
                 for issue in GHIssue.decodeList(result.out) { byNumber[issue.number] = issue }
             }
             all[repo] = byNumber.values.sorted { $0.number < $1.number }
         }
-        return all
+        return (all, failed)
+    }
+
+    /// The issues to show after a fetch: the new ones, except for a repo whose fetch failed, which keeps what
+    /// was last known.
+    static func merged(old: [String: [GHIssue]], fetched: [String: [GHIssue]], failed: Set<String>) -> [String: [GHIssue]] {
+        var out = fetched
+        for repo in failed { out[repo] = old[repo] ?? fetched[repo] }
+        return out
     }
 }
 
