@@ -145,7 +145,43 @@ final class MachinesMorningTests: XCTestCase {
                                   "number,title,labels,comments", "--limit", "100"])
     }
 
+    func testFetchNamesTheReposWhoseGhCallFailedAndKeepsTheirOldIssues() async {
+        let runner = MorningFakeRunner { argv in
+            argv.contains("sd:needs-you") ? CommandResult(code: 1, out: "", err: "network") :
+                CommandResult(code: 0, out: "[{\"number\":1,\"title\":\"New\",\"labels\":[],\"comments\":[]}]", err: "")
+        }
+        let result = await MorningItems.fetchIssuesChecked(repos: [repo], runner: runner)
+        XCTAssertEqual(result.failed, [repo])
+        let old = [repo: [GHIssue(number: 1, title: "Old"), GHIssue(number: 2, title: "Two")]]
+        XCTAssertEqual(MorningItems.merged(old: old, fetched: result.issues, failed: result.failed)[repo]?.map(\.title), ["Old", "Two"])
+        // a repo that fetched fine takes the new issues
+        XCTAssertEqual(MorningItems.merged(old: old, fetched: result.issues, failed: [])[repo]?.map(\.title), ["New"])
+        // nothing known before: what the fetch got is better than nothing
+        XCTAssertEqual(MorningItems.merged(old: [:], fetched: result.issues, failed: [repo])[repo]?.map(\.title), ["New"])
+    }
+
     // MARK: actions
+
+    func testStaleOutcomeOfAnotherCommitShowsNothing() async {
+        let a = actions(MorningFakeRunner(), merge: { _, _, _, _ in MergeOutcome(fetched: true, merged: true, checked: true, error: "push rejected") })
+        let first = item(.ready)
+        await a.merge(first).value
+        XCTAssertEqual(a.outcome(for: first)?.merged, true, "the outcome of this commit shows (checklist and Retry push)")
+
+        // the worker returns the branch with a new commit under the same item id
+        var entry = ready(7)
+        entry.commit = "def"
+        let returned = MorningItem(id: first.id, kind: .ready, machine: "m1", repo: repo, issue: 7, title: "t",
+                                   entry: .ready(entry), comment: nil)
+        XCTAssertNil(a.outcome(for: returned), "no checklist and no Retry push for a commit that was never merged")
+
+        a.pruneOutcomes(keeping: [returned])
+        XCTAssertNil(a.outcomes[first.id], "the stale outcome is dropped")
+        await a.merge(first).value
+        XCTAssertNotNil(a.outcome(for: first))
+        a.pruneOutcomes(keeping: [])
+        XCTAssertTrue(a.outcomes.isEmpty, "an item that left the list loses its outcome")
+    }
 
     func testOneActionPerItem() async {
         let runner = MorningFakeRunner()
