@@ -198,16 +198,39 @@ struct MarkdownView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+        let segments = self.segments
+        let media = mediaBySegment(segments)
+        return VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
                 case .prose(let blocks): ProseText(blocks: blocks, bases: bases)
                 case .block(let block): blockView(block)
                 }
+                if let items = media[index] { MediaPreviews(items: items) }
             }
         }
         .tint(KitInk.accentText)
         .textSelection(.enabled)
+    }
+
+    /// Videos and images the prose names, shown under the run of text that names them: the first few
+    /// in the message, each file once.
+    private func mediaBySegment(_ segments: [Segment]) -> [Int: [ChatMedia.Item]] {
+        var out: [Int: [ChatMedia.Item]] = [:]
+        var seen = Set<String>()
+        for (index, segment) in segments.enumerated() {
+            guard seen.count < ChatMedia.perMessage, case .prose(let blocks) = segment else { continue }
+            let text = blocks.map { block -> String in
+                switch block {
+                case .heading(_, let text), .paragraph(let text): return text
+                case .list(let items): return items.map(\.text).joined(separator: "\n")
+                default: return ""
+                }
+            }.joined(separator: "\n")
+            let found = ChatMedia.find(in: text, bases: bases, skipping: seen, limit: ChatMedia.perMessage - seen.count)
+            if !found.isEmpty { out[index] = found; seen.formUnion(found.map(\.path)) }
+        }
+        return out
     }
 
     @ViewBuilder private func blockView(_ block: MarkdownBlock) -> some View {
@@ -269,6 +292,19 @@ struct CodeBlockView: View {
     let language: String
     let text: String
     var run: Run? = nil
+    /// JSON reads as indented lines (Pretty) or as written (Raw); nil when the block isn't JSON.
+    private let pretty: String?
+    @State private var showPretty = true
+
+    init(language: String, text: String, run: Run? = nil) {
+        self.language = language
+        self.text = text
+        self.run = run
+        pretty = JSONPretty.applies(language: language, text: text) ? JSONPretty.format(text) : nil
+    }
+
+    private var isPretty: Bool { pretty != nil && showPretty }
+    private var shown: String { isPretty ? pretty ?? text : text }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -288,14 +324,36 @@ struct CodeBlockView: View {
                     .help("Run in " + ((run.directory as NSString?)?.abbreviatingWithTildeInPath ?? "the session's folder"))
                     .part("Run Command Button", .bottom)
                 }
-                CopyButton(text: text)
+                if pretty != nil {
+                    Button { showPretty.toggle() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "curlybraces").font(.system(size: 9, weight: .medium))
+                            Text(showPretty ? "Pretty" : "Raw")
+                        }
+                    }
+                    .buttonStyle(.kit(.ghost))
+                    .controlSize(.small)
+                    .pointerCursor()
+                    .help(showPretty ? "Indented. Click to show it as written." : "As written. Click to indent it.")
+                    .part("JSON Mode", .bottom)
+                }
+                CopyButton(text: shown)
             }
             .padding(.leading, 12).padding(.trailing, 6).frame(height: 28)
             Rectangle().fill(KitInk.hairline).frame(height: 1)
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(text).kitType(.mono).foregroundColor(KitInk.text)
+            if isPretty {
+                // Indented JSON wraps its long strings instead of running off to the right.
+                Text(shown).kitType(.mono).foregroundColor(KitInk.text)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(shown).kitType(.mono).foregroundColor(KitInk.text)
+                        .textSelection(.enabled)
+                        .padding(12)
+                }
             }
         }
         .background(RoundedRectangle(cornerRadius: KitMetric.radiusMd, style: .continuous).fill(KitInk.raised.opacity(0.7)))
