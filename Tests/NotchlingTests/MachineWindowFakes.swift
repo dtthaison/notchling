@@ -9,8 +9,14 @@ final class ReachableRunner: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [RecordedCall] = []
     let reachable: String
+    /// When set, calls go here and the runner keeps none: a test that walks a model for a secret must not find
+    /// the stdin of a delivery in the runner the model holds.
+    private let sink: (@Sendable (RecordedCall) -> Void)?
 
-    init(reachable: String) { self.reachable = reachable }
+    init(reachable: String, sink: (@Sendable (RecordedCall) -> Void)? = nil) {
+        self.reachable = reachable
+        self.sink = sink
+    }
 
     var calls: [RecordedCall] { lock.withLock { recorded } }
 
@@ -24,7 +30,8 @@ final class ReachableRunner: CommandRunning, @unchecked Sendable {
 
     func run(_ argv: [String], cwd: String?, env: [String: String], stdin: Data?, timeout: TimeInterval,
              onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
-        lock.withLock { recorded.append(RecordedCall(argv: argv, env: env, stdin: stdin, cwd: cwd)) }
+        let call = RecordedCall(argv: argv, env: env, stdin: stdin, cwd: cwd)
+        if let sink { sink(call) } else { lock.withLock { recorded.append(call) } }
         guard let script = argv.last, script.contains("out=$( /bin/sh -c ") else {
             return CommandResult(code: 0, out: "", err: "")
         }

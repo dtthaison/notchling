@@ -100,17 +100,119 @@ final class MachinesSafetyTests: XCTestCase {
         XCTAssertEqual(names, ["m1/stays-awake", "vps-sing-1/base-tools", "vps-sing-1/service", "vps-sing-1/running"])
     }
 
+    /// The vault of the test, with the values inside a closure: a walk over the engine must not find them in the
+    /// fake itself (production's `VaultSecretSource` holds only lookups too).
+    private struct ClosureSecrets: SecretSource {
+        let lookup: @Sendable (String) -> String?
+        init(_ lookup: @escaping @Sendable (String) -> String?) { self.lookup = lookup }
+        func value(named name: String) -> String? { lookup(name) }
+        func entry(named name: String) -> VaultEntry? { nil }
+    }
+
+    /// GitHub says 404 and nothing is kept (`FakeHTTP` records each bearer, which a walk over the engine would find).
+    private struct NoHTTP: HTTPFetching {
+        func get(_ url: URL, bearer: String) async -> HTTPAnswer { HTTPAnswer(status: 404, headers: [:], body: Data()) }
+    }
+
+    private final class CallLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var list: [RecordedCall] = []
+        func add(_ call: RecordedCall) { lock.withLock { list.append(call) } }
+        var calls: [RecordedCall] { lock.withLock { list } }
+    }
+
+    /// Real fake values go through the real delivery steps (Claude login, issues token, Update N machines) against a
+    /// recording runner, and through the real model. A value may be in the stdin of the call that writes its file and
+    /// nowhere else: not in argv, env, a log, an outcome, a result, a confirmation display or anything the view model
+    /// publishes.
+    @MainActor
     func testNoDisplayTextOrScriptContainsAVaultValue() async throws {
-        let values = ["claude-worker": testLongToken,
-                      "m1-github-issues": "github_pat_" + String(testLongToken.dropFirst(13)),
-                      "vps-sing-1-github-issues": "ghp_" + String(testLongToken.reversed().prefix(60))]
+        let reachableText: [String: String] = [
+            "m1": "os=Darwin\narch=arm64\nuid=501\nuser=sondoan\nhome=/Users/sondoan\nversion=26.1\ndisk_kb=125829120\ndocker=none",
+            "vps-sing-1": "os=Linux\narch=x86_64\nuid=1000\nuser=agent\nhome=/home/agent\nversion=Ubuntu 24.04\ndisk_kb=83886080\ndocker=none",
+        ]
         for machine in machines {
-            // the catalog is built with the vault in reach of the engine; no step's text may carry a value
-            for (label, text) in await allTexts(for: machine) {
-                for (name, value) in values {
-                    XCTAssertFalse(text.contains(value), "\(label) contains the value of \(name)")
-                    assertNoFragment(of: value, in: text)
+            let issuesName = "\(machine.name)-github-issues"
+            let values = ["claude-worker": testLongToken,
+                          issuesName: "github_pat_" + String(testLongToken.dropFirst(13).reversed()),
+                          "unrelated": "zZ9-unrelated-vault-value-\(machine.name)-0123456789"]
+            // the value, and pieces of it a cut or a split could leave
+            var needles: [String] = []
+            for value in values.values {
+                let chars = Array(value)
+                needles += [value, String(chars.prefix(8)), String(chars[(chars.count / 2)..<(chars.count / 2 + 8)]), String(chars.suffix(8))]
+            }
+            let log = CallLog()
+            let runner = ReachableRunner(reachable: reachableText[machine.name] ?? "", sink: { log.add($0) })
+            let reg = TestRegistry(machines: [machine])
+            let engine = SetupEngine(runner: runner, secrets: ClosureSecrets { values[$0] }, http: NoHTTP(), mac: { .empty },
+                                     machines: { reg.machines }, save: reg.save, clock: { Date(timeIntervalSince1970: 1_800_000_000) },
+                                     observeVault: false)
+            let model = MachinesModel(poller: MachinePoller(runner: runner, machines: { reg.machines }, clock: { Date() }, observeSleep: false),
+                                      actions: MorningActions(runner: runner), engine: engine, registry: { reg.state }, save: reg.save,
+                                      vaultEntries: { [] }, rename: { _, _ in }, renew: { _ in },
+                                      registryPath: "/tmp/notchling-test/machines.json", runner: runner)
+            await model.open()
+
+            // every confirmation the window can show, and the two delivery Fixes run for real
+            var shown: [String] = []
+            for step in engine.steps(for: machine) {
+                model.requestSetUp(step.id, on: machine.name)
+                guard case .fix(let prompt)? = model.setupSheet else { continue }
+                shown.append(prompt.display)
+                if step.id == .claudeLogin || step.id == .issuesToken {
+                    await model.confirm(prompt, password: nil).value
+                } else {
+                    model.cancel(prompt)
                 }
+            }
+            model.requestSetUpAll(on: machine.name)
+            if case .fix(let all)? = model.setupSheet { shown.append(all.display); model.cancel(all) }
+            model.requestToggle(on: machine.name, to: true)
+            if case .fix(let toggle)? = model.setupSheet { shown.append(toggle.display); model.cancel(toggle) }
+
+            // Update N machines for both renewed values
+            for name in ["claude-worker", issuesName] {
+                engine.vaultValueChanged(name: name)
+                await model.update(secret: name).value
+            }
+            XCTAssertEqual(model.outcomes[machine.name]?.ok, true, "the delivery Fixes ran: \(String(describing: model.outcomes[machine.name]))")
+
+            // 1. what ran: a value only in the stdin of the call that writes its file
+            let calls = log.calls
+            for value in [values["claude-worker"]!, values[issuesName]!] {
+                let carrying = calls.filter { call in call.stdin.map { String(decoding: $0, as: UTF8.self).contains(value) } ?? false }
+                XCTAssertGreaterThanOrEqual(carrying.count, 2, "\(machine.name): the value was delivered by the Fix and by Update")
+                for call in carrying { XCTAssertTrue(call.argv.last?.contains("cat > ") == true, "a value went to a call that writes no file") }
+            }
+            for call in calls {
+                let text = call.argv.joined(separator: " ") + " " + call.env.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+                for needle in needles { XCTAssertFalse(text.contains(needle), "\(machine.name): argv or env carries a value piece: \(text.prefix(200))") }
+            }
+
+            // 2. what the app says: displays, scripts, logs, outcomes, results, notes
+            var said = shown
+            said += engine.logs.values.flatMap { $0 }
+            said += model.outcomes.values.map(\.text) + Array(model.updateNotes.values)
+            for (_, byStep) in engine.results {
+                for (_, r) in byStep {
+                    switch r.state { case .pass(let t), .fail(let t), .cantTell(let t): said.append(t) }
+                    said += r.rows.flatMap { [$0.name, $0.detail] }
+                }
+            }
+            for step in engine.steps(for: machine) {
+                if case .remote(let script, _) = step.probe { said.append(script) }
+                if case .run(let plan) = step.fix { said.append(plan.display) }
+            }
+            XCTAssertFalse(shown.isEmpty)
+            for text in said {
+                for needle in needles { XCTAssertFalse(text.contains(needle), "\(machine.name): shown text carries a value piece: \(text.prefix(200))") }
+            }
+
+            // 3. what the view model and the engine hold
+            for needle in needles {
+                var seen = Set<ObjectIdentifier>()
+                XCTAssertFalse(holds(needle, in: model, seen: &seen), "\(machine.name): the view model holds a value piece")
             }
         }
     }
