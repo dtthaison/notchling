@@ -321,11 +321,14 @@ final class NotchModel: ObservableObject {
     }
 
     /// Slides out a short message of Notchling's own (a usage limit), borrowing an agent's peek slot.
-    func peekNotice(_ text: String, using agent: Agent) {
-        guard state == .collapsed || (isPeeking && !hovering) else { return }
+    /// Returns false when the notch is open or hovered and nothing was shown.
+    @discardableResult
+    func peekNotice(_ text: String, using agent: Agent) -> Bool {
+        guard state == .collapsed || (isPeeking && !hovering) else { return false }
         peek(agent)
         notice = (agent.id, text)
         schedulePeekEnd(after: 10)
+        return true
     }
 
     /// A question or permission prompt holds the agent until you answer.
