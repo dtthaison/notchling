@@ -110,7 +110,7 @@ Move the pure models, parsers and policies listed above into a library target wi
 | `ChatModel` | `ChatViewModel` (selection, drafts, send)<br>`SessionAccountsCoordinator` (move, switch, new session)<br>`DropIntake`<br>`ClaudeCLI` adapter |
 | `AccountStore` | `AccountRepository`<br>`UsageAPI`<br>`ClaudeCodeSwitcher`<br>`LaneSwitcher` (ends the Lanes cycle) |
 | `ConversationReader.parse` (172 lines) | per-type handlers over a `ParseState` struct, plus a `ToolCallFactory` |
-| `NotchView.swift` | one file per card; `PetView` goes to a Pet folder with an injected clock and random source |
+| `NotchView.swift` | one file per card (done: `QuestionCard`, `PermissionCard`, `NotchPeek`, `NotchRows`, `NotchDetail`); `PetView` is in `Notch/Pet/` (injected clock and random source still to do) |
 | `LimitWatcher` | one switch flow for the main login and for lanes; the notifier and banner move to UI |
 
 ### Phase 4: provider registry (done for the four account providers)
