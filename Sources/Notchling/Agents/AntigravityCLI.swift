@@ -186,6 +186,12 @@ final class AntigravityRunner: ObservableObject {
         return l.transcript.conversation()
     }
 
+    /// The conversation as far as it has loaded, without counting as use (the phone's session list reads it
+    /// every few seconds; that must not keep an idle process from being reaped).
+    func peekConversation(_ id: String) -> Conversation? { live[id]?.transcript.conversation() }
+
+    func isOpen(_ id: String) -> Bool { live[id] != nil }
+
     func isLoading(_ id: String) -> Bool { live[id].map { !$0.loaded && $0.loadError == nil } ?? false }
 
     /// Starts a process for the session and loads it, unless one is open already.
