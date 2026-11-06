@@ -1,0 +1,8 @@
+# Resource limits for the sd worker and its TestFlight poll (Linux). Install as /etc/systemd/system/sd-worker.slice.
+[Unit]
+Description=sd worker resource limits
+
+[Slice]
+CPUQuota=400%
+MemoryMax=6G
+MemorySwapMax=0

@@ -1,0 +1,12 @@
+# Runs sd-testflight.service every 15 minutes (Linux). Install as /etc/systemd/system/sd-testflight.timer, and
+# enable it only on the machine whose worker.json has a testflight block (see README.md, Limits).
+[Unit]
+Description=sd TestFlight feedback poll every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=sd-testflight.service
+
+[Install]
+WantedBy=timers.target

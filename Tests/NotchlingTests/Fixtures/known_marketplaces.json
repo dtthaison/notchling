@@ -1,0 +1,10 @@
+{
+  "claude-plugins-official": {
+    "source": {"source": "github", "repo": "anthropics/claude-plugins-official"},
+    "installLocation": "/Users/x/.claude/plugins/marketplaces/claude-plugins-official"
+  },
+  "system-design": {
+    "source": {"source": "directory", "path": "@SYSTEM_DESIGN_DIR@"},
+    "installLocation": "@SYSTEM_DESIGN_DIR@"
+  }
+}
