@@ -20,6 +20,14 @@ enum VaultPrompt {
         return result ?? nil
     }
 
+    /// A reminder's Renew…: the form for this secret in its own panel, the value empty and the how-to above
+    /// it. Doesn't wait. Call on the main thread.
+    static func renew(_ entry: VaultEntry) {
+        let controller = PromptPanel(title: "Renew Secret")
+        let close: () -> Void = { [weak controller] in controller?.close() }
+        controller.show(AnyView(VaultSheet(form: VaultForm(entry, renew: true), finish: { _ in close() }, done: close)))
+    }
+
     /// Shows `content` in a floating panel on the main thread and waits for its answer (closing the panel
     /// answers `fallback`).
     private static func wait<T, V: View>(title: String, default fallback: T,

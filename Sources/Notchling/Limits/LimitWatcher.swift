@@ -395,9 +395,10 @@ enum NoticeBanner {
     private static var panel: NSPanel?
     private static var closing: DispatchWorkItem?
 
-    static func show(_ title: String, _ body: String) {
+    static func show(_ title: String, _ body: String, action: (title: String, run: () -> Void)? = nil) {
         dismiss()
-        let view = NSHostingView(rootView: NoticeBannerView(title: title, message: body) { dismiss() })
+        let button = action.map { action in (title: action.title, run: { dismiss(); action.run() }) }
+        let view = NSHostingView(rootView: NoticeBannerView(title: title, message: body, action: button) { dismiss() })
         view.setFrameSize(NSSize(width: width, height: view.fittingSize.height))
         let panel = NSPanel(contentRect: view.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentView = view
@@ -429,6 +430,7 @@ enum NoticeBanner {
 struct NoticeBannerView: View {
     let title: String
     let message: String
+    var action: (title: String, run: () -> Void)?
     let onClose: () -> Void
 
     var body: some View {
@@ -439,6 +441,9 @@ struct NoticeBannerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
                 Text(message).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let action {
+                    Button(action.title, action: action.run).padding(.top, 4)
+                }
             }
             Spacer(minLength: 0)
         }
