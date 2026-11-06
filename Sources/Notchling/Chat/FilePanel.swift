@@ -201,10 +201,12 @@ private struct MarkdownFileView: View {
     }
 }
 
-/// Monospaced, selectable, scrollable; one NSTextView, so a long file stays fast.
+/// Monospaced, selectable, scrollable; one NSTextView, so a long file stays fast. A .json file is
+/// indented (keys in the order written) and wraps long strings; everything else scrolls sideways.
 private struct TextFileView: NSViewRepresentable {
     let url: URL
     let version: FilePanel.Stamp
+    private var isJSON: Bool { url.pathExtension.lowercased() == "json" }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -217,6 +219,10 @@ private struct TextFileView: NSViewRepresentable {
         view.textContainerInset = NSSize(width: 14, height: 14)
         view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         view.textColor = NSColor(KitInk.text)
+        if isJSON {
+            scroll.hasHorizontalScroller = false
+            return scroll
+        }
         // Long lines scroll sideways rather than wrapping, as in an editor.
         view.isHorizontallyResizable = true
         view.textContainer?.widthTracksTextView = false
@@ -230,7 +236,8 @@ private struct TextFileView: NSViewRepresentable {
         context.coordinator.shown = version
         let (text, cut) = readText(url)
         let place = scroll.contentView.bounds.origin
-        view.string = cut ? text + "\n\n… (first 2 MB shown)" : text
+        // A cut file isn't valid JSON, so it stays as read.
+        view.string = cut ? text + "\n\n… (first 2 MB shown)" : (isJSON ? JSONPretty.formatted(text) : text)
         scroll.contentView.scroll(to: place)
     }
 

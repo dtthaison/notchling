@@ -205,6 +205,7 @@ struct ToolCallRow: View {
                     }
                     if let output = call.output, !output.isEmpty {
                         MonoBox(title: call.isError ? "Error" : "Output", text: output, tone: call.isError ? .error : .plain)
+                        if !call.isError { OutputMediaPreviews(text: output) }
                     }
                 }
                 .padding(.leading, 24)
