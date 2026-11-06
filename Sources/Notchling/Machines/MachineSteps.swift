@@ -21,7 +21,7 @@ enum MachineSteps {
             SetupStep(id: .claudeCode, title: "Claude Code", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
                       fix: .notBuiltRun()),
             SetupStep(id: .xcode, title: "Xcode", needs: [.reachable], cadence: .everyRefresh, probe: .notBuilt,
-                      fix: .howTo("Install Xcode from the App Store on the machine and open it once to accept the license.")),
+                      fix: .howTo("Notchling doesn't install Xcode, which needs your Apple ID. On the machine: App Store, open it once, Xcode > Settings > Components for the iOS runtime, then Check again.")),
         ]
     }
 }

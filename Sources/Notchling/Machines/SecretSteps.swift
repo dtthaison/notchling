@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// How a secret sits in its file on the machine.
@@ -24,7 +25,12 @@ enum SecretSteps {
                   probe: .notBuilt, fix: .notBuiltRun())
     }
 
-    static func issuesToken(for machine: Machine, job: SDWorkerSettings) -> SetupStep {
+    /// `open` and `form` are the seam for the creation flow the Fix starts through `TokenCreation.start` when the
+    /// vault lacks the token: tests pass their own. The defaults are the production ones (Task 7 points `form`
+    /// at `VaultPrompt.open(request:done:)`).
+    static func issuesToken(for machine: Machine, job: SDWorkerSettings,
+                            open: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) },
+                            form: @escaping @Sendable (VaultRequest) -> Void = { _ in }) -> SetupStep {
         SetupStep(id: .issuesToken, title: "GitHub issues token delivered", needs: [.reachable], cadence: .everyRefresh,
                   probe: .notBuilt, fix: .notBuiltRun())
     }

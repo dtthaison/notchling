@@ -118,7 +118,8 @@ struct FixContext: Sendable {
     let adminPassword: String?
     /// Output of a running Fix. It can fire from any thread, from the stdout and stderr readers at once, and for a
     /// moment after `MachineRun` returned (an orphan holding the pipe). The engine's closure must be thread-safe
-    /// (or hop to the MainActor) and drop lines once the Fix has ended.
+    /// and keep the order: append to a lock-protected buffer or yield into one serial `AsyncStream`, never one
+    /// MainActor `Task` per line. It drops lines once the Fix has ended.
     let log: @Sendable (String) -> Void
 }
 

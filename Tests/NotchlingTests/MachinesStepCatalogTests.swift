@@ -140,16 +140,18 @@ final class MachinesStepCatalogTests: XCTestCase {
         XCTAssertEqual(kind(linux.first { $0.id == .running }!), "toggle+admin")
     }
 
-    func testTheStubsAnswerCantTellAndRefuseTheirFix() async {
+    /// The two helpers every stub starts from; no catalog step is checked, so filling a stub never breaks this.
+    func testTheStubHelpersCantTellAndRefuseTheirFix() async {
         let ctx = StepContext.test()
-        for step in catalog(TestMachines.mac()) {
-            guard case let .local(probe) = step.probe else { return XCTFail("\(step.id.raw): a stub probe is local") }
-            let result = await probe(ctx)
-            XCTAssertEqual(result.state, .cantTell("not built yet"), step.id.raw)
-            if let plan = plan(step) {
-                let outcome = await plan.run(.test(ctx))
-                XCTAssertEqual(outcome, FixOutcome(ok: false, message: "not built yet"), step.id.raw)
-            }
+        guard case let .local(probe) = Probe.notBuilt else { return XCTFail("the stub probe is local") }
+        let result = await probe(ctx)
+        XCTAssertEqual(result.state, .cantTell("not built yet"))
+        for admin in [false, true] {
+            guard let plan = plan(SetupStep(id: .running, title: "x", needs: [], cadence: .slow, probe: .notBuilt,
+                                            fix: .notBuiltRun(needsAdmin: admin))) else { return XCTFail("not a run Fix") }
+            XCTAssertEqual(plan.needsAdmin, admin)
+            let outcome = await plan.run(.test(ctx))
+            XCTAssertEqual(outcome, FixOutcome(ok: false, message: "not built yet"))
         }
     }
 

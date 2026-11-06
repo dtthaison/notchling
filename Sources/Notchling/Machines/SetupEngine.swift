@@ -11,8 +11,9 @@ enum AdminAnswer { case password(String), rootConfirmed, cancelled }
 /// Runs the checks and the Fixes. Task 10 fills the bodies; the signatures here are final.
 ///
 /// Output reaches the engine from any thread (`FixContext.log` fires from the stdout and stderr readers and
-/// for a moment after a run returned). The engine's log closure hops to the MainActor and ignores lines that
-/// arrive after its Fix ended.
+/// for a moment after a run returned). The engine's log closure appends each line to a lock-protected buffer, or
+/// yields it into one serial `AsyncStream`, so the order is kept and the MainActor drains it. It never starts a
+/// MainActor `Task` per line (those can reorder), and it drops lines that arrive after its Fix ended.
 @MainActor
 final class SetupEngine: ObservableObject {
     /// By machine name.
