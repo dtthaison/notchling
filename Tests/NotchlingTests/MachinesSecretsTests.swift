@@ -102,6 +102,36 @@ final class MachinesSecretsTests: XCTestCase {
         }
     }
 
+    /// Mask first, trim afterwards: a value with a space at its edge no longer matches once the edge is trimmed.
+    func testAValueWithEdgeSpacesEchoedAloneIsStillMasked() async {
+        let value = "  sk-ant-oat01-SPACEDVALUE  "
+        for onStderr in [true, false] {
+            let result = onStderr ? CommandResult(code: 1, out: "", err: value) : CommandResult(code: 1, out: value, err: "")
+            let runner = ScriptedRunner()
+            runner.on({ _ in true }, result: result)
+            let ctx = fixContext(runner: runner, secrets: FakeSecrets(values: ["claude-worker": value]))
+            let outcome = await SecretSteps.deliver(claudeUsage(), ctx: ctx)
+            XCTAssertFalse(outcome.ok)
+            XCTAssertFalse(outcome.message.contains("SPACEDVALUE"), outcome.message)
+            XCTAssertTrue(outcome.message.contains("[secret:claude-worker]"), outcome.message)
+        }
+    }
+
+    /// The engine's mask (every vault value of the machine) is applied to deliver's message too.
+    func testDeliverRunsItsMessageThroughTheContextsMask() async {
+        let runner = ScriptedRunner()
+        runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: "no space for OTHERSECRET-1234 here"))
+        let step = StepContext.test(machine: TestMachines.mac(), runner: runner,
+                                    secrets: FakeSecrets(values: ["claude-worker": claudeValue]))
+        let ctx = FixContext(step: step, adminPassword: nil, log: { _ in }, mask: {
+            $0.replacingOccurrences(of: "OTHERSECRET-1234", with: "[secret:other]")
+        })
+        let outcome = await SecretSteps.deliver(claudeUsage(), ctx: ctx)
+        XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("[secret:other]"), outcome.message)
+        XCTAssertFalse(outcome.message.contains("OTHERSECRET"), outcome.message)
+    }
+
     func testAHugeOrCutEchoIsNotShownAtAll() async {
         for said in ["[earlier output cut]\nrest of \(claudeValue)", String(repeating: "y", count: 5000)] {
             let runner = ScriptedRunner()

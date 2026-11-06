@@ -171,10 +171,12 @@ final class SetupEngine: ObservableObject {
         return masks
     }
 
-    /// The context of one machine. A Fix gets its own machine's, never another's.
+    /// The context of one machine. A Fix gets its own machine's, never another's. Its `mask` hides the machine's
+    /// vault values, so a step masks what a machine said before it cuts it.
     private func stepContext(_ machine: Machine) -> StepContext {
-        StepContext(machine: machine, all: currentMachines(), runner: runner, secrets: secrets, http: http,
-                    mac: mac(), now: clock())
+        let masks = masks(for: machine)
+        return StepContext(machine: machine, all: currentMachines(), runner: runner, secrets: secrets, http: http,
+                           mac: mac(), now: clock(), mask: { masks.apply($0) })
     }
 
     // MARK: checks
@@ -536,7 +538,9 @@ final class SetupEngine: ObservableObject {
             for await line in stream { self?.appendLog(name, [line]) }
         }
 
-        let ctx = FixContext(step: stepContext(m), adminPassword: adminPassword, log: { log.add($0) })
+        // `mask` hides the vault values and this Fix's admin password, so a step masks before it cuts a failure line
+        let ctx = FixContext(step: stepContext(m), adminPassword: adminPassword, log: { log.add($0) },
+                             mask: { masks.apply($0) })
         let raw = await body(ctx)
         log.end()
         await drain.value

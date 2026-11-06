@@ -64,17 +64,20 @@ enum MachineSteps {
     }
 
     /// A short failure line from a Fix's result: the last line of stderr (where brew, apt and curl say what went
-    /// wrong), or of stdout when stderr is empty. The admin password is replaced first, then the line is cut, so
-    /// no piece of it survives a cut.
+    /// wrong), or of stdout when stderr is empty. The vault values and the admin password are masked first
+    /// (`ctx.mask`), then the line is cut, so no piece of a secret survives a cut. Output `ProcessRunner` cut at
+    /// its start is a notice and a half line that can hold the end of a value: that half line is not shown.
     private static func outcome(_ r: CommandResult, ok: String, ctx: FixContext) -> FixOutcome {
         if r.code == 0 { return FixOutcome(ok: true, message: ok) }
-        func lastLine(_ text: String) -> String? {
-            var text = text
+        func lastLine(_ output: String) -> String? {
+            var text = ctx.mask(output)
             if let password = ctx.adminPassword, !password.isEmpty {
                 text = text.replacingOccurrences(of: password, with: "[admin password]")
             }
-            return text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-                .last { !$0.isEmpty }
+            var lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if output.hasPrefix(ProcessRunner.cutNotice), lines.count > 1 { lines.remove(at: 1) }
+            return lines.last
         }
         let last = lastLine(r.err) ?? lastLine(r.out) ?? "no output"
         return FixOutcome(ok: false, message: "failed (code \(r.code)): \(cut(last))")
@@ -95,10 +98,12 @@ enum MachineSteps {
     """#
 
     private static func parseReachable(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
-        let kv = keyed(out.text, keys: ["os", "arch", "home", "version", "disk_kb", "docker"])
+        // masked before anything is cut from it
+        let text = ctx.mask(out.text)
+        let kv = keyed(text, keys: ["os", "arch", "home", "version", "disk_kb", "docker"])
         guard let osName = kv["os"], !osName.isEmpty else {
             if out.code != 0 {
-                let why = firstLine(out.text)
+                let why = firstLine(text)
                 return CheckResult(state: .fail(why.isEmpty ? "can't reach the machine" : "can't reach the machine: \(cut(why))"))
             }
             return CheckResult(state: .cantTell("the machine gave no answer"))
@@ -184,7 +189,7 @@ enum MachineSteps {
             detected.fileVault = false
             return CheckResult(state: .pass("off"), detected: detected)
         }
-        let why = firstLine(out.text)
+        let why = firstLine(ctx.mask(out.text))
         return CheckResult(state: .cantTell(why.isEmpty ? "fdesetup said nothing" : cut(why)))
     }
 
@@ -298,7 +303,7 @@ enum MachineSteps {
     private static let claudeScript = "command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null"
 
     private static func parseClaudeCode(_ out: RemoteOutput, _ ctx: StepContext) async -> CheckResult {
-        let line = firstLine(out.text)
+        let line = firstLine(ctx.mask(out.text))
         guard !line.isEmpty, line.contains(where: \.isNumber) else { return CheckResult(state: .fail("not installed")) }
         return CheckResult(state: .pass(cut(line)))
     }

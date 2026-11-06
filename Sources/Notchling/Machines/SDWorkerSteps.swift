@@ -297,7 +297,7 @@ enum SDWorkerSteps {
                       probe: .remote(script: serviceProbe(linux: linux), parse: { out, ctx in serviceCheck(out, ctx) }),
                       fix: .run(FixPlan(display: serviceDisplay(linux: linux), needsAdmin: linux, run: installService))),
             SetupStep(id: .sdCheck, title: "sd worker setup --check", needs: [.service], cadence: .slow,
-                      probe: .remote(script: setupCheckScript(job), parse: { out, _ in setupCheckResult(out) }),
+                      probe: .remote(script: setupCheckScript(job), parse: { out, ctx in setupCheckResult(out, mask: ctx.mask) }),
                       fix: .howTo("Read the rows under this step. Fix what they name, then check again.")),
             SetupStep(id: .running, title: "Running", needs: [.sdCheck], cadence: .everyRefresh,
                       probe: .remote(script: runningProbe(linux: linux), parse: { out, _ in runningCheck(out, linux: linux) }),
@@ -389,12 +389,12 @@ enum SDWorkerSteps {
         let tar = await ctx.step.runner.run(["/usr/bin/tar", "-czf", archive, "-C", sd.path, "."], cwd: nil,
                                             env: ["COPYFILE_DISABLE": "1"], stdin: nil, timeout: 120, onOutput: ctx.log)
         guard tar.code == 0, let data = FileManager.default.contents(atPath: archive), !data.isEmpty else {
-            return FixOutcome(ok: false, message: "couldn't pack sd \(sd.version) on this Mac: \(firstLine(tar.err))")
+            return FixOutcome(ok: false, message: "couldn't pack sd \(sd.version) on this Mac: \(firstLine(tar.err, ctx.mask))")
         }
         let run = await MachineRun.script(pluginsScript(marketplace: market), stdin: data, ctx: ctx)
         return run.code == 0
             ? FixOutcome(ok: true, message: "sd \(sd.version) and superpowers installed")
-            : FixOutcome(ok: false, message: "the install failed (exit \(run.code)): \(firstLine(run.err))")
+            : FixOutcome(ok: false, message: "the install failed (exit \(run.code)): \(firstLine(run.err, ctx.mask))")
     }
 
     // MARK: worker.json written
@@ -443,7 +443,7 @@ enum SDWorkerSteps {
         // error) is a real read error, and the Fix must not overwrite a file it couldn't read.
         let missing = read.out.isEmpty && read.err.isEmpty && (read.code == 0 || read.code == 1)
         guard missing || (read.code == 0 && read.err.isEmpty) else {
-            let why = firstLine(read.err)
+            let why = firstLine(read.err, ctx.mask)
             return FixOutcome(ok: false, message: "couldn't read worker.json (exit \(read.code))" + (why.isEmpty ? "" : ": \(why)"))
         }
         let remote = Data(read.out.utf8)
@@ -454,7 +454,7 @@ enum SDWorkerSteps {
                                             stdin: WorkerJSON.merged(remote: remote, owned: owned), ctx: ctx, timeout: 60)
         return write.code == 0
             ? FixOutcome(ok: true, message: "worker.json written")
-            : FixOutcome(ok: false, message: "couldn't write worker.json: \(firstLine(write.err))")
+            : FixOutcome(ok: false, message: "couldn't write worker.json: \(firstLine(write.err, ctx.mask))")
     }
 
     // MARK: Service installed
@@ -567,20 +567,20 @@ enum SDWorkerSteps {
             let run = await MachineRun.admin(installScript(files: files), ctx: ctx)
             return run.code == 0
                 ? FixOutcome(ok: true, message: "\(files.count) units written")
-                : FixOutcome(ok: false, message: "couldn't write the units (exit \(run.code)): \(firstLine(run.err))")
+                : FixOutcome(ok: false, message: "couldn't write the units (exit \(run.code)): \(firstLine(run.err, ctx.mask))")
         }
         // The plist has RunAtLoad, so launchd would start it at the next login. Disable the label first (launchd keeps
         // that without a plist or a loaded job), so a failure leaves no plist behind. This never loads it: no
         // bootstrap, no enable.
         let off = await MachineRun.script(macDisableScript, ctx: ctx, timeout: 60)
         guard off.code == 0 else {
-            return FixOutcome(ok: false, message: "couldn't disable \(macLabel) (exit \(off.code)): \(firstLine(off.err)); no service file was written")
+            return FixOutcome(ok: false, message: "couldn't disable \(macLabel) (exit \(off.code)): \(firstLine(off.err, ctx.mask)); no service file was written")
         }
         let run = await MachineRun.script(RemoteShell.writeFile(ServiceFiles.plistPath, mode: "644"),
                                           stdin: Data(files[0].content.utf8), ctx: ctx, timeout: 60)
         return run.code == 0
             ? FixOutcome(ok: true, message: "\(ServiceFiles.plistName) written; \(macLabel) stays disabled until Running is turned on")
-            : FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err))")
+            : FixOutcome(ok: false, message: "couldn't write the LaunchAgent: \(firstLine(run.err, ctx.mask))")
     }
 
     // MARK: sd worker setup --check
@@ -596,13 +596,15 @@ enum SDWorkerSteps {
             + "c=$?; echo; echo \"@@exit $c\"; head -c 4096 \"$e\"; rm -f \"$e\""
     }
 
-    private static func cut(_ s: String) -> String { String(s.prefix(textCap)) }
+    /// Machine text for a message: masked first (`mask` is the context's), then cut, so a cut can't leave a piece of
+    /// a vault value.
+    private static func cut(_ s: String, _ mask: (String) -> String) -> String { String(mask(s).prefix(textCap)) }
 
-    private static func firstLine(_ s: String) -> String {
-        cut(s.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "")
+    private static func firstLine(_ s: String, _ mask: (String) -> String) -> String {
+        String((mask(s).split(separator: "\n", omittingEmptySubsequences: true).first ?? "").prefix(textCap))
     }
 
-    private static func setupCheckResult(_ out: RemoteOutput) -> CheckResult {
+    private static func setupCheckResult(_ out: RemoteOutput, mask: (String) -> String) -> CheckResult {
         let text = out.text
         guard let marker = text.range(of: "@@exit ", options: .backwards) else {
             return CheckResult(state: .fail("setup --check printed no result"))
@@ -612,7 +614,7 @@ enum SDWorkerSteps {
         let stderr = String(tail.drop { $0 != "\n" }.dropFirst())
         let stdout = String(text[..<marker.lowerBound])
         guard code == "0" || code == "4" else {
-            let why = firstLine(stderr)
+            let why = firstLine(stderr, mask)
             return CheckResult(state: .fail(why.isEmpty ? "setup --check exited \(code)" : why))
         }
         guard let data = stdout.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
@@ -620,7 +622,8 @@ enum SDWorkerSteps {
             return CheckResult(state: .fail("setup --check printed rows this Notchling can't read"))
         }
         let rows = array.prefix(rowCap).map { row in
-            SubRow(name: cut(row["name"] as? String ?? ""), ok: row["ok"] as? Bool ?? false, detail: cut(row["detail"] as? String ?? ""))
+            SubRow(name: cut(row["name"] as? String ?? "", mask), ok: row["ok"] as? Bool ?? false,
+                   detail: cut(row["detail"] as? String ?? "", mask))
         }
         let counted = rows.filter { $0.name != notCounted }
         let failed = counted.filter { !$0.ok }.count

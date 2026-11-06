@@ -404,6 +404,46 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertEqual(step.cadence == .slow, true)
     }
 
+    /// A line of machine or gh output is masked before it is cut to 200 characters: the cut falls inside the token.
+    func testMachineTextIsMaskedBeforeItIsCutInChecksAndFixes() async {
+        let token = testLongToken
+        let mask = testMask(token, as: "[secret:m1-github-issues]")
+        let said = String(repeating: "f", count: 170) + token
+        let ctx = StepContext.test(mask: mask)
+
+        // the push check: the first line of what git said
+        let push = await probe(.pushRefused(repo)).parse(RemoteOutput(text: said + "\n", code: 128), ctx)
+        assertNoFragment(of: token, in: "\(push.state)")
+        XCTAssertTrue("\(push.state)".contains("[secret:m1-github-issues]"), "\(push.state)")
+
+        // the clone check: the origin line
+        let clone = await probe(.clone(repo)).parse(RemoteOutput(text: said + "\n", code: 0), ctx)
+        assertNoFragment(of: token, in: "\(clone.state)")
+
+        // the deploy key check: gh's error when it can't list the keys, and what ssh said to GitHub
+        let runner = ScriptedRunner()
+        runner.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 1, out: "", err: said))
+        let listed = await probe(.deployKey(repo)).parse(RemoteOutput(text: remoteText(pub: pub, ssh: welcome), code: 0),
+                                                         .test(runner: runner, mask: mask))
+        assertNoFragment(of: token, in: "\(listed.state)")
+        let ssh = await probe(.deployKey(repo)).parse(RemoteOutput(text: remoteText(pub: pub, ssh: said), code: 0), {
+            let ok = ScriptedRunner()
+            ok.on({ $0.contains("repos/\(self.repo)/keys") }, result: CommandResult(code: 0, out: self.ghKeys(self.body, readOnly: true), err: ""))
+            return .test(runner: ok, mask: mask)
+        }())
+        assertNoFragment(of: token, in: "\(ssh.state) \(ssh.rows)")
+
+        // the Fixes: clone's failure line and gh's, each cut to 200 characters
+        let failing = ScriptedRunner()
+        failing.on({ _ in true }, result: CommandResult(code: 128, out: "", err: said))
+        let cloned = await plan(.clone(repo)).run(.test(.test(runner: failing, mask: mask)))
+        XCTAssertFalse(cloned.ok)
+        assertNoFragment(of: token, in: cloned.message)
+        XCTAssertTrue(cloned.message.contains("[secret:m1-github-issues]"), cloned.message)
+        let key = await plan(.deployKey(repo)).run(.test(.test(runner: failing, mask: mask)))
+        assertNoFragment(of: token, in: key.message)
+    }
+
     func testStepsKeepTheirOrderAndDependencies() {
         let all = steps()
         XCTAssertEqual(all.map(\.id), [.deployKey(repo), .clone(repo), .pushRefused(repo)])

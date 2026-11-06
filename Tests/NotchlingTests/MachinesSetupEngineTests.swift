@@ -8,6 +8,8 @@ private final class EngineRunner: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [RecordedCall] = []
     var handler: (RecordedCall) -> (CommandResult, [String]) = { _ in (CommandResult(code: 0, out: "", err: ""), []) }
+    /// Chunks that arrive after `handler`'s, each tagged with its pipe the way `ProcessRunner` tags them.
+    var taggedChunks: (RecordedCall) -> [(OutputChannel, String)] = { _ in [] }
 
     var calls: [RecordedCall] { lock.withLock { recorded } }
     /// The batched probe calls (one ssh each).
@@ -23,6 +25,7 @@ private final class EngineRunner: CommandRunning, @unchecked Sendable {
         lock.withLock { recorded.append(call) }
         let (result, chunks) = handler(call)
         for chunk in chunks { onOutput?(chunk) }
+        for (channel, chunk) in taggedChunks(call) { OutputStreamTag.with(channel) { onOutput?(chunk) } }
         return result
     }
 }
@@ -1173,5 +1176,125 @@ final class MachinesSetupEngineTests: XCTestCase {
         XCTAssertEqual(on, FixOutcome(ok: false, message: "waits for sd check"))
         let off = await w.engine.toggleRunning(on: "m1", to: false, approval: admin())
         XCTAssertTrue(off.ok, off.message)
+    }
+
+    // MARK: integration round
+
+    /// The catalog's real step `id` of `machine` with its real Fix, a probe that passes on this Mac, and stubs that
+    /// pass for what it needs: the engine runs the real Fix on a runner that answers it.
+    private func realFix(_ id: StepID, _ machine: Machine) -> [SetupStep] {
+        func passes(_ id: StepID, _ title: String, _ fix: StepFix) -> SetupStep {
+            SetupStep(id: id, title: title, needs: [], cadence: .everyRefresh,
+                      probe: .local { _ in CheckResult(state: .pass("ok")) }, fix: fix)
+        }
+        guard let real = StepCatalog.steps(for: machine, all: [machine]).first(where: { $0.id == id }) else { return [] }
+        return real.needs.map { passes($0, $0.raw, .howTo("")) } + [passes(real.id, real.title, real.fix)]
+    }
+
+    /// Task 5: the failure line of a Fix is cut to 200 characters; the cut falls inside the token.
+    func testAClaudeInstallFailureIsMaskedBeforeItIsCut() async {
+        let machine = TestMachines.mac("m1")
+        let steps = realFix(.claudeCode, machine)
+        XCTAssertEqual(steps.last?.id, .claudeCode)
+        let w = world([machine], secrets: FakeSecrets(values: ["claude-worker": longToken])) { _, _ in steps }
+        w.runner.handler = { _ in (CommandResult(code: 1, out: "", err: String(repeating: "f", count: 170) + self.longToken), []) }
+        await w.engine.refresh(["m1"])
+        let out = await w.engine.runFix(.claudeCode, on: "m1", approval: admin())
+        XCTAssertFalse(out.ok)
+        noFragment(of: longToken, in: out.message)
+        noFragment(of: longToken, in: (w.engine.logs["m1"] ?? []).joined(separator: "\n"))
+        XCTAssertTrue(out.message.contains("[secret:claude-worker]"), out.message)
+    }
+
+    /// Task 6: the clone failure is the first line of the output, cut to 200 characters.
+    func testACloneFailureIsMaskedBeforeItIsCut() async {
+        let machine = TestMachines.mac("m1")
+        let id = StepID.clone(TestMachines.repo)
+        let steps = realFix(id, machine)
+        XCTAssertEqual(steps.last?.id, id)
+        let w = world([machine], secrets: FakeSecrets(values: ["m1-github-issues": longToken])) { _, _ in steps }
+        w.runner.handler = { _ in (CommandResult(code: 128, out: "", err: String(repeating: "f", count: 170) + self.longToken), []) }
+        await w.engine.refresh(["m1"])
+        let out = await w.engine.runFix(id, on: "m1", approval: admin())
+        XCTAssertFalse(out.ok)
+        noFragment(of: longToken, in: out.message)
+        XCTAssertTrue(out.message.contains("[secret:m1-github-issues]"), out.message)
+    }
+
+    /// Task 9: the write failure is the first line of stderr, cut to 300 characters.
+    func testAWorkerJSONWriteFailureIsMaskedBeforeItIsCut() async {
+        let machine = TestMachines.mac("m1")
+        let steps = realFix(.workerJSON, machine)
+        XCTAssertEqual(steps.last?.id, .workerJSON)
+        let w = world([machine], secrets: FakeSecrets(values: ["claude-worker": longToken])) { _, _ in steps }
+        w.runner.handler = { call in
+            // the read finds no file; the write (the only call with stdin) fails
+            call.stdin == nil
+                ? (CommandResult(code: 0, out: "", err: ""), [])
+                : (CommandResult(code: 1, out: "", err: String(repeating: "f", count: 270) + self.longToken), [])
+        }
+        await w.engine.refresh(["m1"])
+        let out = await w.engine.runFix(.workerJSON, on: "m1", approval: admin())
+        XCTAssertFalse(out.ok)
+        XCTAssertTrue(out.message.hasPrefix("couldn't write worker.json: "), out.message)
+        noFragment(of: longToken, in: out.message)
+        XCTAssertTrue(out.message.contains("[secret:claude-worker]"), out.message)
+    }
+
+    /// Task 7 through the engine's mask: another vault value of the machine, echoed where deliver's cut falls.
+    func testDeliveryMasksTheMachinesOtherVaultValuesBeforeItCuts() async {
+        let issues = "github_pat_" + String(longToken.dropFirst(13))
+        let secrets = FakeSecrets(values: ["claude-worker": longToken, "m1-github-issues": issues])
+        let w = world(secrets: secrets, steps: { _, _ in [] }, usages: SecretSteps.usages, deliver: SecretSteps.deliver)
+        w.runner.handler = { call in
+            call.stdin == nil
+                ? (CommandResult(code: 0, out: "", err: ""), [])
+                : (CommandResult(code: 1, out: "", err: String(repeating: "f", count: 270) + issues), [])
+        }
+        w.engine.vaultValueChanged(name: "claude-worker")
+        let outcomes = await w.engine.updateMachines(for: "claude-worker", approval: admin())
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes.first?.ok, false)
+        noFragment(of: issues, in: outcomes.first?.message ?? "")
+        XCTAssertTrue(outcomes.first?.message.contains("[secret:m1-github-issues]") == true, outcomes.first?.message ?? "")
+    }
+
+    /// O1: the delivery filter keeps one redactor per pipe. A token split on stdout while stderr writes between
+    /// the halves is whole again in its line.
+    func testDeliveryMasksAValueSplitOnOnePipeWhenTheOtherPipeWritesBetween() async {
+        let secrets = FakeSecrets(values: ["claude-worker": longToken])
+        let w = world(secrets: secrets, steps: { _, _ in [] }, usages: SecretSteps.usages, deliver: SecretSteps.deliver)
+        let half = longToken.count / 2
+        w.runner.taggedChunks = { call in
+            guard call.stdin != nil else { return [] }
+            return [(.stdout, "using " + String(self.longToken.prefix(half))),
+                    (.stderr, "warning: something\n"),
+                    (.stdout, String(self.longToken.dropFirst(half)) + " done\n"),
+                    (.stderr, "warning: again\n")]
+        }
+        w.engine.vaultValueChanged(name: "claude-worker")
+        let outcomes = await w.engine.updateMachines(for: "claude-worker", approval: admin())
+        XCTAssertEqual(outcomes.first?.ok, true, outcomes.first?.message ?? "")
+        let log = w.engine.logs["m1"] ?? []
+        noFragment(of: longToken, in: log.joined(separator: "\n"))
+        XCTAssertTrue(log.contains("using [secret:claude-worker] done"), "\(log)")
+        XCTAssertTrue(log.contains("warning: something"))
+        XCTAssertTrue(log.contains("warning: again"))
+    }
+
+    /// O1: what each redactor holds back at the end goes to its own pipe's line.
+    func testDeliveryFlushesEachPipesHeldTailOnThatPipe() async {
+        let secrets = FakeSecrets(values: ["claude-worker": longToken])
+        let w = world(secrets: secrets, steps: { _, _ in [] }, usages: SecretSteps.usages, deliver: SecretSteps.deliver)
+        // each ends in the start of the value (a held tail) and has no newline
+        w.runner.taggedChunks = { call in
+            guard call.stdin != nil else { return [] }
+            return [(.stdout, "out sk-a"), (.stderr, "err sk-ant")]
+        }
+        w.engine.vaultValueChanged(name: "claude-worker")
+        _ = await w.engine.updateMachines(for: "claude-worker", approval: admin())
+        let log = w.engine.logs["m1"] ?? []
+        XCTAssertTrue(log.contains("out sk-a"), "\(log)")
+        XCTAssertTrue(log.contains("err sk-ant"), "\(log)")
     }
 }

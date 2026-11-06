@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 @testable import Notchling
 
 /// One call a `ScriptedRunner` saw.
@@ -109,15 +110,36 @@ extension StepContext {
     static func test(machine: Machine = TestMachines.mac(), all: [Machine]? = nil,
                      runner: CommandRunning = ScriptedRunner(), secrets: SecretSource = FakeSecrets(),
                      http: HTTPFetching = FakeHTTP(), mac: MacFacts = .empty,
-                     now: Date = Date(timeIntervalSince1970: 1_800_000_000)) -> StepContext {
+                     now: Date = Date(timeIntervalSince1970: 1_800_000_000),
+                     mask: @escaping @Sendable (String) -> String = { $0 }) -> StepContext {
         StepContext(machine: machine, all: all ?? [machine], runner: runner, secrets: secrets, http: http,
-                    mac: mac, now: now)
+                    mac: mac, now: now, mask: mask)
     }
 }
 
 extension FixContext {
+    /// `mask` nil takes the step context's own, as the engine's contexts do.
     static func test(_ step: StepContext = .test(), adminPassword: String? = nil,
-                     log: @escaping @Sendable (String) -> Void = { _ in }) -> FixContext {
-        FixContext(step: step, adminPassword: adminPassword, log: log)
+                     log: @escaping @Sendable (String) -> Void = { _ in },
+                     mask: (@Sendable (String) -> String)? = nil) -> FixContext {
+        FixContext(step: step, adminPassword: adminPassword, log: log, mask: mask)
     }
 }
+
+/// A mask that hides one value the way the engine's does.
+func testMask(_ value: String, as marker: String) -> @Sendable (String) -> String {
+    { $0.replacingOccurrences(of: value, with: marker) }
+}
+
+/// Fails when an 8-character piece of `value` shows in `text`.
+func assertNoFragment(of value: String, in text: String, file: StaticString = #filePath, line: UInt = #line) {
+    let chars = Array(value)
+    for i in 0...(chars.count - 8) {
+        XCTAssertFalse(text.contains(String(chars[i..<(i + 8)])), "a fragment of the value shows at \(i): \(text)", file: file, line: line)
+    }
+}
+
+/// A 108-character token like a Claude OAuth token.
+let testLongToken = "sk-ant-oat01-" + String((0..<95).map { i in
+    Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-_")[(i * 7 + i / 3) % 57]
+})

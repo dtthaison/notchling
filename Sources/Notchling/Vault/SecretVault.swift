@@ -275,7 +275,8 @@ enum SecretVault {
     /// Sets or clears the expiry day (`YYYY-MM-DD`) of a saved secret in the index at `url`. Only that index is
     /// rewritten, and only that field. An index it can't read, a missing name or a bad day throws and changes
     /// nothing. The skill files and the sent reminders are updated only for the real index. It takes the store's
-    /// lock, so it can't interleave with a save.
+    /// lock, so it can't interleave with a save. That lock is not recursive: never call this from inside
+    /// `VaultStore.locked` or `save`, or the caller waits on itself.
     static func setExpires(_ name: String, day: String?, in url: URL = indexURL) throws {
         if let day, VaultExpiry.parse(day) != day { throw AccountError("\(day) is not a day (YYYY-MM-DD).") }
         try VaultStore.shared.locked {

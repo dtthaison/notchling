@@ -110,6 +110,10 @@ struct StepContext: Sendable {
     let http: HTTPFetching
     let mac: MacFacts
     let now: Date
+    /// Hides the vault values of this machine in text that came from it (`[secret:<name>]`). A step that shows a
+    /// piece of machine output masks it first and cuts it afterwards: a cut through a value leaves a piece that
+    /// no longer matches. The engine fills it; the default hides nothing, for tests that build a context by hand.
+    var mask: @Sendable (String) -> String = { $0 }
 }
 
 struct FixContext: Sendable {
@@ -121,6 +125,18 @@ struct FixContext: Sendable {
     /// and keep the order: append to a lock-protected buffer or yield into one serial `AsyncStream`, never one
     /// MainActor `Task` per line. It drops lines once the Fix has ended.
     let log: @Sendable (String) -> Void
+    /// Hides the vault values of the machine and this Fix's admin password in text a step shows (a failure line, a
+    /// message). Mask first, cut afterwards. The default is the step context's own, which hides nothing until the
+    /// engine fills it.
+    let mask: @Sendable (String) -> String
+
+    init(step: StepContext, adminPassword: String?, log: @escaping @Sendable (String) -> Void,
+         mask: (@Sendable (String) -> String)? = nil) {
+        self.step = step
+        self.adminPassword = adminPassword
+        self.log = log
+        self.mask = mask ?? step.mask
+    }
 }
 
 struct FixOutcome: Equatable { let ok: Bool; let message: String }

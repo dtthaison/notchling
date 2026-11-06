@@ -122,12 +122,14 @@ enum SecretSteps {
             text = "\(key)=\(value)\n"
         }
         let filter = SecretLogFilter(value: value, name: usage.name, sink: ctx.log)
-        let safe = FixContext(step: ctx.step, adminPassword: nil, log: { filter.feed($0) })
+        let safe = FixContext(step: ctx.step, adminPassword: nil, log: { filter.feed($0) }, mask: ctx.mask)
         let result = await MachineRun.script(RemoteShell.writeFile(usage.remotePath), stdin: Data(text.utf8), ctx: safe)
         filter.finish()
+        // this value's own mask, then the engine's (every vault value of the machine), in both places
+        func hide(_ text: String) -> String { ctx.mask(filter.redact(text)) }
         guard result.code == 0 else {
-            let said = shown(result.err.isEmpty ? result.out : result.err, filter: filter)
-            return FixOutcome(ok: false, message: filter.redact(
+            let said = shown(result.err.isEmpty ? result.out : result.err, hide: hide)
+            return FixOutcome(ok: false, message: hide(
                 "could not write \(usage.remotePath) on \(usage.machine) (code \(result.code))" + (said.isEmpty ? "" : ": \(said)")))
         }
         return FixOutcome(ok: true, message: "\(usage.name) is on \(usage.machine) at \(usage.remotePath)")
@@ -152,13 +154,12 @@ enum SecretSteps {
     /// The shortest value delivered. Real tokens are 90 characters or more.
     private static let minimumLength = 8
 
-    /// What a machine said, for a failure message: redacted first, then cut, so a cut can't leave a piece of the
-    /// value. Output that the runner itself cut (the value's front may be gone) or that is far longer than an
-    /// error is not shown.
-    private static func shown(_ said: String, filter: SecretLogFilter) -> String {
-        let text = said.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.hasPrefix("[earlier output cut]"), text.count <= 4000 else { return "(output not shown)" }
-        return String(filter.redact(text).prefix(300))
+    /// What a machine said, for a failure message: masked first, then trimmed and cut, so neither can leave a piece
+    /// of the value (a value with a space at its edge no longer matches once the edge is trimmed). Output that the
+    /// runner itself cut (the value's front may be gone) or that is far longer than an error is not shown.
+    private static func shown(_ said: String, hide: (String) -> String) -> String {
+        guard !said.hasPrefix("[earlier output cut]"), said.count <= 4000 else { return "(output not shown)" }
+        return String(hide(said).trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
     }
 
     private static func hasValue(_ secrets: SecretSource, _ name: String) -> Bool {
@@ -180,38 +181,53 @@ enum SecretSteps {
 
 /// Hides one value in a Fix's output. `Redactor` holds back the tail of a read that could start the value, so a
 /// value split across two reads is still caught (deliver refuses values too short for that to hold).
+///
+/// One `Redactor` per pipe (`OutputStreamTag.current`): what a redactor holds back belongs to the pipe it came from,
+/// and the next read of the other pipe must not carry it on. The log (`SetupFixLog`) keeps a partial line per
+/// pipe, so a held tail sent out under the other pipe's tag would split the value across two lines.
 private final class SecretLogFilter: @unchecked Sendable {
     private let lock = NSLock()
     private let value: String
     private let marker: String
     private let sink: @Sendable (String) -> Void
-    private let redactor: Redactor
+    private var redactors: [OutputChannel: Redactor] = [:]
 
     init(value: String, name: String, sink: @escaping @Sendable (String) -> Void) {
         self.value = value
         marker = "[secret:\(name)]"
         self.sink = sink
-        redactor = Redactor([value: marker])
+    }
+
+    private func redactor(_ channel: OutputChannel) -> Redactor {
+        if let existing = redactors[channel] { return existing }
+        let made = Redactor([value: marker])
+        redactors[channel] = made
+        return made
     }
 
     func feed(_ chunk: String) {
+        let channel = OutputStreamTag.current
         lock.lock(); defer { lock.unlock() }
-        emit(redactor.feed(Data(chunk.utf8)))
+        emit(redactor(channel).feed(Data(chunk.utf8)), on: channel)
     }
 
-    /// Flushes what the redactor held back while a value might have been split across chunks.
+    /// Flushes what each redactor held back while a value might have been split across chunks, to the pipe it
+    /// came from.
     func finish() {
         lock.lock(); defer { lock.unlock() }
-        emit(redactor.finish())
+        for channel in [OutputChannel.stdout, .stderr] {
+            if let held = redactors[channel] { emit(held.finish(), on: channel) }
+        }
     }
 
     func redact(_ text: String) -> String {
         text.replacingOccurrences(of: value, with: marker)
     }
 
-    private func emit(_ data: Data) {
+    /// Forwards under the pipe's own tag, so the sink (the engine's log) puts the text in that pipe's line.
+    private func emit(_ data: Data, on channel: OutputChannel) {
         guard !data.isEmpty else { return }
-        sink(String(decoding: data, as: UTF8.self))
+        OutputStreamTag.with(channel) { sink(String(decoding: data, as: UTF8.self)) }
     }
 }
 

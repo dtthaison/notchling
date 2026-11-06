@@ -673,6 +673,66 @@ final class MachinesSDWorkerStepsTests: XCTestCase {
         guard case .fail = noMarker.state else { return XCTFail("\(noMarker.state)") }
     }
 
+    /// A row's text and a failure line are masked before they are cut to 300 characters: the cut falls inside the token.
+    func testSetupCheckMasksWhatTheMachineSaysBeforeItCutsIt() async throws {
+        let token = testLongToken
+        let marker = "[secret:claude-worker]"
+        let m1 = TestMachines.mac()
+        let ctx = StepContext.test(machine: m1, mac: mac, mask: testMask(token, as: marker))
+        guard case let .remote(_, parse) = try step(.sdCheck, m1).probe else { return XCTFail("not remote") }
+        let said = String(repeating: "f", count: 270) + token
+
+        let rows = await parse(RemoteOutput(text: #"[{"name":"\#(said)","ok":true,"detail":"\#(said)"}]"# + "\n@@exit 0\n", code: 0), ctx)
+        XCTAssertEqual(rows.rows.count, 1)
+        assertNoFragment(of: token, in: rows.rows[0].name)
+        assertNoFragment(of: token, in: rows.rows[0].detail)
+        XCTAssertTrue(rows.rows[0].detail.contains(marker), rows.rows[0].detail)
+
+        let broken = await parse(RemoteOutput(text: "\n@@exit 2\n\(said)\n", code: 0), ctx)
+        guard case let .fail(text) = broken.state else { return XCTFail("\(broken.state)") }
+        assertNoFragment(of: token, in: text)
+        XCTAssertTrue(text.contains(marker), text)
+    }
+
+    /// The Fixes of this file: a write failure is masked before it is cut to 300 characters (the plugins install,
+    /// the units, the LaunchAgent, worker.json's read).
+    func testFixFailuresAreMaskedBeforeTheyAreCut() async throws {
+        let token = testLongToken
+        let marker = "[secret:claude-worker]"
+        let said = String(repeating: "f", count: 270) + token
+        let mask = testMask(token, as: marker)
+        let sdDir = temp.appendingPathComponent("sd")
+        try FileManager.default.createDirectory(at: sdDir.appendingPathComponent("templates"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try templatesDir, to: sdDir.appendingPathComponent("templates/worker"))
+        let facts = MacFacts(plugins: ["sd@system-design": InstalledPlugin(version: "1.19.2", path: sdDir.path)], marketplaceJSON: [:])
+
+        // the LaunchAgent write (the disable before it succeeds)
+        let m1 = TestMachines.mac()
+        let agent = ScriptedRunner()
+        agent.on({ $0.last?.contains("LaunchAgents") == true }, result: CommandResult(code: 1, out: "", err: said))
+        let written = try await plan(.service, machine: m1).run(.test(.test(machine: m1, runner: agent, mac: facts, mask: mask)))
+        XCTAssertFalse(written.ok)
+        assertNoFragment(of: token, in: written.message)
+        XCTAssertTrue(written.message.contains(marker), written.message)
+
+        // the Linux units
+        var vps = TestMachines.linux()
+        vps.jobs[0].sdWorker?.sdPath = MachinePaths.sdPy(home: "/home/agent")
+        let units = ScriptedRunner()
+        units.on({ _ in true }, result: CommandResult(code: 1, out: "", err: said))
+        let linux = try await plan(.service, machine: vps)
+            .run(.test(.test(machine: vps, runner: units, mac: facts, mask: mask), adminPassword: "pw-123"))
+        XCTAssertFalse(linux.ok)
+        assertNoFragment(of: token, in: linux.message)
+
+        // worker.json: a read error shows the first line of stderr
+        let read = ScriptedRunner()
+        read.on({ _ in true }, result: CommandResult(code: 1, out: "", err: said))
+        let json = try await plan(.workerJSON, machine: m1).run(.test(.test(machine: m1, runner: read, mac: facts, mask: mask)))
+        XCTAssertFalse(json.ok)
+        assertNoFragment(of: token, in: json.message)
+    }
+
     func testSetupCheckCommandUsesAbsolutePathsAndNeverLive() throws {
         let vps = TestMachines.linux()
         let s = try script(.sdCheck, machine: vps)

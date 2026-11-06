@@ -335,6 +335,42 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertEqual(missing.state, .fail("not installed"))
     }
 
+    /// A line of machine output is masked before it is cut to 200 characters: the cut falls inside the token.
+    func testMachineTextIsMaskedBeforeItIsCutInChecksAndFixes() async {
+        let token = testLongToken
+        let marker = "[secret:claude-worker]"
+        let mask = testMask(token, as: marker)
+        let ctx = StepContext.test(machine: TestMachines.mac(), mask: mask)
+        func parse(_ id: StepID, _ text: String, code: Int32 = 0) async -> CheckResult {
+            guard case let .remote(_, parse) = step(id).probe else { XCTFail("\(id.raw) has no remote probe"); return CheckResult(state: .cantTell("")) }
+            return await parse(RemoteOutput(text: text, code: code), ctx)
+        }
+
+        // claude --version, Reachable's failure reason, fdesetup's answer
+        let version = await parse(.claudeCode, "2.1.0 " + String(repeating: "f", count: 164) + token + "\n")
+        assertNoFragment(of: token, in: "\(version.state)")
+        XCTAssertTrue("\(version.state)".contains(marker), "\(version.state)")
+        let reach = await parse(.reachable, String(repeating: "f", count: 160) + token + "\n", code: 255)
+        assertNoFragment(of: token, in: "\(reach.state)")
+        let vault = await parse(.filevault, String(repeating: "f", count: 170) + token + "\n")
+        assertNoFragment(of: token, in: "\(vault.state)")
+
+        // a Fix's failure line (the last line of stderr), cut to 200 characters
+        let said = String(repeating: "f", count: 170) + token
+        let runner = ScriptedRunner()
+        runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: said))
+        let fix = await plan(step(.claudeCode)).run(.test(.test(runner: runner, mask: mask)))
+        XCTAssertFalse(fix.ok)
+        assertNoFragment(of: token, in: fix.message)
+        XCTAssertTrue(fix.message.contains(marker), fix.message)
+
+        // output the runner cut at its start: the half line after the notice may hold the end of the token
+        let cutRunner = ScriptedRunner()
+        cutRunner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: ProcessRunner.cutNotice + String(token.suffix(60))))
+        let cut = await plan(step(.claudeCode)).run(.test(.test(runner: cutRunner, mask: mask)))
+        assertNoFragment(of: token, in: cut.message)
+    }
+
     func testClaudeCodeFixInstallsAsTheWorkerWithoutAdmin() async {
         let p = plan(step(.claudeCode))
         XCTAssertFalse(p.needsAdmin)
