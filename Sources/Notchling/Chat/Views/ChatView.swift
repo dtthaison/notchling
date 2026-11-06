@@ -18,7 +18,7 @@ struct ChatView: View {
             Rectangle().fill(KitInk.hairline).frame(width: 1)
             Group {
                 if let agent = model.selected {
-                    SessionDetail(model: model, notch: notch, agent: agent).id(agent.id)
+                    SessionDetail(model: model, notch: notch, agent: agent)
                 } else {
                     // No session to read, but a page opened from search still shows on the right.
                     GeometryReader { geo in
