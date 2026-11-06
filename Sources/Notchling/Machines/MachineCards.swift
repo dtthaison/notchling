@@ -17,6 +17,8 @@ enum MachineForm {
             out.append(nameProblem)
         } else if existing.contains(name) {
             out.append("\(name) is already a machine")
+        } else if RepoSteps.endsInReplacedKeyDate(name) {
+            out.append("A machine name can't end in -<8 digits>; that's how replaced keys are titled")
         }
         if !isHost(host) { out.append(hostProblem) }
         if !isUser(user) { out.append(userProblem) }

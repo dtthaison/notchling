@@ -89,6 +89,14 @@ final class MachinesWindowTests: XCTestCase {
         XCTAssertEqual(MachineForm.problems(name: "", host: "m1", user: "u", existing: []), [nameProblem])
         XCTAssertEqual(MachineForm.problems(name: "-m", host: "m1", user: "u", existing: []), [nameProblem])
         XCTAssertEqual(MachineForm.problems(name: "m1\n", host: "m1", user: "u", existing: []), [nameProblem])
+        // a replaced key is titled agents-<machine>-<8 digits>: a name that ends that way would collide with it
+        let datedProblem = "A machine name can't end in -<8 digits>; that's how replaced keys are titled"
+        for name in ["m1-20261001", "vps-sing-1-99999999", "a-00000000"] {
+            XCTAssertEqual(MachineForm.problems(name: name, host: "m1", user: "u", existing: []), [datedProblem], name)
+        }
+        for name in ["m1-2026100", "m1-202610011", "20261001", "m1-20261001-x", "m1-2026-1001"] {
+            XCTAssertEqual(MachineForm.problems(name: name, host: "m1", user: "u", existing: []), [], name)
+        }
         for host in ["-oProxyCommand=x", "a b", "h;x", "", "h\n", "a$(x)", ".a", "a/b"] {
             XCTAssertEqual(MachineForm.problems(name: "m2", host: host, user: "u", existing: []), [hostProblem], host)
         }

@@ -327,6 +327,13 @@ enum RepoSteps {
         return id > 0 ? id : nil
     }
 
+    /// Whether a machine name ends in `-` and 8 ASCII digits, which is how Replace key dates a title: such a name
+    /// could own another machine's `agents-<machine>-<date>` title.
+    static func endsInReplacedKeyDate(_ name: String) -> Bool {
+        let tail = Array(name.unicodeScalars.suffix(9))
+        return tail.count == 9 && tail[0] == "-" && tail.dropFirst().allSatisfy { $0.value >= 48 && $0.value <= 57 }
+    }
+
     /// The titles this machine gives its keys: `agents-<machine>` (Set up) or `agents-<machine>-<8 digits>` (Replace key).
     private static func isOwnKeyTitle(_ title: String, machine: String) -> Bool {
         let base = "agents-\(machine)"
@@ -372,13 +379,14 @@ enum RepoSteps {
             + "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=\"ssh -F /dev/null -i '$k' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=8\" "
             + "git -c core.hooksPath=/dev/null -C \"$t\" push --dry-run git@github.com:\(github).git HEAD:refs/heads/agents-push-test </dev/null 2>&1\n"
             + "echo \"@@push $?\""
-        // exit 3: a file is missing and 1: the private key could not move, so nothing moved; 2: only the .pub could not
-        // move (it is then rewritten from the private key, through a temporary file). Any other code (ssh's 255, a
-        // timeout) proves nothing about what was moved.
+        // Exit 43: a file is missing and 41: the private key could not move, so nothing moved; 42: only the .pub could
+        // not move (it is then rewritten from the private key, through a temporary file). These are far from the
+        // codes a signal (1 to 15, as the runner reports it), ssh (255) or a timeout (124) can give: any other code
+        // proves nothing about what was moved.
         let tmpPub = RemoteShell.path(path + ".pub.tmp")
-        let swap = "[ -f \(newKey) ] && [ -f \(newPub) ] || exit 3\n"
-            + "mv -f \(newKey) \(key) || exit 1\n"
-            + "mv -f \(newPub) \(keyPub) || { ssh-keygen -y -f \(key) > \(tmpPub) 2>/dev/null && mv -f \(tmpPub) \(keyPub); rm -f \(tmpPub); exit 2; }"
+        let swap = "[ -f \(newKey) ] && [ -f \(newPub) ] || exit 43\n"
+            + "mv -f \(newKey) \(key) || exit 41\n"
+            + "mv -f \(newPub) \(keyPub) || { ssh-keygen -y -f \(key) > \(tmpPub) 2>/dev/null && mv -f \(tmpPub) \(keyPub); rm -f \(tmpPub); exit 42; }"
         let cleanup = "rm -f \(newKey) \(newPub)"
 
         let display = "On \(name):\n\(readOld)\n(the old public key is read first)\n\n"
@@ -396,6 +404,9 @@ enum RepoSteps {
 
         return FixPlan(display: display, needsAdmin: false) { ctx in
             guard isValidMachineName(name) else { return FixOutcome(ok: false, message: "the machine name \(name) is not a plain name") }
+            guard !endsInReplacedKeyDate(name) else {
+                return FixOutcome(ok: false, message: "a machine name can't end in -<8 digits>; that's how replaced keys are titled (\(name))")
+            }
             let title = "agents-\(name)-\(dateStamp(ctx.step.now))"
             func said(_ r: CommandResult) -> String { firstLine(r.err.isEmpty ? r.out : r.err, ctx.mask) }
 
@@ -498,31 +509,35 @@ enum RepoSteps {
             // the old key's id comes from GitHub's JSON and goes into an argv: it has to be an integer, and it
             // is found before the move so that a bad one stops everything while the old key is still in place
             var oldID: Int?
-            var oldIsForeign = false
+            var foreignTitle: String?
             if let old = listed(oldPub, in: keys) {
                 guard let id = keyID(old) else {
                     return await undo("the old key's id on GitHub is not a number; no key was deleted and nothing was replaced",
                                       newKey: pub, onGitHub: true)
                 }
                 // the text matches; it is deleted only when the title is this machine's own as well
-                if isOwnKeyTitle((old["title"] as? String) ?? "", machine: name) { oldID = id } else { oldIsForeign = true }
+                let found = (old["title"] as? String) ?? ""
+                if isOwnKeyTitle(found, machine: name) { oldID = id } else { foreignTitle = found }
             }
 
             // 5. every check passed: the new pair takes the old one's file names, so ~/.ssh/config stays as it is
             let moved = await MachineRun.script(swap, ctx: ctx, timeout: 60)
             switch moved.code {
             case 0: break
-            case 2:
+            case 42:
                 return FixOutcome(ok: false, message: "new key in use, but the public key file on \(name) may be stale; Check again. The old key is still on GitHub: remove it in Settings → Deploy keys once the check passes")
-            case 1, 3:
+            case 41, 43:
                 // the script's own failures: nothing was moved
                 return await undo("could not move the new key over the old one on \(name): \(said(moved))", newKey: pub, onGitHub: true)
             default:
-                // 255 (the connection dropped), a timeout, a kill: the move may have happened. Nothing is deleted anywhere.
-                return FixOutcome(ok: false, message: "can't tell whether the key was replaced on \(name) (code \(moved.code)); the swap may have happened; Check again before anything else. Both keys are still on GitHub and nothing was removed")
+                // 255 (the connection dropped), a timeout, a kill or a bare 1, 2, 3 (a signal): the move may have happened.
+                // Nothing is deleted anywhere.
+                return FixOutcome(ok: false, message: "can't tell whether the key was replaced on \(name) (code \(moved.code)); the swap may have happened; Check again before anything else. Nothing was removed from GitHub or from \(name)")
             }
-            if oldIsForeign {
-                return FixOutcome(ok: false, message: "new key in use on \(name); the old key's title doesn't match \(name); remove it in Settings → Deploy keys if it's yours")
+            if let foreignTitle {
+                // the title came from GitHub: masked, then cut, like any text from outside
+                let shown = firstLine(foreignTitle, ctx.mask, limit: 80)
+                return FixOutcome(ok: false, message: "replaced the key on \(name); the old key on GitHub is titled '\(shown)', not agents-\(name), so nothing was deleted; remove it in Settings → Deploy keys if it's \(name)'s")
             }
             guard let oldID else {
                 return FixOutcome(ok: true, message: "replaced the deploy key of \(github) on \(name); the old key was not listed on GitHub, so nothing was deleted")

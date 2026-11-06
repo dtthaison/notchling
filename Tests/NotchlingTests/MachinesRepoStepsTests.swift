@@ -575,7 +575,9 @@ final class MachinesRepoStepsTests: XCTestCase {
     }
 
     private func keyJSON(id: String, body: String, title: String, readOnly: Bool) -> String {
-        "{\"id\":\(id),\"key\":\"ssh-ed25519 \(body)\",\"title\":\"\(title)\",\"read_only\":\(readOnly)}"
+        let json = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return "{\"id\":\(id),\"key\":\"ssh-ed25519 \(body)\",\"title\":\"\(json)\",\"read_only\":\(readOnly)}"
     }
 
     /// A machine and GitHub for Replace key: the old key is id 11 on GitHub, the new one becomes id 22.
@@ -818,13 +820,27 @@ final class MachinesRepoStepsTests: XCTestCase {
         XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") }, "\(kinds(runner))")
         XCTAssertTrue(kinds(runner).contains("swap"), "the new key is in use")
         XCTAssertFalse(outcome.ok, "the old key is left on GitHub: not a silent pass")
-        XCTAssertTrue(outcome.message.contains("the old key's title doesn't match m1; remove it in Settings → Deploy keys if it's yours"), outcome.message)
+        // it names the title found, says nothing was deleted, and stays red
+        XCTAssertTrue(outcome.message.contains("replaced the key on m1; the old key on GitHub is titled 'agents-m2', not agents-m1, so nothing was deleted; remove it in Settings → Deploy keys if it's m1's"), outcome.message)
+    }
+
+    func testTheTitleFoundOnGitHubIsMaskedAndCutBeforeItIsShown() async {
+        let token = testLongToken
+        let title = "agents-x" + String(repeating: "f", count: 170) + token
+        let runner = replaceRunner(oldTitle: title)
+        let outcome = await replacePlan().run(.test(.test(runner: runner, mask: testMask(token, as: "[secret:m1-github-issues]"))))
+        XCTAssertFalse(outcome.ok)
+        assertNoFragment(of: token, in: outcome.message)
+        XCTAssertTrue(outcome.message.contains("titled 'agents-x"), outcome.message)
+        XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") })
     }
 
     func testTheOldKeyIsDeletedOnlyUnderThisMachinesOwnTitles() async {
         for (title, deleted) in [("agents-m1", true), ("agents-m1-20261001", true), ("agents-m2", false), ("agents-m1-2026", false),
                                  ("agents-m10", false), ("agents-m1-20261001x", false), ("agents-m1-", false), ("", false),
-                                 ("Agents-m1", false), ("deploy", false)] {
+                                 ("Agents-m1", false), ("deploy", false), ("xagents-m1", false), ("agents-m1\n", false),
+                                 ("agents-m1-20261001\n", false), ("agents-m1\n-20261001", false), ("agents-m1-2026100\u{0661}", false),
+                                 ("agents-m1-20261001-20261001", false), ("agents-m1 ", false)] {
             let runner = replaceRunner(oldTitle: title)
             let outcome = await run(replacePlan(), runner)
             XCTAssertEqual(kinds(runner).contains("gh delete 11"), deleted, "title '\(title)': \(kinds(runner))")
@@ -845,12 +861,17 @@ final class MachinesRepoStepsTests: XCTestCase {
     }
 
     func testCleanupAfterAFailedAddDeletesNothingThatWasAlreadyListed() async {
-        // the add fails; every key GitHub lists (m2's included) was there before the add
+        // The add fails, and the listing after it holds a key with the new key's text that this run did not add: it
+        // has another id and another title (someone else's, put there meanwhile). The cleanup used to delete any
+        // key with that text; it must delete nothing and say so. m2's key, listed all along, stays too.
         let m2 = keyJSON(id: "5", body: otherBody, title: "agents-m2", readOnly: true)
-        let runner = replaceRunner(newReadOnly: nil, addCode: 1, extraListed: [m2])
+        let runner = replaceRunner(newReadOnly: true, addCode: 1, extraListed: [m2], newTitleOnGitHub: "agents-m2-someone-elses")
         let outcome = await run(replacePlan(), runner)
         XCTAssertFalse(outcome.ok)
+        XCTAssertTrue(outcome.message.contains("add boom"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("nothing was deleted"), outcome.message)
         XCTAssertFalse(kinds(runner).contains { $0.hasPrefix("gh delete") }, "\(kinds(runner))")
+        XCTAssertTrue(kinds(runner).contains("rm"))
     }
 
     func testListingFailingBeforeTheAddStopsBeforeTheAdd() async {
@@ -876,8 +897,9 @@ final class MachinesRepoStepsTests: XCTestCase {
     }
 
     func testAMultiLineKeyFieldFromGitHubNeverMatches() async {
-        // a listed "key" that holds two lines, the first one the new key: not a match
-        let hostile = "{\"id\":7,\"key\":\"ssh-ed25519 \(newBody)\\nssh-ed25519 \(otherBody)\",\"title\":\"x\",\"read_only\":true}"
+        // a listed "key" that holds two lines, the first one the new key plus a comment: not a match. (The comment's
+        // space is what a first-two-fields comparison would have matched on.)
+        let hostile = "{\"id\":7,\"key\":\"ssh-ed25519 \(newBody) x\\nssh-ed25519 \(otherBody)\",\"title\":\"x\",\"read_only\":true}"
         let runner = replaceRunner(extraListed: [hostile])
         let outcome = await run(replacePlan(), runner)
         XCTAssertEqual(outcome.ok, true, outcome.message)
@@ -886,12 +908,14 @@ final class MachinesRepoStepsTests: XCTestCase {
     // MARK: Replace key: an ambiguous swap deletes nothing (I2)
 
     func testASwapThatReturns255IsCantTellAndDeletesNothing() async {
-        for code in [255, 124, 137, 4] as [Int32] {
+        // 1, 2 and 3 are what a signal looks like to the runner (SIGHUP, SIGINT, SIGQUIT): they prove nothing either
+        for code in [255, 124, 125, 137, 4, 15, 9, 1, 2, 3, 40, 44] as [Int32] {
             let runner = replaceRunner(swapCode: code)
             let outcome = await run(replacePlan(), runner)
             XCTAssertFalse(outcome.ok, "\(code)")
             XCTAssertTrue(outcome.message.contains("can't tell whether the key was replaced on m1"), outcome.message)
             XCTAssertTrue(outcome.message.contains("the swap may have happened; Check again before anything else"), outcome.message)
+            XCTAssertTrue(outcome.message.contains("Nothing was removed from GitHub"), outcome.message)
             XCTAssertFalse(outcome.message.contains("untouched"), "never claims what it didn't prove: \(outcome.message)")
             let k = kinds(runner)
             XCTAssertEqual(k.last, "swap", "\(code): nothing after the swap, no delete of either key: \(k)")
@@ -900,7 +924,8 @@ final class MachinesRepoStepsTests: XCTestCase {
     }
 
     func testASwapThatFailsWithItsOwnCodesIsUndoneAsBefore() async {
-        for code in [1, 3] as [Int32] {
+        // the swap script's own failure codes: 41 the private key would not move, 43 a file was missing
+        for code in [41, 43] as [Int32] {
             let runner = replaceRunner(swapCode: code)
             let outcome = await run(replacePlan(), runner)
             XCTAssertFalse(outcome.ok, "\(code)")
@@ -913,7 +938,7 @@ final class MachinesRepoStepsTests: XCTestCase {
     }
 
     func testASwapWhoseSecondMoveFailedSaysTheKeyIsInUseAndThePubMayBeStale() async {
-        let runner = replaceRunner(swapCode: 2)
+        let runner = replaceRunner(swapCode: 42)
         let outcome = await run(replacePlan(), runner)
         XCTAssertFalse(outcome.ok)
         XCTAssertTrue(outcome.message.contains("new key in use"), outcome.message)
@@ -939,6 +964,27 @@ final class MachinesRepoStepsTests: XCTestCase {
         let outcome = await replacePlan(machine: machine).run(.test(.test(machine: machine, runner: runner)))
         XCTAssertFalse(outcome.ok)
         XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    /// A machine named `m1-20261001` would own the title `agents-m1-20261001`, which is how `m1`'s replaced key is
+    /// titled: Replace key refuses such a name, before any command.
+    func testReplaceKeyRefusesAMachineNameThatLooksLikeAReplacedKeyTitle() async {
+        for name in ["m1-20261001", "vps-99999999", "a-00000000"] {
+            var machine = TestMachines.mac()
+            machine.name = name
+            let runner = replaceRunner()
+            let outcome = await replacePlan(machine: machine).run(.test(.test(machine: machine, runner: runner)))
+            XCTAssertFalse(outcome.ok, name)
+            XCTAssertTrue(outcome.message.contains("a machine name can't end in -<8 digits>"), outcome.message)
+            XCTAssertTrue(runner.calls.isEmpty, name)
+        }
+        for name in ["m1-2026100", "m1-202610011", "20261001", "m1-20261001-x", "m1"] {
+            var machine = TestMachines.mac()
+            machine.name = name
+            let runner = replaceRunner()
+            _ = await replacePlan(machine: machine).run(.test(.test(machine: machine, runner: runner)))
+            XCTAssertFalse(runner.calls.isEmpty, "\(name) is a fine name")
+        }
     }
 
     func testReplaceKeyMasksWhatItShowsBeforeCuttingIt() async {
@@ -1056,7 +1102,7 @@ final class MachinesRepoStepsTests: XCTestCase {
 
         // a second swap has nothing to move: it fails without touching the key now in place
         let (again, _) = try shell(script(containing: "mv -f"))
-        XCTAssertEqual(again, 3)
+        XCTAssertEqual(again, 43)
         XCTAssertEqual(try String(contentsOfFile: keyPath + ".pub", encoding: .utf8), newPubText)
     }
 
