@@ -1,33 +1,6 @@
 Xcode 26.1
 @@runtimes
-{
-  "runtimes" : [
-    {
-      "isAvailable" : true,
-      "version" : "26.5",
-      "isInternal" : false,
-      "buildversion" : "23F77",
-      "supportedArchitectures" : [
-        "arm64"
-      ],
-      "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
-      "platform" : "iOS",
-      "name" : "iOS 26.5"
-    },
-    {
-      "isAvailable" : true,
-      "version" : "26.5",
-      "isInternal" : false,
-      "buildversion" : "23T55",
-      "supportedArchitectures" : [
-        "arm64"
-      ],
-      "identifier" : "com.apple.CoreSimulator.SimRuntime.tvOS-26-5",
-      "platform" : "tvOS",
-      "name" : "tvOS 26.5"
-    }
-  ]
-}
+iOS 26.5 (26.5 - 23F77) - com.apple.CoreSimulator.SimRuntime.iOS-26-5
 @@devices
 {
   "devices" : {

@@ -164,6 +164,28 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertTrue(runner.calls.isEmpty)
     }
 
+    func testAFailedFixShowsTheLastStderrLineNotStdout() async {
+        let runner = ScriptedRunner()
+        runner.on({ _ in true }, result: CommandResult(code: 1, out: "==> Downloading\nprogress 40%\n", err: "warning: x\nError: no formula named foo\n"))
+        let outcome = await plan(step(.baseTools)).run(.test(.test(runner: runner)))
+        XCTAssertEqual(outcome, FixOutcome(ok: false, message: "failed (code 1): Error: no formula named foo"))
+        let quiet = ScriptedRunner()
+        quiet.on({ _ in true }, result: CommandResult(code: 1, out: "only stdout\n", err: ""))
+        let fromOut = await plan(step(.baseTools)).run(.test(.test(runner: quiet)))
+        XCTAssertEqual(fromOut.message, "failed (code 1): only stdout")
+    }
+
+    func testThePasswordIsReplacedBeforeTheMessageIsCut() async {
+        let password = "pw-" + String(repeating: "k", count: 40)
+        let runner = ScriptedRunner()
+        // the password would straddle character 200 of the line
+        let line = String(repeating: "a", count: 180) + " " + password
+        runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: line + "\n"))
+        let outcome = await plan(step(.staysAwake)).run(.test(.test(runner: runner), adminPassword: password))
+        XCTAssertFalse(outcome.message.contains("pw-"), outcome.message)
+        XCTAssertTrue(outcome.message.contains("[admin password]"), outcome.message)
+    }
+
     func testAFailedFixMessageNeverHoldsTheAdminPassword() async {
         let runner = ScriptedRunner()
         runner.on({ _ in true }, result: CommandResult(code: 1, out: "", err: "Sorry, try again pw-1234\n"))
@@ -236,9 +258,12 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertTrue(sent.contains("NEEDRESTART_SUSPEND=1"))
         XCTAssertTrue(sent.contains("apt-get install -y git python3 jq wget"))
         XCTAssertTrue(sent.contains("apt-get install -y gh"))
-        for word in ["restart", "upgrade", "systemctl"] { XCTAssertFalse(sent.contains(word), word) }
+        XCTAssertEqual(sent.components(separatedBy: "--no-upgrade").count - 1, 2, "both installs keep installed packages as they are")
+        // "upgrade" appears only inside the --no-upgrade flag
+        let withoutFlag = sent.replacingOccurrences(of: "--no-upgrade", with: "")
+        for word in ["restart", "upgrade", "systemctl"] { XCTAssertFalse(withoutFlag.contains(word), word) }
         for service in MachineSafety.productionServices { XCTAssertFalse(sent.contains(service), service) }
-        for word in ["restart", "upgrade", "systemctl"] { XCTAssertFalse(p.display.contains(word), word) }
+        for word in ["restart", "upgrade", "systemctl"] { XCTAssertFalse(p.display.replacingOccurrences(of: "--no-upgrade", with: "").contains(word), word) }
     }
 
     func testLinuxBaseToolsFixRefusesWithoutAPassword() async {
@@ -264,6 +289,31 @@ final class MachinesMachineStepsTests: XCTestCase {
         XCTAssertTrue(sent.contains("brew install git python jq gh"))
         XCTAssertTrue(sent.contains("Homebrew is missing: install it from https://brew.sh"))
         XCTAssertTrue(p.display.contains("brew install git python jq gh"))
+        XCTAssertTrue(sent.contains("xcode-select -p"), "Homebrew needs the Command Line Tools")
+    }
+
+    func testBaseToolsFixRefusesWhenTheOSIsNotDetectedYet() async {
+        var machine = TestMachines.mac()
+        machine.os = nil
+        let runner = ScriptedRunner()
+        let p = plan(step(.baseTools, machine))
+        XCTAssertFalse(p.needsAdmin)
+        let outcome = await p.run(.test(.test(machine: machine, runner: runner)))
+        XCTAssertEqual(outcome, FixOutcome(ok: false, message: "OS not detected yet; run Reachable first"))
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testBaseToolsWithoutCommandLineToolsFailsWithoutRunningPython() async throws {
+        let r = await check(.baseTools, "clt=missing\ngit=/usr/bin/git\npython3=/usr/bin/python3\njq=\ngh=\npyver=\nbrew=no\n")
+        XCTAssertEqual(r.state, .fail("Command Line Tools missing"))
+        XCTAssertNil(r.detected.python)
+        // the probe asks xcode-select before it runs python3, and only on macOS
+        let s = script(step(.baseTools))
+        let guardAt = try XCTUnwrap(s.range(of: "xcode-select -p >/dev/null 2>&1"))
+        let pythonAt = try XCTUnwrap(s.range(of: "python3 -c"))
+        XCTAssertLessThan(guardAt.lowerBound, pythonAt.lowerBound)
+        XCTAssertTrue(s.contains("Darwin"))
+        XCTAssertFalse(s.contains("git --version"))
     }
 
     func testMacBaseToolsFixReportsAMissingHomebrew() async {
@@ -288,16 +338,43 @@ final class MachinesMachineStepsTests: XCTestCase {
     func testClaudeCodeFixInstallsAsTheWorkerWithoutAdmin() async {
         let p = plan(step(.claudeCode))
         XCTAssertFalse(p.needsAdmin)
-        XCTAssertTrue(p.display.contains("curl -fsSL https://claude.ai/install.sh | bash"))
+        XCTAssertTrue(p.display.contains(MachineSteps.claudeInstall))
         let runner = ScriptedRunner()
         let outcome = await p.run(.test(.test(runner: runner)))
         XCTAssertTrue(outcome.ok, outcome.message)
         XCTAssertEqual(runner.calls.count, 1)
-        XCTAssertTrue(runner.calls[0].argv.last!.contains("curl -fsSL https://claude.ai/install.sh | bash"))
+        XCTAssertTrue(runner.calls[0].argv.last!.contains("curl -fsSL https://claude.ai/install.sh"))
         XCTAssertFalse(runner.calls[0].argv.last!.contains("sudo"))
         runner.on({ _ in true }, result: CommandResult(code: 22, out: "", err: "curl: (22) 404"))
         let failed = await p.run(.test(.test(runner: runner)))
         XCTAssertFalse(failed.ok)
+    }
+
+    /// Runs the install script under `/bin/sh` with a fake `curl` first on PATH.
+    private func runInstall(curl: String) throws -> Int32 {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("t5-curl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("curl")
+        try ("#!/bin/sh\n" + curl + "\n").write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", MachineSteps.claudeInstall]
+        process.environment = ["PATH": dir.path + ":/usr/bin:/bin"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    func testClaudeInstallScriptFailsWhenTheDownloadFails() throws {
+        XCTAssertEqual(try runInstall(curl: "exit 22"), 22)
+        XCTAssertNotEqual(try runInstall(curl: "exit 6"), 0)
+        // and still runs what it downloaded when the download works
+        XCTAssertEqual(try runInstall(curl: "echo 'exit 0'"), 0)
+        XCTAssertEqual(try runInstall(curl: "echo 'exit 3'"), 3)
     }
 
     // MARK: Xcode
@@ -316,19 +393,50 @@ final class MachinesMachineStepsTests: XCTestCase {
         let noXcode = await check(.xcode, String(text.drop { $0 != "@" }))
         XCTAssertEqual(noXcode.state, .fail("Xcode is not installed"))
 
-        let noRuntime = await check(.xcode, text.replacingOccurrences(of: "\"name\" : \"iOS 26.5\"", with: "\"name\" : \"watchOS 26.5\"")
-            .replacingOccurrences(of: "\"platform\" : \"iOS\"", with: "\"platform\" : \"watchOS\""))
+        // grep '^iOS ' printed nothing: there is no iOS runtime
+        let noRuntime = await check(.xcode, text.replacingOccurrences(of: "iOS 26.5 (26.5 - 23F77) - com.apple.CoreSimulator.SimRuntime.iOS-26-5\n", with: ""))
         XCTAssertEqual(noRuntime.state, .fail("no iOS runtime"))
 
-        let broken = await check(.xcode, "Xcode 26.1\n@@runtimes\n{ not json\n@@devices\n")
-        XCTAssertEqual(broken.state, .fail("no iOS runtime"))
+        // the newest iOS runtime is shown
+        let two = await check(.xcode, text.replacingOccurrences(of: "iOS 26.5 (26.5 - 23F77)", with: "iOS 26.5 (26.5 - 23F77) - x\niOS 27.0 (27.0 - 24A1)"))
+        XCTAssertEqual(two.detected.abilities?.iosRuntimes, ["iOS 27.0", "iOS 26.5"])
 
         XCTAssertTrue(howTo(step(.xcode)).contains("Apple ID"))
+    }
+
+    func testXcodeProbeAsksForARuntimeLineNotRuntimeJSON() {
         let s = script(step(.xcode))
         XCTAssertTrue(s.contains("xcodebuild -version | head -1"))
         XCTAssertTrue(s.contains("@@runtimes") && s.contains("@@devices"))
-        XCTAssertTrue(s.contains("xcrun simctl list runtimes available -j"))
+        XCTAssertTrue(s.contains("xcrun simctl list runtimes available 2>/dev/null | grep '^iOS '"))
+        XCTAssertFalse(s.contains("runtimes available -j"), "the runtimes JSON alone is 48 KB")
         XCTAssertTrue(s.contains("xcrun simctl list devices available -j"))
+    }
+
+    func testXcodeCantTellWhenTheOutputWasCutOrCannotBeRead() async throws {
+        let text = try fixture("simctl-ok")
+        var known = TestMachines.mac()
+        known.abilities?.xcode = "Xcode 25.0"
+        known.abilities?.simulators = ["iPhone 16"]
+
+        // the runner cut the start: the Xcode line and the first marker are gone
+        let cutStart = "[earlier output cut]\n" + String(text.dropFirst(40))
+        // the tail of the devices JSON is gone
+        let cutEnd = String(text.prefix(text.count - 120))
+        // a JSON section that is present but not JSON
+        let broken = "Xcode 26.1\n@@runtimes\niOS 26.5 (26.5 - 23F77) - x\n@@devices\n{ not json\n"
+        // output at the 64 KiB cap
+        let atCap = text + String(repeating: " ", count: 65_536)
+        // a marker missing
+        let noMarker = "Xcode 26.1\n"
+        for (name, input) in [("cut start", cutStart), ("cut end", cutEnd), ("broken", broken), ("cap", atCap), ("no marker", noMarker)] {
+            let r = await check(.xcode, input, machine: known)
+            guard case .cantTell = r.state else { XCTFail("\(name) should be can't tell, got \(r.state)"); continue }
+            XCTAssertNil(r.detected.abilities, "\(name) must not overwrite the abilities")
+        }
+        // an unreadable runtime line is can't tell too
+        let oddRuntime = await check(.xcode, "Xcode 26.1\n@@runtimes\niOS ??\n@@devices\n{\"devices\":{}}\n", machine: known)
+        guard case .cantTell = oddRuntime.state else { return XCTFail("an unreadable iOS line should be can't tell") }
     }
 
     func testXcodeFixture() throws {
