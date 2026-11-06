@@ -14,7 +14,7 @@ enum TokenScope {
                      open: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) },
                      form: @escaping @Sendable (VaultRequest) -> Void = { _ in }) -> SetupStep {
         let repos = job.repos.map(\.github)
-        let display = "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read-only, nothing else) "
+        let display = "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read and write, Metadata: read, nothing else) "
             + "and the vault form for \(job.issuesSecret). The new token is saved in the vault and never shown."
         let fix = FixPlan(display: display, needsAdmin: false) { _ in
             // A new token is the one clean fix for a shared, mis-scoped or expired one.
@@ -60,19 +60,21 @@ enum TokenScope {
         guard !served.isEmpty, served.allSatisfy(isRepoName) else {
             return CheckResult(state: .cantTell("the served repos are not all owner/name"))
         }
-        let servedKeys = Set(served.map { $0.lowercased() })
 
         // Every private repo of the served owners that is not served, from the user's own gh.
-        let listing = await otherPrivateRepos(owners: owners(of: served), excluding: servedKeys, runner: ctx.runner)
+        let listing = await privateListing(served: served, runner: ctx.runner)
 
-        let issuesURLs = served.compactMap { apiURL("/repos/\($0)/issues", query: "per_page=1") }
-        let commitsURLs = served.compactMap { apiURL("/repos/\($0)/commits", query: "per_page=1") }
-        let otherURLs: [URL]
-        switch listing {
-        case .success(let names): otherURLs = names.compactMap { apiURL("/repos/\($0)", query: nil) }
-        case .failure: otherURLs = []
+        let issuesReqs = requests(served, suffix: "/issues", query: "per_page=1")
+        let commitsReqs = requests(served, suffix: "/commits", query: "per_page=1")
+        guard issuesReqs.count == served.count, commitsReqs.count == served.count else {
+            return CheckResult(state: .cantTell("couldn't build the requests for the served repos"))
         }
-        let answers = await fetchAll(issuesURLs + commitsURLs + otherURLs, token: token, http: ctx.http)
+        let otherReqs: [(name: String, url: URL)]
+        switch listing {
+        case .success(let l): otherReqs = requests(l.others, suffix: "", query: nil)
+        case .failure: otherReqs = []
+        }
+        let answers = await fetchAll((issuesReqs + commitsReqs + otherReqs).map(\.url), token: token, http: ctx.http)
 
         // A 401 anywhere means nothing else it said can be trusted.
         if answers.values.contains(where: { $0.status == 401 }) {
@@ -80,15 +82,15 @@ enum TokenScope {
         }
 
         var outcomes: [(String, Outcome)] = []
-        outcomes.append(("Reaches issues", issuesOutcome(served, issuesURLs, answers)))
-        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherURLs, answers)))
-        outcomes.append(("No code access", contentsOutcome(served, commitsURLs, answers)))
+        outcomes.append(("Reaches issues", issuesOutcome(issuesReqs, answers)))
+        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherReqs, answers)))
+        outcomes.append(("No code access", contentsOutcome(commitsReqs, answers)))
         outcomes.append(("Distinct token", distinctOutcome(token: token, secretName: secretName, ctx: ctx)))
 
-        let header = issuesURLs.lazy.compactMap { answers[$0] }.filter { $0.status == 200 }
+        let header = issuesReqs.lazy.compactMap { answers[$0.url] }.filter { $0.status == 200 }
             .compactMap { $0.headers["github-authentication-token-expiration"] }.first
         let day = header.flatMap(expiryDay(header:))
-        outcomes.append(("Expiry", expiryOutcome(day: day, now: ctx.now)))
+        outcomes.append(("Expiry", expiryOutcome(header: header, day: day, now: ctx.now)))
 
         var result = CheckResult(state: summary(outcomes, served: served, day: day))
         result.rows = outcomes.map { SubRow(name: $0.0, ok: $0.1.row.ok, detail: $0.1.row.detail) }
@@ -111,9 +113,9 @@ enum TokenScope {
         return .pass(reach + ", no code access" + (day.map { ", expires \($0)" } ?? ""))
     }
 
-    private static func issuesOutcome(_ served: [String], _ urls: [URL], _ answers: [URL: HTTPAnswer]) -> Outcome {
+    private static func issuesOutcome(_ reqs: [(name: String, url: URL)], _ answers: [URL: HTTPAnswer]) -> Outcome {
         var failed: [String] = [], unknown = false
-        for (repo, url) in zip(served, urls) {
+        for (repo, url) in reqs {
             guard let a = answers[url] else { unknown = true; continue }
             switch a.status {
             case 200: break
@@ -123,18 +125,18 @@ enum TokenScope {
         }
         if !failed.isEmpty { return .fail("no issues access to \(failed.joined(separator: ", "))") }
         if unknown { return .unknown("couldn't read the issues of every served repo") }
-        return .ok("can read issues of \(served.count) repo\(served.count == 1 ? "" : "s")")
+        return .ok("can read issues of \(reqs.count) repo\(reqs.count == 1 ? "" : "s")")
     }
 
-    private static func deniedOutcome(_ listing: Result<[String], ListingError>, _ urls: [URL],
+    private static func deniedOutcome(_ listing: Result<Listing, ListingError>, _ reqs: [(name: String, url: URL)],
                                       _ answers: [URL: HTTPAnswer]) -> Outcome {
-        let names: [String]
+        let l: Listing
         switch listing {
         case .failure(let e): return .unknown(e.message)
-        case .success(let n): names = n
+        case .success(let value): l = value
         }
         var visible: [String] = [], unknown = 0
-        for (name, url) in zip(names, urls) {
+        for (name, url) in reqs {
             guard let a = answers[url] else { unknown += 1; continue }
             switch a.status {
             case 200: visible.append(name)
@@ -142,17 +144,25 @@ enum TokenScope {
             default: unknown += 1
             }
         }
+        // Seeing a repo is a fail whatever else is doubtful.
         if !visible.isEmpty {
             let shown = visible.prefix(namedRepos).joined(separator: ", ") + (visible.count > namedRepos ? "…" : "")
             return .fail("can see \(visible.count) other private repo\(visible.count == 1 ? "" : "s") (\(shown))")
         }
-        if unknown > 0 { return .unknown("couldn't check \(unknown) of \(names.count) other private repos") }
-        return .ok("denied \(names.count) other private repo\(names.count == 1 ? "" : "s")")
+        // gh must list the served repos (they are private): if it doesn't, it is looking at the wrong account or
+        // cannot see private repos, and an empty "others" list would prove nothing.
+        if !l.servedMissing.isEmpty {
+            return .unknown("gh doesn't list \(l.servedMissing.joined(separator: ", ")) among the private repos it can see")
+        }
+        if l.skippedLines > 0 { return .unknown("gh listed \(l.skippedLines) lines that are not repo names") }
+        if l.maybeCut { return .unknown("gh may have cut its list of private repos at \(listLimit)") }
+        if unknown > 0 { return .unknown("couldn't check \(unknown) of \(reqs.count) other private repos") }
+        return .ok("denied \(reqs.count) other private repo\(reqs.count == 1 ? "" : "s")")
     }
 
-    private static func contentsOutcome(_ served: [String], _ urls: [URL], _ answers: [URL: HTTPAnswer]) -> Outcome {
+    private static func contentsOutcome(_ reqs: [(name: String, url: URL)], _ answers: [URL: HTTPAnswer]) -> Outcome {
         var readable: [String] = [], unknown = false
-        for (repo, url) in zip(served, urls) {
+        for (repo, url) in reqs {
             guard let a = answers[url] else { unknown = true; continue }
             switch a.status {
             // 409 is GitHub's answer for an empty repo the token can read.
@@ -169,19 +179,24 @@ enum TokenScope {
     /// Compares in memory with every other machine's token. Neither value is printed, stored or hashed.
     private static func distinctOutcome(token: String, secretName: String, ctx: StepContext) -> Outcome {
         var failures: [String] = []
+        let mine = token.trimmingCharacters(in: .whitespacesAndNewlines)
         for other in ctx.all where other.name != ctx.machine.name {
             guard let theirs = other.sdWorker?.issuesSecret, !theirs.isEmpty else { continue }
             if theirs == secretName {
                 failures.append("\(other.name) uses the same secret \(theirs)")
-            } else if let value = ctx.secrets.value(named: theirs), value == token {
+            } else if let value = ctx.secrets.value(named: theirs), !mine.isEmpty,
+                      value.trimmingCharacters(in: .whitespacesAndNewlines) == mine {
                 failures.append("same token as \(other.name) (\(theirs))")
             }
         }
         return failures.isEmpty ? .ok("no other machine uses this token") : .fail(failures.joined(separator: "; "))
     }
 
-    private static func expiryOutcome(day: String?, now: Date) -> Outcome {
-        guard let day else { return .ok("GitHub reported no expiry") }
+    private static func expiryOutcome(header: String?, day: String?, now: Date) -> Outcome {
+        guard let day else {
+            // A header that is there but unreadable is not "no expiry".
+            return header == nil ? .ok("GitHub reported no expiry") : .unknown("couldn't read the expiry header")
+        }
         if VaultExpiry.status(of: day, now: now) == .expired { return .fail("expired on \(day)") }
         return .ok("expires \(day)")
     }
@@ -193,11 +208,27 @@ enum TokenScope {
 
     private static func rateLimited(_ a: HTTPAnswer) -> Bool {
         a.status == 429 || a.headers["x-ratelimit-remaining"] == "0" || a.headers["retry-after"] != nil
+            // A secondary limit may carry neither header; its message says so.
+            || String(decoding: a.body, as: UTF8.self).lowercased().contains("rate limit")
     }
 
     // MARK: repos and requests
 
     private struct ListingError: Error { let message: String }
+
+    /// What `gh repo list --visibility private` said for the served owners.
+    private struct Listing {
+        /// Private repos that are not served, sorted.
+        var others: [String]
+        /// Served repos gh did not list.
+        var servedMissing: [String]
+        /// Lines that were not `owner/name`, which are never probed.
+        var skippedLines: Int
+        /// A list as long as `--limit` may have been cut.
+        var maybeCut: Bool
+    }
+
+    private static let listLimit = 1000
 
     /// `owner/name`, as GitHub allows, and never a dot-only name that would climb out of the path.
     private static func isRepoName(_ text: String) -> Bool {
@@ -216,24 +247,36 @@ enum TokenScope {
         return out
     }
 
-    /// The private repos of each owner that are not served, sorted, from the user's own `gh`. gh holds its own
-    /// login; this probe never hands it the token.
-    private static func otherPrivateRepos(owners: [String], excluding served: Set<String>,
-                                          runner: CommandRunning) async -> Result<[String], ListingError> {
-        var names = Set<String>()
-        for owner in owners {
-            let argv = [MachineTools.path("gh"), "repo", "list", owner, "--visibility", "private", "--limit", "1000",
+    /// The private repos of each served owner, from the user's own `gh`. gh holds its own login; this probe never
+    /// hands it the token.
+    private static func privateListing(served: [String], runner: CommandRunning) async -> Result<Listing, ListingError> {
+        let servedKeys = Set(served.map { $0.lowercased() })
+        var seen = Set<String>(), others = Set<String>(), skipped = 0, cut = false
+        for owner in owners(of: served) {
+            let argv = [MachineTools.path("gh"), "repo", "list", owner, "--visibility", "private", "--limit", "\(listLimit)",
                         "--json", "nameWithOwner", "--jq", ".[].nameWithOwner"]
             let result = await runner.run(argv, cwd: nil, timeout: 60)
             guard result.code == 0 else {
                 return .failure(ListingError(message: "couldn't list the private repos of \(owner) with gh"))
             }
+            var lines = 0
             for line in result.out.split(whereSeparator: \.isNewline) {
                 let name = line.trimmingCharacters(in: .whitespaces)
-                if isRepoName(name), !served.contains(name.lowercased()) { names.insert(name) }
+                if name.isEmpty { continue }
+                lines += 1
+                guard isRepoName(name) else { skipped += 1; continue }
+                seen.insert(name.lowercased())
+                if !servedKeys.contains(name.lowercased()) { others.insert(name) }
             }
+            if lines >= listLimit { cut = true }
         }
-        return .success(names.sorted())
+        return .success(Listing(others: others.sorted(), servedMissing: served.filter { !seen.contains($0.lowercased()) },
+                                skippedLines: skipped, maybeCut: cut))
+    }
+
+    /// The requests for `names`, each paired with its URL, so a row never pairs a name with another's answer.
+    private static func requests(_ names: [String], suffix: String, query: String?) -> [(name: String, url: URL)] {
+        names.compactMap { name in apiURL("/repos/\(name)\(suffix)", query: query).map { (name, $0) } }
     }
 
     /// Only ever `https://api.github.com`: `path` comes from validated repo names.

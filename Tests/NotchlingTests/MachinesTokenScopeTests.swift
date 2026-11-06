@@ -157,6 +157,59 @@ final class MachinesTokenScopeTests: XCTestCase {
         guard case .cantTell = limited.state else { return XCTFail("rate limit gave \(limited.state)") }
     }
 
+    // MARK: gh's listing must be trustworthy
+
+    /// Today's second mistake must never pass because gh saw too little.
+    func testAnEmptyGhListingCantTellEvenWhenTheOthersAnswer200() async {
+        for listing in [[], ["dtthaison/some-other"]] as [[String]] {
+            let result = await check(ctx(http: http(other: 200), runner: runner(listing: listing)))
+            guard case let .cantTell(text) = result.state else { return XCTFail("\(listing) gave \(result.state)") }
+            XCTAssertTrue(text.contains(repo), text)
+            XCTAssertFalse(result.rows.first { $0.name == "Denied elsewhere" }!.ok)
+        }
+    }
+
+    func testAServedRepoIsFoundInTheListingWhateverItsCase() async {
+        let result = await check(ctx(http: http(), runner: runner(listing: [repo.uppercased()] + others())))
+        guard case .pass = result.state else { return XCTFail("got \(result.state)") }
+    }
+
+    func testAListingWithOnlyTheServedReposPasses() async {
+        let result = await check(ctx(http: http(), runner: runner(listing: [repo])))
+        guard case .pass = result.state else { return XCTFail("got \(result.state)") }
+    }
+
+    func testAListingThatMayBeCutOrHasOddLinesCantTell() async {
+        let full = [repo] + (1...999).map { "dtthaison/p-\($0)" }
+        let cut = await check(ctx(http: http(), runner: runner(listing: full)))
+        guard case .cantTell = cut.state else { return XCTFail("1000 names gave \(cut.state)") }
+        let odd = await check(ctx(http: http(), runner: runner(listing: [repo, "not a repo name"] + others())))
+        guard case .cantTell = odd.state else { return XCTFail("odd line gave \(odd.state)") }
+    }
+
+    func testASecondaryRateLimitBodyIsNotADenial() async {
+        var a: [String: HTTPAnswer] = [
+            "/repos/\(repo)/issues?per_page=1": answer(200), "/repos/\(repo)/commits?per_page=1": answer(403),
+        ]
+        let body = Data(#"{"message":"You have exceeded a secondary rate limit."}"#.utf8)
+        for name in others() { a["/repos/\(name)"] = HTTPAnswer(status: 403, headers: [:], body: body) }
+        let result = await check(ctx(http: FakeHTTP(answers: a), runner: runner()))
+        guard case .cantTell = result.state else { return XCTFail("got \(result.state)") }
+    }
+
+    func testAnUnreadableExpiryHeaderCantTell() async {
+        let result = await check(ctx(http: http(header: "soon"), runner: runner()))
+        guard case let .cantTell(text) = result.state else { return XCTFail("got \(result.state)") }
+        XCTAssertTrue(text.contains("expiry"), text)
+        XCTAssertNil(result.detected.tokenExpires)
+    }
+
+    func testTheSameTokenWithStrayWhitespaceIsStillTheSame() async {
+        let values = ["m1-github-issues": secret, "vps-sing-1-github-issues": secret + " \n"]
+        let result = await check(ctx(http: http(), runner: runner(), values: values))
+        XCTAssertEqual(result.state, .fail("same token as vps-sing-1 (vps-sing-1-github-issues)"))
+    }
+
     func testAFailedGhListCantTell() async {
         let r = ScriptedRunner()
         r.on({ $0.contains("list") }, result: CommandResult(code: 1, out: "", err: "gh: not logged in"))
@@ -292,6 +345,10 @@ final class MachinesTokenScopeTests: XCTestCase {
         guard case let .run(plan) = step.fix else { return XCTFail("no fix") }
         XCTAssertFalse(plan.needsAdmin)
         XCTAssertTrue(plan.display.contains("m1-github-issues"))
+        // The worker takes jobs, changes labels and comments, so the token needs Issues read and write.
+        XCTAssertTrue(plan.display.contains("Issues: read and write"), plan.display)
+        XCTAssertFalse(plan.display.contains("read-only"), plan.display)
+        XCTAssertTrue(plan.display.contains("Metadata: read"), plan.display)
         let outcome = await plan.run(.test(ctx(http: http(), runner: runner())))
         XCTAssertTrue(outcome.ok)
         XCTAssertFalse(outcome.message.contains("SECRET123"))
