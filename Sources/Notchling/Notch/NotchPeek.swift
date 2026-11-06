@@ -23,6 +23,11 @@ struct PeekView: View {
                     .reportsCardHeight(to: model)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
+            } else if let p = model.agyPermission(agent.id) {
+                AgyPermissionCard(model: model, agent: agent, permission: p, showsAgent: true).part("Notch Permission Card", .topTrailing)
+                    .reportsCardHeight(to: model)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
             } else if let q = model.question(agent.id) {
                 QuestionCard(model: model, agent: agent, question: q, showsAgent: true, bodyLimit: QuestionCard.peekBodyLimit).part("Notch Question Card", .topTrailing)
                     .reportsCardHeight(to: model)

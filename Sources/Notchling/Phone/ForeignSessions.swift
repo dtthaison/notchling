@@ -384,7 +384,7 @@ final class ForeignSessionSource: @unchecked Sendable {
     }
 
     /// The model and effort picked in Chat for this Codex row (kept in UserDefaults by `ChatModel`).
-    private static func codexPick(for rowID: String) -> CodexPick {
+    static func codexPick(for rowID: String) -> CodexPick {
         guard let data = UserDefaults.standard.data(forKey: "codexPicks"),
               let saved = try? JSONDecoder().decode([String: CodexPick].self, from: data) else { return CodexPick() }
         return saved[rowID] ?? CodexPick()

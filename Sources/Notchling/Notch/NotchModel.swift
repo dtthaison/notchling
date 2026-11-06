@@ -21,6 +21,14 @@ enum NotchState: Equatable {
 
 final class NotchModel: ObservableObject {
     @Published var agents: [Agent] = [] { didSet { layoutChanged?() } }
+    /// Codex and Antigravity CLI sessions (`NotchForeign`), apart from `agents` since Chat reads those as Claude
+    /// Code's and lists the others itself.
+    @Published var foreignAgents: [Agent] = [] { didSet { layoutChanged?() } }
+    /// Antigravity permissions waiting for an answer, by row id. The runner holds the truth, so answering here
+    /// or in Chat clears both.
+    @Published var foreignPermissions: [String: ACPPermission] = [:] { didSet { layoutChanged?() } }
+    /// Everything the lists show: Claude Code's agents, then the other tools'.
+    var listed: [Agent] { agents + foreignAgents }
     @Published private(set) var snapshots: [String: Snapshot] = [:] { didSet { layoutChanged?() } }
     /// Prompts a hook is holding open, by session id.
     @Published var requests: [String: HookRequest] = [:] {
@@ -120,12 +128,15 @@ final class NotchModel: ObservableObject {
     private var answered = Set<String>()
     private var choicesFor: String?
 
-    var needsCount: Int { agents.filter { $0.group == .needsInput }.count }
-    var workingCount: Int { agents.filter { $0.group == .working }.count }
+    var needsCount: Int { listed.filter { $0.group == .needsInput }.count }
+    var workingCount: Int { listed.filter { $0.group == .working }.count }
 
     func agent(_ id: String) -> Agent? {
-        agents.first { $0.id == id } ?? (detailSnapshot?.id == id ? detailSnapshot : nil)
+        listed.first { $0.id == id } ?? (detailSnapshot?.id == id ? detailSnapshot : nil)
     }
+
+    /// The Antigravity permission this agent waits on, shown as a card with Antigravity's own options.
+    func agyPermission(_ id: String) -> ACPPermission? { foreignPermissions[id] }
 
     func snapshot(_ id: String) -> Snapshot { snapshots[id] ?? Snapshot() }
 
@@ -167,7 +178,7 @@ final class NotchModel: ObservableObject {
         pendingPeekEnd?.cancel()
         if new == .list, state == .collapsed || isPeeking {
             // Open on the tab that most likely needs you.
-            tab = AgentGroup.allCases.first { g in agents.contains { $0.group == g } } ?? .needsInput
+            tab = AgentGroup.allCases.first { g in listed.contains { $0.group == g } } ?? .needsInput
         }
         withAnimation(.spring(response: 0.36, dampingFraction: 0.9)) { state = new }
         if new == .collapsed { releaseKey?() }
@@ -182,10 +193,15 @@ final class NotchModel: ObservableObject {
 
     /// Reads every agent's transcript off the main thread; unchanged files come from cache.
     func refreshSnapshots(_ done: @escaping (_ old: [String: Snapshot], _ new: [String: Snapshot]) -> Void) {
-        let agents = self.agents
+        let agents = self.listed
+        // The runner is main-thread only; Codex rows are read from their files below.
+        let agy = NotchForeign.agyConversations(for: foreignAgents)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var fresh: [String: Snapshot] = [:]
-            for agent in agents { fresh[agent.id] = TranscriptReader.snapshot(for: agent) }
+            for agent in agents {
+                fresh[agent.id] = NotchForeign.isForeign(agent) ? NotchForeign.snapshot(for: agent, agy: agy)
+                                                                : TranscriptReader.snapshot(for: agent)
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 let old = self.snapshots
@@ -215,6 +231,9 @@ final class NotchModel: ObservableObject {
             if let r = permission(id) {
                 return CGSize(width: width.panel, height: chrome + min(cardHeight ?? permissionHeight(r), Self.maxCard) + 16)
             }
+            if let p = agyPermission(id) {
+                return CGSize(width: width.panel, height: chrome + min(cardHeight ?? NotchForeign.permissionHeight(p), Self.maxCard) + 16)
+            }
             if let q = question(id), let agent = agent(id) {
                 return CGSize(width: width.panel,
                               height: chrome + min(cardHeight ?? questionHeight(q, canAnswer: canAnswer(agent, q)), Self.maxCard) + 16)
@@ -226,11 +245,11 @@ final class NotchModel: ObservableObject {
             let hasText = showLastReply && (snapshots[id]?.lastReply != nil || agent(id)?.detail != nil)
             return CGSize(width: width.list, height: chrome + (hasText ? 100 : 56))
         case .list:
-            let rows = agents.filter { $0.group == tab }
+            let rows = listed.filter { $0.group == tab }
             let content = rows.isEmpty ? 44 : rows.reduce(CGFloat(tab == .completed ? 28 : 0)) { $0 + rowHeight($1) + 4 }
             return CGSize(width: width.list, height: chrome + 34 + min(content, 300) + 6)
         case .detail:
-            if case .detail(let id) = state, question(id) != nil || permission(id) != nil {
+            if case .detail(let id) = state, question(id) != nil || permission(id) != nil || agyPermission(id) != nil {
                 return CGSize(width: width.panel, height: chrome + 470)
             }
             return CGSize(width: width.panel, height: chrome + 420)
@@ -311,7 +330,7 @@ final class NotchModel: ObservableObject {
 
     /// A question or permission prompt holds the agent until you answer.
     private func blocksAgent(_ id: String) -> Bool {
-        question(id) != nil || permission(id) != nil
+        question(id) != nil || permission(id) != nil || agyPermission(id) != nil
     }
 
     /// Anything you can answer from the peek: a question, a permission prompt, or a reply box.
@@ -322,7 +341,7 @@ final class NotchModel: ObservableObject {
     /// A peek gets a reply box when the agent waits on a plain reply that can be sent from here.
     func canReplyInPeek(_ id: String) -> Bool {
         guard let agent = agent(id), agent.group == .needsInput, canReply(agent) else { return false }
-        return question(id) == nil && permission(id) == nil
+        return question(id) == nil && permission(id) == nil && agyPermission(id) == nil
     }
 
     /// The agent whose reply box is on show: the conversation's, or a peek's.
@@ -351,7 +370,8 @@ final class NotchModel: ObservableObject {
     // MARK: Conversation
 
     func open(_ id: String) {
-        detailSnapshot = agents.first { $0.id == id }
+        detailSnapshot = listed.first { $0.id == id }
+        if let agent = detailSnapshot, NotchForeign.isForeign(agent) { NotchForeign.opened(agent) }
         draft = ""
         sendError = nil
         resetChoices(for: id)
@@ -359,6 +379,7 @@ final class NotchModel: ObservableObject {
     }
 
     func send(_ preset: String? = nil) {
+        if let id = replyID, let agent = agent(id), NotchForeign.isForeign(agent) { sendForeign(agent, preset); return }
         guard let id = replyID, let agent = agent(id), case .job(let jobID) = agent.target, !sending else { return }
         let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -377,11 +398,42 @@ final class NotchModel: ObservableObject {
         }
     }
 
+    /// The next turn of a Codex or Antigravity session, run the way Chat runs it.
+    private func sendForeign(_ agent: Agent, _ preset: String?) {
+        guard !sending else { return }
+        let text = (preset ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if preset == nil { draft = "" }
+        sending = true
+        sendError = nil
+        NotchForeign.send(text, to: agent) { [weak self] failure in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.sending = false
+                if let failure {
+                    self.sendError = failure
+                    if preset == nil, self.draft.isEmpty { self.draft = text }
+                } else if self.state == .peek(agent.id) {
+                    self.go(.collapsed)
+                }
+            }
+        }
+    }
+
+    /// Answers an Antigravity permission with the option picked. The runner clears it for Chat too.
+    func decideAntigravity(_ option: ACPPermission.Option, for id: String) {
+        guard let agent = agent(id), agyPermission(id) != nil else { return }
+        foreignPermissions[id] = nil
+        NotchForeign.answer(option, for: agent)
+        foldPeek()
+    }
+
     // MARK: Slash commands and suggestions
 
-    /// Commands matching a draft like "/sd:ap"; empty once there's a space after the command.
+    /// Commands matching a draft like "/sd:ap"; empty once there's a space after the command. Those are Claude
+    /// Code's, so Codex and Antigravity sessions get none here (Chat lists their own).
     func completions(for agent: Agent) -> [SlashCommand] {
-        guard draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
+        guard !NotchForeign.isForeign(agent), draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
         return SlashCommands.matches(String(draft.dropFirst()), in: SlashCommands.all(for: agent.cwd))
     }
 
@@ -394,7 +446,7 @@ final class NotchModel: ObservableObject {
     /// Tab, arrows and Return while typing a reply. True when the key was used.
     func handleReplyKey(_ keyCode: UInt16) -> Bool {
         guard let id = replyID, let agent = agent(id), agent.canReply,
-              question(id) == nil, permission(id) == nil else { return false }
+              question(id) == nil, permission(id) == nil, agyPermission(id) == nil else { return false }
         // A peek's box has no room for the command list; that's in the conversation.
         let list = isPeeking ? [] : completions(for: agent)
         switch keyCode {

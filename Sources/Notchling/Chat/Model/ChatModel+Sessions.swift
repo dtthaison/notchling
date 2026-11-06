@@ -41,7 +41,7 @@ extension ChatModel {
         return agent.id
     }
 
-    /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which only Chat shows.
+    /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's, which the notch lists apart (`NotchModel.foreignAgents`).
     var allAgents: [Agent] {
         notch.agents + codexDrafts + (codexAgents + agyAgents).filter { !isClosed($0) } + agyDrafts
     }

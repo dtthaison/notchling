@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ConsoleCore
 import ServiceManagement
 
@@ -46,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
     private var statusItem: NSStatusItem!
     private var agents: [Agent] = []
+    /// Codex and Antigravity CLI sessions in the notch (`NotchForeign`); Claude Code's are `agents`.
+    private var foreignAgents: [Agent] = []
+    private var allAgents: [Agent] { agents + foreignAgents }
+    private var foreignWatch: AnyCancellable?
     private var lastGroups: [String: AgentGroup]?
     private var timer: Timer?
     private var seenRequests = Set<String>()
@@ -96,6 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // every launch (a no-op when nothing changed) so older installs get the read hook and the skill.
         if keepPages { setKeepPages(true) }
 
+        // Codex and Antigravity rows show up and change in the background; a runner's permission or turn end
+        // updates the notch within a moment rather than at the next 3 s tick.
+        NotchForeignSource.shared.onChange = { [weak self] in self?.refresh() }
+        foreignWatch = AntigravityRunner.shared.$version
+            .receive(on: DispatchQueue.main)
+            .throttle(for: .milliseconds(600), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] _ in self?.refresh() }
         refresh()
         if showNotch { notch.show() }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
@@ -214,15 +226,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             held.label = r.question != nil ? "Asks you" : "Needs permission"
             return held
         }
+        // Codex and Antigravity sessions: Chat's rows unless closed there, with the runners' live state.
+        let foreignRows = NotchForeignSource.shared.current()
+        let permissions = NotchForeign.permissions(for: foreignRows)
+        let closedInChat = UserDefaults.standard.dictionary(forKey: "chatClosedSessions") as? [String: Double] ?? [:]
+        foreignAgents = NotchForeign.merge(foreignRows, closed: closedInChat, codexRunning: CodexRunner.shared.running,
+                                           agyWorking: AntigravityRunner.shared.working, permissions: permissions).filter { a in
+            guard a.group == .completed, let at = cleared[a.id] else { return true }
+            return a.since.timeIntervalSince1970 > at
+        }
         let wasHidden = hidden
-        let stillHidden = wasHidden.filter { id, group in agents.contains { $0.id == id && $0.group.rawValue == group } }
+        let stillHidden = wasHidden.filter { id, group in allAgents.contains { $0.id == id && $0.group.rawValue == group } }
         agents.removeAll { stillHidden[$0.id] != nil }
+        foreignAgents.removeAll { stillHidden[$0.id] != nil }
         if stillHidden != wasHidden { hidden = stillHidden }
 
         let fresh = requests.values.filter { !seenRequests.contains($0.id) }
         seenRequests = Set(requests.values.map(\.id))
         notch.model.requests = requests
         notch.model.agents = agents
+        notch.model.foreignAgents = foreignAgents
+        notch.model.foreignPermissions = permissions.filter { entry in foreignAgents.contains { $0.id == entry.key } }
         notch.model.onClearCompleted = { [weak self] in self?.clearCompleted() }
         notch.model.onHide = { [weak self] in self?.hide($0) }
         notch.model.onRemove = { [weak self] in self?.remove($0) }
@@ -233,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notch.model.peek(agent)
         }
         notch.model.refreshSnapshots { [weak self] old, new in self?.peekTransitions(old: old, new: new) }
-        awake.apply(agentsWorking: agents.contains { $0.group == .working })
+        awake.apply(agentsWorking: allAgents.contains { $0.group == .working })
         resumer.check(agents)
         limits.check(agents)
         updateButton()
@@ -260,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Peeks out of the notch when an agent replies (starts needing input or finishes) or asks a question.
     /// The first poll only sets the baseline.
     private func peekTransitions(old: [String: Snapshot], new: [String: Snapshot]) {
-        let current = Dictionary(agents.map { ($0.id, $0.group) }, uniquingKeysWith: { a, _ in a })
+        let current = Dictionary(allAgents.map { ($0.id, $0.group) }, uniquingKeysWith: { a, _ in a })
         defer { lastGroups = current }
         guard let previous = lastGroups else { return }
 
@@ -268,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let q = new[agent.id]?.question else { return false }
             return old[agent.id]?.question?.toolUseID != q.toolUseID
         }
-        let changed = agents.filter { agent in
+        let changed = allAgents.filter { agent in
             guard let before = previous[agent.id] else { return false }
             return before != agent.group && agent.group != .working
         }
@@ -859,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func clearCompleted() {
         var cleared = dismissed
         let now = Date().timeIntervalSince1970
-        for agent in agents where agent.group == .completed { cleared[agent.id] = now }
+        for agent in allAgents where agent.group == .completed { cleared[agent.id] = now }
         // Forget entries old enough that they'd be hidden anyway.
         dismissed = cleared.filter { now - $0.value < 7 * 86400 }
         refresh()

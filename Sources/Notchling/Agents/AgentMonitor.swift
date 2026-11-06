@@ -17,10 +17,10 @@ enum AgentTarget {
     case job(String)                             // background job: `claude attach <id>`
     case process(pid_t)                          // live terminal session: bring its window forward
     case resume(sessionID: String, cwd: String)  // exited session: `claude --resume <id>`
-    /// A Codex CLI session, shown only in Chat; turns run through `CodexRunner`. Empty id: a new
+    /// A Codex CLI session, shown in Chat and the notch; turns run through `CodexRunner`. Empty id: a new
     /// session not started yet (its first message starts it).
     case codex(sessionID: String)
-    /// An Antigravity CLI conversation, shown only in Chat; `AntigravityRunner` loads it and runs its
+    /// An Antigravity CLI conversation, shown in Chat and the notch; `AntigravityRunner` loads it and runs its
     /// turns over ACP. Empty id: a new session not started yet.
     case antigravity(sessionID: String)
 
