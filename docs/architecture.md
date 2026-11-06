@@ -134,15 +134,12 @@ protocol AccountProvider: AnyObject {
 ### Phase 5: a hook with no AppKit
 Once Core and System are separate targets, the `--hook` path links only those two, so the hook starts faster and pulls in less.
 
-## Possible bugs found in the review (not yet verified)
-- `AccountsView.refresh()` doesn't call `desktop.sync()`, but `show()` does.
-- Usage freshness is `15*60` in Accounts, while `LimitLogic.freshFor` is 10 minutes.
-- `CostTracker.Summary.==` ignores projects, channels and models, so changes to those may not publish.
-- The `DayBars` title says "Last 14 Days" but it can show up to 30 bars.
-- `ChatModel.refreshPage` reads `pages.json` on the main thread on every 1-second tick.
-- `ConversationReader.cache` has no size limit.
-- `AccountStore.snapshot()` calls `DispatchQueue.main.sync` and would deadlock if it were ever called on the main thread.
-- The `NotchController` NotificationCenter observers are never removed.
+## Review findings, checked
+The review's real bugs are fixed. These turned out not to be bugs:
+- Usage freshness `15*60` (in `LimitWatcher`, not Accounts) against `LimitLogic.freshFor` (10 minutes): they gate different things. `freshFor` is for an account Notchling would switch to, `inUseFreshFor` for the account already in use, which is refreshed every 5 minutes and skipped while its token is expired. The two literals are now one named constant.
+- `ConversationReader.cache` having no size limit: its `TranscriptCursors` was already capped at 60 files, though by clearing them all. It now drops only the file read longest ago.
+- `AccountStore.snapshot()` and `DispatchQueue.main.sync`: every caller (and the Codex and Antigravity `capture()`s) is already inside its own serial `queue.async`, so none can run on the main thread.
+- `NotchController` observers never removed: it is created once by `AppDelegate` and lives as long as the process, and the closure observers hold `self` weakly.
 
 ## Rules for new code
 - No `FileManager.default`, `UserDefaults.standard`, `Process` or `URLSession` outside the adapters. Take the dependency in `init` instead.

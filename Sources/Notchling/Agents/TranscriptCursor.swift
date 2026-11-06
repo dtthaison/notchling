@@ -9,7 +9,7 @@ protocol TranscriptLineParser {
 /// Reads transcripts incrementally: each file keeps a cursor (where it was read up to, and the parser's
 /// state there), so a call parses only the lines appended since the last one. The first call, and a file
 /// that was replaced, truncated or grew by more than `tailBytes` at once, starts from the last
-/// `tailBytes` of the file.
+/// `tailBytes` of the file. At most `limit` files are kept; reading one more drops the one read longest ago.
 final class TranscriptCursors<Parser: TranscriptLineParser, Output> {
     private struct Cursor {
         let inode: UInt64
@@ -19,12 +19,15 @@ final class TranscriptCursors<Parser: TranscriptLineParser, Output> {
         var size: UInt64
         var parser: Parser
         var output: Output
+        /// `clock` at the last read, to find the cursor read longest ago.
+        var used: UInt64
     }
 
     private let tailBytes: UInt64
     private let limit: Int
     private let render: (Parser) -> Output
     private var cursors: [String: Cursor] = [:]
+    private var clock: UInt64 = 0
     /// Held while a cursor reads and parses, so two callers never advance the same one.
     private let lock = NSLock()
 
@@ -43,9 +46,13 @@ final class TranscriptCursors<Parser: TranscriptLineParser, Output> {
         let inode = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
 
         lock.lock(); defer { lock.unlock() }
+        clock += 1
         let reusable: Bool
         if let cached = cursors[path], cached.inode == inode, cached.offset <= size, size - cached.offset <= tailBytes {
-            if cached.modified == modified, cached.size == size { return cached.output }
+            if cached.modified == modified, cached.size == size {
+                cursors[path]?.used = clock
+                return cached.output
+            }
             reusable = true
         } else {
             reusable = false
@@ -60,6 +67,7 @@ final class TranscriptCursors<Parser: TranscriptLineParser, Output> {
             cursor.modified = modified
             cursor.size = size
             cursor.output = render(cursor.parser)
+            cursor.used = clock
             cursors[path] = cursor
             return cursor.output
         }
@@ -69,9 +77,12 @@ final class TranscriptCursors<Parser: TranscriptLineParser, Output> {
         var parser = Parser()
         for line in chunk.lines { parser.consume(line) }
         let output = render(parser)
-        if cursors.count > limit { cursors.removeAll() }
+        if cursors[path] == nil, cursors.count >= limit,
+           let oldest = cursors.min(by: { $0.value.used < $1.value.used })?.key {
+            cursors.removeValue(forKey: oldest)
+        }
         cursors[path] = Cursor(inode: inode, offset: start + chunk.consumed, modified: modified, size: size,
-                               parser: parser, output: output)
+                               parser: parser, output: output, used: clock)
         return output
     }
 

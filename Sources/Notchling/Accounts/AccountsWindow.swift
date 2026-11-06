@@ -228,6 +228,7 @@ struct AccountsView: View {
     private func refresh() {
         accounts.sync(force: true)
         antigravity.sync()
+        desktop.sync()
         codex.sync(force: true)
         cost.refresh()
         settings.reload?()
@@ -621,7 +622,7 @@ private struct CostPage: View {
                         Text("Reading transcripts…").font(.callout).foregroundColor(.secondary)
                     }
                 }
-                DayBars(days: s.days)
+                DayBars(title: range == 7 ? "Last 7 Days" : "Last 30 Days", days: s.days)
                 if filter.isEmpty {
                     Breakdown(title: "By Account, \(rangeLabel)", rows: s.accounts.map { (name($0.id), $0.cost) })
                 }
@@ -656,6 +657,8 @@ private struct Stat: View {
 }
 
 private struct DayBars: View {
+    /// One bar per day: 7 for the 7-day range, 30 for the others (All Time shows its last 30).
+    let title: String
     let days: [(day: Date, cost: Double)]
 
     var body: some View {
@@ -666,7 +669,7 @@ private struct DayBars: View {
             return f
         }()
         VStack(alignment: .leading, spacing: 4) {
-            Text("Last 14 Days").font(.caption.weight(.semibold)).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(.secondary)
             HStack(alignment: .bottom, spacing: 6) {
                 ForEach(Array(days.enumerated()), id: \.offset) { i, day in
                     VStack(spacing: 3) {

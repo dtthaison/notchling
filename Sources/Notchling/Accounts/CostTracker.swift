@@ -7,7 +7,7 @@ import Foundation
 /// scan stopped. Running totals, read offsets and the ids already counted are kept in Application Support.
 final class CostTracker: ObservableObject {
     struct Summary: Equatable {
-        /// The last 14 days, oldest first.
+        /// The last 7 or 30 days (30 for All Time), oldest first.
         var days: [(day: Date, cost: Double)] = []
         var today = 0.0, week = 0.0, month = 0.0
         /// The last 30 days, most expensive first.
@@ -20,9 +20,15 @@ final class CostTracker: ObservableObject {
         /// The last 30 days by channel (Claude Code, Desktop).
         var channels: [(name: String, cost: Double)] = []
 
+        /// Every field counts: a change in any of them has to reach the views.
         static func == (a: Summary, b: Summary) -> Bool {
-            a.month == b.month && a.today == b.today && a.days.map(\.cost) == b.days.map(\.cost)
-                && a.accounts.map(\.cost) == b.accounts.map(\.cost) && a.modelDetail == b.modelDetail
+            a.today == b.today && a.week == b.week && a.month == b.month
+                && a.days.elementsEqual(b.days, by: { $0.day == $1.day && $0.cost == $1.cost })
+                && a.models.elementsEqual(b.models, by: { $0.name == $1.name && $0.cost == $1.cost })
+                && a.modelDetail == b.modelDetail
+                && a.projects.elementsEqual(b.projects, by: { $0.name == $1.name && $0.cost == $1.cost })
+                && a.accounts.elementsEqual(b.accounts, by: { $0.id == $1.id && $0.cost == $1.cost })
+                && a.channels.elementsEqual(b.channels, by: { $0.name == $1.name && $0.cost == $1.cost })
         }
     }
 

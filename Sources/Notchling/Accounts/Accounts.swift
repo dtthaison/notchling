@@ -163,6 +163,7 @@ final class AccountStore: ObservableObject {
         var usage: [String: AccountUsage]
     }
 
+    /// Runs on the queue (every caller is inside `queue.async`), never on the main thread, which it waits for.
     private func snapshot() -> State {
         DispatchQueue.main.sync { State(accounts: accounts, activeID: activeID, usage: usage) }
     }

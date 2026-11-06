@@ -202,7 +202,10 @@ final class ChatModel: ObservableObject {
     }
     /// The Artifact open in the panel beside the chat.
     @Published var page: PageLibrary.Entry? {
-        didSet { if page != nil { file = nil } }
+        didSet {
+            pageChecked = nil
+            if page != nil { file = nil }
+        }
     }
     /// A file opened from a link in a message, shown in the same place as a page (`FilePanel`).
     @Published var file: URL? {
@@ -1283,10 +1286,17 @@ final class ChatModel: ObservableObject {
         return .systemAction
     }
 
+    /// `pages.json`'s modification date when `refreshPage` last read it for the shown page (nil: not read yet),
+    /// so the 1-second tick parses the list only after it changed.
+    private var pageChecked: Date??
+
     /// The panel's page again from the library, so a republish shows up.
     private func refreshPage() {
-        guard let shown = page, !shown.url.isEmpty,
-              let fresh = PageLibrary.find(shown.url).first(where: { $0.folder == shown.folder }),
+        guard let shown = page, !shown.url.isEmpty else { return }
+        let stamp = PageLibrary.listModified
+        if let checked = pageChecked, checked == stamp { return }
+        pageChecked = stamp
+        guard let fresh = PageLibrary.find(shown.url).first(where: { $0.folder == shown.folder }),
               fresh != shown else { return }
         page = fresh
     }

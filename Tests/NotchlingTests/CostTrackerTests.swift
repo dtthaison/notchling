@@ -96,3 +96,35 @@ final class CostTrackerTests: XCTestCase {
         XCTAssertEqual(again.summary.today, 20, accuracy: 0.001, "read from the cache, not counted twice")
     }
 }
+
+/// A summary is published only when it differs, so every part of it has to take part in `==`.
+final class CostSummaryEqualityTests: XCTestCase {
+    func base() -> CostTracker.Summary {
+        var s = CostTracker.Summary()
+        s.today = 1; s.week = 2; s.month = 3
+        s.days = [(Date(timeIntervalSince1970: 0), 1)]
+        s.models = [("Opus 5.5", 3)]
+        s.modelDetail = [CostTracker.ModelStat(name: "claude-opus-5-5", cost: 3, percent: 100, input: 1, output: 2, cacheRead: 0, cacheWrite: 0)]
+        s.projects = [("demo", 3)]
+        s.accounts = [("a", 3)]
+        s.channels = [("Claude Code", 3)]
+        return s
+    }
+
+    func testEqualSummariesAreEqual() {
+        XCTAssertEqual(base(), base())
+    }
+
+    func testEachFieldChangeShows() {
+        var week = base(); week.week = 5
+        var days = base(); days.days = [(Date(timeIntervalSince1970: 86400), 1)]
+        var models = base(); models.models = [("Sonnet 5.5", 3)]
+        var projects = base(); projects.projects = [("other", 3)]
+        var accounts = base(); accounts.accounts = [("b", 3)]
+        var channels = base(); channels.channels = [("Desktop", 3)]
+        for (name, changed) in [("week", week), ("days", days), ("models", models), ("projects", projects),
+                                ("accounts", accounts), ("channels", channels)] {
+            XCTAssertNotEqual(base(), changed, name)
+        }
+    }
+}

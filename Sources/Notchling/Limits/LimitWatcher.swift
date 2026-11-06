@@ -21,6 +21,11 @@ enum LimitLogic {
     static let defaultSwitchAt = 95
     /// An account must have limits fetched this recently, and both under `roomBelow`, to be switched to.
     static let freshFor: TimeInterval = 10 * 60
+    /// How old the limits of an account already in use (main login or a lane) may be and still count.
+    /// Looser than `freshFor` on purpose: a switch target must be current before sessions move onto it,
+    /// while the account in use is refreshed every 5 minutes and skipped whenever Claude Code's token
+    /// is expired, so it needs a few missed rounds of slack before its warnings stop.
+    static let inUseFreshFor: TimeInterval = 15 * 60
     static let roomBelow = 80.0
     static let switchGap: TimeInterval = 30 * 60
 
@@ -132,7 +137,7 @@ final class LimitWatcher {
         let now = Date()
         if activeSeen?.id != active.id { activeSeen = (active.id, now) }
         let usage = accounts.usage[active.id]
-        let fresh = usage.map { now.timeIntervalSince($0.fetched) <= 15 * 60 } ?? false
+        let fresh = usage.map { now.timeIntervalSince($0.fetched) <= LimitLogic.inUseFreshFor } ?? false
 
         var windows: [(name: String, window: UsageWindow?)] = [("5-hour", fresh ? usage?.session : nil),
                                                               ("weekly", fresh ? usage?.week : nil)]
@@ -241,7 +246,7 @@ final class LimitWatcher {
     private func checkLanes(now: Date) {
         guard mode == .notifyAndSwitch else { return }
         for lane in LaneStore.all() where !laneSwitching.contains(lane.name) {
-            guard let usage = accounts.usage[lane.accountID], now.timeIntervalSince(usage.fetched) <= 15 * 60 else { continue }
+            guard let usage = accounts.usage[lane.accountID], now.timeIntervalSince(usage.fetched) <= LimitLogic.inUseFreshFor else { continue }
             let windows = [usage.session, usage.week].compactMap { $0 } + usage.other.map(\.window)
             guard windows.contains(where: { $0.percent >= Double(switchAt) }),
                   LimitLogic.maySwitch(lastSwitch: laneSwitched[lane.name], now: now) else { continue }

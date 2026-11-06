@@ -64,6 +64,11 @@ enum PageLibrary {
 
     // MARK: - Reading (app side)
 
+    /// When the list was last written, for callers that poll and only need to read it after a change.
+    static var listModified: Date? {
+        (try? listURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
     /// Every saved page, newest first.
     static func entries() -> [Entry] {
         let list = HookBridge.readJSON(listURL)?["pages"] as? [[String: Any]] ?? []
