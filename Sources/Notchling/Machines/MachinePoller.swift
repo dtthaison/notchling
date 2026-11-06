@@ -66,13 +66,15 @@ final class MachinePoller: ObservableObject {
     }
 
     private func poll() async {
-        let list = machines()
+        // a machine without an sd worker job has no `sdPath`: `python3 '' worker status` would only fail
+        let list = machines().filter { $0.sdWorker != nil }
         let runner = runner
         let results = await withTaskGroup(of: (Machine, CommandResult).self) { group in
             for m in list {
                 group.addTask {
-                    let remote = [m.python, m.sdPath, "worker", "status", "--json"]
-                    return (m, await runner.run(SSH.argv(m, remote), cwd: nil, timeout: Self.commandTimeout))
+                    // `RemoteShell.path` lets a `~/…` path expand for the worker user
+                    let script = RemoteShell.path(m.python) + " " + RemoteShell.path(m.sdPath) + " worker status --json"
+                    return (m, await runner.run(SSH.script(m, script), cwd: nil, timeout: Self.commandTimeout))
                 }
             }
             var all: [(Machine, CommandResult)] = []
@@ -124,11 +126,20 @@ final class MachinePoller: ObservableObject {
     private func startTimer(afterWake: Bool = false) {
         stopTimer()
         Task { await refresh(queueIfBusy: afterWake) }
-        let t = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+        let t = Timer(timeInterval: Self.interval, repeats: true) { [weak self] timer in
+            Self.tick(timer, poller: self)
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    /// One tick of the timer. A poller that was freed while its timer was still on the run loop stops the timer.
+    nonisolated static func tick(_ timer: Timer, poller: MachinePoller?) {
+        guard let poller else {
+            timer.invalidate()
+            return
+        }
+        Task { @MainActor in await poller.refresh() }
     }
 
     private func stopTimer() {
@@ -150,7 +161,12 @@ final class MachinePoller: ObservableObject {
             if let status = WorkerStatus.decode(Data(result.out.utf8)) { return LastReport(status: status, at: now) }
             return LastReport(at: now, error: "unreadable status")
         case 124: return LastReport(at: now, error: "timed out")
-        case 127: return LastReport(at: now, error: "ssh not found")
+        case 127:
+            // 127 is also what the shell on the machine says for a missing python or `sd.py`
+            let text = result.err.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text == "/usr/bin/ssh not found" { return LastReport(at: now, error: "ssh not found") }
+            let first = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? ""
+            return LastReport(at: now, error: first.isEmpty ? "not found on the machine" : "not found on the machine: \(first)")
         default:
             let text = result.err.trimmingCharacters(in: .whitespacesAndNewlines)
             return LastReport(at: now, error: text.isEmpty ? "ssh exited \(result.code)" : text)

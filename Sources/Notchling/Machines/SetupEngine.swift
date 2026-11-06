@@ -8,12 +8,108 @@ struct FixApproval {
 
 enum AdminAnswer { case password(String), rootConfirmed, cancelled }
 
-/// Runs the checks and the Fixes. Task 10 fills the bodies; the signatures here are final.
+/// What a machine's output and results must not show: the vault values its steps use, and the admin password
+/// of the Fix in flight. Built per call and never stored on the engine.
+private struct Masks {
+    /// Secret value → what shows instead (`[secret:<name>]`).
+    var vault: [String: String] = [:]
+    var adminPassword: String?
+
+    static let adminMask = "[admin password]"
+
+    func apply(_ text: String) -> String {
+        guard !text.isEmpty else { return text }
+        var text = text
+        if !vault.isEmpty {
+            let redactor = Redactor(vault)
+            var data = redactor.feed(Data(text.utf8))
+            data.append(redactor.finish())
+            text = String(decoding: data, as: UTF8.self)
+        }
+        // `Redactor` leaves out strings under 4 bytes; the admin password is masked whatever its length
+        if let pw = adminPassword, !pw.isEmpty { text = text.replacingOccurrences(of: pw, with: Self.adminMask) }
+        return text
+    }
+
+    /// The longest string that is masked: a line may be cut that far from its end without splitting a secret.
+    var longest: Int { max(vault.keys.map { $0.utf8.count }.max() ?? 0, adminPassword?.utf8.count ?? 0) }
+
+    func apply(_ result: CheckResult) -> CheckResult {
+        var r = result
+        switch r.state {
+        case .pass(let s): r.state = .pass(apply(s))
+        case .fail(let s): r.state = .fail(apply(s))
+        case .cantTell(let s): r.state = .cantTell(apply(s))
+        }
+        r.rows = r.rows.map { SubRow(name: apply($0.name), ok: $0.ok, detail: apply($0.detail)) }
+        return r
+    }
+}
+
+/// Collects the output of one Fix. `add` fires from the stdout and stderr readers at once, and for a moment
+/// after the run returned (an orphan holding the pipe). Every call takes the lock, appends to the line being
+/// built, masks and yields each complete line into one serial stream the MainActor drains, so the order is
+/// kept. A value cut between two chunks is whole again in the line. Once `end()` ran, nothing more gets in.
+private final class FixLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private let masks: Masks
+    private let continuation: AsyncStream<String>.Continuation
+    private var partial = ""
+    private var ended = false
+    /// A line this long without a newline is let out in pieces (a progress bar, a binary dump).
+    private static let longLine = 4096
+
+    init(masks: Masks, continuation: AsyncStream<String>.Continuation) {
+        self.masks = masks
+        self.continuation = continuation
+    }
+
+    func add(_ chunk: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !ended, !chunk.isEmpty else { return }
+        partial += chunk
+        var lines = partial.components(separatedBy: "\n")
+        partial = lines.removeLast()
+        for line in lines { emit(line) }
+        if partial.count > Self.longLine {
+            // mask first, cut afterwards: a cut through a secret would leave a fragment that no longer matches.
+            // The end stays back, so a secret that is still arriving is whole in the next piece.
+            let masked = masks.apply(partial)
+            let keep = min(max(masks.longest, 1), masked.count)
+            let cut = masked.index(masked.endIndex, offsetBy: -keep)
+            emit(String(masked[..<cut]))
+            partial = String(masked[cut...])
+        }
+    }
+
+    func end() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !ended else { return }
+        ended = true
+        if !partial.isEmpty { emit(partial) }
+        partial = ""
+        continuation.finish()
+    }
+
+    private func emit(_ line: String) {
+        var line = line
+        if line.hasSuffix("\r") { line.removeLast() }
+        continuation.yield(masks.apply(line))
+    }
+}
+
+/// Runs the checks and the Fixes.
 ///
-/// Output reaches the engine from any thread (`FixContext.log` fires from the stdout and stderr readers and
-/// for a moment after a run returned). The engine's log closure appends each line to a lock-protected buffer, or
-/// yields it into one serial `AsyncStream`, so the order is kept and the MainActor drains it. It never starts a
-/// MainActor `Task` per line (those can reorder), and it drops lines that arrive after its Fix ended.
+/// - A **check** is read-only. `refresh` batches the `.remote` probes of a machine into one ssh per phase (the
+///   cheap ones with 60 s, then the slow ones whose needs passed with 180 s); `.local` probes run up to four at
+///   a time. A step whose need isn't passing says `waits for <title>` and its probe's answer is dropped.
+/// - A **Fix** runs only from `runFix`, `setUpAll`, `toggleRunning` and `updateMachines`, which a button calls with
+///   a `FixApproval`. Refresh, Add, opening the window and a changed vault value never reach them.
+/// - **Secrets.** Every string that leaves the engine (a result, a log line, a Fix's message) goes through the
+///   masks of the machine: its vault values as `[secret:<name>]`, the admin password as `[admin password]`. The
+///   password lives in the Fix's context for that one step; no property of the engine holds it.
 @MainActor
 final class SetupEngine: ObservableObject {
     /// By machine name.
@@ -27,36 +123,580 @@ final class SetupEngine: ObservableObject {
     /// Detected facts were not saved because the registry is unreadable.
     @Published private(set) var saveRefused = false
 
+    private let runner: CommandRunning
+    private let secrets: SecretSource
+    private let http: HTTPFetching
+    private let mac: () -> MacFacts
+    private let machineList: () -> [Machine]
+    private let save: ([Machine]) -> Bool
+    private let clock: () -> Date
+    private let stepList: (Machine, [Machine]) -> [SetupStep]
+    private let usageList: ([Machine]) -> [SecretUsage]
+    private let deliver: (SecretUsage, FixContext) async -> FixOutcome
+    private let setVaultExpiry: (String, String) -> Void
+    private let toggleScript: (Bool, Bool) -> String
+    private var vaultObserver: NSObjectProtocol?
+
+    /// When each machine's slow checks last ran.
+    private var lastSlow: [String: Date] = [:]
+    /// Facts the checks learned, by machine: laid over the registry's machine whether or not they could be saved.
+    private var facts: [String: Detected] = [:]
+    /// What was last saved, so unchanged facts are not saved again.
+    private var savedState: [String: Machine] = [:]
+    /// The token expiry last given to the vault, by machine.
+    private var expirySent: [String: String] = [:]
+
+    private static let logLimit = 2000
+    private static let cheapTimeout: TimeInterval = 60
+    private static let slowTimeout: TimeInterval = 180
+    private static let slowEvery: TimeInterval = 10 * 60
+    private static let localParallel = 4
+    private static let connectErrors = ["Could not resolve hostname", "timed out", "No route to host", "Network is unreachable"]
+
+    /// - Parameter toggleScript: `(linux, on)` → the shell script of the Running switch. The default holds the
+    ///   scripts of plan D until `SDWorkerSteps.toggleScript` (Task 9) is merged.
     init(runner: CommandRunning, secrets: SecretSource, http: HTTPFetching, mac: @escaping () -> MacFacts,
          machines: @escaping () -> [Machine], save: @escaping ([Machine]) -> Bool, clock: @escaping () -> Date,
          steps: @escaping (Machine, [Machine]) -> [SetupStep] = StepCatalog.steps,
          usages: @escaping ([Machine]) -> [SecretUsage] = SecretSteps.usages,
          deliver: @escaping (SecretUsage, FixContext) async -> FixOutcome = SecretSteps.deliver,
          setVaultExpiry: @escaping (String, String) -> Void = { try? SecretVault.setExpires($0, day: $1) },
-         observeVault: Bool = true) {}
-
-    func steps(for machine: Machine) -> [SetupStep] { [] }
-
-    /// Checks only, never a Fix. `names` nil means every machine.
-    func refresh(_ names: [String]? = nil, includeSlow: Bool = false) async {}
-
-    /// For the Add sheet: the machine steps of a draft, nothing saved.
-    func check(draft: Machine) async -> [StepID: CheckResult] { [:] }
-
-    func runFix(_ id: StepID, on machine: String, approval: FixApproval) async -> FixOutcome {
-        FixOutcome(ok: false, message: "not built yet")
+         observeVault: Bool = true,
+         toggleScript: @escaping (Bool, Bool) -> String = SetupEngine.defaultToggleScript) {
+        self.runner = runner
+        self.secrets = secrets
+        self.http = http
+        self.mac = mac
+        self.machineList = machines
+        self.save = save
+        self.clock = clock
+        self.stepList = steps
+        self.usageList = usages
+        self.deliver = deliver
+        self.setVaultExpiry = setVaultExpiry
+        self.toggleScript = toggleScript
+        if observeVault {
+            // the notification carries the name only; the handler makes the offer and sends nothing
+            vaultObserver = NotificationCenter.default.addObserver(forName: .vaultValueChanged, object: nil, queue: .main) { [weak self] note in
+                guard let name = note.userInfo?["name"] as? String else { return }
+                MainActor.assumeIsolated { self?.vaultValueChanged(name: name) }
+            }
+        }
     }
 
+    deinit {
+        if let vaultObserver { NotificationCenter.default.removeObserver(vaultObserver) }
+    }
+
+    /// The scripts of the Running switch (Linux: systemd; macOS: the LaunchAgent). Production services are never
+    /// named, and `systemctl` only enables or disables the worker's own unit.
+    nonisolated static func defaultToggleScript(linux: Bool, on: Bool) -> String {
+        if linux { return on ? "systemctl enable --now sd-worker.service" : "systemctl disable --now sd-worker.service" }
+        return on
+            ? "launchctl enable \"gui/$(id -u)/com.sd.worker\"; launchctl bootstrap \"gui/$(id -u)\" \"$HOME/Library/LaunchAgents/com.sd.worker.plist\""
+            : "launchctl bootout \"gui/$(id -u)/com.sd.worker\"; launchctl disable \"gui/$(id -u)/com.sd.worker\""
+    }
+
+    // MARK: machines and steps
+
+    /// The registry's machines with the facts the checks learned laid over them.
+    private func currentMachines() -> [Machine] { machineList().map(withFacts) }
+
+    private func machine(named name: String) -> Machine? { currentMachines().first { $0.name == name } }
+
+    private func withFacts(_ m: Machine) -> Machine {
+        guard let d = facts[m.name] else { return m }
+        return Self.applying(d, to: m)
+    }
+
+    /// `m` with the detected facts merged in. A path from a machine counts only when it is a safe one.
+    private static func applying(_ d: Detected, to m: Machine) -> Machine {
+        var m = m
+        if let os = d.os { m.os = os }
+        if let fileVault = d.fileVault { m.fileVault = fileVault }
+        if let abilities = d.abilities {
+            var a = abilities
+            if a.home == nil { a.home = m.abilities?.home }
+            m.abilities = a
+        }
+        if let home = d.home, RemoteShell.isSafeMachinePath(home) {
+            var a = m.abilities ?? MachineAbilities()
+            a.home = home
+            m.abilities = a
+        }
+        if var job = m.sdWorker {
+            if let python = d.python, RemoteShell.isSafeMachinePath(python) { job.python = python }
+            if let sdPath = d.sdPath, RemoteShell.isSafeMachinePath(sdPath) { job.sdPath = sdPath }
+            if let day = d.tokenExpires { job.tokenExpires = day }
+            m.sdWorker = job
+        }
+        return m
+    }
+
+    private static func merged(_ old: Detected?, _ new: Detected) -> Detected {
+        var d = old ?? Detected()
+        if let v = new.os { d.os = v }
+        if let v = new.home { d.home = v }
+        if let v = new.fileVault { d.fileVault = v }
+        if let v = new.python { d.python = v }
+        if let v = new.sdPath { d.sdPath = v }
+        if let v = new.abilities { d.abilities = v }
+        if let v = new.tokenExpires { d.tokenExpires = v }
+        return d
+    }
+
+    func steps(for machine: Machine) -> [SetupStep] { stepList(withFacts(machine), currentMachines()) }
+
+    /// The vault values of the machine's usages, each hiding as `[secret:<name>]`.
+    private func masks(for machine: Machine, adminPassword: String? = nil) -> Masks {
+        var names = Set(usageList(currentMachines()).filter { $0.machine == machine.name }.map(\.name))
+        names.insert(machine.claudeSecret)
+        if let issues = machine.sdWorker?.issuesSecret, !issues.isEmpty { names.insert(issues) }
+        var masks = Masks(adminPassword: adminPassword)
+        for name in names.sorted() {
+            if let value = secrets.value(named: name), !value.isEmpty { masks.vault[value] = "[secret:\(name)]" }
+        }
+        return masks
+    }
+
+    /// The context of one machine. A Fix gets its own machine's, never another's.
+    private func stepContext(_ machine: Machine) -> StepContext {
+        StepContext(machine: machine, all: currentMachines(), runner: runner, secrets: secrets, http: http,
+                    mac: mac(), now: clock())
+    }
+
+    // MARK: checks
+
+    /// The outcome of checking one machine.
+    private struct Evaluation {
+        var results: [StepID: CheckResult] = [:]
+        var detected = Detected()
+        /// Whether an ssh was tried.
+        var tried = false
+        /// The machine did not answer ssh; `connectError` when the reason looks like a missing connection.
+        var unreachable = false
+        var connectError = false
+        var slowRan = false
+    }
+
+    /// Checks only, never a Fix. `names` nil means every machine.
+    func refresh(_ names: [String]? = nil, includeSlow: Bool = false) async {
+        let targets = currentMachines().filter { names?.contains($0.name) ?? true }
+        guard !targets.isEmpty else { return }
+        var evaluations: [String: Evaluation] = [:]
+        await withTaskGroup(of: (String, Evaluation).self) { group in
+            for m in targets {
+                group.addTask { @MainActor [self] in
+                    let due = lastSlow[m.name].map { clock().timeIntervalSince($0) > Self.slowEvery } ?? false
+                    return (m.name, await evaluate(m, slow: includeSlow || due))
+                }
+            }
+            for await (name, e) in group { evaluations[name] = e }
+        }
+
+        // every machine that was tried failed to connect: this Mac is probably offline
+        let tried = evaluations.values.filter(\.tried)
+        let offline = tried.count >= 2 && tried.allSatisfy { $0.unreachable && $0.connectError }
+
+        var learned = false
+        for m in targets {
+            guard var e = evaluations[m.name] else { continue }
+            if offline, e.results[.reachable] != nil {
+                e.results[.reachable] = CheckResult(state: .cantTell("no machine answered; this Mac may be offline"))
+            }
+            let masks = masks(for: m)
+            let known = Set(stepList(m, currentMachines()).map(\.id))
+            var published = (results[m.name] ?? [:]).filter { known.contains($0.key) }
+            for (id, r) in e.results { published[id] = masks.apply(r) }
+            results[m.name] = published
+            if e.slowRan { lastSlow[m.name] = clock() }
+            if e.detected != Detected() {
+                facts[m.name] = Self.merged(facts[m.name], e.detected)
+                learned = true
+            }
+        }
+        if learned { saveFacts(for: Set(targets.map(\.name))) }
+    }
+
+    /// For the Add sheet: the machine steps of a draft, nothing saved.
+    func check(draft: Machine) async -> [StepID: CheckResult] {
+        var machine = draft
+        machine.jobs = []
+        let e = await evaluate(machine, slow: false, usePrior: false)
+        let masks = masks(for: machine)
+        return e.results.mapValues { masks.apply($0) }
+    }
+
+    /// Writes the facts the checks learned into the registry, when they changed anything.
+    private func saveFacts(for names: Set<String>) {
+        var list = machineList()
+        var changed = false
+        for (i, raw) in list.enumerated() where names.contains(raw.name) {
+            let merged = withFacts(raw)
+            if let day = merged.sdWorker?.tokenExpires, let secret = merged.sdWorker?.issuesSecret, !secret.isEmpty,
+               expirySent[raw.name] != day {
+                expirySent[raw.name] = day
+                setVaultExpiry(secret, day)
+            }
+            guard merged != raw, merged != savedState[raw.name] else { continue }
+            list[i] = merged
+            changed = true
+        }
+        guard changed else { return }
+        if save(list) {
+            saveRefused = false
+            for m in list where names.contains(m.name) { savedState[m.name] = m }
+        } else {
+            saveRefused = true
+        }
+    }
+
+    /// Checks one machine. A fact the first pass detected (the `sdPath` of Plugins installed, a home) changes the
+    /// steps that come after it: their scripts and contexts are built from the machine. So when the facts changed
+    /// the machine, the steps are built again from it and checked once more; later refreshes find nothing new.
+    private func evaluate(_ m: Machine, slow: Bool, usePrior: Bool = true) async -> Evaluation {
+        let first = await evaluateOnce(m, slow: slow, usePrior: usePrior)
+        let learned = Self.applying(first.detected, to: m)
+        guard !first.unreachable, learned != m else { return first }
+        var second = await evaluateOnce(learned, slow: slow, usePrior: usePrior)
+        second.slowRan = second.slowRan || first.slowRan
+        return second
+    }
+
+    /// Runs the checks of one machine: the cheap remote probes in one ssh, then the rest in waves as their needs
+    /// become known.
+    private func evaluateOnce(_ m: Machine, slow: Bool, usePrior: Bool) async -> Evaluation {
+        let list = stepList(m, currentMachines())
+        let ctx = stepContext(m)
+        let prior = usePrior ? (results[m.name] ?? [:]) : [:]
+        var e = Evaluation()
+        var final: [StepID: CheckResult] = [:]
+        var detections: [Detected] = []
+
+        // phase 1: every cheap remote probe, one ssh
+        var raw: [StepID: CheckResult] = [:]
+        let cheap = list.filter { s in
+            if case .remote = s.probe, s.cadence == .everyRefresh { return true }
+            return false
+        }
+        if !cheap.isEmpty {
+            e.tried = true
+            switch await runBatch(cheap, on: m, ctx: ctx, timeout: Self.cheapTimeout) {
+            case .unreachable(let line, let connect):
+                e.unreachable = true
+                e.connectError = connect
+                for s in list {
+                    final[s.id] = s.id == .reachable
+                        ? CheckResult(state: .fail(line)) : CheckResult(state: .cantTell("\(m.name) is not reachable"))
+                }
+                e.results = final
+                return e
+            case .answers(let r):
+                raw = r
+            }
+        }
+
+        // the rest, wave by wave: a step is ready when every need has an answer
+        let ids = Set(list.map(\.id))
+        let titles = Dictionary(list.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        var pending = list
+
+        func blockingNeed(_ s: SetupStep) -> String? {
+            for need in s.needs {
+                if case .pass? = final[need]?.state { continue }
+                return titles[need] ?? need.raw
+            }
+            return nil
+        }
+
+        while !pending.isEmpty {
+            let ready = pending.filter { s in s.needs.allSatisfy { final[$0] != nil || !ids.contains($0) } }
+            guard !ready.isEmpty else {
+                for s in pending { final[s.id] = CheckResult(state: .cantTell("waits for \(s.needs.first.map { titles[$0] ?? $0.raw } ?? "another step")")) }
+                break
+            }
+            var slowRemote: [SetupStep] = [], locals: [SetupStep] = []
+            for s in ready {
+                if let need = blockingNeed(s) {
+                    final[s.id] = CheckResult(state: .cantTell("waits for \(need)"))
+                    continue
+                }
+                switch (s.probe, s.cadence) {
+                case (.remote, .everyRefresh):
+                    let r = raw[s.id] ?? CheckResult(state: .cantTell("no answer from the machine"))
+                    final[s.id] = r
+                    detections.append(r.detected)
+                case (_, .slow) where !slow:
+                    final[s.id] = prior[s.id] ?? CheckResult(state: .cantTell("not checked yet"))
+                case (.remote, .slow):
+                    slowRemote.append(s)
+                case (.local, _):
+                    locals.append(s)
+                }
+            }
+            if !slowRemote.isEmpty {
+                e.slowRan = true
+                switch await runBatch(slowRemote, on: m, ctx: ctx, timeout: Self.slowTimeout) {
+                case .unreachable:
+                    for s in slowRemote { final[s.id] = CheckResult(state: .cantTell("\(m.name) is not reachable")) }
+                case .answers(let r):
+                    for s in slowRemote {
+                        let result = r[s.id] ?? CheckResult(state: .cantTell("no answer from the machine"))
+                        final[s.id] = result
+                        detections.append(result.detected)
+                    }
+                }
+            }
+            if !locals.isEmpty {
+                if locals.contains(where: { $0.cadence == .slow }) { e.slowRan = true }
+                let done = await runLocals(locals, ctx: ctx)
+                for s in locals {
+                    let result = done[s.id] ?? CheckResult(state: .cantTell("no answer"))
+                    final[s.id] = result
+                    detections.append(result.detected)
+                }
+            }
+            pending.removeAll { final[$0.id] != nil }
+        }
+
+        for d in detections { e.detected = Self.merged(e.detected, d) }
+        e.results = final
+        return e
+    }
+
+    private enum BatchOutcome {
+        case unreachable(String, connect: Bool)
+        case answers([StepID: CheckResult])
+    }
+
+    /// One ssh for the probes of `steps`. Each probe's output is cut from the rest by a marker line that carries
+    /// this call's random nonce and the probe's index; anything else, whatever it looks like, is probe output.
+    private func runBatch(_ steps: [SetupStep], on m: Machine, ctx: StepContext, timeout: TimeInterval) async -> BatchOutcome {
+        let nonce = (0..<16).map { _ in String("0123456789abcdef".randomElement()!) }.joined()
+        var probes: [(step: SetupStep, parse: @Sendable (RemoteOutput, StepContext) async -> CheckResult)] = []
+        var wrapped: [String] = []
+        for s in steps {
+            guard case .remote(let script, let parse) = s.probe else { continue }
+            let index = probes.count
+            probes.append((s, parse))
+            wrapped.append("out=$( ( \(script)\n) </dev/null 2>&1 ); c=$?; printf '%s' \"$out\" | head -c 65536; printf '\\n@@\(nonce) \(index) %s@@\\n' \"$c\"")
+        }
+        let r = await runner.run(SSH.script(m, wrapped.joined(separator: "\n")), cwd: nil, timeout: timeout)
+
+        var answers: [Int: RemoteOutput] = [:]
+        var current: [String] = []
+        let prefix = "@@\(nonce) "
+        for line in r.out.components(separatedBy: "\n") {
+            if line.hasPrefix(prefix), line.hasSuffix("@@") {
+                let parts = line.dropFirst(prefix.count).dropLast(2).split(separator: " ")
+                if parts.count == 2, let index = Int(parts[0]), let code = Int32(parts[1]),
+                   probes.indices.contains(index), answers[index] == nil {
+                    answers[index] = RemoteOutput(text: current.joined(separator: "\n"), code: code)
+                    current = []
+                    continue
+                }
+            }
+            current.append(line)
+        }
+
+        if r.code == 255 || (answers.isEmpty && r.code != 0) {
+            let first = r.err.split(whereSeparator: \.isNewline).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+            let line: String
+            switch r.code {
+            case 124: line = first.isEmpty ? "timed out" : first
+            case 127: line = first.isEmpty ? "ssh not found" : first
+            default: line = first.isEmpty ? "ssh exited \(r.code)" : first
+            }
+            let connect = r.code == 124 || Self.connectErrors.contains { r.err.contains($0) }
+            return .unreachable(line, connect: connect)
+        }
+
+        var parsed: [StepID: CheckResult] = [:]
+        for (i, probe) in probes.enumerated() {
+            if let out = answers[i] {
+                parsed[probe.step.id] = await probe.parse(out, ctx)
+            } else {
+                parsed[probe.step.id] = CheckResult(state: .cantTell("no answer from the machine"))
+            }
+        }
+        return .answers(parsed)
+    }
+
+    /// The local probes, four at a time.
+    private func runLocals(_ steps: [SetupStep], ctx: StepContext) async -> [StepID: CheckResult] {
+        var out: [StepID: CheckResult] = [:]
+        var rest = steps[...]
+        while !rest.isEmpty {
+            let chunk = Array(rest.prefix(Self.localParallel))
+            rest = rest.dropFirst(chunk.count)
+            await withTaskGroup(of: (StepID, CheckResult).self) { group in
+                for s in chunk {
+                    guard case .local(let probe) = s.probe else { continue }
+                    group.addTask { (s.id, await probe(ctx)) }
+                }
+                for await (id, r) in group { out[id] = r }
+            }
+        }
+        return out
+    }
+
+    // MARK: Fixes
+
+    private func appendLog(_ name: String, _ lines: [String]) {
+        guard !lines.isEmpty else { return }
+        logs[name] = Array(((logs[name] ?? []) + lines).suffix(Self.logLimit))
+    }
+
+    /// Why a Fix can't run now, or nil. Nothing has run when this answers.
+    private func refusal(for step: SetupStep, on m: Machine, approval: FixApproval, needsAdmin: Bool, checkNeeds: Bool = true) -> String? {
+        if running[m.name] != nil { return "another Fix is running on \(m.name)" }
+        if checkNeeds {
+            let list = stepList(m, currentMachines())
+            for need in step.needs {
+                if case .pass? = results[m.name]?[need]?.state { continue }
+                return "waits for \(list.first { $0.id == need }?.title ?? need.raw)"
+            }
+        }
+        if needsAdmin {
+            if m.admin == .rootSSH {
+                if !approval.asRootConfirmed { return "needs your confirmation to run as root on \(m.name)" }
+            } else if (approval.adminPassword ?? "").isEmpty {
+                return "needs the admin password"
+            }
+        }
+        return nil
+    }
+
+    func runFix(_ id: StepID, on machine: String, approval: FixApproval) async -> FixOutcome {
+        guard let m = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
+        guard let step = stepList(m, currentMachines()).first(where: { $0.id == id }) else {
+            return FixOutcome(ok: false, message: "\(machine) has no step \(id.raw)")
+        }
+        let plan: FixPlan
+        switch step.fix {
+        case .howTo(let text): return FixOutcome(ok: false, message: "\(step.title) has no Fix. \(text)")
+        case .toggle: return FixOutcome(ok: false, message: "\(step.title) is a switch, not a Fix")
+        case .run(let p): plan = p
+        }
+        if let why = refusal(for: step, on: m, approval: approval, needsAdmin: plan.needsAdmin) {
+            return FixOutcome(ok: false, message: why)
+        }
+        // only an admin step on a sudo machine gets the password, and only for this one step
+        let password = plan.needsAdmin && m.admin == .sudo ? approval.adminPassword : nil
+        let outcome = await perform(step: id, title: step.title, on: m, adminPassword: password) { ctx in await plan.run(ctx) }
+        await refresh([machine], includeSlow: true)
+        return outcome
+    }
+
+    /// Runs `body` as the Fix in flight on `m`: logs `▸ <title>` and the outcome, streams its output into the
+    /// log, and masks it all.
+    private func perform(step id: StepID, title: String, on m: Machine, adminPassword: String?,
+                         body: (FixContext) async -> FixOutcome) async -> FixOutcome {
+        running[m.name] = id
+        let masks = masks(for: m, adminPassword: adminPassword)
+        appendLog(m.name, ["▸ \(title)"])
+
+        var continuation: AsyncStream<String>.Continuation!
+        let stream = AsyncStream<String> { continuation = $0 }
+        let log = FixLog(masks: masks, continuation: continuation)
+        let name = m.name
+        let drain = Task { @MainActor [weak self] in
+            for await line in stream { self?.appendLog(name, [line]) }
+        }
+
+        let ctx = FixContext(step: stepContext(m), adminPassword: adminPassword, log: { log.add($0) })
+        let raw = await body(ctx)
+        log.end()
+        await drain.value
+
+        let message = masks.apply(raw.message)
+        appendLog(m.name, message.components(separatedBy: "\n").enumerated().map { $0.offset == 0 ? "\(raw.ok ? "✓" : "✗") \($0.element)" : $0.element })
+        running[m.name] = nil
+        return FixOutcome(ok: raw.ok, message: message)
+    }
+
+    /// Runs every ✗ step with a Fix in catalog order and stops at the first Fix that fails (a secret step with
+    /// no value yet fails with its message and stops it too). A step is looked at when its turn comes, so one
+    /// that waited for an earlier Fix runs after it.
     func setUpAll(on machine: String, askAdmin: @escaping (SetupStep) async -> AdminAnswer) async -> FixOutcome {
-        FixOutcome(ok: false, message: "not built yet")
+        guard let first = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
+        if running[machine] != nil { return FixOutcome(ok: false, message: "another Fix is running on \(machine)") }
+        var fixed = 0
+        for step in stepList(first, currentMachines()) {
+            guard case .run(let plan) = step.fix, case .fail? = results[machine]?[step.id]?.state else { continue }
+            var approval = FixApproval(adminPassword: nil, asRootConfirmed: false)
+            if plan.needsAdmin {
+                switch await askAdmin(step) {
+                case .cancelled: return FixOutcome(ok: false, message: "Set up all stopped before \(step.title): cancelled")
+                case .password(let p): approval = FixApproval(adminPassword: p, asRootConfirmed: false)
+                case .rootConfirmed: approval = FixApproval(adminPassword: nil, asRootConfirmed: true)
+                }
+            }
+            let outcome = await runFix(step.id, on: machine, approval: approval)
+            guard outcome.ok else { return FixOutcome(ok: false, message: "\(step.title): \(outcome.message)") }
+            fixed += 1
+        }
+        return FixOutcome(ok: true, message: fixed == 0 ? "nothing to set up" : "\(fixed) step\(fixed == 1 ? "" : "s") set up")
     }
 
     func toggleRunning(on machine: String, to on: Bool, approval: FixApproval) async -> FixOutcome {
-        FixOutcome(ok: false, message: "not built yet")
+        guard let m = self.machine(named: machine) else { return FixOutcome(ok: false, message: "no machine named \(machine)") }
+        guard let step = stepList(m, currentMachines()).first(where: { $0.id == .running }), case .toggle(let needsAdmin) = step.fix else {
+            return FixOutcome(ok: false, message: "\(machine) has no Running switch")
+        }
+        // turning the worker off stays possible when its checks are failing
+        if let why = refusal(for: step, on: m, approval: approval, needsAdmin: needsAdmin, checkNeeds: on) {
+            return FixOutcome(ok: false, message: why)
+        }
+        let script = toggleScript(m.os == .linux, on)
+        let password = needsAdmin && m.admin == .sudo ? approval.adminPassword : nil
+        let outcome = await perform(step: .running, title: on ? "Turn Running on" : "Turn Running off", on: m, adminPassword: password) { ctx in
+            let r = needsAdmin ? await MachineRun.admin(script, ctx: ctx) : await MachineRun.script(script, ctx: ctx)
+            let text = (r.err.isEmpty ? r.out : r.err).trimmingCharacters(in: .whitespacesAndNewlines)
+            if r.code == 0 { return FixOutcome(ok: true, message: on ? "Running is on" : "Running is off") }
+            return FixOutcome(ok: false, message: text.isEmpty ? "exited \(r.code)" : text)
+        }
+        await refresh([machine])
+        return outcome
     }
 
-    /// Makes the update offer; sends nothing.
-    func vaultValueChanged(name: String) {}
+    // MARK: renewed secrets
 
-    func updateMachines(for secret: String, approval: FixApproval) async -> [FixOutcome] { [] }
+    /// Makes the update offer from the name; sends nothing.
+    func vaultValueChanged(name: String) {
+        let found = usageList(currentMachines()).filter { $0.name == name }
+        updateOffers[name] = found.isEmpty ? nil : found
+    }
+
+    /// Delivers the renewed value to each usage (on the click that calls this), checks that usage's step again,
+    /// and clears the offer. A usage whose delivery failed stays in it.
+    func updateMachines(for secret: String, approval: FixApproval) async -> [FixOutcome] {
+        var outcomes: [FixOutcome] = []
+        var failed: [SecretUsage] = []
+        for usage in updateOffers[secret] ?? [] {
+            guard let m = self.machine(named: usage.machine) else {
+                outcomes.append(FixOutcome(ok: false, message: "no machine named \(usage.machine)"))
+                failed.append(usage)
+                continue
+            }
+            if running[m.name] != nil {
+                outcomes.append(FixOutcome(ok: false, message: "another Fix is running on \(m.name)"))
+                failed.append(usage)
+                continue
+            }
+            let isIssues = usage.name == m.sdWorker?.issuesSecret
+                || (usage.name != m.claudeSecret && usage.remotePath == MachinePaths.githubToken)
+            let deliver = deliver
+            // `perform` builds the context from this usage's own machine
+            let outcome = await perform(step: isIssues ? .issuesToken : .claudeLogin, title: "Update \(usage.name)", on: m, adminPassword: nil) { ctx in
+                await deliver(usage, ctx)
+            }
+            // check the delivered file again; a renewed issues token also has a new scope and expiry
+            await refresh([m.name], includeSlow: isIssues)
+            outcomes.append(outcome)
+            if !outcome.ok { failed.append(usage) }
+        }
+        updateOffers[secret] = failed.isEmpty ? nil : failed
+        return outcomes
+    }
 }
