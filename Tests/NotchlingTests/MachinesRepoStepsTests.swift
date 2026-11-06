@@ -449,13 +449,14 @@ final class MachinesRepoStepsTests: XCTestCase {
         for machine in [TestMachines.mac(), TestMachines.linux()] {
             let script = probe(.pushRefused(repo), machine: machine).script
             XCTAssertTrue(script.contains("gh auth status --hostname github.com >/dev/null 2>&1"), script)
-            XCTAssertTrue(script.contains("ssh -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com"), script)
+            // a user's ssh config with StrictHostKeyChecking accept-new would let this check add a known_hosts entry
+            XCTAssertTrue(script.contains("ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes -T git@github.com"), script)
             XCTAssertTrue(script.contains("grep -q 'github.com' ~/.git-credentials 2>/dev/null"), script)
             XCTAssertFalse(script.contains("gh auth token"), "the token is never printed")
             XCTAssertFalse(script.contains("gh auth login") || script.contains("gh auth logout") || script.contains("gh auth setup-git"))
             XCTAssertFalse(script.contains("credential fill") || script.contains("credential approve"))
             XCTAssertFalse(script.contains(" -g") || script.contains(" -w"), "no keychain secret is asked for")
-            XCTAssertFalse(script.contains("StrictHostKeyChecking"), "a check must not write known_hosts")
+            XCTAssertFalse(script.contains("accept-new") || script.contains("StrictHostKeyChecking=no"), "a check must not write known_hosts")
             XCTAssertEqual(script.components(separatedBy: " push ").count, 2, "the only push is the dry run")
         }
         XCTAssertTrue(probe(.pushRefused(repo), machine: TestMachines.mac()).script.contains("security find-internet-password -s github.com >/dev/null 2>&1"))

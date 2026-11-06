@@ -324,11 +324,12 @@ enum RepoSteps {
     /// alias with `IdentitiesOnly yes`, so it never sees a personal `gh` login, a default ssh key, a keychain password
     /// or a stored credential of the account. Each check keeps what its tool printed on the machine and says only a
     /// token line: an exit code, or for ssh the account name GitHub greeted (cut to GitHub's own name characters).
-    /// None of them writes: `ssh -T` only authenticates, and no host key is added.
+    /// None of them writes: `ssh -T` only authenticates, and `StrictHostKeyChecking=yes` keeps a user's ssh config
+    /// (`accept-new`) from letting it add a host key.
     private static func loginChecks(linux: Bool) -> String {
         var lines = [
             "if command -v gh >/dev/null 2>&1; then gh auth status --hostname github.com >/dev/null 2>&1; echo \"gh=$?\"; else echo gh=none; fi",
-            "r=$(ssh -o BatchMode=yes -o ConnectTimeout=8 -T git@github.com </dev/null 2>&1); "
+            "r=$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes -T git@github.com </dev/null 2>&1); "
                 + "n=$(printf '%s\\n' \"$r\" | sed -n 's|^Hi \\([A-Za-z0-9._/-]*\\)!.*|\\1|p' | head -n 1); "
                 + "if [ -n \"$n\" ]; then echo \"ssh=hi:$n\"; else case \"$r\" in *denied*) echo ssh=denied;; *) echo ssh=unknown;; esac; fi",
         ]

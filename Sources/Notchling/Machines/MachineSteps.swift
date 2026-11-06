@@ -14,7 +14,8 @@ enum MachineSteps {
             SetupStep(id: .reachable, title: "Reachable", needs: [], cadence: .everyRefresh,
                       probe: .remote(script: reachableScript, parse: parseReachable),
                       fix: .howTo("Turn the machine on and check it from this Mac with `tailscale ping \(machine.host)`. For a new Linux user, add the user to the Tailscale ACL's ssh users. Then check again.")),
-            SetupStep(id: .workerUser, title: "Worker user", needs: [.reachable], cadence: .everyRefresh,
+            // slow: its `sudo -n -l` can write a line to the machine's sudo auth log, so not on every 60 s refresh
+            SetupStep(id: .workerUser, title: "Worker user", needs: [.reachable], cadence: .slow,
                       probe: .remote(script: workerUserScript, parse: parseWorkerUser),
                       fix: .howTo("Use the worker account (agent on vps-sing-1). Root is only for steps marked needs admin. On Linux the worker account must not be able to use sudo: remove it from the sudo group (admin steps run as root over SSH). Then check again.")),
             SetupStep(id: .staysAwake, title: "Stays awake", needs: [.reachable], cadence: .everyRefresh,
