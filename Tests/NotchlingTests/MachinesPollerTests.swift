@@ -44,10 +44,11 @@ final class MachinesPollerTests: XCTestCase {
     func testSSHArgvQuotesRemote() {
         let m = machine("vps", user: "agent")
         let argv = SSH.argv(m, ["python3", "/opt/my sd/sd.py", "it's", "worker", "status", "--json"])
-        XCTAssertEqual(Array(argv.prefix(6)), ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "agent@vps.tail"])
-        XCTAssertEqual(argv.count, 7)
+        // `--` ends the options, so a host written as `-oProxyCommand=…` is a destination, never an option
+        XCTAssertEqual(Array(argv.prefix(7)), ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--", "agent@vps.tail"])
+        XCTAssertEqual(argv.count, 8)
         // one remote argument, in which the path with a space and the quote stay single words
-        XCTAssertEqual(argv[6], "'python3' '/opt/my sd/sd.py' 'it'\\''s' 'worker' 'status' '--json'")
+        XCTAssertEqual(argv[7], "'python3' '/opt/my sd/sd.py' 'it'\\''s' 'worker' 'status' '--json'")
     }
 
     func testGitURL() {
