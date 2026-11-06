@@ -60,6 +60,18 @@ struct Agent {
         if case .antigravity = target { return true }
         return false
     }
+
+    /// The tool's own session id (what `claude --resume`, `codex resume` or agy take); nil when it
+    /// has none yet: a draft, or a command job with no transcript.
+    var sessionID: String? {
+        switch target {
+        case .resume(let id, _), .codex(let id), .antigravity(let id): return id.isEmpty ? nil : id
+        case .job, .process:
+            guard let transcriptPath else { return nil }
+            let stem = URL(fileURLWithPath: transcriptPath).deletingPathExtension().lastPathComponent
+            return stem.isEmpty ? nil : stem
+        }
+    }
 }
 
 /// Reads Claude Code's own state files, in ~/.claude and in each lane's folder:

@@ -1712,6 +1712,16 @@ private struct SessionSidebar: View {
             Button("Take Over…") { ChatTakeover.run(agent) { model.selection = $0 } }
             Divider()
         }
+        if !agent.cwd.isEmpty, FileManager.default.fileExists(atPath: agent.cwd) {
+            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: agent.cwd)]) }
+        }
+        if let id = agent.sessionID {
+            Button("Copy Session ID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(id, forType: .string)
+            }
+        }
+        Divider()
         switch agent.target {
         case .codex, .antigravity:
             Button(agent.target.isDraft ? "Discard New Session" : "Close Session") { model.closeSession(agent) }
