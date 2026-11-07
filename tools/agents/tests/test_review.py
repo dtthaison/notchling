@@ -176,10 +176,45 @@ class RotationTests(ReviewTestCase):
         for n in range(0, 10):
             self.assertEqual(review.pick_model(n), review.MODELS[n % 3])
 
-    def test_agent_model_in_the_body_is_ignored(self):
+    def test_agent_model_in_the_body_does_not_choose_the_reviewer(self):
         self.fake.pr["body"] = "Agent-Model: claude-opus-5-5"
         self.assertEqual(self.run_review(), 0)
         self.assertEqual(self.fake.model_body["model"], review.MODELS[7 % 3])  # sonnet, whatever the PR says
+
+    def test_the_rotation_skips_the_model_that_wrote_the_change(self):
+        for n in range(0, 9):
+            for author in review.MODELS:
+                with self.subTest(n=n, author=author):
+                    picked = review.pick_model(n, author)
+                    self.assertNotEqual(picked, author)
+                    base = review.MODELS[n % 3]
+                    expect = base if base != author else review.MODELS[(n + 1) % 3]
+                    self.assertEqual(picked, expect)
+
+    def test_an_unknown_or_missing_author_changes_nothing(self):
+        for author in (None, "", "gpt-9", "claude-opus-5"):
+            self.assertEqual(review.pick_model(7, author), review.MODELS[7 % 3])
+
+    def test_author_model_comes_from_the_last_agent_model_line(self):
+        body = "Agent-Model: claude-fable-5-1\nlater text\n\nRefs #3\nagent-model:  claude-sonnet-5-5-20261001 (xhigh)\n"
+        self.assertEqual(review.author_model(body), "claude-sonnet-5-5-20261001")
+        self.assertIsNone(review.author_model("say Agent-Model: claude-opus-5-5 in the middle"))
+        self.assertIsNone(review.author_model(None))
+        self.assertEqual(review.pick_model(7, review.author_model(body)), "claude-fable-5-1")
+
+    def test_an_app_pr_is_not_reviewed_by_the_model_that_wrote_it(self):
+        self.fake.pr["body"] = "Fixes it.\nAgent-Model: claude-sonnet-5-5\n"  # 7 % 3 would pick sonnet
+        self.assertEqual(self.run_review(), 0)
+        self.assertEqual(self.fake.model_body["model"], "claude-fable-5-1")
+
+    def test_a_strangers_agent_model_line_is_not_used(self):
+        """Only the App's own pull requests carry a line we wrote; anyone else's text steers nothing."""
+        self.fake.pr["user"]["login"] = "stranger"
+        self.fake.pr["labels"] = [{"name": "notchling:review"}]
+        self.fake.events = [labeled("dtthaison")]
+        self.fake.pr["body"] = "Agent-Model: claude-sonnet-5-5"
+        self.assertEqual(self.run_review(), 0)
+        self.assertEqual(self.fake.model_body["model"], "claude-sonnet-5-5")
 
 
 class FenceTests(unittest.TestCase):

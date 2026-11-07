@@ -103,8 +103,24 @@ def build_prompt(context: Mapping[str, str], pr: Mapping[str, Any], diff: str, c
     return "\n".join(parts) + "\n"
 
 
-def pick_model(pr_number: int) -> str:
-    return MODELS[pr_number % len(MODELS)]
+AGENT_MODEL_RE = re.compile(r"(?mi)^Agent-Model:[ \t]*([A-Za-z0-9._-]{1,64})")
+
+
+def author_model(body: Optional[str]) -> Optional[str]:
+    """The model the push wrapper says wrote the change: its `Agent-Model:` line, the last one, since the
+    wrapper appends its own after whatever the agent wrote."""
+    found = AGENT_MODEL_RE.findall(body or "")
+    return found[-1].lower() if found else None
+
+
+def pick_model(pr_number: int, author: Optional[str] = None) -> str:
+    """Rotation by pull request number (a fixed, public rule: which model reviews gives the author
+    nothing, since the comment names it and no single verdict merges anything). Never the model that
+    wrote the change: if the rotation lands on it, the next one in the list reviews."""
+    i = pr_number % len(MODELS)
+    if author and (author == MODELS[i] or author.startswith(MODELS[i] + "-")):
+        i = (i + 1) % len(MODELS)
+    return MODELS[i]
 
 
 # ---- verdict ---------------------------------------------------------------------------------
@@ -312,10 +328,14 @@ def missing(reason: str) -> Outcome:
     return Outcome("failure", "review missing: " + reason)
 
 
+def is_app_pr(cfg: Config, pr: Mapping[str, Any]) -> bool:
+    login = str((pr.get("user") or {}).get("login") or "").lower()
+    return bool(cfg.app_login) and login == cfg.app_login.lower()
+
+
 def eligible(cfg: Config, pr: Mapping[str, Any], gh: GitHub, root: Path) -> bool:
     """The App's own PR, or one a maintainer labeled `notchling:review` (the latest such event decides)."""
-    login = str((pr.get("user") or {}).get("login") or "").lower()
-    if cfg.app_login and login == cfg.app_login.lower():
+    if is_app_pr(cfg, pr):
         return True
     if REVIEW_LABEL not in {l.get("name") for l in pr.get("labels") or [] if isinstance(l, dict)}:
         return False
@@ -397,7 +417,7 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
         return missing("diff too large")
     prompt = build_prompt(load_context(root), {"number": int(cfg.number), "title": str(pr.get("title") or "")[:300],
                                               "body": str(pr.get("body") or "")[:10_000]}, diff, check_lines(gh, head))
-    model = pick_model(int(cfg.number))
+    model = pick_model(int(cfg.number), author_model(pr.get("body")) if is_app_pr(cfg, pr) else None)
     try:
         v = parse_verdict(ask_model(cfg.model_base, cfg.key, model, prompt))
     except Invalid:
