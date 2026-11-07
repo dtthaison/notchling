@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
@@ -15,12 +16,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import push_wrapper
 from tests.test_preflight import FakeGitHub
 
 TOKEN = "ghs_SECRETINSTALLATIONTOKEN0123456789"
-HAVE_OPENSSL = shutil.which("openssl") is not None
+# The wrapper looks for openssl (and git) only in these folders, so the tests need it there too.
+HAVE_OPENSSL = any(os.access(os.path.join(d, "openssl"), os.X_OK) for d in push_wrapper.TOOL_DIRS)
 GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
@@ -54,7 +57,7 @@ class Recording(push_wrapper.Runner):
 
     def __call__(self, argv, env=None, input=None, cwd=None):
         self.calls.append({"argv": list(argv), "env": dict(env) if env is not None else None,
-                           "input": input})
+                           "input": input, "cwd": cwd})
         return super().__call__(argv, env=env, input=input, cwd=cwd)
 
 
@@ -421,7 +424,7 @@ class ApiErrors(Base):
         self.assertIn("pushed", res.message)  # the branch is up; only the PR is missing
 
 
-ZWJ = "‍"
+ZWJ = "\u200d"
 # A reader's approximation of what GitHub treats as a closing reference (not the wrapper's own regex).
 GITHUB_CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*(?:[\w.-]+/[\w.-]+)?#\d+"
                            r"|\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*https://github\.com/\S+",
@@ -643,6 +646,199 @@ class WorkflowFiles(Base):
         self.assertEqual(res.code, 0, res)
 
 
+TESTING = {"NOTCHLING_PUSH_WRAPPER_TESTING": "1"}
+
+
+class CallerEnvironment(Base):
+    """What the caller (sd through sudo, or anyone) controls besides the arguments: PATH, the working
+    directory, environment variables. None of it may choose which git or openssl runs."""
+
+    def planted_tools(self):
+        evil = self.root / "evil-bin"
+        evil.mkdir()
+        marker = self.root / "planted-ran"
+        for name in ("git", "openssl"):
+            script = evil / name
+            script.write_text("#!/bin/sh\necho %s >> %s\nexit 1\n" % (name, marker))
+            script.chmod(0o755)
+        return evil, marker
+
+    def test_planted_tools_on_the_callers_path_or_in_its_cwd_never_run(self):
+        self.start()
+        evil, marker = self.planted_tools()
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(str(evil))
+        env = {"PATH": "%s::.:/nonexistent" % evil, "OPENSSL_CONF": "/evil/openssl.cnf",
+               "GIT_EXEC_PATH": str(evil), "GIT_SSH_COMMAND": str(evil / "git")}
+        with mock.patch.dict(os.environ, env):
+            res = self.go()
+        self.assertFalse(marker.exists(), marker.read_text() if marker.exists() else "")
+        self.assertEqual(res.code, 0, res)
+
+    def test_tools_are_absolute_paths_from_the_fixed_directories(self):
+        self.start()
+        self.assertEqual(self.go().code, 0)
+        self.assertTrue(self.runner.calls)
+        for call in self.runner.calls:
+            exe = call["argv"][0]
+            self.assertTrue(os.path.isabs(exe), exe)
+            self.assertIn(os.path.dirname(exe), push_wrapper.TOOL_DIRS)
+            self.assertEqual(call["env"]["PATH"], push_wrapper.SAFE_PATH)
+        for entry in push_wrapper.SAFE_PATH.split(":"):
+            self.assertTrue(os.path.isabs(entry), "no empty or relative PATH entries")
+
+    def test_openssl_gets_a_minimal_environment(self):
+        self.start()
+        evil = {"OPENSSL_CONF": "/evil", "OPENSSL_MODULES": "/evil", "LD_PRELOAD": "/evil",
+                "DYLD_INSERT_LIBRARIES": "/evil", "HOME": "/evil"}
+        with mock.patch.dict(os.environ, evil):
+            self.go()
+        sign = [c for c in self.runner.calls if "dgst" in c["argv"]]
+        self.assertEqual(len(sign), 1)
+        self.assertEqual(sign[0]["env"], {"PATH": push_wrapper.SAFE_PATH, "LANG": "C"})
+
+    def test_git_gets_none_of_the_callers_settings(self):
+        evil = {"GIT_SSH_COMMAND": "/evil", "GIT_EXEC_PATH": "/evil", "GIT_DIR": "/evil",
+                "GIT_CONFIG_PARAMETERS": "'core.x=y'", "GIT_TEMPLATE_DIR": "/evil", "SSL_CERT_FILE": "/evil",
+                "SSL_CERT_DIR": "/evil", "GIT_SSL_CAINFO": "/evil", "LD_PRELOAD": "/evil",
+                "DYLD_INSERT_LIBRARIES": "/evil", "PATH": "/evil", "HTTPS_PROXY": "http://proxy:3128"}
+        with mock.patch.dict(os.environ, evil):
+            env = push_wrapper.git_env(TOKEN, "https://github.com/o/r.git", "/scratch")
+        self.assertEqual(env["PATH"], push_wrapper.SAFE_PATH)
+        for key in evil:
+            if key not in ("PATH", "HTTPS_PROXY"):
+                self.assertNotIn(key, env)
+        self.assertEqual(env["HTTPS_PROXY"], "http://proxy:3128")
+
+    def test_every_subprocess_runs_in_the_scratch_directory(self):
+        self.start()
+        self.assertEqual(self.go().code, 0)
+        prefix = os.path.join(str(self.tmp), "push-wrapper-")
+        for call in self.runner.calls:
+            self.assertTrue((call["cwd"] or "").startswith(prefix), call)
+
+    def test_a_missing_tool_is_an_error_not_a_search(self):
+        self.start()
+        with mock.patch.object(push_wrapper, "TOOL_DIRS", ("/nonexistent",)):
+            res = self.go()
+        self.assertEqual(res.code, 2, res)
+        self.assertIn("not found", res.message)
+
+    def test_scrub_environment_keeps_a_fixed_path_and_proxies_only(self):
+        out = push_wrapper.scrub_environment({
+            "PATH": "/evil", "HOME": "/x", "SSL_CERT_FILE": "/e.pem", "GIT_DIR": "/e", "PYTHONPATH": "/e",
+            "NOTCHLING_PUSH_WRAPPER_TESTING": "1", "HTTPS_PROXY": "http://proxy:3128", "LANG": "de_DE"})
+        self.assertEqual(out, {"PATH": push_wrapper.SAFE_PATH, "LANG": "C", "HTTPS_PROXY": "http://proxy:3128"})
+
+    def test_the_documented_invocation_runs_isolated(self):
+        """`python3 -I push_wrapper.py ...` as the sudoers line has it: the caller's PYTHONPATH is ignored."""
+        lib = self.root / "pylib"
+        lib.mkdir()
+        marker = self.root / "shadowed-json-ran"
+        (lib / "json.py").write_text("open(%r, 'w').write('x')\n" % str(marker))
+        proc = subprocess.run([sys.executable, "-I", os.path.join(AGENTS_DIR, "push_wrapper.py"),
+                               "--config", str(self.root / "none.json"), "--worktree", "w", "--issue", "5",
+                               "--title", "t"], env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(lib)},
+                              input=b"body", capture_output=True, cwd=str(self.root))
+        self.assertFalse(marker.exists(), "PYTHONPATH reached the wrapper")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn(b"config", proc.stderr)
+
+
+class ConfigRules(Base):
+    def write(self, mode=0o600, name="cfg.json", **over):
+        data = {"app_id": 12345, "key_path": str(self.key), "repo": "o/r"}
+        data.update(over)
+        path = self.root / name
+        if path.exists():
+            path.unlink()
+        path.write_text(json.dumps(data))
+        path.chmod(mode)
+        return path
+
+    def test_a_config_nobody_else_can_write_is_read(self):
+        for mode in (0o600, 0o400, 0o640, 0o644):
+            cfg = push_wrapper.load_config(str(self.write(mode)))
+            self.assertEqual(cfg.repo, "o/r", oct(mode))
+
+    def test_a_config_others_can_write_is_refused(self):
+        for mode in (0o660, 0o620, 0o606, 0o602, 0o666, 0o664):
+            with self.assertRaises(push_wrapper.Refused, msg=oct(mode)):
+                push_wrapper.load_config(str(self.write(mode)))
+
+    def test_a_symlinked_or_hard_linked_config_is_refused(self):
+        real = self.write()
+        link = self.root / "link.json"
+        link.symlink_to(real)
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.load_config(str(link))
+        os.link(str(real), str(self.root / "second.json"))
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.load_config(str(real))
+
+    def test_a_config_owned_by_someone_else_is_refused(self):
+        path = self.write()
+        real = os.geteuid()
+        with mock.patch.object(os, "geteuid", lambda: real + 1):
+            with self.assertRaises(push_wrapper.Refused):
+                push_wrapper.load_config(str(path))
+
+    def test_the_default_path_comes_from_the_account_not_the_environment(self):
+        want = os.path.join(pwd.getpwuid(os.geteuid()).pw_dir, ".config", "notchling", "push-wrapper.json")
+        with mock.patch.dict(os.environ, {"HOME": "/tmp/evil-home",
+                                          "NOTCHLING_PUSH_WRAPPER_CONFIG": "/tmp/evil.json"}):
+            self.assertEqual(push_wrapper.config_path(None), want)
+        self.assertEqual(push_wrapper.config_path("/a/b.json"), "/a/b.json")
+
+
+class EndpointRules(Base):
+    """api_url and remote_url are where the App's JWT and token go. Only GitHub's, unless a test says so."""
+
+    def write(self, **over):
+        data = {"app_id": 12345, "key_path": str(self.key), "repo": "o/r"}
+        data.update(over)
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps(data))
+        path.chmod(0o600)
+        return str(path)
+
+    def test_github_itself_passes(self):
+        cfg = push_wrapper.load_config(self.write(api_url="https://api.github.com",
+                                                  remote_url="https://github.com/o/r.git"))
+        self.assertEqual((cfg.api_url, cfg.remote_url), ("https://api.github.com", "https://github.com/o/r.git"))
+        cfg = push_wrapper.load_config(self.write(remote_url="https://github.com/o/r"))
+        self.assertEqual(cfg.remote_url, "https://github.com/o/r")
+        cfg = push_wrapper.load_config(self.write())
+        self.assertEqual((cfg.api_url, cfg.remote_url), ("https://api.github.com", "https://github.com/o/r.git"))
+
+    def test_other_api_urls_are_refused(self):
+        for url in ("http://api.github.com", "https://api.github.com.evil.example", "https://evil.example",
+                    "https://api.github.com@evil.example", "https://api.github.com:8443",
+                    "https://api.github.com/x", "https://api.github.com/", "http://127.0.0.1:8080", "ftp://x"):
+            with self.assertRaises(push_wrapper.Refused, msg=url):
+                push_wrapper.load_config(self.write(api_url=url))
+
+    def test_other_remote_urls_are_refused(self):
+        for url in ("http://github.com/o/r.git", "https://github.com.evil.example/o/r.git",
+                    "https://github.com@evil.example/o/r.git", "https://evil.example/o/r.git",
+                    "https://github.com/other/r.git", "https://github.com/o/other.git",
+                    "ssh://git@github.com/o/r.git", "git@github.com:o/r.git", "/tmp/some/path",
+                    "file:///tmp/x", "https://github.com/o/r.git?x=1", "https://github.com/o/r.git/",
+                    "https://user:pw@github.com/o/r.git", "https://GitHub.com/o/r.git"):
+            with self.assertRaises(push_wrapper.Refused, msg=url):
+                push_wrapper.load_config(self.write(remote_url=url))
+
+    def test_the_testing_variable_allows_a_fake_server_and_nothing_else_does(self):
+        self.start()
+        path = self.write(api_url=self.srv.url, remote_url=str(self.bare))
+        cfg = push_wrapper.load_config(path, TESTING)
+        self.assertEqual((cfg.api_url, cfg.remote_url), (self.srv.url, str(self.bare)))
+        for env in (None, {}, {"NOTCHLING_PUSH_WRAPPER_TESTING": "0"}, {"NOTCHLING_PUSH_WRAPPER_TESTING": ""},
+                    {"NOTCHLING_PUSH_WRAPPER_TESTING": "true"}):
+            with self.assertRaises(push_wrapper.Refused, msg=repr(env)):
+                push_wrapper.load_config(path, env)
+
+
 class HostileWorktree(Base):
     """The worktree belongs to the agent. Nothing in its git config or attributes may run as the wrapper."""
 
@@ -788,9 +984,22 @@ class UntrustedFiles(Base):
 class Cli(Base):
     def run_main(self, argv, env=None, stdin=None):
         out, err = io.StringIO(), io.StringIO()
-        code = push_wrapper.main(argv, env or {}, out, err,
+        code = push_wrapper.main(argv, TESTING if env is None else env, out, err,
                                  stdin=io.BytesIO(self.body) if stdin is None else stdin)
         return code, out.getvalue(), err.getvalue()
+
+    def cfg_path(self, **over):
+        """A config pointing at the fake GitHub and the local bare remote, mode 0600."""
+        data = {"app_id": 12345, "key_path": str(self.key), "repo": "o/r", "api_url": self.srv.url,
+                "remote_url": str(self.bare)}
+        data.update(over)
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps(data))
+        path.chmod(0o600)
+        return str(path)
+
+    def args(self, path, *extra):
+        return ["--worktree", str(self.wt), "--issue", "5", "--title", "Fix", "--config", path] + list(extra)
 
     def test_usage_and_missing_config(self):
         self.assertEqual(self.run_main([])[0], 2)
@@ -801,11 +1010,7 @@ class Cli(Base):
 
     def test_the_body_is_read_from_stdin(self):
         self.start()
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
-        code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                        "--config", str(path)], stdin=io.BytesIO(b"piped words\n"))
+        code, out, err = self.run_main(self.args(self.cfg_path()), stdin=io.BytesIO(b"piped words\n"))
         self.assertEqual(code, 0, err)
         pr = [r for r in self.srv.requests if r["path"] == "/repos/o/r/pulls"][0]
         self.assertIn("piped words", json.loads(pr["body"])["body"])
@@ -816,11 +1021,7 @@ class Cli(Base):
         self.start()
         link = self.root / "body.md"
         link.symlink_to(self.key)
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
-        code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                        "--body-file", str(link), "--config", str(path)])
+        code, out, err = self.run_main(self.args(self.cfg_path(), "--body-file", str(link)))
         self.assertEqual(code, 2)
         self.assertEqual(self.api_paths(), [])
         self.assertNotIn("PRIVATE KEY", out + err)
@@ -831,53 +1032,47 @@ class Cli(Base):
                 return True
 
         self.start()
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
-        code, _, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                      "--config", str(path)], stdin=Tty(b"x"))
+        code, _, err = self.run_main(self.args(self.cfg_path()), stdin=Tty(b"x"))
         self.assertEqual(code, 1)
         self.assertIn("stdin", err)
         self.assertEqual(self.api_paths(), [])
 
     def test_config_loading(self):
         self.start()
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
-        cfg = push_wrapper.load_config(str(path))
+        cfg = push_wrapper.load_config(self.cfg_path(), TESTING)
         self.assertEqual((cfg.app_id, cfg.repo, cfg.api_url), ("12345", "o/r", self.srv.url))
+        path = Path(self.cfg_path())
         path.write_text(json.dumps({"app_id": 1, "key_path": "k", "repo": "not a repo"}))
         with self.assertRaises(push_wrapper.Refused):
-            push_wrapper.load_config(str(path))
+            push_wrapper.load_config(str(path), TESTING)
         path.write_text("{")
         with self.assertRaises(push_wrapper.Refused):
-            push_wrapper.load_config(str(path))
+            push_wrapper.load_config(str(path), TESTING)
 
     def test_defaults_point_at_github(self):
         path = self.root / "cfg.json"
         path.write_text(json.dumps({"app_id": 1, "key_path": "k", "repo": "o/r"}))
+        path.chmod(0o600)
         cfg = push_wrapper.load_config(str(path))
         self.assertEqual((cfg.api_url, cfg.remote_url), ("https://api.github.com", "https://github.com/o/r.git"))
 
     def test_end_to_end_through_main(self):
         self.start()
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
-        code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                        "--agent-model", "m1", "--config", str(path)])
+        code, out, err = self.run_main(self.args(self.cfg_path(), "--agent-model", "m1"))
         self.assertEqual((code, out.strip()), (0, "https://github.com/o/r/pull/9"), err)
         self.assertNotIn(TOKEN, out + err)
 
+    def test_a_fake_server_is_refused_without_the_testing_variable(self):
+        self.start()
+        code, _, err = self.run_main(self.args(self.cfg_path()), env={})
+        self.assertEqual(code, 1)
+        self.assertIn("api_url", err)
+        self.assertEqual(self.api_paths(), [])
+
     def test_refusal_exit_code_is_1(self):
         self.start()
-        path = self.root / "cfg.json"
-        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
-                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
         git(self.wt, "checkout", "-q", "main")
-        code, _, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                      "--config", str(path)])
+        code, _, err = self.run_main(self.args(self.cfg_path()))
         self.assertEqual(code, 1)
         self.assertIn("refused", err)
 

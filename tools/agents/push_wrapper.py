@@ -10,17 +10,26 @@ key lives in a file only the wrapper user can read. What this script promises:
 
 - It pushes only `refs/heads/agent/<issue>-<slug>` (lowercase slug, the issue number matching), as one
   explicit `<sha>:<ref>` refspec: never a force, a tag, a delete or a glob. A branch that exists with other
-  history is rejected by the remote, not overwritten.
+  history is rejected by the remote, not overwritten (exit 1, with the remote's reason).
 - The installation token is narrowed to this one repository (`contents` and `pull_requests` write; GitHub
-  makes it good for an hour), lives in memory, and reaches git only through GIT_CONFIG_* environment
-  variables. It is in no argument list and no file.
+  makes it good for an hour, and the wrapper revokes it when done), lives in memory, and reaches git only
+  through GIT_CONFIG_* environment variables. It is in no argument list and no file.
 - The worktree belongs to the agent, so nothing in its git config, hooks or attributes may run as the
   wrapper. The only git commands run there are `rev-parse` and `symbolic-ref`, which execute nothing. The
   clean check and the push run in a scratch repository of ours that borrows the agent's objects through
-  `objects/info/alternates`.
+  `objects/info/alternates`; an agent repository with alternates of its own is refused, and the one file
+  read from it by path (the index) is opened without following links.
+- The caller picks the arguments, the environment and the working directory, and none of them chooses what
+  runs: git and openssl come from fixed folders by absolute path, every command runs in the scratch
+  folder with a minimal environment, `--config` must name a file only this user can write, and the App's
+  JWT and token go to GitHub's own URLs.
+- Nothing from the agent reaches the pull request raw: a body with a private key or the token is refused;
+  @mentions and closing keywords for other issues are broken with a zero-width joiner; a branch that
+  changes `.github/workflows/` is refused (the App has no `workflows` permission).
 
-Exit codes: 0 done (prints the PR URL), 1 refused, 2 error. Config (JSON, default
-~/.config/notchling/push-wrapper.json): app_id, key_path, repo, and optionally api_url and remote_url."""
+Exit codes: 0 done (prints the PR URL), 1 refused (including a push the remote rejects), 2 error. Config
+(JSON, default `.config/notchling/push-wrapper.json` in this account's home): app_id, key_path, repo, and
+for tests api_url and remote_url, which must otherwise be GitHub's."""
 
 from __future__ import annotations
 
@@ -28,6 +37,7 @@ import argparse
 import base64
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
@@ -55,7 +65,7 @@ WORKFLOWS_DIR = ".github/workflows/"
 # The agent repository's idea of the base branch, tried in order (see workflow_changes).
 BASE_REFS = ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
              "refs/heads/main", "refs/heads/master")
-ZWJ = "‍"
+ZWJ = "\u200d"
 MENTION_RE = re.compile(r"@(?=[A-Za-z0-9_])")
 _REPO = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
 CLOSING_RE = re.compile(
@@ -67,9 +77,17 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 FAILURE_MAX = 600
 GIT_TIMEOUT = 300
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
-DEFAULT_CONFIG = "~/.config/notchling/push-wrapper.json"
-PASS_ENV = ("PATH", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy",
-            "SSL_CERT_FILE", "SSL_CERT_DIR", "GIT_SSL_CAINFO")
+CONFIG_MAX = 64 * 1024
+DEFAULT_CONFIG = os.path.join(".config", "notchling", "push-wrapper.json")  # under the account's home
+# The only places git and openssl are looked for, in this order. Never the caller's PATH: sudo's
+# environment, a '.' or an empty entry could otherwise put the agent's own program first.
+TOOL_DIRS = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
+SAFE_PATH = ":".join(TOOL_DIRS)
+# The one thing taken from the caller's environment: where the proxy is, if the worker needs one.
+PROXY_ENV = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy")
+# Lets a test point api_url and remote_url at a local fake. The script scrubs its environment on start,
+# so it cannot be set from outside a running process.
+TESTING_VAR = "NOTCHLING_PUSH_WRAPPER_TESTING"
 
 
 class Refused(Exception):
@@ -78,6 +96,10 @@ class Refused(Exception):
 
 class Failed(Exception):
     """Something outside our control went wrong (GitHub, git, openssl)."""
+
+
+class ToolMissing(Failed):
+    """git or openssl is not in any of TOOL_DIRS. An error of the machine, never read as a refusal."""
 
 
 class Result(NamedTuple):
@@ -114,6 +136,32 @@ class Runner:
                                   capture_output=True, timeout=GIT_TIMEOUT, **extra)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise Failed("%s could not run (%s)" % (argv[0], type(e).__name__))
+
+
+def in_dir(runner: Runner, cwd: str) -> Runner:
+    """The same runner, but every command starts in `cwd` (our scratch folder, never the caller's)."""
+    def run(argv: List[str], env: Optional[Mapping[str, str]] = None, input: Optional[bytes] = None,
+            cwd_: Optional[str] = None) -> "subprocess.CompletedProcess[bytes]":
+        return runner(argv, env=env, input=input, cwd=cwd_ or cwd)
+    return run  # type: ignore[return-value]
+
+
+def find_tool(name: str) -> str:
+    """The absolute path of `name` in TOOL_DIRS, or Failed. Never a search of the caller's PATH."""
+    for d in TOOL_DIRS:
+        path = os.path.join(d, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise ToolMissing("%s was not found in %s" % (name, ", ".join(TOOL_DIRS)))
+
+
+def scrub_environment(environ: Mapping[str, str]) -> dict:
+    """What the script keeps of the environment it was started with: a fixed PATH, LANG=C and the proxy
+    settings. Everything else (PYTHON*, GIT_*, SSL_CERT_*, OPENSSL_*, LD_*, this script's own test switch)
+    is dropped before anything runs."""
+    out = {k: environ[k] for k in PROXY_ENV if k in environ}
+    out.update({"PATH": SAFE_PATH, "LANG": "C"})
+    return out
 
 
 # --- rules -------------------------------------------------------------------------------------------
@@ -266,8 +314,8 @@ def make_jwt(app_id: str, key_path: str, now: int, runner: Runner) -> str:
     payload = _b64url(json.dumps({"iat": now - 60, "exp": now + 540, "iss": iss},
                                  separators=(",", ":")).encode())
     signing_input = ("%s.%s" % (header, payload)).encode()
-    proc = runner(["openssl", "dgst", "-sha256", "-sign", key_path], env={"PATH": os.environ.get("PATH", "")},
-                  input=signing_input)
+    proc = runner([find_tool("openssl"), "dgst", "-sha256", "-sign", key_path],
+                  env={"PATH": SAFE_PATH, "LANG": "C"}, input=signing_input)
     if proc.returncode != 0 or not proc.stdout:
         raise Failed("openssl could not sign with the App key")
     return "%s.%s.%s" % (header, payload, _b64url(proc.stdout))
@@ -291,8 +339,8 @@ def installation_token(api: Api, repo: str, jwt: str) -> str:
 def git_env(token: Optional[str], remote_url: str, scratch: str, global_config: str = os.devnull) -> dict:
     """A bare-bones environment for git. The token, if any, goes in as a per-URL extraHeader through
     GIT_CONFIG_*, so it is never in an argument list or a config file."""
-    env = {k: os.environ[k] for k in PASS_ENV if k in os.environ}
-    env.update({"HOME": scratch, "LANG": "C", "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0",
+    env = {k: os.environ[k] for k in PROXY_ENV if k in os.environ}
+    env.update({"PATH": SAFE_PATH, "HOME": scratch, "LANG": "C", "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0",
                 "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": global_config, "GIT_ASKPASS": "true"})
     parts = urllib.parse.urlsplit(remote_url)
     if token and parts.scheme in ("http", "https") and parts.netloc:
@@ -328,7 +376,7 @@ def push_failure(stderr: bytes, secret: str = "") -> Tuple[bool, str]:
 
 
 def _git(runner: Runner, args: List[str], env: Mapping[str, str], what: str, secret: str = "") -> bytes:
-    proc = runner(["git"] + args, env=env)
+    proc = runner([find_tool("git")] + args, env=env)
     if proc.returncode != 0:
         rejected, text = push_failure(proc.stderr, secret)
         if rejected:
@@ -385,6 +433,8 @@ def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) ->
                       env, "reading the worktree").decode().strip()
         branch = _git(runner, safe + ["symbolic-ref", "-q", "--short", "HEAD"], env,
                       "reading the branch").decode().strip()
+    except ToolMissing:
+        raise
     except Failed:
         raise Refused("the worktree has no readable branch")
     validate_branch(branch, issue)
@@ -433,6 +483,7 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
         body = validate_body(req.body)
         check_key(cfg.key_path)
         scratch = tempfile.mkdtemp(prefix="push-wrapper-", dir=tmp_root)
+        runner = in_dir(runner, scratch)
         branch, sha, sgit = inspect_worktree(runner, req.worktree, req.issue, scratch)
         ref = validate_ref("refs/heads/" + branch)
 
@@ -520,14 +571,55 @@ def open_pr(api: Api, repo: str, token: str, branch: str, base: str, title: str,
     return url
 
 
-def load_config(path: str) -> Config:
+def default_config_path() -> str:
+    """The config lives under the home folder of the account running the wrapper, taken from the account
+    database. Not $HOME (sudo may leave the caller's) and not an environment variable."""
     try:
-        with open(path) as f:
-            raw = json.load(f)
+        home = pwd.getpwuid(os.geteuid()).pw_dir
+    except KeyError:
+        raise Failed("this account has no entry in the user database, so it has no default config path")
+    return os.path.join(home, DEFAULT_CONFIG)
+
+
+def config_path(arg: Optional[str]) -> str:
+    return arg or default_config_path()
+
+
+def read_config_file(path: str) -> Any:
+    """The config as JSON, if the file is one only this user can change: a plain file (no link), owned by
+    the user running the wrapper, with no write bit for group or others. The caller picks the path with
+    --config, so without these checks it could hand us a file of its own that names its own endpoints."""
+    if not os.path.lexists(path):
+        raise Failed("the config file %s does not exist" % path)
+    fd, st = open_regular(path, "the config file", CONFIG_MAX)
+    try:
+        if st.st_uid != os.geteuid():
+            raise Refused("the config file is not owned by the user running the wrapper")
+        if st.st_mode & 0o022:
+            raise Refused("the config file must not be writable by group or others")
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            return json.loads(f.read(CONFIG_MAX + 1))
     except OSError:
         raise Failed("the config file could not be read")
     except ValueError:
         raise Refused("the config file is not valid JSON")
+    finally:
+        os.close(fd)
+
+
+def check_endpoints(api_url: str, remote_url: str, repo: str, env: Optional[Mapping[str, str]]) -> None:
+    """The App's JWT and installation token are sent to api_url and git's header to remote_url, so both are
+    GitHub's, exactly, unless a test says otherwise."""
+    if env is not None and env.get(TESTING_VAR) == "1":
+        return
+    if api_url != API_URL:
+        raise Refused("config: api_url must be %s" % API_URL)
+    if remote_url not in ("https://github.com/%s.git" % repo, "https://github.com/%s" % repo):
+        raise Refused("config: remote_url must be https://github.com/%s.git" % repo)
+
+
+def load_config(path: str, env: Optional[Mapping[str, str]] = None) -> Config:
+    raw = read_config_file(path)
     if not isinstance(raw, dict):
         raise Refused("the config file must be a JSON object")
     app_id, key_path, repo = raw.get("app_id"), raw.get("key_path"), raw.get("repo")
@@ -537,12 +629,13 @@ def load_config(path: str) -> Config:
         raise Refused("config: app_id is missing or not an id")
     if not isinstance(key_path, str) or not key_path:
         raise Refused("config: key_path is missing")
-    if not isinstance(repo, str) or not REPO_RE.match(repo):
+    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo):
         raise Refused("config: repo must be owner/name")
     api_url = raw.get("api_url") or API_URL
     remote = raw.get("remote_url") or "https://github.com/%s.git" % repo
     if not isinstance(api_url, str) or not isinstance(remote, str):
         raise Refused("config: api_url and remote_url must be strings")
+    check_endpoints(api_url, remote, repo, env)
     return Config(app_id, key_path, repo, api_url, remote)
 
 
@@ -558,9 +651,8 @@ def main(argv: List[str], env: Mapping[str, str], out: TextIO, err: TextIO,
         args = parser.parse_args(argv)
     except SystemExit:
         return 2
-    path = args.config or os.path.expanduser(DEFAULT_CONFIG.replace("~", env.get("HOME", "~"), 1))
     try:
-        cfg = load_config(path)
+        cfg = load_config(config_path(args.config), env)
         body = read_stdin_body(stdin if stdin is not None else sys.stdin.buffer)
         res = push_and_open_pr(Request(args.worktree, args.issue, args.title, body, args.agent_model), cfg)
     except Refused as e:
@@ -575,4 +667,7 @@ def main(argv: List[str], env: Mapping[str, str], out: TextIO, err: TextIO,
 
 
 if __name__ == "__main__":
+    scrubbed = scrub_environment(os.environ)
+    os.environ.clear()
+    os.environ.update(scrubbed)
     sys.exit(main(sys.argv[1:], os.environ, sys.stdout, sys.stderr))
