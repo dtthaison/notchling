@@ -79,7 +79,25 @@ final class RunLedgerTests: XCTestCase {
     func testADeadPidIsNotActive() {
         var ledger = RunLedger()
         ledger.apply(lines: [start("/l/a.log", pid: 77)])
-        XCTAssertTrue(ledger.active(now: t0, pidAlive: { $0 != 77 }).isEmpty)
+        XCTAssertTrue(ledger.active(now: t0, pidAlive: { $0.pid != 77 }).isEmpty)
+    }
+
+    func testARunPastItsLimitIsNotActiveEvenIfItsPidIsAlive() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log", limit: "7200"), start("/l/b.log", limit: "null")])
+        let justInside = t0.addingTimeInterval(7200 + RunLedger.limitSlack - 1)
+        XCTAssertEqual(ledger.active(now: justInside, pidAlive: { _ in true }).count, 2)
+        let past = t0.addingTimeInterval(7200 + RunLedger.limitSlack + 1)
+        XCTAssertEqual(ledger.active(now: past, pidAlive: { _ in true }).map(\.log), ["/l/b.log"], "a run with no limit stays until it is stale")
+    }
+
+    func testTheAliveCheckGetsTheWholeStartRecord() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log", at: t0.addingTimeInterval(5), pid: 77)])
+        var seen: [RunStart] = []
+        _ = ledger.active(now: t0.addingTimeInterval(10), pidAlive: { seen.append($0); return true })
+        XCTAssertEqual(seen.map(\.pid), [77])
+        XCTAssertEqual(seen.map(\.startedAt), [t0.addingTimeInterval(5)])
     }
 
     func testFinishMatchesItsStartByLog() {

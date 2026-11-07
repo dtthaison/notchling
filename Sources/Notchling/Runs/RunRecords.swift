@@ -224,3 +224,26 @@ enum RunLog {
         return nil
     }
 }
+
+/// Is the process in a start record still that run?
+enum RunProcess {
+    /// A run's record is written right after its process starts; a process that began later than this is a pid reused.
+    static let identityTolerance: TimeInterval = 2
+
+    /// When the process began, from the kernel (`proc_pidinfo`, which answers for other users' processes too);
+    /// nil when there is no such process or it has ended and waits to be reaped.
+    static func startTime(of pid: Int32) -> Date? {
+        guard pid > 0 else { return nil }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != UInt32(SZOMB) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
+    }
+
+    /// Alive, and began no later than `startedAt` plus the tolerance. Not `kill(pid, 0)`: a pid sd's run left
+    /// behind may now belong to anything, and EPERM only says that it does.
+    static func isAlive(pid: Int32, startedAt: Date) -> Bool {
+        guard let began = startTime(of: pid) else { return false }
+        return began <= startedAt.addingTimeInterval(identityTolerance)
+    }
+}

@@ -116,6 +116,18 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
+    func testARunPastItsLimitStopsKeepingTheMacAwake() {
+        appendStart(limit: 7200)
+        let w = makeWatcher()
+        clock = clock.addingTimeInterval(7200 + 300)
+        w.tick(agents: [agent("s1", .working)])
+        XCTAssertTrue(w.hasActive)
+        clock = clock.addingTimeInterval(RunLedger.limitSlack)
+        w.tick(agents: [agent("s1", .working)])
+        XCTAssertFalse(w.hasActive, "its pid is still 'alive', but sd would have stopped it long ago")
+        XCTAssertTrue(items.isEmpty)
+    }
+
     func testFinishMovesTheRunToCompletedAndWakesTheSessionOnce() {
         appendStart()
         let w = makeWatcher()

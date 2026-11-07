@@ -69,6 +69,8 @@ struct RunLedger {
     static let staleAfter: TimeInterval = 2 * 86400
     /// Ended runs are kept this long (the notch shows them for 10 minutes, a wake can wait a while).
     static let keepEnds: TimeInterval = 3600
+    /// A run with a limit counts as active this long past it, then no more: sd would have stopped it.
+    static let limitSlack: TimeInterval = 600
 
     private var starts: [String: RunStart] = [:]
     private var lastFinish: [String: Date] = [:]
@@ -96,12 +98,14 @@ struct RunLedger {
         self = RunLedger()
     }
 
-    /// Runs with a start, no later finish for their log, and a live process.
-    func active(now: Date, pidAlive: (Int32) -> Bool) -> [RunStart] {
+    /// Runs with a start, no later finish for their log, a live process (`pidAlive` gets the start record, to check
+    /// the pid is still that run) and, with a limit, not long past it.
+    func active(now: Date, pidAlive: (RunStart) -> Bool) -> [RunStart] {
         starts.values.filter { s in
             guard (lastFinish[s.log] ?? .distantPast) < s.startedAt, now.timeIntervalSince(s.startedAt) < Self.staleAfter else { return false }
-            guard let pid = s.pid else { return false }
-            return pidAlive(pid)
+            if let limit = s.limit, now.timeIntervalSince(s.startedAt) > limit + Self.limitSlack { return false }
+            guard s.pid != nil else { return false }
+            return pidAlive(s)
         }.sorted { $0.startedAt < $1.startedAt }
     }
 

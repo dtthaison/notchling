@@ -38,7 +38,7 @@ final class RunWatcher {
 
     // Injected, so a test can drive time, processes and the outside world.
     private let now: () -> Date
-    private let pidAlive: (Int32) -> Bool
+    private let pidAlive: (RunStart) -> Bool
     private let load: () -> Double?
     private let extraRepos: () -> [String]
     private let enabled: () -> Bool
@@ -70,7 +70,7 @@ final class RunWatcher {
     private(set) var hasActive = false
 
     init(now: @escaping () -> Date = Date.init,
-         pidAlive: @escaping (Int32) -> Bool = RunWatcher.processExists,
+         pidAlive: @escaping (RunStart) -> Bool = RunWatcher.isRunning,
          load: @escaping () -> Double? = RunWatcher.loadAverage,
          extraRepos: @escaping () -> [String] = { [] },
          enabled: @escaping () -> Bool = { true },
@@ -285,9 +285,8 @@ final class RunWatcher {
         set { UserDefaults.standard.set(newValue, forKey: "wakeOnRunFinish") }
     }
 
-    static func processExists(_ pid: Int32) -> Bool {
-        guard pid > 0 else { return false }
-        return kill(pid, 0) == 0 || errno == EPERM
+    static func isRunning(_ run: RunStart) -> Bool {
+        run.pid.map { RunProcess.isAlive(pid: $0, startedAt: run.startedAt) } ?? false
     }
 
     static func loadAverage() -> Double? {
