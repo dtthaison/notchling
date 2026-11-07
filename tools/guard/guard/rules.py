@@ -158,13 +158,19 @@ def _guard_rulesets() -> bool:
 
 
 def _guard_baseline() -> bool:
-    """Writing a first baseline over one that exists is refused."""
+    """A head commit that adds a baseline entry is a gate reason, and writing a first baseline over one that exists is refused."""
+    with _tmp() as root:
+        base = _repo(root, {str(lint.BASELINE): json.dumps({"entries": ["A|a.swift|x"]})})
+        write(root, {str(lint.BASELINE): json.dumps({"entries": ["A|a.swift|x", "B|b.swift|y"]})})
+        _git(root, "commit", "-q", "-am", "grow")
+        grew = gate.baseline_reasons(root, base, _git(root, "rev-parse", "HEAD"))
     with _tmp() as root:
         _repo(root, {str(lint.BASELINE): json.dumps({"entries": []})})
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = lint.main(root, write_new=True)
-    return code == 1 and "GUARD-BASELINE" in out.getvalue()
+    return (any(r.startswith("GUARD-BASELINE:") for r in grew)
+            and code == 1 and "GUARD-BASELINE" in out.getvalue())
 
 
 def _guard_claude_md() -> bool:

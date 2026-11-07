@@ -67,6 +67,6 @@ A new use of a powerful API sends the pull request to the maintainer, wherever t
 | GUARD-CODEOWNERS | `.github/CODEOWNERS` is exactly what `zones.json` generates | The zone and the code owners must never disagree | `python3 -m guard codeowners --check` |
 | GUARD-PINS | Every workflow action is pinned to a commit SHA and from an allowed repository | A tag can be moved to other code after review; a SHA can't | `python3 -m guard pins` |
 | GUARD-RULESETS | The rulesets in `.github/rulesets/` say what the guard relies on, and every required check is a job | A loosened ruleset, or a check that never runs, would stop the guard from guarding | `python3 -m guard rulesets` |
-| GUARD-BASELINE | The lint baseline only shrinks | A baseline that grows hides new violations | `python3 -m guard lint` |
+| GUARD-BASELINE | The lint baseline only shrinks | A baseline that grows hides new violations | `python3 -m guard gate` (a PR whose baseline grew needs the maintainer); `python3 -m guard lint` (refuses to overwrite it) |
 | GUARD-CLAUDE-MD | The only tracked `CLAUDE*.md` is the root `CLAUDE.md`, and it holds exactly `@AGENTS.md` | Agent instructions live in `AGENTS.md`; a second file is an instruction source nobody reviews | `python3 -m guard claudemd` |
 | GUARD-RULES | Every rule listed here has a check that fires on its bad example, and every check is listed | A rule without a working check is only a wish | `python3 -m guard rules` |
