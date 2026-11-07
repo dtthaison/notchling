@@ -11,7 +11,7 @@ tools/dev-profile.sh claude [args]      # runs claude with the profile as its ho
 tools/dev-profile.sh shell [args]       # runs $SHELL inside the profile (shell -c 'cmd' works)
 ```
 
-The profile is `${NOTCHLING_DEV_HOME:-$HOME/.notchling-dev/home}`. It starts empty: no login, no settings, no hooks. Sign in to `claude` inside it (`tools/dev-profile.sh claude`). `--copy-login` is not implemented, on purpose: copying a login means copying a refresh token, and refresh tokens rotate.
+The profile is `${NOTCHLING_DEV_HOME:-$HOME/.notchling-dev/home}`. It starts empty: no settings, no hooks, no `claude` login of its own. The app still sees your real Claude Code login; see "What is not isolated". Sign in to `claude` inside it (`tools/dev-profile.sh claude`). `--copy-login` is not implemented, on purpose: copying a login means copying a refresh token, and refresh tokens rotate.
 
 `./build.sh --dev` takes no other flag and is never installed. It changes only the built copy of `Info.plist`: bundle id `local.notchling.dev`, name "Notchling Dev", and it drops the `agentconsole://` URL scheme so it doesn't compete with the installed app. Without `--dev`, `build.sh` does what it always did.
 
@@ -36,6 +36,9 @@ Everything the app builds from the home folder, because the data folder name is 
 ## What is not isolated
 
 - **The login Keychain.** The dev build uses the same Keychain as the installed app, and the account code goes through `/usr/bin/security`. Account switching, lanes, the Secret Vault and the Codex and Antigravity saved logins can read, replace or delete real items. Don't use them in a dev build. We did not test whether `security` finds your keychain with a different `HOME`; don't count on either answer. `claude` with `CLAUDE_CONFIG_DIR` set keeps its login in a separate item (`Claude Code-credentials-<hash of the path>`), but that item still lands in your real keychain.
+- **Your real Claude Code login, on launch.** The live login item is the fixed `Claude Code-credentials` (`AccountStore.liveService`). `capture()` runs at launch and every 60 s, reads that real login, asks `/api/oauth/profile` with it and writes it into the saved-login Keychain service the installed app uses too.
+- **Jobs on the main folder drop `CLAUDE_CONFIG_DIR`.** `AgentMonitor.environment(configDir: nil)` removes it, so `claude attach`, `rm`, `stop` and moves the dev app starts for such jobs run with the profile's `HOME` but the real, unhashed login item. Keeping an inherited `CLAUDE_CONFIG_DIR` as the main folder is a protected code change, not made yet.
+- **Launch at Login.** Turning it on registers `build/Notchling Dev.app` as a login item. At the next login it starts without the profile and writes its hooks into your real `~/.claude/settings.json`. Leave it off in a dev build.
 - **Ports 47821 and 47822.** The phone bridge binds them at launch. If the installed app runs, the dev build can't, and if the dev build wins, your phone may pair with it. Turn the phone bridge off in the dev build.
 - **UserDefaults.** The dev bundle id gives it its own settings domain, but the plist still sits in your real `~/Library/Preferences` (checked: a defaults write from inside the profile landed there). On first launch `migrateFromAwake` can copy keys from the old `local.awake.menubar` domain into it.
 - **Other apps and processes.** Account switching quits and restarts real apps (ChatGPT/Codex, Antigravity) and runs `codex app-server daemon restart`. `claude --bg` jobs are real processes. The global hot key (⌘⇧P) and the notch are shared with the installed app. Notification permission is per bundle id, so the dev build asks again.

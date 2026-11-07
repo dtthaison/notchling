@@ -84,7 +84,7 @@ The feature folders in `Sources/Notchling/`:
 Built in Phase 2; they exist today.
 
 - `tools/guard/zones.json` names the auto-merge zone. `.github/CODEOWNERS` is generated from it ([0002](docs/decisions/0002-the-line.md)).
-- `python3 -m guard` runs in `.github/workflows/guard.yml`: the architecture lint with a shrink-only baseline, actions pinned and allowlisted, CODEOWNERS in step, rulesets matching the workflows.
+- `python3 -m guard` runs in `.github/workflows/guard.yml`: the architecture lint with a shrink-only baseline (the gate sends a PR that grows it to the maintainer), actions pinned and allowlisted, CODEOWNERS in step, rulesets matching the workflows.
 - `maintainer-gate` (`.github/workflows/maintainer-gate.yml`, `python3 -m guard gate`): when a PR touches a protected path, uses a capability or weakens a test, it passes only with the maintainer's approval of the head commit.
 - `.github/rulesets/` and `tools/github/apply-settings.sh` hold the repository settings as code ([0009](docs/decisions/0009-rulesets-as-code.md)).
 - CI also runs `swift test`, `./build.sh`, and the phone's `flutter analyze` and `flutter test` (goldens included).
@@ -95,7 +95,7 @@ Releases today: `./release.sh <version>` opens a `release/<version>` PR, and mer
 
 Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), Flutter for the phone, and the engine as an always-on service.
 
-**None of the target's Rust tree (`crates/`) exists yet.** The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its throwaway code is in `spike/gpui/`, with the results in `spike/RESULTS.md`; that code never goes into `main`.
+**None of the target's Rust tree (`crates/`) exists yet.** The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is on branch `spike/gpui-phase1` (and in git history) and never goes into `main`.
 
 ```
   GPUI desktop app      hook            command line             phone, and apps on
@@ -148,7 +148,7 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 | `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Today's Swift app and ConsoleCore, in `Sources/`; moves in Phase 4 |
 | `protocol/` | Spec, JSON Schema, fixtures | Planned: Phase 4 |
 | `docs/`, `tools/`, `viz/` | Docs; the guard and setup tools; the web page behind the phone's Visualize tab | Exist |
-| `spike/` | The throwaway GPUI spike and its results; its code never goes into `main` | Exists |
+| `spike/` | The GPUI spike's results (`RESULTS.md`); its code stays on branch `spike/gpui-phase1` | Exists |
 
 ### Swift and Rust side by side
 

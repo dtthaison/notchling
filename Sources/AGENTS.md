@@ -6,7 +6,7 @@ These are the working notes for `Sources/` and what builds and tests it (`build.
 
 ## Build, install, run
 
-- `./build.sh` builds `build/Notchling.app`; `./build.sh --install` replaces `/Applications/Notchling.app` and relaunches it. Always install after a change the user should see; they test on their own screen.
+- `./build.sh` builds `build/Notchling.app`; `./build.sh --install` replaces `/Applications/Notchling.app` and relaunches it. Only when working with the maintainer on his own Mac: install after a change he should see, since he tests on his own screen. Every other agent (contributors', workers) never runs `--install`, which quits the running app and replaces the one in /Applications; use `./build.sh`, or `./build.sh --dev` with `tools/dev-profile.sh` (docs/dev-profile.md).
 - Code lives in feature folders under `Sources/Notchling/` (App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search, Terminal, Phone). `build.sh` compiles every file there with swiftc, after building `Sources/ConsoleCore` (the phone bridge engine, session host client and transcript/session readers) as a static module per architecture that Notchling and `Sources/hostd` import; `Package.swift` exists for `swift test`, which runs `Tests/NotchlingTests` (`@testable import Notchling`, fixtures in `Fixtures/`) and `Tests/ConsoleCoreTests`. Run `swift test` after a change to logic, and add a test with any new pure logic or parser. The restructuring plan is in `docs/architecture.md`.
 - Bundle id `local.notchling`; settings live in its UserDefaults. `AppDelegate.migrateFromAwake()` copies keys from the old `local.awake.menubar` domain (the app used to be called Awake). When adding a setting, add its key to that list.
 

@@ -17,7 +17,7 @@ From the design: [Architecture](https://github.com/dtthaison/notchling/blob/d285
 - More code of our own: the terminal view and the markdown view.
 - A crate under any other license fails CI. The `cargo-deny` config, `Cargo.toml` and `Cargo.lock` are protected, so loosening the list needs the maintainer ([0002](0002-the-line.md)).
 - Lockfile updates never auto-merge.
-- The only Rust code today is the throwaway spike in `spike/gpui/`, and there is no `cargo-deny` yet. It comes with the Cargo workspace in Phase 4.
+- There is no Rust code in the tree yet (the throwaway spike is on branch `spike/gpui-phase1`), and there is no `cargo-deny` yet. It comes with the Cargo workspace in Phase 4.
 
 ## Status
 

@@ -72,7 +72,7 @@ The bar at the bottom of Chat's sidebar opens the rest: **Machines**, **Artifact
 
 ## How it works
 
-Notchling reads files Claude Code already writes. It sends no telemetry. With your own login it asks Anthropic which account a login belongs to (`/api/oauth/profile`), how much of each limit is used (`/api/oauth/usage`, every 5 minutes), and renews the token of a saved account that isn't in use. The phone bridge, the tunnel, Codex limits, publishing to another account's page and Machines make calls only when you turn them on; [docs/policies/privacy.md](docs/policies/privacy.md) lists every one.
+Notchling reads files Claude Code already writes. It sends no telemetry. With your own login it asks Anthropic which account a login belongs to (`/api/oauth/profile`), how much of each limit is used (`/api/oauth/usage`, every 5 minutes), and renews the token of a saved account that isn't in use. Codex limits are fetched while Codex is signed in, and publishing to a page owned by another saved account runs while local copies of artifacts are on (the default). The phone bridge, the tunnel and Machines make calls only when you turn them on; [docs/policies/privacy.md](docs/policies/privacy.md) lists every one.
 
 | Source | Used for |
 |---|---|

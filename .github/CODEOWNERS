@@ -41,6 +41,10 @@
 /docs/rules.md @dtthaison
 /docs/decisions/ @dtthaison
 /docs/policies/ @dtthaison
+/docs/dev-profile.md @dtthaison
+/docs/feature-map.md @dtthaison
+/docs/architecture.md @dtthaison
+/docs/superpowers/ @dtthaison
 /mobile/lib/features/pairing/ @dtthaison
 **/AGENTS.md @dtthaison
 **/CLAUDE.md @dtthaison

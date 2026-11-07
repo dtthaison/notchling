@@ -19,7 +19,7 @@ The rest of the manual, in layers:
 - **Bugs:** open an issue with the bug template. macOS version, Mac model (notch or not), Claude Code version and steps to reproduce make it much faster to fix.
 - **Ideas:** open a feature request first, before writing code. Notchling tries to stay small; [docs/goals.md](docs/goals.md) says what's in scope. Things outside it may get a polite no, and that's about scope, not about you.
 - **Security problems:** don't open an issue. See [SECURITY.md](SECURITY.md).
-- **Small fixes** (typos, an obvious bug with a one-line fix) can go straight to a pull request.
+- **Small fixes** (typos, an obvious bug with a one-line fix) from people can go straight to a pull request; the maintainer files the issue for it. Agents always start from a queued issue.
 
 Expect a first reply within about a week.
 
@@ -30,7 +30,7 @@ Expect a first reply within about a week.
 3. **Branch.** Agents use `agent/<issue>-<slug>`, for example `agent/42-fix-peek-width`. People work on a fork, or a branch with any name.
 4. **Pull request.** One change per pull request, using the template. Sign off every commit (see [Sign-off](#sign-off-dco)).
 5. **Checks.** Every pull request runs the checks below. Each one is bound to the PR's head commit.
-6. **Merge.** A pull request that touches only the auto-merge zone and passes every check may merge on its own. Anything else waits for the maintainer: `maintainer-gate` passes only after he approves the PR's current head commit, and a later push needs a new approval.
+6. **Merge.** Until Phase 5 the maintainer merges every pull request; agents never merge. From Phase 5, a pull request that touches only the auto-merge zone and passes every check may merge on its own. Anything else waits for the maintainer: `maintainer-gate` passes only after he approves the PR's current head commit, and a later push needs a new approval.
 7. **Beta, then Stable.** *(Phase 6.)* Merged work goes into a daily Beta; the maintainer promotes a Beta to Stable with one click. Until then, releases are cut by hand (see [Releasing](#releasing)).
 
 ### The checks
@@ -50,7 +50,7 @@ Rust checks (`cargo test`, `cargo clippy`, `cargo-deny`) join once Rust code lan
 
 ### What's in place now, and what comes later
 
-- **Now:** the rulesets for `main`, `agent/**` and release tags, kept as code in `.github/rulesets/` and applied by the maintainer; CODEOWNERS that protects everything outside the zone; the checks above, `maintainer-gate` included; the auto-merge zone.
+- **Now:** the rulesets for `main`, `agent/**` and release tags, kept as code in `.github/rulesets/` (not applied yet: the maintainer runs `tools/github/apply-settings.sh`); CODEOWNERS that protects everything outside the zone; the checks above, `maintainer-gate` included; the auto-merge zone as a list (merging on its own starts in Phase 5).
 - **Phase 5:** the GitHub App that agent pull requests come from, the workers that pick up `notchling:queued` issues, a triage Action for new issues, and a review agent that starts recommend-only. Outside pull requests get a model review only after the maintainer labels them `notchling:review`.
 - **Phase 6:** Beta and Stable channels, updates the app installs on its own, per-PR changelog fragments, and a release build that is signed apart from the code that built it.
 
@@ -75,7 +75,7 @@ You need macOS 13 or later and the Xcode Command Line Tools (`xcode-select --ins
 
 ```sh
 ./build.sh            # builds build/Notchling.app (arm64 + x86_64, signed ad hoc)
-./build.sh --install  # replaces /Applications/Notchling.app and relaunches it
+./build.sh --install  # replaces /Applications/Notchling.app and relaunches it (people only; agents never)
 ./build.sh --dmg      # also makes build/Notchling-<version>.dmg
 swift test            # Tests/NotchlingTests and Tests/ConsoleCoreTests
 ```

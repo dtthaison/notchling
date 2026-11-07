@@ -7,7 +7,7 @@ page in the same pull request.
 
 ## In short
 
-- Notchling has no server. It sends nothing to the project or its maintainer.
+- Notchling has no server. It sends nothing to the project or its maintainer, unless you turn on the tunnel and leave its default hostname and team, which are the maintainer's (see Tunnel below).
 - There is **no telemetry today**: no analytics, no crash reports, no usage statistics and no update
   check. The Swift app has no third-party packages.
 - Its own calls go only to services you already use, with your own logins, for the features listed
