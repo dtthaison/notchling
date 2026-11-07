@@ -45,6 +45,21 @@ class ZoneTests(unittest.TestCase):
         self.assertFalse(Z.in_zone("apps/flutter/lib/features/pairing/pair.dart"))
         self.assertFalse(Z.in_zone("apps/flutter/lib/core/pairing/keys.dart"))
 
+    def test_crate_sources_in_zone_but_manifests_and_build_scripts_not(self):
+        # A Cargo.toml adds dependencies and a build.rs runs code at build time: both wait for the maintainer.
+        for p in ["crates/app/src/view.rs", "crates/kit/src/button.rs", "crates/engine/src/transcript/reader.rs",
+                  "crates/engine/src/search/rank.rs"]:
+            self.assertTrue(Z.in_zone(p), p)
+        for p in ["crates/app/Cargo.toml", "crates/kit/Cargo.toml", "crates/kit/build.rs", "crates/app/build.rs",
+                  "crates/app/src/build.rs", "crates/kit/src/nested/Cargo.toml", "crates/engine/Cargo.toml"]:
+            self.assertFalse(Z.in_zone(p), p)
+
+    def test_changing_a_crate_manifest_or_build_script_is_protected(self):
+        for p in ["crates/app/Cargo.toml", "crates/kit/build.rs"]:
+            self.assertEqual(protected_paths([chg(p, "M")], Z), [p], p)
+            self.assertEqual(protected_paths([chg(p, "A")], Z), [p], p)
+        self.assertEqual(protected_paths([chg("crates/app/src/view.rs", "M")], Z), [])
+
     def test_guard_and_github_protected(self):
         for p in ["tools/guard/zones.json", ".github/workflows/guard.yml", ".github/CODEOWNERS", "build.sh",
                   "CLAUDE.md", "AGENTS.md", "legacy/macos/Sources/Notchling/AGENTS.md", ".claude/settings.json"]:

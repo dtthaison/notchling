@@ -34,6 +34,8 @@
     "crates/kit/**",
     "crates/engine/src/transcript/**",
     "crates/engine/src/search/**",
+    "!crates/**/Cargo.toml",
+    "!crates/**/build.rs",
     "!**/AGENTS.md",
     "!**/CLAUDE.md",
     "!**/.claude/**",

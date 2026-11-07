@@ -46,6 +46,8 @@
 /docs/architecture.md @dtthaison
 /docs/superpowers/ @dtthaison
 /apps/flutter/lib/features/pairing/ @dtthaison
+/crates/**/Cargo.toml @dtthaison
+/crates/**/build.rs @dtthaison
 **/AGENTS.md @dtthaison
 **/CLAUDE.md @dtthaison
 **/.claude/ @dtthaison
