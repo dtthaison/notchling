@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/sessions/sessions_notifier.dart';
+import '../../features/chat/open_chat.dart';
 import '../message_alerts.dart';
 import '../nav_state.dart';
 import '../alerts.dart';
@@ -14,7 +14,7 @@ import 'motion.dart';
 
 /// The banner for an alert while the app is open: the session's avatar, its name and the first line of what Claude said
 /// (or what it needs). It slides in from the top, stays 4 s, opens that chat on tap and goes away on a swipe up. Put
-/// it at the top of a Stack, under the status bar.
+/// it above the Navigator (MaterialApp.builder), under the status bar.
 class InAppAlertBanner extends ConsumerWidget {
   const InAppAlertBanner({super.key});
 
@@ -24,9 +24,9 @@ class InAppAlertBanner extends ConsumerWidget {
     return AlertBannerView(
       event: event,
       onTap: () {
-        if (event == null) return;
-        ref.read(selectedSessionIdProvider.notifier).select(event.sessionId);
-        ref.read(activeTabProvider.notifier).show(1);
+        final BuildContext? navigator = appNavigatorKey.currentContext;
+        if (event == null || navigator == null) return;
+        openChat(navigator, ref, event.sessionId);
         ref.read(inAppAlertProvider.notifier).dismiss();
       },
       onDismiss: () => ref.read(inAppAlertProvider.notifier).dismiss(),

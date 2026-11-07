@@ -8,12 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/net/bridge_client.dart';
 import '../core/net/ws_transport.dart';
 import '../features/chat/chat_screen.dart';
+import '../features/chat/open_chat.dart';
 import '../features/connection/connection.dart';
 import '../features/connection/subscription_sync.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/macs_screen.dart';
 import '../features/pairing/pairing_screen.dart';
-import '../features/sessions/sessions_notifier.dart';
 import '../features/sessions/sessions_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/visualize/visualize_screen.dart';
@@ -23,12 +23,11 @@ import 'nav_state.dart';
 import 'notifications.dart';
 import 'theme/tokens.dart';
 import 'widgets/common.dart';
-import 'widgets/alert_banner.dart';
 import 'widgets/glass_nav.dart';
 import 'widgets/kit.dart';
 import 'widgets/motion.dart';
 
-/// Root: pair first, then the three tabs (or three panels from 840 dp, like the Mac).
+/// Root: pair first, then the two tabs with the chat pushed over them (or three panels from 840 dp, like the Mac).
 class AppRoot extends ConsumerStatefulWidget {
   const AppRoot({super.key});
 
@@ -43,8 +42,7 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     unawaited(ref.read(notificationServiceProvider).init());
     ref.read(notificationServiceProvider).taps.listen((String sessionId) {
-      ref.read(selectedSessionIdProvider.notifier).select(sessionId);
-      ref.read(activeTabProvider.notifier).show(1);
+      if (mounted) openChat(context, ref, sessionId);
     });
   }
 
@@ -151,11 +149,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       (BridgeClient? previous, BridgeClient? next) => _bind(next),
     );
     final int tab = ref.watch(activeTabProvider);
-    final bool hideBar =
-        tab == 1 &&
-        ref.watch(selectedSessionIdProvider) != null &&
-        MediaQuery.sizeOf(context).width < Metric.threePanelBreakpoint;
-
     final bool wide =
         MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint;
     final Kit kit = Kit.of(context);
@@ -187,55 +180,51 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       // Scaffold's MediaQuery), so nothing needs an opaque strip behind it.
       extendBody: !wide,
       extendBodyBehindAppBar: true,
-      // The Chat tab with a session open has its own header (with the Macs button): a second bar above it would eat a
-      // quarter of the screen.
-      appBar: hideBar
-          ? null
-          : AppBar(
-              toolbarHeight: 48,
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              surfaceTintColor: Colors.transparent,
-              flexibleSpace: const GlassBar(
-                top: true,
-                child: SizedBox.expand(),
+      appBar: AppBar(
+          toolbarHeight: 48,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          flexibleSpace: const GlassBar(
+            top: true,
+            child: SizedBox.expand(),
+          ),
+          title: Text(l10n.appName, style: kit.titleMd),
+          actions: <Widget>[
+            IconButton(
+              tooltip: l10n.openMacs,
+              icon: const Icon(Icons.laptop_mac),
+              constraints: const BoxConstraints(
+                minWidth: Metric.minTarget,
+                minHeight: Metric.minTarget,
               ),
-              title: Text(l10n.appName, style: kit.titleMd),
-              actions: <Widget>[
-                IconButton(
-                  tooltip: l10n.openMacs,
-                  icon: const Icon(Icons.laptop_mac),
-                  constraints: const BoxConstraints(
-                    minWidth: Metric.minTarget,
-                    minHeight: Metric.minTarget,
-                  ),
-                  onPressed: () => unawaited(
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext context) => const MacsScreen(),
-                      ),
-                    ),
+              onPressed: () => unawaited(
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (BuildContext context) => const MacsScreen(),
                   ),
                 ),
-                IconButton(
-                  tooltip: l10n.settingsTitle,
-                  icon: const Icon(Icons.settings_outlined),
-                  constraints: const BoxConstraints(
-                    minWidth: Metric.minTarget,
-                    minHeight: Metric.minTarget,
-                  ),
-                  onPressed: () => unawaited(
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext context) =>
-                            const SettingsScreen(),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
+            IconButton(
+              tooltip: l10n.settingsTitle,
+              icon: const Icon(Icons.settings_outlined),
+              constraints: const BoxConstraints(
+                minWidth: Metric.minTarget,
+                minHeight: Metric.minTarget,
+              ),
+              onPressed: () => unawaited(
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (BuildContext context) =>
+                        const SettingsScreen(),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       body: wide
           ? SafeArea(
               bottom: false,
@@ -247,7 +236,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       children: <Widget>[
                         SizedBox(
                           width: 360,
-                          child: SessionsScreen(onOpenChat: () {}),
+                          child: const SessionsScreen(),
                         ),
                         const VerticalDivider(),
                         const Expanded(child: ChatScreen()),
@@ -270,25 +259,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                         _TabSlot(
                           active: tab == 0,
                           child: SessionsScreen(
-                            onOpenChat: () =>
-                                ref.read(activeTabProvider.notifier).show(1),
+                            onOpenChat: (String id) => openChat(context, ref, id),
                           ),
                         ),
-                        _TabSlot(
-                          active: tab == 1,
-                          child: hideBar
-                              ? inset(
-                                  const Column(
-                                    children: <Widget>[
-                                      ConnectionBanner(),
-                                      Expanded(child: ChatScreen()),
-                                    ],
-                                  ),
-                                )
-                              : inset(const ChatScreen()),
-                        ),
                         // Only built while shown, so the Phone stream and viz loads stop when you leave.
-                        if (tab == 2)
+                        if (tab == 1)
                           inset(const VisualizeScreen(), bottom: true)
                         else
                           const SizedBox.shrink(),
@@ -296,18 +271,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     ),
                   ),
                 ),
-                if (!hideBar)
-                  Positioned(
-                    top: MediaQuery.paddingOf(context).top,
-                    left: 0,
-                    right: 0,
-                    child: const ConnectionBanner(),
-                  ),
                 Positioned(
                   top: MediaQuery.paddingOf(context).top,
                   left: 0,
                   right: 0,
-                  child: const InAppAlertBanner(),
+                  child: const ConnectionBanner(),
                 ),
               ],
             ),
@@ -453,8 +421,6 @@ class _BottomNav extends ConsumerWidget {
     }
     return GlassNav(
       selected: ref.watch(activeTabProvider),
-      // Chat is the tab whose list moves under the bar with the keyboard: no blur there.
-      solid: ref.watch(activeTabProvider) == 1,
       onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
     );
   }
