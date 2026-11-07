@@ -33,9 +33,10 @@ python3 -m guard pins                 # workflow actions pinned and allowlisted
 python3 -m guard codeowners --check   # CODEOWNERS matches tools/guard/zones.json
 python3 -m guard rulesets             # the rulesets require checks the workflows run
 python3 -m guard claudemd             # CLAUDE.md is only @AGENTS.md, and there is no other
+cargo test --workspace --locked       # the Rust crates (also: cargo clippy --workspace --all-targets -- -D warnings, cargo fmt --check, cargo deny check)
 ```
 
-The phone app's checks are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) (`flutter analyze`, `flutter test`). Run `swift test` after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test` and `maintainer-gate`.
+The phone app's checks are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) (`flutter analyze`, `flutter test`). Run `swift test` after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test`, `rust-test`, `rust-clippy`, `rust-deny` and `maintainer-gate`.
 
 ## The line
 

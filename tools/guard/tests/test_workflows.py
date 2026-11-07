@@ -153,7 +153,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", text)
 
     def test_code_jobs_have_no_secrets(self):
-        for f in ("guard.yml", "build.yml", "phone.yml"):
+        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml"):
             self.assertNotIn("secrets.", read(".github/workflows/" + f), f)
 
     def test_every_workflow_sets_permissions(self):
@@ -162,7 +162,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_required_check_jobs_exist(self):
         found = {j for f in WORKFLOWS.glob("*.yml") for j in jobs(f.read_text())}
-        for name in ("build", "app-build", "guard", "phone-analyze", "phone-test"):
+        for name in ("build", "app-build", "guard", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"):
             self.assertIn(name, found)
 
     def test_guard_job_runs_every_check(self):
@@ -171,7 +171,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(cmd, text)
 
     def test_pr_workflows_dont_persist_credentials(self):
-        for f in ("guard.yml", "build.yml", "phone.yml", "maintainer-gate.yml"):
+        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml", "maintainer-gate.yml"):
             text = read(".github/workflows/" + f)
             self.assertEqual(text.count("actions/checkout@"), text.count("persist-credentials: false"), f)
 
