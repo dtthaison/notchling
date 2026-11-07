@@ -23,7 +23,7 @@ Why now: the repo just went public, so issues will come from strangers, and the 
 ## Non-goals
 
 - Notarization, App Store, or a website.
-- Shipping Linux or Windows apps in this plan's first phases; the layout only makes room for them.
+- Shipping Linux or Windows apps before the Rust engine and the GPUI app exist.
 - Replacing the sd worker or the Machines window; this design uses them.
 - A full rewrite. The re-architecture is incremental and every step ships green.
 
@@ -133,58 +133,87 @@ Target:
 
 Today: the macOS app (Swift, ~55k lines), its engine `ConsoleCore` + `hostd` (Swift, ~7.4k lines), and a
 Flutter app for iOS and Android (`mobile/`, ~15.6k lines) that knows the Mac only through the
-`agentconsole.v1` protocol. Linux and Windows may come later.
+`agentconsole.v1` protocol.
 
-Shape: **one engine per computer, many apps talking to it.**
+Decided by the maintainer: **Rust for the engine, GPUI (Zed's UI framework) for every desktop app,
+the Mac included.** The Swift app is replaced, not kept beside it.
 
-- **Engine** (`notchlingd`): finds Claude Code (and Codex, Antigravity) sessions, reads transcripts,
-  hosts terminals, keeps the vault and logins, serves the protocol to local and remote apps. **Rust**
-  *(maintainer's decision, over Go)*, so one engine runs on macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`,
-  `sysinfo`, `keepawake`, `tray-icon`).
-- **Apps**: the native macOS app stays Swift (the notch is Mac-only) and calls the engine through
-  UniFFI or the protocol; one Flutter app covers iOS, Android, and later Linux and Windows desktops
-  *(my call: Flutter over Tauri or a Rust UI, since the phone app is already Flutter; it calls the engine
-  through `flutter_rust_bridge` or the protocol)*.
-- **Protocol** is the contract between them: a written spec (JSON Schema) plus conformance fixtures
-  every engine and app must pass. It stays additive (older apps ignore new fields), as today.
+- **Engine** (`notchlingd` and library crates): finds Claude Code, Codex and Antigravity sessions, reads
+  transcripts, hosts terminals, keeps the vault and logins, serves the protocol to the phone. Same code on
+  macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`, `sysinfo`,
+  `keepawake`).
+- **Desktop app**: one GPUI app for macOS, Linux and Windows, in the same Cargo workspace as the engine,
+  calling it directly (no bridge). Platform pieces live behind small traits with one implementation per
+  OS: the notch overlay and menu bar on macOS (through `objc2`), a tray and a top-of-screen panel on Linux
+  and Windows *(my call: no notch there, so the notch views become a small always-on-top panel)*.
+- **Phone app**: stays Flutter (GPUI has no iOS or Android). It keeps speaking the protocol to
+  `notchlingd`.
+- **Protocol** is the contract between engine and phone: a written spec (JSON Schema) plus conformance
+  fixtures. It stays additive, as today.
+- *(My call, still to confirm: on Linux and Windows the app watches and controls the sessions on that same
+  computer.)*
 
-*(My call, not yet confirmed: on Linux and Windows the app watches and controls the sessions running on
-that same computer, which is why the engine moves to Rust. If those desktops only need to view the
-Mac's sessions, the Flutter desktop app needs no engine there and the Rust port can wait.)*
+GPUI facts that shape the plan:
+- Pre-1.0 and developed for Zed: pin an exact revision, upgrade on purpose, and keep our own thin widget
+  layer (the ChatKit equivalent) so a GPUI change touches one place.
+- Desktop only: two UI codebases from now on (GPUI desktop, Flutter phone).
+- Zed's own crates can be reused where they fit, for example its terminal view built on
+  `alacritty_terminal` in place of our `TerminalScreen`.
 
-Repo layout (one repo):
+Risks to settle with a throwaway spike before any port (each a yes/no):
+1. The notch: a borderless, transparent, click-through window placed around the camera, with the
+   mouse-test toggling of `ignoresMouseEvents` we do today. GPUI has popup and transparent windows; a
+   notch overlay is untested.
+2. Web content: Pages, artifact previews and the HTML file viewer need a web view. GPUI has none;
+   the options are embedding `wry` (WKWebView, WebView2, WebKitGTK) in a GPUI window or opening pages in
+   their own window.
+3. Previews the Mac gets from the OS today (PDFKit, AVKit, Quick Look) and native notifications: what
+   replaces each, per OS.
+4. Rules that carry over unchanged: Keychain through `/usr/bin/security`, never the Security framework,
+   for account logins (ad hoc builds lose access on rebuild), and the vault's opposite rule (trusts only
+   this build); the hook stays a short-lived process that never hangs Claude Code.
+
+Repo layout (one repo, one Cargo workspace):
 
 ```
-apps/macos/        Swift app: notch, menu bar, Chat (today's Sources/Notchling)
-apps/flutter/      one Flutter app: iOS, Android, then Linux and Windows (today's mobile/)
-engine/            Rust workspace: crates per job (sessions, transcripts, pty, bridge, vault,
-                   accounts) and the notchlingd binary
-engine-swift/      today's ConsoleCore + hostd, kept until the Rust engine replaces each part
-protocol/          agentconsole spec, JSON Schema, conformance fixtures
+crates/engine/      sessions, transcripts, accounts, lanes, vault, pty, bridge (library)
+crates/notchlingd/  the headless engine binary (Linux servers, phone bridge)
+crates/app/         the GPUI desktop app (macOS, Linux, Windows)
+crates/platform/    per-OS pieces: notch and menu bar (macOS), tray and panel (Linux, Windows)
+crates/kit/         our widget layer over GPUI (today's ChatKit)
+apps/flutter/       the phone app (today's mobile/)
+legacy/macos/       today's Swift app and ConsoleCore, frozen to fixes until retired
+protocol/           spec, JSON Schema, conformance fixtures
 docs/  tools/  viz/
 ```
 
-The Rust port goes piece by piece behind the protocol and never as one switch: first a headless
-`notchlingd` on Linux (sessions, transcripts, bridge), which the Mac doesn't depend on; then the Mac app
-moves one piece at a time, with the Swift piece deleted once its Rust replacement passes the same
-fixtures. Vault and account code is ported last and stays a protected path in both languages.
+The port goes area by area, each one done when it matches the Swift app's behavior on the existing test
+fixtures (transcripts, terminal recordings, `Fixtures/`). The Swift app keeps shipping releases until the
+GPUI app covers every area; then it is retired in one release. Accounts, lanes and the vault are ported
+last and stay protected paths in Rust.
 
-Protected paths gain: `protocol/` (a careless change breaks paired phones), and `engine/` crates for
-vault, accounts and pty.
+Protected paths gain `protocol/`, `crates/engine` modules for accounts, lanes, vault and pty, and
+`crates/platform`.
 
 ## Phases
 
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
    `sd:queued`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
 2. Quality checks: build job, architecture lint with its fixtures, cross-model review job.
-3. Repo layout: move into `apps/`, `engine-swift/`, `protocol/`; write the protocol spec and its
-   conformance fixtures from today's Swift and Dart code. Done before the AGENTS.md split, since folders
-   move.
-4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per feature folder; feature map.
+3. Repo layout and protocol: move into the layout above (Swift to `legacy/macos/`, Flutter to
+   `apps/flutter/`), write the protocol spec and its conformance fixtures.
+4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per folder; feature map.
 5. Turn on the worker for `sd:queued` issues in the auto-merge zone only; watch a week of sampling.
-6. macOS app into Swift modules, one folder at a time (protected ones need the maintainer).
-7. Rust engine: headless `notchlingd` on Linux first, then piece by piece on the Mac.
-8. Flutter desktop builds for Linux and Windows against `notchlingd`.
+6. GPUI spike (throwaway): the notch overlay and a web view in a GPUI window on this Mac. If either
+   fails, the maintainer decides again before phase 8.
+7. Rust engine: transcripts and sessions first (pure, fixture-tested), headless `notchlingd` with the
+   phone bridge, then terminals; accounts, lanes and vault last.
+8. GPUI desktop app, area by area: notch and menu bar, Chat, Search, Pages, Machines, Accounts, Vault.
+   Linux and Windows builds from the same app as each area lands.
+9. Retire the Swift app in one release once the GPUI app covers every area.
+
+Dropped from the earlier draft: splitting the Swift app into Swift modules (it is being replaced; it
+gets fixes only).
 
 ## Constraints
 
