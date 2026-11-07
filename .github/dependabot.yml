@@ -1,7 +1,22 @@
-# Notchling has no package dependencies; this keeps the CI actions up to date.
+# Version updates, weekly, after a 7-day cooldown so a freshly published release has time to be
+# yanked. Nothing merges itself: every update is a pull request that goes through the same checks.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+    cooldown:
+      default-days: 7
+  - package-ecosystem: pub
+    directory: /mobile
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

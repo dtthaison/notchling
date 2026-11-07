@@ -1,0 +1,8 @@
+{
+ "_comment": "Repositories workflows may use actions from, each pinned to a commit SHA (python3 -m guard pins). Adding one is a protected change.",
+ "allow": [
+  "actions/checkout",
+  "actions/setup-python",
+  "subosito/flutter-action"
+ ]
+}

@@ -1,0 +1,19 @@
+name: Review signal
+
+# A review can't post a status itself without running with the PR's token. This workflow does
+# nothing but finish; maintainer-gate.yml listens for it (workflow_run) and re-decides with
+# main's code. It runs no repository code and has no permissions.
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          PR: ${{ github.event.pull_request.number }}
+        run: echo "$PR"
