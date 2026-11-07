@@ -195,6 +195,78 @@ last and stay protected paths in Rust.
 Protected paths gain `protocol/`, `crates/engine` modules for accounts, lanes, vault and pty, and
 `crates/platform`.
 
+## Parts
+
+Each part is done when the Rust version passes the same fixtures the Swift version passes today
+(transcripts, terminal recordings, protocol messages in `Fixtures/`). Each part gets its own detailed
+plan when its turn comes, since what the early parts teach about GPUI changes the later ones. Sizes are
+today's Swift lines. "Protected" parts wait for the maintainer.
+
+### Engine (Rust)
+
+| # | Part | What moves | Size | Protected |
+| --- | --- | --- | --- | --- |
+| E1 | Transcripts | Claude, Codex and Antigravity readers, subagents, background shells, search matching | ~4k, pure | |
+| E2 | Sessions | Finding jobs across lanes, `state.json`, following `/clear` and worktrees (`resumeSessionId`) | ~2k | |
+| E3 | Terminal and replies | pty, `claude attach`, typing replies, reading question dialogs, hostd; Zed's terminal replaces `TerminalScreen` | ~3k | yes |
+| E4 | Hook | The `--hook` process; must never hang Claude Code | ~0.5k | yes |
+| E5 | Phone bridge | TLS, pairing, tunnel, the protocol, served by `notchlingd` | ~4k | yes |
+| E6 | Other tools | Codex runner, Antigravity (ACP), Delegate, second opinions | ~2.5k | Delegate |
+| E7 | Pages and search index | Artifact library, owner publish, the search index | ~2k | |
+| E8 | Accounts | Four providers, limits, auto-switch at a limit (acts on its own, changes the live login), lanes, cost tracking | ~5k | yes |
+| E9 | Vault | Keychain item, socket server, redactor, CLI | ~2.3k | yes |
+| E10 | Machines | ssh setup steps, deploy keys, Morning Actions | ~8.3k | yes |
+| E11 | Session control | New Session, Trust Folder, Stop, Remove, moves between accounts and Move All, takeover, slash and `!` commands, resume after wake, git status | ~3k | yes |
+| E12 | Keep awake and system | Keeping the computer awake, sleep and wake, notifications with the banner fallback, file watching, 0600 files | ~1k | |
+| E13 | Installing into other tools | Our hooks in `~/.claude/settings.json` (backup, others' hooks kept), skills for Claude Code, Codex and Antigravity | ~1k | yes |
+| E14 | Settings and data | One settings store for all OSes, moving today's UserDefaults (and the old Awake keys), data folders per OS, the AgentConsole folder kept so paired phones survive | ~0.5k | yes |
+| E15 | Phone extras | Visualize tab (`viz/`), photos from the phone, web snapshots, screen and window streaming | ~2k | |
+| E16 | Command line and services | One binary with all its modes (`--hook`, `--page`, `--secret`, `--delegate`); hostd as LaunchAgent, systemd user service or Windows startup task; installers and updates | ~1k | yes |
+
+### Desktop app (GPUI)
+
+| # | Part | What it covers |
+| --- | --- | --- |
+| U0 | Kit and shell | Our widget layer over GPUI (today's ChatKit), app window, tray and menu bar, Dock presence per OS, light and dark |
+| U1 | Chat | Sidebar, conversation, markdown, composer, inspector, question and permission cards, file panel, terminal sheet |
+| U2 | Notch | Overlay, rows, cards, Peek, Tab Perch, the pet; a top panel on Linux and Windows |
+| U3 | Search | Global hot key panel |
+| U4 | Pages | Library window and web view |
+| U5 | Accounts, Vault, Machines | Their windows and sheets |
+| U6 | Phone pairing | QR and one-time code, paired phones, bridge switch, tunnel status |
+| U7 | Pop-ups outside Chat | Vault approval (must not be fakeable by another app), the vault request form, notice banners, Trust Folder |
+| U8 | Sheets | New Session, Add Account, Settings, Second Opinion views |
+| U9 | Usage and cost | Limit bars, cost by account and model |
+| U10 | Rendering for agents | Offscreen render of any view to PNG (today's `render-notch-view`, KitGallery, README GIFs). Agents need it to check their own UI work, so it lands in Milestone 1 |
+| U11 | First run and updates | Installing hooks on first launch, moving over from the Swift app (settings, paired phones, vault), About, updates |
+
+What macOS gives the Swift app for free and the GPUI app must build or reuse:
+- Input methods (Vietnamese Telex/VNI) in the reply box; Zed handles them on Mac, weaker on Linux and Windows.
+- Selecting text across a whole reply (today a dedicated NSTextView per prose run).
+- Markdown and code highlighting (reuse Zed's markdown and tree-sitter).
+- Drag and drop of files and images, attachment thumbnails.
+- File previews per OS (PDF, video, Quick Look, images).
+- Keyboard: copy and paste, Esc, ⌘[, Tab in cards, the global hot key.
+- Screen readers: GPUI has little support today; decide how much we own.
+- The `?` button that names every part, from a GPUI equivalent of `.part("Name")`; the feature map
+  depends on it.
+- Pointer cursor on everything clickable.
+
+### Milestones (each one a usable app)
+
+1. **Read-only viewer**: E1, E2, E12, E14, U0, U10, Chat read-only. Lists sessions and shows
+   conversations on Mac, Linux and Windows; only reads files. Agents can take most of it.
+2. **Reply**: E3, E4, E11, U2, U7, U8. Answer and drive sessions. Maintainer reviews.
+3. **Phone**: E5, E15, E16's hostd service, U6. `notchlingd` serves the phone; the Swift bridge is
+   switched off. Maintainer reviews.
+4. **The rest that's safe**: E6, E7, U3, U4. Agents can take most of it.
+5. **Logins and secrets**: E8, E9, E10, E13, U5, U9, U11. Then the Swift app is retired. Maintainer
+   reviews.
+
+Open question for the spike: how Claude Code background sessions (`claude --bg`, `attach`,
+`state.json`) behave on Linux and Windows and where their files live. If they don't exist there, the
+Linux and Windows apps can show sessions but not drive them.
+
 ## Phases
 
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
@@ -204,13 +276,12 @@ Protected paths gain `protocol/`, `crates/engine` modules for accounts, lanes, v
    `apps/flutter/`), write the protocol spec and its conformance fixtures.
 4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per folder; feature map.
 5. Turn on the worker for `sd:queued` issues in the auto-merge zone only; watch a week of sampling.
-6. GPUI spike (throwaway): the notch overlay and a web view in a GPUI window on this Mac. If either
-   fails, the maintainer decides again before phase 8.
-7. Rust engine: transcripts and sessions first (pure, fixture-tested), headless `notchlingd` with the
-   phone bridge, then terminals; accounts, lanes and vault last.
-8. GPUI desktop app, area by area: notch and menu bar, Chat, Search, Pages, Machines, Accounts, Vault.
-   Linux and Windows builds from the same app as each area lands.
-9. Retire the Swift app in one release once the GPUI app covers every area.
+6. GPUI spike (throwaway): the notch overlay, a web view in a GPUI window, Vietnamese input in a text
+   field, offscreen render to PNG, and Claude Code background sessions on Linux and Windows. If any
+   fails, the maintainer decides again before phase 7.
+7. Milestones 1 to 5 above, in order, engine and app parts together. Linux and Windows builds from the
+   same app as each milestone lands.
+8. Retire the Swift app in one release once the GPUI app covers every part.
 
 Dropped from the earlier draft: splitting the Swift app into Swift modules (it is being replaced; it
 gets fixes only).
