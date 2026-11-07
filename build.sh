@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builds Notchling.app into ./build. Pass --install to copy it to /Applications,
 # or --dmg to also make build/Notchling-<version>.dmg for other Macs.
+# --dev (alone) builds build/Notchling Dev.app instead: bundle id local.notchling.dev, name "Notchling Dev", no
+# agentconsole:// URL scheme. Run it with tools/dev-profile.sh app. It is never installed; see docs/dev-profile.md.
 #
 # Three pieces, all swiftc, none with package dependencies:
 #   ConsoleCore  Sources/ConsoleCore: the phone bridge's engine and the session host client, built per
@@ -10,7 +12,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+DEV=0
+if [[ "${1:-}" == "--dev" ]]; then
+    DEV=1
+    shift
+    if [[ $# -gt 0 ]]; then
+        echo "build.sh --dev takes no other flag (the dev build is never installed or packaged)" >&2
+        exit 2
+    fi
+fi
+
 APP=build/Notchling.app
+if [[ $DEV == 1 ]]; then APP="build/Notchling Dev.app"; fi
 SOURCES=$(find Sources/Notchling -name '*.swift' | sort)
 CORE_SOURCES=$(find Sources/ConsoleCore -name '*.swift' | sort)
 rm -rf "$APP"
@@ -45,6 +58,15 @@ mkdir -p "$APP/Contents/Resources"
 cp Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Pet/*.png "$APP/Contents/Resources/"
 cp Info.plist "$APP/Contents/Info.plist"
+if [[ $DEV == 1 ]]; then
+    # Edit the built copy only, never the source Info.plist. The URL scheme goes so the dev build doesn't compete
+    # with the installed app for agentconsole://.
+    PLIST="$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier local.notchling.dev" "$PLIST"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Notchling Dev" "$PLIST"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Notchling Dev" "$PLIST"
+    /usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST"
+fi
 codesign --force --sign - "$APP/Contents/Helpers/agent-console-hostd"
 codesign --force --sign - "$APP"
 

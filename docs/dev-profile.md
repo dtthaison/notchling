@@ -1,0 +1,49 @@
+# Dev profile
+
+A way to run a dev build of Notchling, and `claude`, without touching your real `~/.claude` or `~/Library/Application Support/Notchling`. Read "What is not isolated" before you trust it.
+
+## Use
+
+```
+./build.sh --dev                        # builds build/Notchling Dev.app (bundle id local.notchling.dev)
+tools/dev-profile.sh app                # runs that build, with the profile as its home
+tools/dev-profile.sh claude [args]      # runs claude with the profile as its home and config folder
+tools/dev-profile.sh shell [args]       # runs $SHELL inside the profile (shell -c 'cmd' works)
+```
+
+The profile is `${NOTCHLING_DEV_HOME:-$HOME/.notchling-dev/home}`. It starts empty: no login, no settings, no hooks. Sign in to `claude` inside it (`tools/dev-profile.sh claude`). `--copy-login` is not implemented, on purpose: copying a login means copying a refresh token, and refresh tokens rotate.
+
+`./build.sh --dev` takes no other flag and is never installed. It changes only the built copy of `Info.plist`: bundle id `local.notchling.dev`, name "Notchling Dev", and it drops the `agentconsole://` URL scheme so it doesn't compete with the installed app. Without `--dev`, `build.sh` does what it always did.
+
+## How it works
+
+The script sets `HOME`, `CFFIXED_USER_HOME`, `ZDOTDIR` and `CLAUDE_CONFIG_DIR` to the profile and clears `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`.
+
+`HOME` alone is not enough. On macOS 26 `NSHomeDirectory()` and `FileManager.default.homeDirectoryForCurrentUser` ignore it; they follow `CFFIXED_USER_HOME`. Checked with a small probe: with only `HOME` set both returned the real home, with both set they returned the profile.
+
+`app` runs `build/Notchling Dev.app/Contents/MacOS/Notchling` directly, and only if that bundle's id is `local.notchling.dev`. Never start the dev build with `open` or by double-clicking: it then runs with your real home and writes to your real folders.
+
+The script refuses to run when the profile is empty, not an absolute path, `/`, your real home (also through a symlink), a folder that contains your real home, or anything inside your real `~/.claude` or `~/Library`. It changes the mode of the profile folder only when it created it.
+
+## What is isolated
+
+Everything the app builds from the home folder, because the data folder name is written into the code and not taken from the bundle id (see "Hard-coded names"):
+
+- `~/.claude`: hooks in `settings.json`, the `notchling-*` skills, sessions, transcripts, `~/.claude-lanes`.
+- `~/Library/Application Support/Notchling` (hook files, `pages.json`, `vault.json`, `vault.sock`, search index, Machines) and `~/Library/Application Support/AgentConsole` (phone certificate, tokens, `hostd.sock`).
+- `~/.codex`, `~/.gemini/antigravity-cli`, the Claude Desktop folders: they are looked up under the profile too, so they are empty there.
+
+## What is not isolated
+
+- **The login Keychain.** The dev build uses the same Keychain as the installed app, and the account code goes through `/usr/bin/security`. Account switching, lanes, the Secret Vault and the Codex and Antigravity saved logins can read, replace or delete real items. Don't use them in a dev build. We did not test whether `security` finds your keychain with a different `HOME`; don't count on either answer. `claude` with `CLAUDE_CONFIG_DIR` set keeps its login in a separate item (`Claude Code-credentials-<hash of the path>`), but that item still lands in your real keychain.
+- **Ports 47821 and 47822.** The phone bridge binds them at launch. If the installed app runs, the dev build can't, and if the dev build wins, your phone may pair with it. Turn the phone bridge off in the dev build.
+- **UserDefaults.** The dev bundle id gives it its own settings domain, but the plist still sits in your real `~/Library/Preferences` (checked: a defaults write from inside the profile landed there). On first launch `migrateFromAwake` can copy keys from the old `local.awake.menubar` domain into it.
+- **Other apps and processes.** Account switching quits and restarts real apps (ChatGPT/Codex, Antigravity) and runs `codex app-server daemon restart`. `claude --bg` jobs are real processes. The global hot key (⌘⇧P) and the notch are shared with the installed app. Notification permission is per bundle id, so the dev build asks again.
+- **The session host.** `agent-console-hostd` is a per-user LaunchAgent made by `tools/install-hostd.sh`. The profile has none, so terminal sessions that live in the host are not available in it, and nothing here should install one.
+
+## Hard-coded names (found by grep, not changed)
+
+- `Library/Application Support/Notchling` and `…/AgentConsole` are literal strings joined to `FileManager.default.homeDirectoryForCurrentUser` in about 65 places (for example `HookBridge`, `SecretVault`, `VaultServer`, `SessionIndex`, `BridgeIdentity`, `hostd`). The bundle id plays no part, so a dev build run without the script writes to the real folders.
+- `.claude`, `.codex`, `.gemini`, `.local/bin` are joined to the same home value. `ReplySender.claudePath` looks for `$HOME/.local/bin/claude`, then `/usr/local/bin/claude`; `dev-profile.sh app` links the real `claude` into the profile for that.
+- `local.notchling` appears only as dispatch queue labels and one notification name. `local.awake.menubar` is read by `migrateFromAwake`. The app's own bundle id is never compared in code, checked for `nil` (`Bundle.main.bundleIdentifier != nil`) before notifications.
+- Hooks and skills use `Bundle.main.bundlePath`, so inside the profile they point at `build/Notchling Dev.app`, with a space in the path.
