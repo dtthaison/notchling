@@ -263,14 +263,17 @@ through the protocol, so it keeps working through the engine port as long as the
 | P0 | Phone guard rails | `flutter analyze` and `flutter test` as required checks (CI tests none of it today), golden tests (screens to PNG) as the phone's rendering for agents, an `AGENTS.md` for the folder | Phase 2 |
 | P1 | Generated protocol types | Dart and Rust types generated from the protocol's JSON Schema, checked by the shared fixtures; no Rust inside the phone (`flutter_rust_bridge` would complicate iOS and Android builds) *(my call)* | Phase 3 |
 | P2 | Many computers | "Macs" becomes "computers": one phone paired with several engines on macOS, Linux and Windows | Milestone 3 |
-| P3 | Rename and docs | "Agent Console" / `agent_console` becomes Notchling; a real README in place of Flutter's template | Any time, agents can take it |
+| P3 | Rename and docs | "Agent Console" / `agent_console` becomes Notchling; a real README in place of Flutter's template, with the build-it-yourself guide | Any time, agents can take it |
 
 Later, when people ask: a simpler way to reach a computer from outside home than one's own Cloudflare
 tunnel and Access setup; the visualize tab, images, Stop and new sessions for Codex and Antigravity
 sessions on the phone.
 
-Open question (maintainer's): how someone who finds Notchling on GitHub gets the phone app: App Store
-and Google Play, a TestFlight or APK link, or building it themselves.
+Distribution *(maintainer's decision)*: for now people build the phone app themselves; store releases
+(App Store, Google Play) come later. So P3 includes a build guide that works from a fresh clone: Flutter
+version, `flutter build ios` with one's own Apple team and bundle id, `flutter build apk` for Android,
+and pairing with the computer. Nothing in the repo may assume the maintainer's signing team, bundle id
+or Cloudflare setup.
 
 ### Milestones (each one a usable app)
 
