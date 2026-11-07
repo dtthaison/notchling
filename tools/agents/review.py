@@ -16,6 +16,8 @@ comment and stops; only a maintainer's `notchling:review` label added after that
 look. A pull request gets at most 6 model calls and the repository at most REVIEW_DAILY_CAP a UTC day,
 both counted from the bot's own marker comments.
 
+`review.py find-pr` is the workflow's lookup step: it names the pull request a "Review run" belongs to.
+
 Issue and PR text is data: it is fenced in the prompt, and what the model answers is validated against a
 fixed shape, scrubbed of markup and capped before it reaches a comment. Fail closed: no key, an API
 error or an answer that doesn't validate gives the status `failure` ("review missing"), never a default
@@ -337,6 +339,57 @@ class Config:
             raise Invalid("RUN_HEAD is not a commit")
 
 
+RUN_WORKFLOW_RE = re.compile(r"\.github/workflows/review-run\.yml(?:@\S+)?")
+
+
+def run_path_ok(path: Optional[str]) -> bool:
+    """The triggering run is `review-run.yml`'s: a run of any other file in a PR that merely reuses the
+    name "Review run" is not. (GitHub may append `@<ref>` to the path.) Which version of that file ran
+    can't be told, and doesn't matter: a pull_request run uses the file from the PR's own merge commit,
+    and nothing from the run is used but the fields GitHub sets, below."""
+    return isinstance(path, str) and RUN_WORKFLOW_RE.fullmatch(path) is not None
+
+
+def find_pull_request(prs: Any, head_repo: str, head_branch: str, head_sha: str) -> Optional[int]:
+    """The number of the one open pull request whose head is exactly this repository, branch and commit,
+    taken from the run's own head_repository, head_branch and head_sha (which GitHub sets, not the PR's
+    author). A commit can belong to several pull requests, e.g. a fork that pushed the App's commit and
+    opened its own; matching on the commit alone would let that fork start reviews of the App's. Anything
+    but exactly one match is None."""
+    if not head_repo or not head_branch or not re.fullmatch(r"[0-9a-f]{40}", head_sha or ""):
+        return None
+    hits = []
+    for pr in prs if isinstance(prs, list) else []:
+        if not isinstance(pr, dict) or pr.get("state") != "open" or type(pr.get("number")) is not int:
+            continue
+        head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+        repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+        name = repo.get("full_name")
+        if isinstance(name, str) and name.lower() == head_repo.lower() and head.get("ref") == head_branch and head.get("sha") == head_sha:
+            hits.append(pr["number"])
+    return hits[0] if len(hits) == 1 else None
+
+
+def find_pr_main(env: Mapping[str, str], listed: str) -> int:
+    """`review.py find-pr`: reads the JSON list `commits/<sha>/pulls` gave on stdin and prints the number
+    of the pull request this run is for, or nothing."""
+    if not run_path_ok((env.get("RUN_PATH") or "").strip()):
+        print("review: the run is not review-run.yml's: skipped", file=sys.stderr)
+        return 0
+    try:
+        prs = json.loads(listed)
+    except ValueError:
+        print("review: unreadable pull request list", file=sys.stderr)
+        return 1
+    n = find_pull_request(prs, (env.get("RUN_HEAD_REPO") or "").strip(), env.get("RUN_HEAD_BRANCH") or "",
+                          (env.get("RUN_HEAD") or "").strip())
+    if n is None:
+        print("review: no single open pull request has this run's repository, branch and commit: skipped", file=sys.stderr)
+    else:
+        print(n)
+    return 0
+
+
 class Outcome:
     def __init__(self, state: str, description: str, comment: Optional[str] = None, label: bool = False):
         self.state, self.description, self.comment, self.label = state, description[:140], comment, label
@@ -586,4 +639,6 @@ def main(env: Mapping[str, str], root: Path) -> int:
 
 if __name__ == "__main__":
     import os
+    if sys.argv[1:] == ["find-pr"]:
+        sys.exit(find_pr_main(os.environ, sys.stdin.read()))
     sys.exit(main(os.environ, Path(__file__).resolve().parents[2]))

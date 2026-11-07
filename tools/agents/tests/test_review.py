@@ -488,6 +488,58 @@ class VerdictFlowTests(ReviewTestCase):
         self.assertEqual(order, ["/repos/o/r/issues/7/comments", f"/repos/o/r/statuses/{SHA}"])
 
 
+class FindPullRequestTests(unittest.TestCase):
+    """Which pull request a "Review run" belongs to, from fields GitHub sets and the PR author can't."""
+
+    def pr(self, number, repo="o/r", ref="agent/1-x", sha=SHA, state="open"):
+        return {"number": number, "state": state, "head": {"repo": {"full_name": repo}, "ref": ref, "sha": sha}}
+
+    def find(self, prs, repo="o/r", branch="agent/1-x", sha=SHA):
+        return review.find_pull_request(prs, repo, branch, sha)
+
+    def test_the_one_pull_request_with_this_repository_branch_and_commit(self):
+        self.assertEqual(self.find([self.pr(12)]), 12)
+
+    def test_a_fork_pull_request_with_the_apps_head_commit_maps_to_itself(self):
+        """The attack: a fork pushes the App's commit and opens a PR; the commit then belongs to two PRs."""
+        prs = [self.pr(7), self.pr(12, repo="mallory/r")]  # the App's comes first, as the API lists it
+        self.assertEqual(self.find(prs, repo="mallory/r"), 12)
+        self.assertEqual(self.find(prs, repo="o/r"), 7)
+
+    def test_a_fork_cannot_pick_a_pull_request_it_is_not_the_head_of(self):
+        self.assertIsNone(self.find([self.pr(7)], repo="mallory/r"))
+
+    def test_anything_other_than_exactly_one_match_is_none(self):
+        self.assertIsNone(self.find([]))
+        self.assertIsNone(self.find([self.pr(7), self.pr(8)]))  # the same head to two bases
+        self.assertIsNone(self.find([self.pr(7, ref="other")]))
+        self.assertIsNone(self.find([self.pr(7, sha="f" * 40)]))
+        self.assertIsNone(self.find([self.pr(7, state="closed")]))
+
+    def test_names_compare_the_way_github_does(self):
+        self.assertEqual(self.find([self.pr(7, repo="O/R")], repo="o/r"), 7)  # repository names ignore case
+        self.assertIsNone(self.find([self.pr(7, ref="Agent/1-x")]))  # branch names don't
+
+    def test_missing_or_odd_data_is_none(self):
+        self.assertIsNone(self.find([self.pr(7)], repo=""))  # a deleted fork has no name
+        self.assertIsNone(self.find([self.pr(7)], branch=""))
+        self.assertIsNone(self.find([self.pr(7)], sha="nothex"))
+        self.assertIsNone(self.find(None))
+        self.assertIsNone(self.find({"number": 7}))
+        self.assertIsNone(self.find([{"number": 7, "state": "open", "head": {"repo": None, "ref": "agent/1-x", "sha": SHA}}]))
+        self.assertIsNone(self.find([{"number": "7", "state": "open", "head": {"repo": {"full_name": "o/r"}, "ref": "agent/1-x", "sha": SHA}}]))
+        self.assertIsNone(self.find(["x", None, 3]))
+
+    def test_the_run_must_be_review_runs_own_file(self):
+        for ok in (".github/workflows/review-run.yml", ".github/workflows/review-run.yml@refs/pull/12/merge",
+                   ".github/workflows/review-run.yml@main"):
+            self.assertTrue(review.run_path_ok(ok), ok)
+        for bad in ("", None, ".github/workflows/evil.yml", ".github/workflows/review-run.yml.evil",
+                    "x/.github/workflows/review-run.yml", ".github/workflows/review-run.yaml",
+                    ".github/workflows/review-post.yml", ".github/workflows/review-run.yml\n.github/x"):
+            self.assertFalse(review.run_path_ok(bad), bad)
+
+
 class OneReviewPerHeadTests(ReviewTestCase):
     """At most one model call per (pull request, head commit); a maintainer's newer label asks again."""
 

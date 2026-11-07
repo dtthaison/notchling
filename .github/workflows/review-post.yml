@@ -6,8 +6,16 @@ name: Review post
 # and tools/agents/review.py reads the diff and the check results through the API. Event fields reach
 # the shell only through `env:`.
 #
-# It reviews a PR only when it is the App's (login in the repository variable AGENT_APP_LOGIN) or a
-# maintainer labeled it `notchling:review`; review.py decides that, so stranger PRs cost nothing.
+# Which PR a run is for comes from the run's head repository, branch and commit (fields GitHub sets): the
+# one open PR that matches all three, else none. A commit alone is not enough, since a fork can push the
+# App's commit and open a PR of its own. The run must also be review-run.yml's own (`workflow_run.path`).
+# Which version of that file ran can't be checked and isn't needed: a pull_request run uses the file from
+# the PR's merge commit, and nothing but those GitHub-set fields is read from the run.
+#
+# It reviews a PR only when it is the App's (login in the repository variable AGENT_APP_LOGIN, which must
+# end in `[bot]`) or a maintainer labeled it `notchling:review`; review.py decides that. It asks the model
+# at most once for each head commit, at most 6 times for a PR and at most REVIEW_DAILY_CAP times a day for
+# the repository, so a stranger's PR can't make it spend more than a few reviews however it is poked.
 # It posts the `review-agent` commit status on the head and one comment. The status is `success` only
 # when the verdict is "merge", and that is a recommendation: nothing here approves, requests reviews on
 # or merges a PR. A missing key, a model error or an unreadable answer is a `failure` ("review missing").
@@ -42,7 +50,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
       RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       AGENT_APP_LOGIN: ${{ vars.AGENT_APP_LOGIN }}
@@ -54,15 +61,18 @@ jobs:
           persist-credentials: false
       - name: Find the pull request
         id: pr
+        env:
+          # What GitHub says about the run: the head repository, branch and commit it ran for. They pick
+          # the pull request; a commit alone could belong to a fork's pull request and the App's both.
+          RUN_PATH: ${{ github.event.workflow_run.path }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          n="$(printf '%s' "${RUN_PRS:-[]}" | python3 -c 'import json,sys; p=json.load(sys.stdin) or []; print(p[0]["number"] if p else "")')"
+          listed="$(gh api "repos/$GH_REPO/commits/$RUN_HEAD/pulls?per_page=100")"
+          n="$(printf '%s' "$listed" | python3 tools/agents/review.py find-pr)"
           if [ -z "$n" ]; then
-            # Fork PRs aren't listed on workflow_run; look the head commit up instead.
-            n="$(gh api "repos/$GH_REPO/commits/$RUN_HEAD/pulls" --jq '.[0].number // empty')"
-          fi
-          if [ -z "$n" ]; then
-            echo "no pull request for this event: nothing to review"
+            echo "no single pull request for this run: nothing to review"
             exit 0
           fi
           case "$n" in *[!0-9]*) echo "bad PR number"; exit 1;; esac

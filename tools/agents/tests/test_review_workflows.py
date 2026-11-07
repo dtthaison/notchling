@@ -113,7 +113,9 @@ class ReviewPostTests(unittest.TestCase):
         self.assertEqual(text.count("persist-credentials: false"), 1)
         self.assertEqual(re.findall(r"(?m)^\s*(?:-\s+)?uses: (\S+)", text), ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"])
         self.assertNotIn("github.event.pull_request.head", text)
-        self.assertNotIn("workflow_run.head_branch", text)
+        for line in text.splitlines():  # the run's head fields may only be copied into env: for the lookup step
+            if "workflow_run.head_branch" in line or "workflow_run.head_repository" in line:
+                self.assertRegex(line, r"^ {10}RUN_HEAD_(BRANCH|REPO): \$\{\{ github\.event\.workflow_run\.head_(branch|repository\.full_name) \}\}$")
         self.assertNotRegex(text, r"git (checkout|switch|worktree|fetch|clone|merge|cherry-pick)")
 
     def test_event_fields_reach_the_shell_only_through_env(self):
@@ -153,50 +155,79 @@ class ReviewPostTests(unittest.TestCase):
 
 
 class LookupTests(unittest.TestCase):
-    """Run the 'Find the pull request' step with a fake gh."""
+    """Run the 'Find the pull request' step for real (with review.py from this tree) and a fake gh."""
 
     SHA = "0123456789abcdef0123456789abcdef01234567"
+    APP_PR = {"number": 7, "state": "open", "head": {"repo": {"full_name": "o/r"}, "ref": "agent/1-x", "sha": SHA}}
+    FORK_PR = {"number": 12, "state": "open", "head": {"repo": {"full_name": "mallory/r"}, "ref": "agent/1-x", "sha": SHA}}
 
-    def lookup(self, run_prs, via_commit=None, fail_commit=False):
+    def lookup(self, listed, repo="o/r", branch="agent/1-x", path=".github/workflows/review-run.yml", gh_fails=False,
+               head=None):
         script = run_script(step_named(read(POST), "Find the pull request"))
         tmp = Path(tempfile.mkdtemp())
         gh = tmp / "bin" / "gh"
         gh.parent.mkdir()
         gh.write_text('#!/bin/sh\ncase "$*" in\n'
-                      '  *commits/*/pulls*) [ -n "$FAKE_COMMIT_PR" ] && echo "$FAKE_COMMIT_PR"; exit 0 ;;\n'
+                      '  *commits/*/pulls*) [ -n "$FAKE_FAIL" ] && { echo "HTTP 500" >&2; exit 1; }; printf %s "$FAKE_PRS"; exit 0 ;;\n'
                       '  *) echo "unexpected gh call: $*" >&2; exit 98 ;;\nesac\n')
         gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
         (tmp / "find.sh").write_text(script)
         out = tmp / "out"
         out.write_text("")
         env = dict(os.environ, PATH=str(gh.parent) + os.pathsep + os.environ["PATH"], GH_REPO="o/r",
-                   RUN_PRS=run_prs, RUN_HEAD=self.SHA, GITHUB_OUTPUT=str(out), FAKE_COMMIT_PR=via_commit or "")
+                   RUN_HEAD=head or self.SHA, RUN_HEAD_REPO=repo, RUN_HEAD_BRANCH=branch, RUN_PATH=path,
+                   GITHUB_OUTPUT=str(out), FAKE_PRS=json.dumps(listed), FAKE_FAIL="1" if gh_fails else "")
         r = subprocess.run(["bash", str(tmp / "find.sh")], env=env, capture_output=True, text=True, timeout=60,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL, cwd=str(ROOT))
         return r, out.read_text()
 
-    def test_number_from_the_run(self):
-        r, out = self.lookup(json.dumps([{"number": 7}]))
+    def test_the_number_of_the_one_matching_pull_request(self):
+        r, out = self.lookup([self.APP_PR])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("number=7", out.splitlines())
         self.assertIn("post=true", out.splitlines())
 
-    def test_fork_prs_are_found_through_the_head_commit(self):
-        r, out = self.lookup("[]", via_commit="12")
+    def test_a_fork_with_the_apps_head_commit_reviews_its_own_pull_request_not_the_apps(self):
+        both = [self.APP_PR, self.FORK_PR]
+        r, out = self.lookup(both, repo="mallory/r")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("number=12", out.splitlines())
-        r, out = self.lookup("null", via_commit="12")
-        self.assertIn("number=12", out.splitlines())
+        self.assertNotIn("number=7", out.splitlines())
+        r, out = self.lookup(both, repo="o/r")
+        self.assertIn("number=7", out.splitlines())
 
-    def test_no_pr_posts_nothing_and_does_not_fail_the_run(self):
-        r, out = self.lookup("[]")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("number=", out)
+    def test_no_match_posts_nothing_and_does_not_fail_the_run(self):
+        for name, kw in {"no pull request": dict(listed=[]), "a repository that is not its head": dict(listed=[self.APP_PR], repo="mallory/r"),
+                         "another branch": dict(listed=[self.APP_PR], branch="agent/2-y"),
+                         "another commit": dict(listed=[self.APP_PR], head="f" * 40),
+                         "two matches": dict(listed=[self.APP_PR, dict(self.APP_PR, number=8)])}.items():
+            with self.subTest(name):
+                r, out = self.lookup(**kw)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotIn("number=", out)
+                self.assertNotIn("post=true", out)
 
-    def test_a_bad_number_is_refused(self):
-        r, out = self.lookup("[]", via_commit="1; echo hi")
+    def test_a_run_of_any_other_workflow_file_is_not_reviewed(self):
+        for path in (".github/workflows/evil.yml", "", ".github/workflows/review-run.yml.bak"):
+            with self.subTest(path=path):
+                r, out = self.lookup([self.APP_PR], path=path)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotIn("number=", out)
+
+    def test_the_workflow_path_may_carry_a_ref(self):
+        r, out = self.lookup([self.APP_PR], path=".github/workflows/review-run.yml@refs/pull/7/merge")
+        self.assertIn("number=7", out.splitlines())
+
+    def test_a_github_error_fails_the_step_and_posts_nothing(self):
+        r, out = self.lookup([self.APP_PR], gh_fails=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn("number=", out)
+
+    def test_a_bad_branch_name_is_data_not_shell(self):
+        r, out = self.lookup([self.APP_PR], branch="x; echo pwned > /tmp/rv-pwned; $(id)")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("number=", out)
+        self.assertFalse(Path("/tmp/rv-pwned").exists())
 
 
 if __name__ == "__main__":
