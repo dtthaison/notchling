@@ -59,10 +59,14 @@ ConsoleCore, docs, tests, fixtures) is the auto-merge zone.
 1. **Intake.** A stranger files an issue through the existing templates. A triage agent (GitHub Action,
    read-only token) labels it `bug`/`enhancement`, asks for missing repro info, closes duplicates, and
    marks it `needs-triage`. It never starts work.
-2. **Approval to work.** Only the maintainer adds `sd:queued`, the label the sd worker already takes
-   (its other labels: `sd:ready`, `sd:needs-you`, `sd:stuck`; this design adds no new work labels). Issue text from
+2. **Approval to work.** Only the maintainer adds `notchling:queued`. *(Maintainer's decision: the
+   work labels carry the project's name, not sd's: `notchling:queued`, `notchling:ready`,
+   `notchling:needs-you`, `notchling:stuck`, replacing sd's `sd:*`.)* The sd worker keeps doing the work;
+   sd gains a label prefix setting (for example `labels.prefix` in the repo's sd config, defaulting to
+   `sd`), a change in sd's own repo, and Notchling's Morning Actions reads the prefix instead of the
+   hard-coded `sd:` labels (`MorningItems.labels`, `MergePlan`). Issue text from
    anyone else is treated as data, not instructions: the worker's prompt quotes it and says so.
-3. **Work.** The sd worker takes `sd:queued` issues, branches `agent/<issue>-<slug>`, implements with
+3. **Work.** The sd worker takes `notchling:queued` issues, branches `agent/<issue>-<slug>`, implements with
    tests, runs the checks and renders locally, pushes the branch and opens a GitHub pull request that
    links the issue and lists what it verified. *(Maintainer's decision: work lands through GitHub pull
    requests.)* This replaces the worker's read-only key and the MacBook merge: the worker may push
@@ -335,14 +339,14 @@ Linux and Windows apps can show sessions but not drive them.
 ## Phases
 
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
-   `sd:queued`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
+   `notchling:queued`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
 2. Quality checks: build job, architecture lint with its fixtures, cross-model review job, and the
    phone's guard rails (P0).
 3. Repo layout and protocol: move into the layout above (Swift to `legacy/macos/`, Flutter to
    `apps/flutter/`), write the protocol spec and its conformance fixtures, and generate the Dart types
    from it (P1).
 4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per folder; feature map.
-5. Turn on the worker for `sd:queued` issues in the auto-merge zone only; watch a week of sampling.
+5. Turn on the worker for `notchling:queued` issues in the auto-merge zone only; watch a week of sampling.
 6. GPUI spike (throwaway): the notch overlay, a web view in a GPUI window, Vietnamese input in a text
    field, offscreen render to PNG, and Claude Code background sessions on Linux and Windows. If any
    fails, the maintainer decides again before phase 7.
