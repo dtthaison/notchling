@@ -63,6 +63,14 @@ _FM_CALLS = r"createFile|createDirectory|createSymbolicLink|copyItem|moveItem|re
 # Data(contentsOf: url) fetches a URL; append(contentsOf:) doesn't, so only the initialisers count.
 _FETCHERS = r"Data|NSData|String|NSString|NSArray|NSMutableArray|NSDictionary|NSMutableDictionary|NSImage|NSAttributedString"
 
+# Rust's file-writing functions in `std::fs` (or `tokio::fs`). Matched as `fs::write(..)` too, since
+# `use std::fs;` is how they are usually called, and in an import (`use std::fs::{self, remove_file}`,
+# or one that goes on over several lines), where the bare name is then called with no `fs::` before it.
+_RS_FS_WRITES = r"write|remove_\w+|rename|create_dir\w*|copy|hard_link|symlink\w*|set_permissions"
+# `Command` imported from a std or tokio `process` module, singly or in a group (an unclosed group can
+# hold it on a later line, `Command as C` included).
+_RS_COMMAND_IMPORT = r"\bprocess::(?:Command\b|\{(?:[^}]*\bCommand\b|[^}]*$))"
+
 # NSWorkspace opens files and starts apps, but most of it is harmless (the frontmost app, Reveal in
 # Finder, accessibility flags). So: its open and launch calls, and `NSWorkspace.shared` kept in a
 # variable, whose calls the pattern can't see.
@@ -71,19 +79,22 @@ _WORKSPACE_OPEN = r"\bNSWorkspace\b[^;]*\.(open|openApplication|openURLs?|launch
 # Matched against the line with comments and string contents blanked.
 RULES: Dict[str, List[Pattern[str]]] = {
     "CAP-PROCESS": _c(r"\bProcess\b", r"\blaunchPath\b", r"\.launch\s*\(\s*\)", r"\.executableURL\b",
-                      r"std::process::Command", r"\bprocess::Command\b", r"\bsubprocess\.", r"\bos\.system\(",
+                      r"std::process::Command", _RS_COMMAND_IMPORT, r"\bCommand::new\b", r"\bCommandExt\b",
+                      r"\bsubprocess\.", r"\bos\.system\(",
                       r"\bpopen\b", _WORKSPACE_OPEN, r"\bNSWorkspace\.shared\b(?!\s*\.)"),
     "CAP-PTY": _c(r"\bforkpty\b", r"\bposix_spawn\w*\b", r"\bportable_pty\b", r"\bopenpty\b"),
     "CAP-APPLESCRIPT": _c(r"\bNSAppleScript\b", r"\bosascript\b"),
     "CAP-DYNAMIC": _c(r"\bdlsym\b", r"\bdlopen\b", r"@_silgen_name\b", r"@_cdecl\b"),
     "CAP-NETWORK": _c(r"\bURLSession\b", r"\bNWConnection\b", r"\breqwest\b", r"\bHttpClient\b", r"\bWebSocket\b",
                       r"\b(%s)\s*\(\s*contentsOf\s*:" % _FETCHERS, r"\.init\s*\(\s*contentsOf\s*:",
-                      r"\bSocket\.(connect|startConnect)\b", r"\b(RawSocket|ServerSocket|HttpServer)\b"),
+                      r"\bSocket\.(connect|startConnect)\b", r"\b(RawSocket|ServerSocket|HttpServer)\b",
+                      r"\b(TcpStream|TcpListener|UdpSocket)\b"),
     "CAP-KEYCHAIN": _c(r"\bSecItem\w+", r"\bkeyring\b", r"\bSecKeychain\w*"),
     "CAP-FILEWRITE": _c(r"FileManager.*\.(createFile|createDirectory|moveItem|copyItem|removeItem|replaceItem|setAttributes)\b",
                         r"\.(%s)\s*\(" % _FM_CALLS, r"\.removeItem\s*\(\s*at(Path)?\s*:",
                         r"\.write\(to:", r"\btoFile\s*:", r"\bFileHandle\s*\(\s*for(Writing|Updating)",
-                        r"\bstd::fs::(write|remove_\w+|rename|create_dir\w*|copy)\b",
+                        r"\bfs::(%s)\b" % _RS_FS_WRITES, r"\bfs::\*", r"\bfs::\{(?:[^}]*\b(?:%s)\b|[^}]*$)" % _RS_FS_WRITES,
+                        r"\bFile::(create|create_new|options)\b", r"\bOpenOptions\b",
                         r"\bFile\([^)]*\)\.(writeAs\w+|delete|rename)\b"),
     "CAP-PROTECTED-TYPE": [],  # by file name, below
 }

@@ -290,6 +290,108 @@ class BlockCommentStateTests(unittest.TestCase):
         self.assertEqual(rules_of("tools/x.sh", "ls */ # Process"), set())
 
 
+RS = "crates/app/src/a.rs"
+
+RUST_PROCESS = [
+    "use std::process::{Command, Stdio};",
+    "use std::process::Command;",
+    "use std::process::{self, Command};",
+    "use std::process::{",  # a grouped import that goes on over several lines
+    "use tokio::process::Command;",
+    'let out = Command::new("sh").arg("-c").output()?;',
+    "let c = Command::new(program);",
+    "use std::os::unix::process::CommandExt;",
+]
+RUST_PROCESS_OK = [
+    "std::process::exit(1);",
+    "use std::process::ExitCode;",
+    "use std::process::{self, ExitCode};",
+    "let id = std::process::id();",
+    '// Command::new("sh")',
+    'let s = "Command::new";',
+]
+RUST_NETWORK = [
+    'let s = std::net::TcpStream::connect("1.2.3.4:80")?;',
+    "use std::net::TcpStream;",
+    "use std::net::{SocketAddr, TcpStream};",
+    "use tokio::net::TcpStream;",
+    "let s = TcpStream::connect(addr)?;",
+    "let l = TcpListener::bind(addr)?;",
+    'let u = UdpSocket::bind("0.0.0.0:0")?;',
+    "use std::net::UdpSocket;",
+]
+RUST_NETWORK_OK = [
+    "use std::net::SocketAddr;",
+    "use std::net::{IpAddr, Ipv4Addr};",
+    "let a: SocketAddr = s.parse()?;",
+    "// TcpStream::connect(addr)",
+]
+RUST_FILEWRITE = [
+    "std::fs::write(path, data)?;",
+    "fs::write(&path, b\"x\")?;",
+    "fs::remove_file(path)?;",
+    "fs::remove_dir_all(dir)?;",
+    "fs::remove_dir(dir)?;",
+    "fs::rename(a, b)?;",
+    "fs::create_dir(dir)?;",
+    "fs::create_dir_all(dir)?;",
+    "fs::copy(a, b)?;",
+    "fs::hard_link(a, b)?;",
+    "std::os::unix::fs::symlink(a, b)?;",
+    "fs::set_permissions(path, perms)?;",
+    "tokio::fs::write(path, data).await?;",
+    "use std::fs::write;",
+    "use std::fs::{self, remove_file};",
+    "use std::fs::{",  # a grouped import that goes on over several lines
+    "use std::fs::*;",
+    "let f = File::create(path)?;",
+    "let f = File::create_new(path)?;",
+    "let f = std::fs::File::create(path)?;",
+    "let f = OpenOptions::new().append(true).open(path)?;",
+    "use std::fs::OpenOptions;",
+    "let f = File::options().write(true).open(path)?;",
+]
+RUST_FILEWRITE_OK = [
+    "let s = fs::read_to_string(path)?;",
+    "let b = std::fs::read(path)?;",
+    "let f = File::open(path)?;",
+    "let m = fs::metadata(path)?;",
+    "for e in fs::read_dir(dir)? {}",
+    "use std::fs;",
+    "use std::fs::File;",
+    "use std::fs::{self, File};",
+    "use std::fs::{read, metadata};",
+    "std::io::copy(&mut r, &mut w)?;",
+    "// fs::write(path, data)",
+]
+
+
+class RustCapabilityTests(unittest.TestCase):
+    """The Rust spellings of the process, network and file-write APIs, imported or called by short name."""
+
+    def check(self, rule, bad, good):
+        for line in bad:
+            with self.subTest(bad=line):
+                self.assertIn(rule, {t.rule for t in scan([added(RS, line)])})
+        for line in good:
+            with self.subTest(good=line):
+                self.assertNotIn(rule, {t.rule for t in scan([added(RS, line)])})
+
+    def test_process(self):
+        self.check("CAP-PROCESS", RUST_PROCESS, RUST_PROCESS_OK)
+
+    def test_network(self):
+        self.check("CAP-NETWORK", RUST_NETWORK, RUST_NETWORK_OK)
+
+    def test_file_write(self):
+        self.check("CAP-FILEWRITE", RUST_FILEWRITE, RUST_FILEWRITE_OK)
+
+    def test_a_new_rust_file_with_these_goes_to_the_maintainer(self):
+        for rule, lines in (("CAP-PROCESS", RUST_PROCESS[:1]), ("CAP-NETWORK", RUST_NETWORK[:1]), ("CAP-FILEWRITE", RUST_FILEWRITE[:1])):
+            trips = scan([Change("crates/kit/src/new.rs", "A", None, tuple((i + 1, l) for i, l in enumerate(lines)))])
+            self.assertIn(rule, {t.rule for t in trips})
+
+
 class OwnFileTests(unittest.TestCase):
     """C3(d): a protected type's own files are a fixed list of exact paths."""
 
