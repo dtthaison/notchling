@@ -24,7 +24,7 @@ struct TabBar: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(AgentGroup.allCases, id: \.self) { group in
-                let count = model.listed.filter { $0.group == group }.count
+                let count = model.listed.filter { $0.group == group }.count + model.runs(in: group).count
                 let selected = model.tab == group
                 Button { model.tab = group } label: {
                     HStack(spacing: 4) {
@@ -124,9 +124,10 @@ struct AgentListView: View {
 
     var body: some View {
         let members = model.listed.filter { $0.group == model.tab }
+        let runs = model.runs(in: model.tab)
         VStack(spacing: 0) {
             TabBar(model: model).part("Notch Tabs", .trailing)
-            if members.isEmpty {
+            if members.isEmpty && runs.isEmpty {
                 Text(model.listed.isEmpty ? (model.foreignAgents.isEmpty ? "No Claude agents running" : "No agents running") : "Nothing \(model.tab.title.lowercased())")
                     .font(.system(size: 12)).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40)
@@ -146,6 +147,12 @@ struct AgentListView: View {
                                     }
                                 }
                         }
+                        if !runs.isEmpty {
+                            Text("Runs").font(.system(size: 10.5, weight: .semibold)).foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .frame(height: NotchModel.runsHeaderHeight, alignment: .bottom)
+                            ForEach(runs) { RunRow(item: $0) }
+                        }
                         if model.tab == .completed {
                             Button("Clear all") { model.onClearCompleted?() }
                                 .buttonStyle(.kitPlain)
@@ -162,4 +169,46 @@ struct AgentListView: View {
             }
         }
     }
+}
+
+/// A long run sd started: its name, how long it has gone (of its limit), the Mac's load and the last line of its log.
+struct RunRow: View {
+    let item: RunItem
+    @State private var hovered = false
+
+    private var color: Color {
+        switch (item.kind, item.rc) {
+        case (.active, _): return AgentGroup.working.color
+        case (_, 0?): return AgentGroup.completed.color
+        case (_, 124?): return .orange
+        default: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle().fill(color).frame(width: 8, height: 8)
+                .frame(width: 10, height: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(item.name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(item.trailing).font(.system(size: 10.5)).foregroundColor(.secondary).lineLimit(1).fixedSize()
+                }
+                Text(oneLine(item.detail)).font(.system(size: 12)).foregroundColor(item.kind == .active ? color : .secondary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(height: NotchModel.runRowHeight, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(hovered ? 0.08 : 0)))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture { open() }
+        .pointerCursor()
+        .contextMenu { Button("Open Log") { open() } }
+        .help(item.log)
+    }
+
+    private func open() { NSWorkspace.shared.open(URL(fileURLWithPath: item.log)) }
 }

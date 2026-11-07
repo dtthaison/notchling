@@ -56,7 +56,7 @@ enum AccountsTab: String, CaseIterable {
 /// through `reload` and carries out each change through `apply`.
 final class SettingsModel: ObservableObject {
     enum Change {
-        case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), showNotch(Bool), notchWidth(NotchWidth)
+        case awakeMode(AwakeMode), keepDisplayOn(Bool), continueAfterSleep(Bool), wakeOnRunFinish(Bool), showNotch(Bool), notchWidth(NotchWidth)
         case animatePet(Bool), showLastReply(Bool), replyFromNotch(Bool), answerFromNotch(Bool), keepPages(Bool), launchAtLogin(Bool)
         case limitMode(LimitMode), limitSwitchAt(Int), codexLimitMode(LimitMode), antigravityLimitMode(LimitMode), codexNetwork(Bool)
     }
@@ -64,6 +64,7 @@ final class SettingsModel: ObservableObject {
     @Published var awakeMode = AwakeMode.off { didSet { push(.awakeMode(awakeMode)) } }
     @Published var keepDisplayOn = false { didSet { push(.keepDisplayOn(keepDisplayOn)) } }
     @Published var continueAfterSleep = true { didSet { push(.continueAfterSleep(continueAfterSleep)) } }
+    @Published var wakeOnRunFinish = true { didSet { push(.wakeOnRunFinish(wakeOnRunFinish)) } }
     @Published var showNotch = true { didSet { push(.showNotch(showNotch)) } }
     @Published var notchWidth = NotchWidth.medium { didSet { push(.notchWidth(notchWidth)) } }
     @Published var animatePet = true { didSet { push(.animatePet(animatePet)) } }
@@ -765,12 +766,15 @@ private struct SettingsPage: View {
                     ForEach(AwakeMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 Toggle("Keep display on", isOn: $settings.keepDisplayOn)
-                Toggle("Continue agents after sleep", isOn: $settings.continueAfterSleep)
+                Toggle("Continue after the Mac wakes", isOn: $settings.continueAfterSleep)
+                Toggle("Wake agents when runs finish", isOn: $settings.wakeOnRunFinish)
             } header: {
                 Text("Keep Mac Awake")
             } footer: {
                 Text("Closing the lid still puts the Mac to sleep. When it wakes, background agents whose reply "
-                     + "was cut off by sleep are told to continue.")
+                     + "was cut off by sleep are told to continue. A long run started with sd keeps the Mac awake "
+                     + "(in While Agents Are Working mode) and, when it ends, tells the background agent that "
+                     + "started it; other sessions get a notification.")
             }
             Section("Notch") {
                 Toggle("Show agents in the notch", isOn: $settings.showNotch)

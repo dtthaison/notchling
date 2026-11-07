@@ -253,6 +253,12 @@ final class RunWatcher {
 
     // MARK: System
 
+    /// "Wake agents when runs finish" (default on).
+    static var wakeOnFinish: Bool {
+        get { UserDefaults.standard.object(forKey: "wakeOnRunFinish") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "wakeOnRunFinish") }
+    }
+
     static func processExists(_ pid: Int32) -> Bool {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0 || errno == EPERM
