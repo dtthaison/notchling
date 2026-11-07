@@ -30,8 +30,17 @@ Replies containing an end-of-paste escape sequence are no longer typed into the 
 ## Which pull requests need one
 
 A pull request that changes `legacy/macos/Sources/**`, `apps/flutter/lib/**` or `crates/**/src/**` must add
-a fragment, or the `fragments` check fails. Docs, tests, workflows and tools need none. When a change to
-app code really needs no entry, the maintainer puts the label `no-changelog` on the pull request.
+a fragment. Docs, tests, workflows and tools need none. When a change to app code really needs no entry,
+the maintainer puts the label `no-changelog` on the pull request.
+`python3 tools/release/fragments.py check --base main --head HEAD` fails when yours is missing one.
+
+Not in force yet:
+
+- CI doesn't run that check, and fragments replace the `[Unreleased]` lines in `CHANGELOG.md` only once the
+  Beta flow is on ([CONTRIBUTING.md](../CONTRIBUTING.md#releasing)).
+- `changes/` is outside the auto-merge zone, so an agent's pull request that adds a fragment waits for the
+  maintainer. Whether to open it to new fragments is his decision
+  ([docs/policies/automation.md](../docs/policies/automation.md#fragments-on-pull-requests)).
 
 ## What happens to them
 

@@ -90,7 +90,26 @@ Built in Phase 2; they exist today.
 - CI also runs `swift test`, `./build.sh`, and the phone's `flutter analyze` and `flutter test` (goldens included).
 - `.github/workflows/rust.yml` checks the Cargo workspace (since Phase 4): `rust-test` (`cargo test` on macOS, Linux and Windows), `rust-clippy` (`cargo fmt --all --check`, then clippy with warnings as errors) and `rust-deny` (`cargo deny check`: licenses, advisories, sources).
 
-Releases today: `legacy/macos/release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes. Builds are signed ad hoc. Phase 6 replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)).
+### Releases
+
+Releases today: `legacy/macos/release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes (`.github/workflows/release.yml`). Builds are signed ad hoc.
+
+Phase 6's pipeline replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)). It is built and **off**: every job stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`, and the signing secrets and the update key don't exist yet.
+
+| Workflow | Job | What it does | Code it runs | What it holds |
+| --- | --- | --- | --- | --- |
+| `beta.yml` (daily, or a click) | `gate` | Kill switch, the next tag | The default branch's | A read-only token |
+| | `build` | `./build.sh`, the version into the built copy, the unsigned zip and its SHA-256 | The gated commit's | A read-only token, no secrets |
+| | `sign` | Checks the hash; Developer ID, notarize, staple; `sign_update`; attests | None: no checkout | The signing secrets (`release` environment), no repository write |
+| | `publish` | The prerelease `vX.Y.Z-beta.N`, the feed item | The default branch's `appcast.py` | A write token, no secrets |
+| `promote.yml` (a maintainer's click) | `authorize` | Kill switch, `MAINTAINERS`, the Stable tag, the notes | The default branch's | A read-only token |
+| | `release` | The Beta's files, same SHA-256 and attestations, published as `vX.Y.Z` | None: no checkout | A write token |
+| | `appcast` | The feed item loses its `beta` channel | The default branch's `appcast.py` | A write token |
+| | `fold` | A pull request folding `changes/` into `CHANGELOG.md` | The default branch's `fragments.py` | Contents and pull requests write |
+
+- `tools/release/` (Python standard library, tested in `tools/release/tests/`, which the `guard` job runs): `version.py` picks the next tag from the `v*` tags and the fragments' kinds and writes it into the built app's `Info.plist` copy, never the source; `fragments.py` reads `changes/` (one fragment per pull request that changes app code; [changes/README.md](changes/README.md)) for the notes and folds them into `CHANGELOG.md`; `appcast.py` writes and checks the Sparkle 2 feed. It signs nothing: Sparkle's `sign_update`, fetched by a pinned URL and SHA-256, signs in the sign job.
+- The feed is `appcast.xml` on the prerelease tagged `appcast`. A Beta item has the `beta` channel; promotion only drops it, so a Stable item keeps the Beta's download and signature.
+- The app doesn't read the feed yet: Sparkle 2.6.4 or later comes in its own protected pull request, after the Developer ID. [docs/policies/automation.md](docs/policies/automation.md#releases-so-far) has the turn-on steps and what isn't built.
 
 ### Agents
 
@@ -138,7 +157,7 @@ Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), 
 | Web content | Pages, artifacts and HTML files open in their own `wry` window, not inside a GPUI view, because GPUI has no web view. | Planned: part U4, Milestone 5. | [0005](docs/decisions/0005-gpui-desktop-app.md) |
 | Protocol | `protocol/`: a written spec in JSON Schema, conformance and behavior fixtures, version negotiation, additive only. Dart and Rust types are generated from it. | Exists since Phase 4, without version negotiation or behavior fixtures yet. `protocol/agentconsole.v1.schema.json` describes today's wire, and 74 fixtures hold it there: what the Mac sends is captured from the real Swift bridge (`ProtocolFixturesTests`), and what the phone sends is written from its client and fed to the bridge's router. `tools/protocol/gen.py` generates `crates/protocol/src/generated.rs` and `apps/flutter/lib/core/protocol/generated.dart` (never edited by hand; `GUARD-PROTOCOL-GEN`), and a Rust and a Dart test parse every fixture. The Mac still encodes with `BridgeProtocol.swift` and the phone still reads with its hand-written `models.dart`, pinned to the generated types by that Dart test. See [protocol/README.md](protocol/README.md). | [0006](docs/decisions/0006-flutter-phone-generated-types.md) (Proposed) |
 | Licenses | Only permissive crates, enforced by `cargo-deny`. Our own terminal and markdown views on permissive crates. | Exists since Phase 4: `deny.toml` allows only `MIT`, `Apache-2.0`, `Apache-2.0 WITH LLVM-exception`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Unicode-3.0` and `Zlib`, and only crates.io as a source; `rust-deny` runs it on every pull request. | [0008](docs/decisions/0008-mit-permissive-crates.md) |
-| Releases | Beta daily, build then sign apart, Stable by one click, one signed update feed. | Planned: Phase 6. | [0010](docs/decisions/0010-build-then-sign-beta-then-stable.md) |
+| Releases | Beta daily, build then sign apart, Stable by one click, one signed update feed. | Built in Phase 6 for the Swift app and off until the maintainer turns it on (see [Releases](#releases)); the app has no updater yet. The Rust app's signed manifest is planned. | [0010](docs/decisions/0010-build-then-sign-beta-then-stable.md) |
 
 Machines stays a separate tool, not inside the daemon, and is ported last (part E10). That is a designer's call, not settled.
 
@@ -158,7 +177,8 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 | `apps/flutter/` | The phone app | Exists (moved here from the old top-level phone folder in Phase 4) |
 | `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Exists (moved from the repo root in Phase 4): `legacy/macos/Sources/`, `Tests/`, `Demo/`, `Icon/`, `Pet/`, `build.sh`, `release.sh`. `Package.swift` and a one-line `build.sh` wrapper stay at the root |
 | `protocol/` | Spec (`README.md`), JSON Schema, fixtures | Exists |
-| `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator) and the agents' scripts (`tools/agents/`: triage, preflight, push wrapper, review); the web page behind the phone's Visualize tab | Exist |
+| `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator), the agents' scripts (`tools/agents/`: triage, preflight, push wrapper, review) and the release tools (`tools/release/`: version, fragments, appcast); the web page behind the phone's Visualize tab | Exist |
+| `changes/` | Changelog fragments, one per pull request that changes app code, folded into `CHANGELOG.md` at each Stable; `README.md` is the guide | Exists (Phase 6) |
 | `spike/` | The GPUI spike's results (`RESULTS.md`); its code stays on branch `spike/gpui-phase1` | Exists |
 
 ### Swift and Rust side by side
@@ -174,7 +194,7 @@ Today the Swift app owns all of them.
 3. Phase 3, the operating manual: this document, the decision records, goals, rules, governance and policies.
 4. Phase 4: the repo layout above, the Cargo workspace, the protocol spec and generated types: done. Switching the phone to the generated types is a later change (part P1).
 5. Phase 5: agents on (the GitHub App, a separate agent user and push wrapper on workers, triage, the worker, the review agent). The parts that need no credential are built and off (see [Agents](#agents)); the rest waits for the maintainer.
-6. Phase 6: releases (notarization, build and sign apart, the Beta feed, Stable by one click).
+6. Phase 6: releases (notarization, build and sign apart, the Beta feed, Stable by one click). The parts that need no signing identity are built and off (see [Releases](#releases)); the rest waits for the maintainer.
 7. Phase 7: a recording phase that captures terminal byte fixtures for every reply behavior while the Swift app can still produce them, then Milestones 1 to 6:
    1. read-only viewer;
    2. the daemon reads, the app shows;

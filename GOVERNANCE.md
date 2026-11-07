@@ -9,14 +9,14 @@ is a protected change: it waits for the maintainer.
 
 | Who | Role | What they can do |
 | --- | --- | --- |
-| `@dtthaison` | Maintainer | Owns every file except the auto-merge zone and the test folders (`.github/CODEOWNERS` starts with `* @dtthaison`). The only account whose approval satisfies `maintainer-gate`. Queues work, approves protected changes, applies the repository settings, and makes and changes decisions. |
+| `@dtthaison` | Maintainer | Owns every file except the auto-merge zone and the test folders (`.github/CODEOWNERS` starts with `* @dtthaison`). The only account whose approval satisfies `maintainer-gate`. Queues work, approves protected changes, applies the repository settings, promotes Betas to Stable, holds the release keys, and makes and changes decisions. |
 | TrietKun | Write access | Works under the same rules as everyone else. The rulesets and `maintainer-gate` apply to this account. Its approval does not satisfy `maintainer-gate`. |
 | Contributors | Anyone, and the agents they run | Open issues and pull requests. Sign off every commit. |
 | The agent App | A GitHub App, from Phase 5. Not created yet. | Pushes `agent/**` branches and opens pull requests for queued issues, through the push wrapper on the workers. It has no say in any decision. |
 
 The list of maintainers is in code: `MAINTAINERS` in `tools/guard/guard/gate.py`. A test checks that
-another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). Both files are
-protected.
+another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). The Promote
+workflow reads the same list. Both files are protected.
 
 Write access is given sparingly. Someone who can push a branch to this repository could add a workflow
 on it that posts a false `maintainer-gate` status. Today only `@dtthaison` and TrietKun can. Adding a
@@ -54,6 +54,28 @@ needs exists:
 Then a week of sampling comes before anything widens.
 [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each part
 on, in order; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on each worker.
+
+## Releases in Phase 6
+
+The Beta and Promote workflows are built and off. Every job stops at its first step until the
+repository variable `NOTCHLING_RELEASES` is `on`. Until then releases are cut by hand with
+`legacy/macos/release.sh` ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)).
+
+- **A Beta** is cut by the daily schedule, or by a click from anyone with write access. Only a
+  maintainer may allow a breaking change in one: the workflow checks the account against `MAINTAINERS`.
+- **Promoting a Beta to Stable** is for a maintainer only. `promote.yml` refuses any account not in
+  `MAINTAINERS`, and any run not started from `main`.
+- **The keys and the switch are the maintainer's:** the kill switch, the `release` environment, its
+  signing secrets and the offline backup of the update signing key. In a personal account's
+  repository only the owner can set Actions variables, secrets and environments.
+- **Agents never touch the release path.** The build job runs repository code with no secrets, and
+  the signing job runs none.
+- Anyone with write access can delete a release; the `release-tags` ruleset, once applied, protects
+  only the `v*` tags. Never delete the `appcast` release or a promoted Beta's release: installed copies would lose
+  the feed or the download.
+
+[docs/policies/automation.md](docs/policies/automation.md#releases-so-far) says what turns each part
+on, in order, and what isn't built yet.
 
 ## Who approves protected changes
 
