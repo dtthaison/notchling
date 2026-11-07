@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,7 +27,7 @@ GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.
 
 def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-                          env=GIT_ENV).stdout.strip()
+                          env=GIT_ENV, stdin=subprocess.DEVNULL).stdout.strip()
 
 
 def b64url_decode(s):
@@ -39,7 +40,8 @@ _KEY = []
 def throwaway_key():
     """A throwaway RSA key from `openssl genrsa`, made once per run (it takes a second)."""
     if not _KEY:
-        _KEY.append(subprocess.run(["openssl", "genrsa", "2048"], check=True, capture_output=True).stdout)
+        _KEY.append(subprocess.run(["openssl", "genrsa", "2048"], check=True, capture_output=True,
+                                   stdin=subprocess.DEVNULL).stdout)
     return _KEY[0]
 
 
@@ -66,9 +68,11 @@ class Base(unittest.TestCase):
         self.key.write_bytes(throwaway_key())
         self.key.chmod(0o600)
         self.bare = self.root / "remote.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(self.bare)], check=True, env=GIT_ENV)
+        subprocess.run(["git", "init", "-q", "--bare", str(self.bare)], check=True, env=GIT_ENV,
+                       stdin=subprocess.DEVNULL)
         self.wt = self.root / "wt"
-        subprocess.run(["git", "init", "-q", "-b", "main", str(self.wt)], check=True, env=GIT_ENV)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.wt)], check=True, env=GIT_ENV,
+                       stdin=subprocess.DEVNULL)
         (self.wt / "a.txt").write_text("one\n")
         git(self.wt, "add", "a.txt")
         git(self.wt, "commit", "-q", "-m", "base")
@@ -109,6 +113,29 @@ class Base(unittest.TestCase):
         out = subprocess.run(["git", "-C", str(self.bare), "for-each-ref", "--format=%(refname) %(objectname)"],
                              capture_output=True, text=True, env=GIT_ENV).stdout
         return dict(line.split() for line in out.splitlines())
+
+
+AGENTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class RunnerHygiene(unittest.TestCase):
+    def test_children_never_inherit_stdin(self):
+        """A child that reads stdin (`cat`, a git filter or fsmonitor) must see end-of-file at once, even
+        when the wrapper's own stdin is a pipe that stays open."""
+        code = ("import push_wrapper, sys\n"
+                "r = push_wrapper.Runner()(['/bin/cat'])\n"
+                "sys.exit(0 if r.returncode == 0 and r.stdout == b'' else 3)\n")
+        proc = subprocess.Popen([sys.executable, "-c", code], cwd=AGENTS_DIR, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.addCleanup(proc.stdin.close)
+        try:
+            self.assertEqual(proc.wait(timeout=10), 0, proc.stdout.read())
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            self.fail("a child of Runner blocked reading the wrapper's stdin")
+        finally:
+            proc.stdout.close()
 
 
 class BranchRules(unittest.TestCase):
@@ -163,7 +190,7 @@ class JwtTests(Base):
                          {"iat": 1_000_000 - 60, "exp": 1_000_000 + 540, "iss": 12345})
         pub = self.root / "pub.pem"
         subprocess.run(["openssl", "rsa", "-in", str(self.key), "-pubout", "-out", str(pub)], check=True,
-                       capture_output=True)
+                       capture_output=True, stdin=subprocess.DEVNULL)
         sigfile = self.root / "sig.bin"
         sigfile.write_bytes(b64url_decode(sig))
         res = subprocess.run(["openssl", "dgst", "-sha256", "-verify", str(pub), "-signature", str(sigfile)],
@@ -275,7 +302,7 @@ class SuccessPath(Base):
         # Make the remote refuse by pre-creating a diverged branch of the same name.
         other = self.root / "other"
         subprocess.run(["git", "clone", "-q", str(self.bare), str(other)], check=True, env=GIT_ENV,
-                       capture_output=True)
+                       capture_output=True, stdin=subprocess.DEVNULL)
         git(other, "checkout", "-q", "-b", "agent/5-fix-thing")
         (other / "z.txt").write_text("z\n")
         git(other, "add", "z.txt")
@@ -413,7 +440,7 @@ class HostileWorktree(Base):
         # Make every file look modified by stat so a naive `git status` has to run the clean filter.
         os.utime(self.wt / "a.txt", (1, 1))
         naive = subprocess.run(["git", "-C", str(self.wt), "status", "--porcelain"], capture_output=True,
-                               env=GIT_ENV)
+                               env=GIT_ENV, stdin=subprocess.DEVNULL)
         self.assertTrue(marker.exists(), "the trap must fire on a naive status, or this test proves nothing")
         marker.unlink()
 

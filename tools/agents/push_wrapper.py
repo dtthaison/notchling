@@ -88,9 +88,12 @@ class Runner:
 
     def __call__(self, argv: List[str], env: Optional[Mapping[str, str]] = None,
                  input: Optional[bytes] = None, cwd: Optional[str] = None) -> "subprocess.CompletedProcess[bytes]":
+        # A child that reads stdin (a git filter, fsmonitor or hook) must not wait on ours: with no input
+        # it gets /dev/null, never the wrapper's own stdin.
+        extra = {"stdin": subprocess.DEVNULL} if input is None else {}
         try:
             return subprocess.run(argv, env=None if env is None else dict(env), input=input, cwd=cwd,
-                                  capture_output=True, timeout=GIT_TIMEOUT)
+                                  capture_output=True, timeout=GIT_TIMEOUT, **extra)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise Failed("%s could not run (%s)" % (argv[0], type(e).__name__))
 
