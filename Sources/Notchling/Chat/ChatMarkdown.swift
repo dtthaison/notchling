@@ -557,7 +557,7 @@ struct ProseText: NSViewRepresentable {
                     attrs[.backgroundColor] = NSColor(KitInk.raised)
                 }
             }
-            if let link = run.link { attrs[.link] = link }
+            if let link = run.link { attrs[.link] = ChatPaths.fileURL(for: link, bases: bases) ?? link }
             attrs[.font] = runFont
             let start = out.length
             out.append(NSAttributedString(string: piece, attributes: attrs))
