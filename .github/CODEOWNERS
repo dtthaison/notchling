@@ -40,6 +40,7 @@
 /docs/goals.md @dtthaison
 /docs/rules.md @dtthaison
 /docs/decisions/ @dtthaison
+/docs/policies/ @dtthaison
 /mobile/lib/features/pairing/ @dtthaison
 **/AGENTS.md @dtthaison
 **/CLAUDE.md @dtthaison

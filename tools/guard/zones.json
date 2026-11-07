@@ -23,6 +23,7 @@
     "!docs/goals.md",
     "!docs/rules.md",
     "!docs/decisions/**",
+    "!docs/policies/**",
     "mobile/lib/features/**",
     "!mobile/lib/features/pairing/**",
     "crates/app/**",
