@@ -15,10 +15,10 @@ name: Review post
 # It reviews a PR only when it is the App's (login in the repository variable AGENT_APP_LOGIN, which must
 # end in `[bot]`) or a maintainer labeled it `notchling:review`; review.py decides that. It asks the model
 # at most once for each head commit, at most 6 times for a PR and at most REVIEW_DAILY_CAP times a day for
-# the repository, so a stranger's PR can't make it spend more than a few reviews however it is poked.
-# It posts the `review-agent` commit status on the head and one comment. The status is `success` only
-# when the verdict is "merge", and that is a recommendation: nothing here approves, requests reviews on
-# or merges a PR. A missing key, a model error or an unreadable answer is a `failure` ("review missing").
+# the repository, so no PR can make it spend more than 6 reviews however it is poked.
+# It posts the `review-agent` commit status on the head and a comment for each model call. The status is
+# `success` only when the verdict is "merge", and that is a recommendation: nothing here approves,
+# requests reviews on or merges a PR. A missing key, a model error or an unreadable answer is a `failure` ("review missing").
 #
 # review-agent is recommend-only for now: it is NOT added to the required checks in .github/rulesets.
 # Adding it there is a decision for the maintainer, after the agent has agreed with him on enough PRs.

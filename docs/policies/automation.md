@@ -37,7 +37,7 @@ Built but off: triage, the review agent, the worker's pre-start check and the pu
 [Phase 5 so far](#phase-5-so-far) says why each is off and what turns it on.
 
 What doesn't exist yet: the agent GitHub App, the worker for queued issues, auto-merge, anything that
-reads the daily caps, the 3-day pause and the kill switch. Until Phase 5 turns them on, an agent may
+reads `AGENT_DAILY_RUN_CAP`, the 3-day pause and the kill switch. Until Phase 5 turns them on, an agent may
 open a pull request but may not merge one. The maintainer merges.
 
 ## Phase 5 so far
@@ -49,7 +49,7 @@ an issue or adds `notchling:queued`.
 | Part | Files | State |
 | --- | --- | --- |
 | Triage | `.github/workflows/triage.yml`, `tools/agents/triage.py`, `tools/agents/triage_labels.json` | Runs on each new issue. Without `ANTHROPIC_API_KEY` its plan is empty: no label, no comment. |
-| Review agent | `.github/workflows/review-run.yml`, `.github/workflows/review-post.yml`, `tools/agents/review.py` | Runs on each pull request. It reviews only one into `main` that is the App's or that a maintainer labeled `notchling:review`, and skips the rest. Without `ANTHROPIC_API_KEY`, those get a failing `review-agent` status, "review missing: no model key". Recommend-only: `review-agent` isn't a required check, so it blocks nothing. |
+| Review agent | `.github/workflows/review-run.yml`, `.github/workflows/review-post.yml`, `tools/agents/review.py` | Runs on each pull request that is not a draft. It reviews only one into `main` that is the App's or that a maintainer labeled `notchling:review`, and skips the rest. It asks the model once for each head commit, at most 6 times for a pull request and at most `REVIEW_DAILY_CAP` times a day. Without `ANTHROPIC_API_KEY`, those get a failing `review-agent` status, "review missing: no model key". Recommend-only: `review-agent` isn't a required check, so it blocks nothing. |
 | Pre-start check | `tools/agents/preflight.py` | Built. Nothing calls it yet. |
 | Push wrapper | `tools/agents/push_wrapper.py`; the worker steps are in [docs/agents/worker-setup.md](../agents/worker-setup.md) | Built. Installed on no worker, and without the App's key it can't push. |
 
@@ -62,7 +62,9 @@ What's still off, and why:
 - **No `ANTHROPIC_API_KEY` repository secret**, so no model runs. The spend cap at the provider comes
   first.
 - **No `AGENT_APP_LOGIN` repository variable.** The review agent knows the App's pull requests by it.
-  `TRIAGE_MODEL` is optional; without it triage uses `claude-haiku-5-5`.
+  It must be the App's bot login, ending in `[bot]`; a value without that suffix is ignored, so no pull
+  request takes the App path. `REVIEW_DAILY_CAP` and `TRIAGE_MODEL` are optional: without them the
+  review agent stops at 20 model calls a UTC day, and triage uses `claude-haiku-5-5`.
 - **The rulesets aren't applied.** Once they are, `agent-branches` lets nobody push to `agent/**`, the
   App included, until the App is in its bypass list.
 - **sd still uses its `sd:*` labels.** Its worker reads `notchling:queued` only once sd has a
@@ -84,11 +86,13 @@ The maintainer, in this order:
    `tools/agents/triage_labels.json` exist: `bug`, `enhancement`, `question`, `needs-info`. The next
    new issue is triaged.
 3. **Reviews of outside pull requests.** The same secret turns them on. Create the `notchling:review` and
-   `notchling:needs-you` labels. Label a pull request `notchling:review` to have it reviewed.
+   `notchling:needs-you` labels. Label a pull request `notchling:review` to have it reviewed. To ask for
+   a fresh review of a commit that was already reviewed, remove the label and add it again; nothing else
+   does that.
 4. **The App.** Create it with the permissions in [The agent's GitHub identity](#the-agents-github-identity-phase-5),
    install it on this repository only, and keep its private key in the Secret Vault. Run
-   `gh variable set AGENT_APP_LOGIN --body '<app-slug>[bot]'` so the review agent reviews its pull
-   requests. Add the App to `bypass_actors` in `.github/rulesets/agent-branches.json` (a protected
+   `gh variable set AGENT_APP_LOGIN --body '<app-slug>[bot]'` (the `[bot]` is required) so the review
+   agent reviews its pull requests. Add the App to `bypass_actors` in `.github/rulesets/agent-branches.json` (a protected
    pull request), then apply the rulesets with `tools/github/apply-settings.sh`.
 5. **Each worker.** Follow [docs/agents/worker-setup.md](../agents/worker-setup.md) on one machine
    first: the agent user, the wrapper user and the App key, the sudoers line, the pre-start check's
@@ -184,31 +188,64 @@ Built (`.github/workflows/triage.yml`, `tools/agents/triage.py`). It does nothin
 
 The review agent is built (`.github/workflows/review-run.yml`, `.github/workflows/review-post.yml`,
 `tools/agents/review.py`) and **recommend-only**. It posts a `review-agent` commit status on the head
-commit and one comment. The status is `success` only for a "merge" verdict, and even that is a
-recommendation: the agent never approves, requests reviews on or merges a pull request. `review-agent`
-is not a required check. Without the `ANTHROPIC_API_KEY` secret every review it takes on is a failure,
+commit and, for each model call, a comment. The status is `success` only for a "merge" verdict, and
+even that is a recommendation: the agent never approves, requests reviews on or merges a pull request.
+`review-agent` is not a required check. Without the `ANTHROPIC_API_KEY` secret every review it takes on is a failure,
 "review missing".
 
 **Agent pull requests** get a cross-model review once the App exists and the `AGENT_APP_LOGIN`
 variable names it:
 
 - The reviewer model is picked by rotation over a fixed list (`claude-opus-5-5`, `claude-sonnet-5-5`,
-  `claude-fable-5-1`), keyed by the pull request's number, not by what the pull request says about
-  its author. The `Agent-Model:` line the push wrapper adds is informational only.
+  `claude-fable-5-1`), keyed by the pull request's number. That is a design choice, not a secret: the
+  number is public and the comment names the model, so an author can tell which model reviews, and a
+  keyed rotation would only hide it until the first review. What protects the review is not which
+  model it is: the pull request's text is fenced as data, the answer is checked against a fixed shape
+  and nothing a model says merges anything. One rule sits on top: never the model that wrote the
+  change. For the App's pull requests the push wrapper appends an `Agent-Model:` line (the last such
+  line counts); if the rotation lands on that model, the next one in the list reviews. A line in
+  anyone else's pull request is ignored, so an outside author can't steer the choice with it.
 - The review is bound to the head commit. It fails closed when the review is missing, the model's
   API is down or its answer isn't the expected JSON.
-- After two failed reviews ("changes" or "not right") of earlier pushes to one pull request, it
-  labels it `notchling:needs-you` and goes to the maintainer instead of reviewing another push.
+- **One model call for each head commit.** The bot's own comment (it starts with a marker naming the
+  verdict and the commit) is the record. A rerun of the same head, whether from a new label,
+  "ready for review" again or a re-run of the workflow, posts the same status again from that comment
+  and stops, with no model call. Reopening a pull request starts nothing. A fresh review of the same
+  head happens only when a maintainer adds `notchling:review` after that verdict. It is a new comment;
+  the earlier one is never edited, so a verdict can't be rolled again by re-running and a failed
+  review can't be erased. A model call that fails (API error, unreadable answer) also leaves a comment,
+  "missing", so it counts as the one call for that head.
+- **Caps**, counted from those comments: at most 6 model calls for one pull request, and at most
+  `REVIEW_DAILY_CAP` (20 when the variable is unset or not a number; `apply-settings.sh` sets it to 40)
+  in the repository from 00:00 UTC, found by listing the repository's comments since midnight. A day
+  with 2000 comments or more is too long to count and stops reviews too. Past a cap the status is
+  "review missing" and there is no model call; the pull request cap also labels it
+  `notchling:needs-you`. Runs for different commits can overlap, so a day can run a few calls over the
+  cap, never unboundedly.
+- After two failed reviews ("changes" or "not right") of two different pushes to one pull request, the
+  agent labels it `notchling:needs-you` in the same run that posts the second one, and goes to the
+  maintainer instead of reviewing another push. A commit looked at again counts once.
+- It skips drafts; "ready for review" starts a run.
+- `AGENT_APP_LOGIN` must end in `[bot]`, or it is ignored and no pull request takes the App path.
 
 **Other people's pull requests:**
 
 - They get a model review **only after a maintainer adds `notchling:review`** (the review agent checks
-  who added the label), so strangers can't spend the review budget.
+  who added the label). Before that they cost no model call. After it, the author can still cause
+  reviews by pushing, one for each new commit, so the limit is the caps above: 6 for the pull request
+  and `REVIEW_DAILY_CAP` a day for all of them together. A stranger can't spend more than that.
 - An untrusted `pull_request` job (`review-run.yml`), with `permissions: {}` and no secrets, runs
   nothing from the pull request and only records its number and head commit. The checks are the other
   workflows. A trusted `workflow_run` job (`review-post.yml`) runs the default branch's code, reads
   only the diff and the check results through the API, never files the fork wrote, and posts the
-  verdict as a commit status and a comment.
+  verdict as a commit status and a comment. Its token starts from no permissions; the job asks for
+  contents and checks read, and pull requests and statuses write.
+- A run belongs to a pull request only by the head repository, branch and commit GitHub records for it:
+  the one open pull request that matches all three, or none. A commit alone is not enough, since a fork
+  can push the App's commit and open a pull request of its own. The run must be `review-run.yml`'s (its
+  `path`), not another workflow file that reuses the name. Which version of that file ran can't be
+  checked, and doesn't need to be: a `pull_request` run uses the file from the pull request's own merge
+  commit, and the only things read from the run are those GitHub-set fields.
 - A bug fix is reproduced first: a failing test on `main` that the pull request makes pass. For a UI
   or intermittent bug, a recorded reproduction is accepted. Nothing runs the reproduction yet; the
   review agent is asked to look for that test.
@@ -226,10 +263,12 @@ variable names it:
 ## Limits
 
 - **Daily caps:** the repository Actions variables `AGENT_DAILY_RUN_CAP=20` (worker runs) and
-  `REVIEW_DAILY_CAP=40` (reviews). `tools/github/apply-settings.sh` sets them; Phase 5's worker and
-  review agent are to read them. Nothing reads them yet, the review agent built so far included: until
-  it does, what it may spend is bounded by what it reviews (the App's pull requests and labeled ones)
-  and by the provider's spend limit.
+  `REVIEW_DAILY_CAP=40` (reviews). `tools/github/apply-settings.sh` sets them. The review agent reads
+  `REVIEW_DAILY_CAP` (20 if it is unset or not a number) and stops asking the model once that many
+  reviews were made since 00:00 UTC; it also asks once for each head commit and at most 6 times for
+  a pull request (see [Review](#review)). That bounds its spend by those counts, not by what it reviews:
+  an outside author's pull request is reviewed only after the maintainer's label, and then costs at
+  most 6 calls. The worker doesn't read `AGENT_DAILY_RUN_CAP` yet; nothing runs it.
 - **Spend:** a hard monthly spend limit at the model provider. It caps the cost even if the run caps
   are bypassed. The maintainer sets it by hand in the provider's console.
 - **Sampling:** each morning the maintainer samples merged pull requests. If nobody has sampled for

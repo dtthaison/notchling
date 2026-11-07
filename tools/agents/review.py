@@ -1,6 +1,6 @@
 """The review agent: reads a pull request through the API, asks a model for a verdict, posts it.
 
-Recommend-only. It posts the `review-agent` commit status and one comment on the PR's head and nothing
+Recommend-only. It posts the `review-agent` commit status and a comment per model call on the PR's head and nothing
 else it can be argued into: it never approves, requests reviews on or merges a PR. Run by
 .github/workflows/review-post.yml with the default branch's code (never the PR's), which supplies
 everything through the environment:
