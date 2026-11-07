@@ -260,7 +260,7 @@ final class RunWatcher {
                            trailing: [progress, load].compactMap { $0 }.joined(separator: " · "),
                            detail: lastLines[run.log] ?? "Starting…", log: run.log, rc: nil)
         }
-        for end in recentEnds() where !dismissed.contains(end.id) {
+        for end in recentEnds() where !dismissed.contains(end.id) && !end.isPrecheck {
             let ago = at.timeIntervalSince(end.finish.at)
             let how = RunFormat.exit(end.finish.rc)
             let cached = lastLines[end.id] ?? RunLog.lastLine(of: end.finish.log) ?? ""

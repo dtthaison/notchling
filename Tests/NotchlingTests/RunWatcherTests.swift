@@ -264,6 +264,34 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
+    // MARK: Finishes without a start
+
+    func testPrecheckFinishesAreNotShownWokenOrAnnounced() {
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        clock = clock.addingTimeInterval(30)
+        append(#"{"key":"precheck: just check","cmd":"x","seconds":4,"rc":0,"head":"h","clean":true,"log":"\#(log).precheck","at":"\#(iso(clock))"}"# + "\n")
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertTrue(notices.isEmpty)
+    }
+
+    func testAFinishWithNoStartIsShownButNeverAnnounced() {
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        clock = clock.addingTimeInterval(30)
+        appendFinish(at: clock)
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertTrue(notices.isEmpty)
+    }
+
     // MARK: Sending
 
     func appendOtherRun(_ n: Int, session: String, finishedAt: Date) {

@@ -59,6 +59,8 @@ struct RunEnd: Equatable {
     /// The log plus the finish time, so a log path sd reuses still tells its runs apart.
     var id: String { finish.log + "@" + String(Int(finish.at.timeIntervalSince1970)) }
     var key: String { start?.key ?? finish.key }
+    /// sd writes `{"key":"precheck: …","log":"<log>.precheck"}` before each main run; it is no run of its own.
+    var isPrecheck: Bool { finish.key.hasPrefix("precheck: ") }
 }
 
 /// What the `runs.jsonl` of one repository says: which runs are going and which have ended.
