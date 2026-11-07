@@ -130,6 +130,7 @@
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Chat/Model/ChatModel+Drops.swift|var base = (name?.isEmpty == false ? name! : url.deletingPathExtension().lastPathComponent)",
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Chat/Views/ReplyEditor.swift|var textView: ReplyTextView!",
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Machines/CommandRunning.swift|let n = write(fd, raw.baseAddress! + offset, raw.count - offset)",
+  "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Machines/MachineSteps.swift|return CheckResult(state: .fail(wrong.map { \"\\($0.key) \\(seen[$0.key]!) (should be \\($0.value))\" }.joined(separator: \", \")))",
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Machines/SecretSteps.swift|return parts.url!",
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Machines/SecretSteps.swift|var parts = URLComponents(string: \"https://github.com/settings/personal-access-tokens/new\")!",
   "LINT-NO-FORCE-UNWRAP|Sources/Notchling/Machines/SetupEngine.swift|let nonce = (0..<16).map { _ in String(\"0123456789abcdef\".randomElement()!) }.joined()",

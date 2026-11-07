@@ -1,20 +1,46 @@
 """The capability check: a new use of a powerful API sends the PR to the maintainer, wherever the
 file is. It reads only added lines in code files, with comments removed. Most patterns ignore
 string contents too; the ones that only appear inside strings (a tool's path, a Dart import) keep
-them."""
+them. A code file git calls binary (a NUL byte, a `-diff` attribute) also goes to the maintainer,
+though its lines are still read: swiftc compiles such a file all the same."""
 
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Pattern
+from typing import Dict, List, Pattern, Tuple
 
 from guard.changes import Change
-from guard.source import strip_code, strip_comments
+from guard.source import SLASH, strip_code, strip_comments
 
 CODE_EXTS = {".swift", ".rs", ".dart", ".sh", ".py"}
-PROTECTED_TYPES = ["VaultStore", "AccountStore", "LaneStore", "ReplySender", "HookBridge", "OwnerPublish"]
+BINARY_RULE = "CAP-BINARY"
+OBSCURE_RULE = "CAP-OBSCURE"  # a line with more `*/` than any real one has
+MAX_COMMENT_ENDS = 8
+
+# Each protected type, with every file that may name it: exact paths, never a name prefix and never
+# a path in the auto-merge zone. Found with `grep -rnE "(class|struct|enum|actor|protocol|extension) Type"`.
+OWN_FILES: Dict[str, Tuple[str, ...]] = {
+    "VaultStore": ("Sources/Notchling/Vault/VaultStore.swift",),
+    "AccountStore": ("Sources/Notchling/Accounts/Accounts.swift",),
+    "LaneStore": ("Sources/Notchling/Lanes/Lanes.swift",),
+    "ReplySender": ("Sources/Notchling/Agents/ReplySender.swift", "Sources/Notchling/Agents/ReplySender+Dialog.swift"),
+    "HookBridge": ("Sources/Notchling/Hook/HookBridge.swift",),
+    "OwnerPublish": ("Sources/Notchling/Pages/OwnerPublish.swift",),
+    # The app's wrappers around processes, ptys and credentials: using one is using the API.
+    "TerminalSession": ("Sources/Notchling/Terminal/TerminalSession.swift",),
+    "AgentActions": ("Sources/Notchling/Agents/AgentActions.swift",),
+    "CodexRunner": ("Sources/Notchling/Agents/CodexRunner.swift",),
+    "AntigravityRunner": ("Sources/Notchling/Agents/AntigravityCLI.swift",),
+    "ACPRunner": ("Sources/Notchling/Agents/ACPRunner.swift",),
+    "ACPConnection": ("Sources/Notchling/Agents/ACPConnection.swift",),
+    "HostTerminals": ("Sources/Notchling/Agents/ReplySender.swift",),
+    "SecretRunner": ("Sources/Notchling/Vault/SecretVault.swift",),
+    "SecretVault": ("Sources/Notchling/Vault/SecretVault.swift",),
+    "VaultServer": ("Sources/Notchling/Vault/VaultServer.swift",),
+}
+PROTECTED_TYPES = list(OWN_FILES)
 
 
 @dataclass(frozen=True)
@@ -29,16 +55,35 @@ def _c(*patterns: str) -> List[Pattern[str]]:
     return [re.compile(p) for p in patterns]
 
 
+# FileManager calls that must trip when `fm` was set on another line (`let fm = FileManager.default`).
+# These names mean nothing else. `removeItem(at:)` is matched too, though NSMenu has one (a menu
+# edit then goes to the maintainer); `setAttributes` stays tied to FileManager on the line, since
+# NSMutableAttributedString has it and text code calls it all the time.
+_FM_CALLS = r"createFile|createDirectory|createSymbolicLink|copyItem|moveItem|replaceItem|replaceItemAt|linkItem|trashItem"
+# Data(contentsOf: url) fetches a URL; append(contentsOf:) doesn't, so only the initialisers count.
+_FETCHERS = r"Data|NSData|String|NSString|NSArray|NSMutableArray|NSDictionary|NSMutableDictionary|NSImage|NSAttributedString"
+
+# NSWorkspace opens files and starts apps, but most of it is harmless (the frontmost app, Reveal in
+# Finder, accessibility flags). So: its open and launch calls, and `NSWorkspace.shared` kept in a
+# variable, whose calls the pattern can't see.
+_WORKSPACE_OPEN = r"\bNSWorkspace\b[^;]*\.(open|openApplication|openURLs?|launchApplication|launchApp|openFile|openTemporaryFile)\b"
+
 # Matched against the line with comments and string contents blanked.
 RULES: Dict[str, List[Pattern[str]]] = {
-    "CAP-PROCESS": _c(r"\bProcess\s*\(", r"\.executableURL\b", r"std::process::Command", r"\bprocess::Command\b",
-                      r"\bProcess\.(run|start)\b", r"\bsubprocess\.", r"\bos\.system\("),
+    "CAP-PROCESS": _c(r"\bProcess\b", r"\blaunchPath\b", r"\.launch\s*\(\s*\)", r"\.executableURL\b",
+                      r"std::process::Command", r"\bprocess::Command\b", r"\bsubprocess\.", r"\bos\.system\(",
+                      r"\bpopen\b", _WORKSPACE_OPEN, r"\bNSWorkspace\.shared\b(?!\s*\.)"),
     "CAP-PTY": _c(r"\bforkpty\b", r"\bposix_spawn\w*\b", r"\bportable_pty\b", r"\bopenpty\b"),
     "CAP-APPLESCRIPT": _c(r"\bNSAppleScript\b", r"\bosascript\b"),
-    "CAP-NETWORK": _c(r"\bURLSession\b", r"\bNWConnection\b", r"\breqwest\b", r"\bHttpClient\b", r"\bWebSocket\b"),
+    "CAP-DYNAMIC": _c(r"\bdlsym\b", r"\bdlopen\b", r"@_silgen_name\b", r"@_cdecl\b"),
+    "CAP-NETWORK": _c(r"\bURLSession\b", r"\bNWConnection\b", r"\breqwest\b", r"\bHttpClient\b", r"\bWebSocket\b",
+                      r"\b(%s)\s*\(\s*contentsOf\s*:" % _FETCHERS, r"\.init\s*\(\s*contentsOf\s*:",
+                      r"\bSocket\.(connect|startConnect)\b", r"\b(RawSocket|ServerSocket|HttpServer)\b"),
     "CAP-KEYCHAIN": _c(r"\bSecItem\w+", r"\bkeyring\b", r"\bSecKeychain\w*"),
     "CAP-FILEWRITE": _c(r"FileManager.*\.(createFile|createDirectory|moveItem|copyItem|removeItem|replaceItem|setAttributes)\b",
-                        r"\.write\(to:", r"\bstd::fs::(write|remove_\w+|rename|create_dir\w*|copy)\b",
+                        r"\.(%s)\s*\(" % _FM_CALLS, r"\.removeItem\s*\(\s*at(Path)?\s*:",
+                        r"\.write\(to:", r"\btoFile\s*:", r"\bFileHandle\s*\(\s*for(Writing|Updating)",
+                        r"\bstd::fs::(write|remove_\w+|rename|create_dir\w*|copy)\b",
                         r"\bFile\([^)]*\)\.(writeAs\w+|delete|rename)\b"),
     "CAP-PROTECTED-TYPE": [],  # by file name, below
 }
@@ -54,10 +99,10 @@ TYPE_USE = re.compile(r"\b(" + "|".join(PROTECTED_TYPES) + r")\b")
 
 
 def _own_file(path: str, type_name: str) -> bool:
-    return os.path.basename(path).startswith(type_name)
+    return path in OWN_FILES.get(type_name, ())
 
 
-def _line_trips(path: str, text: str) -> List[str]:
+def _view_trips(path: str, text: str) -> List[str]:
     code, comments_out = strip_code(path, text), strip_comments(path, text)
     rules = [r for r, pats in RULES.items() if any(p.search(code) for p in pats)]
     rules += [r for r, pats in IN_STRINGS.items() if r not in rules and any(p.search(comments_out) for p in pats)]
@@ -66,12 +111,38 @@ def _line_trips(path: str, text: str) -> List[str]:
     return rules
 
 
+def _line_trips(path: str, text: str) -> List[str]:
+    """A diff shows added lines, not what state the compiler is in when each starts: a line can
+    begin inside a block comment an earlier line opened. Then `// */ code`, or a quote before the
+    `*/`, hides code from the stripper that the compiler runs. So a line with a `*/` is also read as
+    if it began just after each `*/`. Too many of them is itself a trip, so reading stays cheap."""
+    views = [text]
+    if os.path.splitext(path)[1].lower() in SLASH:
+        ends = [m.end() for m in re.finditer(r"\*/", text)]
+        if len(ends) > MAX_COMMENT_ENDS:
+            return [OBSCURE_RULE]
+        views += [text[e:] for e in ends]
+    rules: List[str] = []
+    for view in views:
+        rules += [r for r in _view_trips(path, view) if r not in rules]
+    return rules
+
+
+def _pieces(text: str) -> List[str]:
+    """A bare CR ends a Swift `//` comment, but git and the stripper see one line, so each piece
+    is scanned as a line of its own. (A CRLF ending leaves one empty piece.)"""
+    return text.split("\r")
+
+
 def scan(changes: List[Change]) -> List[Trip]:
     trips: List[Trip] = []
     for c in changes:
-        if os.path.splitext(c.path)[1].lower() not in CODE_EXTS or c.binary:
+        if os.path.splitext(c.path)[1].lower() not in CODE_EXTS:
             continue
+        if c.binary:
+            trips.append(Trip(BINARY_RULE, c.path, 0, "binary change to a code file"))
         for line_no, text in c.added:
-            for rule in _line_trips(c.path, text):
-                trips.append(Trip(rule, c.path, line_no, text.strip()))
+            for piece in _pieces(text):
+                for rule in _line_trips(c.path, piece):
+                    trips.append(Trip(rule, c.path, line_no, piece.strip()))
     return trips

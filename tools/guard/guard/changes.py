@@ -2,11 +2,15 @@
 
 Only the PR's own changes count (three dots: from the merge base). Paths come from
 `--name-status -z`, so spaces and odd characters survive; each file's lines come from its
-own `--unified=0` diff.
+own `--unified=0 --text --no-textconv` diff. Without `--text` git prints no lines for a file it
+thinks is binary (a NUL byte, or a `-diff` line in a `.gitattributes` the PR or an earlier PR
+added), and swiftc compiles such a file anyway. `--numstat` says which files git calls binary,
+so the caller can still send those to the maintainer.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -14,6 +18,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+# Files that are binary on purpose: their bytes aren't read as lines. Any other file the diff
+# calls binary is still read as text, since a code file with a NUL byte in a comment compiles.
+ASSET_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".ico", ".icns", ".pdf", ".mp3",
+                        ".mp4", ".mov", ".wav", ".m4a", ".zip", ".gz", ".tar", ".ttf", ".otf", ".woff", ".woff2"})
 
 
 @dataclass(frozen=True)
@@ -47,16 +56,14 @@ def _entries(repo: Path, base: str, head: str) -> List[Tuple[str, Optional[str],
     return out
 
 
-def _lines(patch: str) -> Tuple[Tuple[Tuple[int, str], ...], Tuple[str, ...], bool]:
-    added, removed, binary, in_hunk, line_no = [], [], False, False, 0
+def _lines(patch: str) -> Tuple[Tuple[Tuple[int, str], ...], Tuple[str, ...]]:
+    added, removed, in_hunk, line_no = [], [], False, 0
     for raw in patch.split("\n"):
         m = HUNK.match(raw)
         if m:
             in_hunk, line_no = True, int(m.group(1))
             continue
         if not in_hunk:
-            if raw.startswith("Binary files ") or raw.startswith("GIT binary patch"):
-                binary = True
             continue
         if raw.startswith("+"):
             added.append((line_no, raw[1:]))
@@ -65,15 +72,26 @@ def _lines(patch: str) -> Tuple[Tuple[Tuple[int, str], ...], Tuple[str, ...], bo
             removed.append(raw[1:])
         elif raw.startswith(" "):
             line_no += 1
-    return tuple(added), tuple(removed), binary
+    return tuple(added), tuple(removed)
+
+
+def _binary(repo: Path, base: str, head: str, paths: List[str]) -> bool:
+    """Does git call this file binary? `--numstat` prints `-` for both counts then."""
+    stat = _git(repo, "diff", "-M", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv",
+                f"{base}...{head}", "--", *paths)
+    return stat.startswith("-\t-\t")
 
 
 def diff(repo: Path, base: str, head: str) -> List[Change]:
     changes = []
     for status, old, path in _entries(repo, base, head):
         paths = [p for p in (old, path) if p]
-        patch = _git(repo, "diff", "-M", "--unified=0", "--no-color", "--no-ext-diff",
-                     f"{base}...{head}", "--", *paths)
-        added, removed, binary = _lines(patch)
+        binary = _binary(repo, base, head, paths)
+        if binary and os.path.splitext(path)[1].lower() in ASSET_EXTS:
+            changes.append(Change(path, status, old, (), (), True))
+            continue
+        patch = _git(repo, "diff", "-M", "--unified=0", "--no-color", "--no-ext-diff", "--text",
+                     "--no-textconv", f"{base}...{head}", "--", *paths)
+        added, removed = _lines(patch)
         changes.append(Change(path, status, old, added, removed, binary))
     return changes
