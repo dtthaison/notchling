@@ -1,6 +1,6 @@
 # Notchling
 
-[![Build](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
+[![Tests](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A small macOS menu bar app for people who run several [Claude Code](https://claude.com/claude-code) agents at once. It keeps the Mac awake while agents work and turns the camera notch into a live view of every session. From the notch you can read conversations, answer Claude's questions, approve permission prompts and reply to background agents without hunting for the right terminal.
