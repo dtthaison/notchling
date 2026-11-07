@@ -121,6 +121,92 @@ final class MachinesTokenScopeTests: XCTestCase {
         XCTAssertEqual(result.state, .fail("can see 1 other private repo (dtthaison/private-2)"))
     }
 
+    // MARK: all repositories, by choice
+
+    private var allReposMachine: Machine {
+        var m = m1
+        m.sdWorker?.tokenAllRepos = true
+        return m
+    }
+
+    private func allReposCtx(http: HTTPFetching) -> StepContext {
+        ctx(http: http, runner: runner(), all: [allReposMachine, vps], machine: allReposMachine)
+    }
+
+    func testAStrictJobStillFailsWhenTheTokenReachesOtherRepos() async {
+        var strict = m1
+        strict.sdWorker?.tokenAllRepos = false
+        let c = ctx(http: http(other: 200, view: viewAnswer([repo] + others(3))), runner: runner(), all: [strict, vps], machine: strict)
+        let result = await check(c)
+        guard case let .fail(text) = result.state else { return XCTFail("expected fail, got \(result.state)") }
+        XCTAssertTrue(text.contains("other private repo"), text)
+    }
+
+    func testAnAllReposJobAcceptsOtherReposByChoice() async {
+        let view = viewAnswer([repo] + others(30))
+        let result = await check(allReposCtx(http: http(other: 200, view: view)))
+        guard case .pass = result.state else { return XCTFail("expected pass, got \(result.state)") }
+        let row = result.rows.first { $0.name == "Denied elsewhere" }
+        XCTAssertEqual(row?.detail, "reaches all repositories, by choice (30 other private repos)")
+        XCTAssertTrue(result.rows.allSatisfy(\.ok), "\(result.rows)")
+    }
+
+    func testAnAllReposJobIgnoresDoubtsAboutTheOtherRepos() async {
+        // gh fails and the token's list errors: both only concern the other repos
+        let r = ScriptedRunner()
+        r.on({ $0.contains("repo") && $0.contains("list") }, result: CommandResult(code: 1, out: "", err: "no"))
+        let c = ctx(http: http(view: viewAnswer([], status: 500)), runner: r, all: [allReposMachine, vps], machine: allReposMachine)
+        let result = await check(c)
+        guard case .pass = result.state else { return XCTFail("expected pass, got \(result.state)") }
+    }
+
+    func testAnAllReposJobStillFailsOnContentsAccess() async {
+        let result = await check(allReposCtx(http: http(commits: 200, other: 200, view: viewAnswer([repo] + others(3)))))
+        guard case let .fail(text) = result.state else { return XCTFail("expected fail, got \(result.state)") }
+        XCTAssertTrue(text.contains("can read code in"), text)
+    }
+
+    func testAnAllReposJobStillFailsWhenAServedRepoLacksIssuesAccess() async {
+        let result = await check(allReposCtx(http: http(issues: 404, other: 200, view: viewAnswer([repo] + others(3)))))
+        guard case let .fail(text) = result.state else { return XCTFail("expected fail, got \(result.state)") }
+        XCTAssertTrue(text.contains("no issues access to"), text)
+    }
+
+    func testAnAllReposJobStillFailsOnASharedToken() async {
+        let values = ["m1-github-issues": secret, "vps-sing-1-github-issues": secret]
+        let c = ctx(http: http(other: 200), runner: runner(), values: values, all: [allReposMachine, vps], machine: allReposMachine)
+        let result = await check(c)
+        guard case .fail = result.state else { return XCTFail("expected fail, got \(result.state)") }
+    }
+
+    func testTheAllReposFixDoesNotAskForSelectedRepositories() {
+        let step = TokenScope.step(for: allReposMachine, job: allReposMachine.sdWorker!, open: { _ in }, form: { _ in })
+        guard case let .run(plan) = step.fix else { return XCTFail("no fix") }
+        XCTAssertTrue(plan.display.contains("any repositories"), plan.display)
+        XCTAssertTrue(plan.display.contains("Issues: read and write") && plan.display.contains("no Contents"), plan.display)
+        XCTAssertFalse(plan.display.contains(repo), plan.display)
+        XCTAssertTrue(TokenCreation.clicks(repos: [repo], allRepos: true).first?.contains("All repositories") == true)
+    }
+
+    func testTheAllReposFlagDecodesFromOldFilesAndIsWrittenOnlyWhenTrue() throws {
+        let old = #"{"python":"python3","sdPath":"/a/sd.py","repos":[],"kinds":[],"issuesSecret":"x"}"#
+        var s = try JSONDecoder().decode(SDWorkerSettings.self, from: Data(old.utf8))
+        XCTAssertNil(s.tokenAllRepos)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(s), as: UTF8.self).contains("tokenAllRepos"))
+        s.tokenAllRepos = true
+        let back = try JSONDecoder().decode(SDWorkerSettings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.tokenAllRepos, true)
+    }
+
+    func testTheJobFormSavesTheAllReposToggleAsTrueOrAbsent() {
+        var draft = JobDraft(machine: m1)
+        XCTAssertFalse(draft.tokenAllRepos)
+        XCTAssertNil(JobForm.settings(draft, base: draft.base).tokenAllRepos)
+        draft.tokenAllRepos = true
+        XCTAssertEqual(JobForm.settings(draft, base: draft.base).tokenAllRepos, true)
+        XCTAssertTrue(JobDraft(machine: Machine(name: "m1", host: "m1", user: "u", jobs: [Job(kind: .sdWorker, sdWorker: JobForm.settings(draft, base: draft.base))])).tokenAllRepos)
+    }
+
     func testTheSameTokenOnTwoMachinesFails() async {
         let values = ["m1-github-issues": secret, "vps-sing-1-github-issues": secret]
         let result = await check(ctx(http: http(), runner: runner(), values: values))

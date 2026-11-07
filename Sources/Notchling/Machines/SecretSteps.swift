@@ -286,16 +286,17 @@ enum TokenCreation {
     }
 
     /// The clicks the user makes on that page, in order.
-    static func clicks(repos: [String]) -> [String] {
-        ["Repository access: choose Only select repositories, then pick \(repos.joined(separator: ", ")).",
+    static func clicks(repos: [String], allRepos: Bool = false) -> [String] {
+        [allRepos ? "Repository access: All repositories (this job allows it)."
+                  : "Repository access: choose Only select repositories, then pick \(repos.joined(separator: ", ")).",
          "Permissions: Issues Read and write. Leave Contents at No access.",
          "Generate token, copy it, and delete any old token for this machine on the same page.",
          "Paste it into Notchling's form and Save."]
     }
 
-    static func request(secret: String, machine: String, repos: [String], today: Date) -> VaultRequest {
+    static func request(secret: String, machine: String, repos: [String], allRepos: Bool = false, today: Date) -> VaultRequest {
         let page = pageURL(secret: secret, machine: machine, repos: repos, today: today)
-        let steps = clicks(repos: repos).enumerated().map { "\($0.offset + 1). \($0.element)" }
+        let steps = clicks(repos: repos, allRepos: allRepos).enumerated().map { "\($0.offset + 1). \($0.element)" }
         let end = Calendar.current.date(byAdding: .day, value: 366, to: today) ?? today
         return VaultRequest(op: .request, name: secret, kind: "token", url: "https://github.com",
                             note: "Issues-only token for the sd worker on \(machine): \(repos.joined(separator: ", "))",
@@ -306,10 +307,10 @@ enum TokenCreation {
 
     /// Opens the page and the form. Nothing is saved until the user presses Save in the form.
     @MainActor
-    static func start(secret: String, machine: String, repos: [String], today: Date = Date(),
+    static func start(secret: String, machine: String, repos: [String], allRepos: Bool = false, today: Date = Date(),
                       open: (URL) -> Void, form: (VaultRequest) -> Void) {
         open(pageURL(secret: secret, machine: machine, repos: repos, today: today))
-        form(request(secret: secret, machine: machine, repos: repos, today: today))
+        form(request(secret: secret, machine: machine, repos: repos, allRepos: allRepos, today: today))
     }
 }
 

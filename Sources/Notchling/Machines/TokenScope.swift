@@ -6,8 +6,8 @@ import Foundation
 /// sent only in the Authorization header of requests to `https://api.github.com`. No result, row or message
 /// holds it.
 enum TokenScope {
-    /// Read-only issues access on each served repo, nothing on any other private repo, no Contents access, a
-    /// value no other machine uses, and an expiry that has not passed.
+    /// Issues access on each served repo, nothing on any other private repo (unless the job allows all repos), no
+    /// Contents access, a value no other machine uses, and an expiry that has not passed.
     ///
     /// `open` and `form` are the seam for the creation flow the Fix starts: tests pass their own and never open the
     /// real form. The default form is the vault's (`VaultPrompt.open`), the one the issues-token step opens too.
@@ -15,12 +15,14 @@ enum TokenScope {
                      open: @escaping @Sendable (URL) -> Void = SecretSteps.openPage,
                      form: @escaping @Sendable (VaultRequest) -> Void = SecretSteps.openVaultForm) -> SetupStep {
         let repos = job.repos.map(\.github)
-        let display = "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read and write, Metadata: read, nothing else) "
-            + "and the vault form for \(job.issuesSecret). The new token is saved in the vault and never shown."
+        let allRepos = job.tokenAllRepos == true
+        let scope = allRepos ? "Open GitHub's token page (any repositories; Issues: read and write, Metadata: read, no Contents) "
+            : "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read and write, Metadata: read, nothing else) "
+        let display = scope + "and the vault form for \(job.issuesSecret). The new token is saved in the vault and never shown."
         let fix = FixPlan(display: display, needsAdmin: false) { _ in
             // A new token is the one clean fix for a shared, mis-scoped or expired one.
             await MainActor.run {
-                TokenCreation.start(secret: job.issuesSecret, machine: machine.name, repos: repos, open: open, form: form)
+                TokenCreation.start(secret: job.issuesSecret, machine: machine.name, repos: repos, allRepos: allRepos, open: open, form: form)
             }
             // Only the page and the form open here. The step is not done until a check passes, so this is not ok:
             // Set up all stops at it (and the window shows the line as guidance).
@@ -60,6 +62,7 @@ enum TokenScope {
             return CheckResult(state: .cantTell("\(secretName.isEmpty ? "the issues token" : secretName) is not in the vault"))
         }
         let served = job.repos.map(\.github)
+        let allRepos = job.tokenAllRepos == true
         guard !served.isEmpty, served.allSatisfy(isRepoName) else {
             return CheckResult(state: .cantTell("the served repos are not all owner/name"))
         }
@@ -88,7 +91,8 @@ enum TokenScope {
 
         var outcomes: [(String, Outcome)] = []
         outcomes.append(("Reaches issues", issuesOutcome(issuesReqs, answers)))
-        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherReqs, answers, view: view, served: served)))
+        outcomes.append(("Denied elsewhere", deniedOutcome(listing, otherReqs, answers, view: view, served: served,
+                                                          allRepos: allRepos)))
         outcomes.append(("No code access", contentsOutcome(commitsReqs, answers)))
         outcomes.append(("Distinct token", distinctOutcome(token: token, secretName: secretName, ctx: ctx)))
 
@@ -97,13 +101,13 @@ enum TokenScope {
         let day = header.flatMap(expiryDay(header:))
         outcomes.append(("Expiry", expiryOutcome(header: header, day: day, now: ctx.now)))
 
-        var result = CheckResult(state: summary(outcomes, served: served, day: day))
+        var result = CheckResult(state: summary(outcomes, served: served, day: day, allRepos: allRepos))
         result.rows = outcomes.map { SubRow(name: $0.0, ok: $0.1.row.ok, detail: $0.1.row.detail) }
         result.detected.tokenExpires = day
         return result
     }
 
-    private static func summary(_ outcomes: [(String, Outcome)], served: [String], day: String?) -> CheckState {
+    private static func summary(_ outcomes: [(String, Outcome)], served: [String], day: String?, allRepos: Bool) -> CheckState {
         var fails: [String] = [], unknowns: [String] = []
         for (_, outcome) in outcomes {
             switch outcome {
@@ -114,7 +118,8 @@ enum TokenScope {
         }
         if !fails.isEmpty { return .fail(fails.joined(separator: "; ")) }
         if !unknowns.isEmpty { return .cantTell(unknowns.joined(separator: "; ")) }
-        let reach = served.count == 1 ? "issues on \(served[0]) only" : "issues on \(served.count) repos only"
+        let reach = allRepos ? "issues on \(served.count) served repo\(served.count == 1 ? "" : "s"), all repositories by choice"
+            : served.count == 1 ? "issues on \(served[0]) only" : "issues on \(served.count) repos only"
         return .pass(reach + ", no code access" + (day.map { ", expires \($0)" } ?? ""))
     }
 
@@ -135,10 +140,14 @@ enum TokenScope {
     }
 
     /// Two independent views of "no other private repo": a probe of each repo gh lists, and the token's own list.
-    /// Either one seeing an unserved repo is a fail; a doubt in either (and no fail) is can't tell.
+    /// Either one seeing an unserved repo is a fail; a doubt in either (and no fail) is can't tell. When the job
+    /// allows all repositories, seeing other repos is accepted and so is any doubt about them: the outcome is ok
+    /// and says how many were seen.
     private static func deniedOutcome(_ listing: Result<Listing, ListingError>, _ reqs: [(name: String, url: URL)],
-                                      _ answers: [URL: HTTPAnswer], view: TokenView, served: [String]) -> Outcome {
+                                      _ answers: [URL: HTTPAnswer], view: TokenView, served: [String],
+                                      allRepos: Bool = false) -> Outcome {
         var fails: [String] = [], unknowns: [String] = []
+        var seenOthers = Set<String>()
 
         switch listing {
         case .failure(let e): unknowns.append(e.message)
@@ -152,6 +161,7 @@ enum TokenScope {
                 default: unknown += 1
                 }
             }
+            visible.forEach { seenOthers.insert($0.lowercased()) }
             if !visible.isEmpty {
                 fails.append("can see \(visible.count) other private repo\(visible.count == 1 ? "" : "s") (\(shown(visible)))")
             }
@@ -173,6 +183,7 @@ enum TokenScope {
         let extra = view.names.filter { !servedKeys.contains($0.lowercased()) }.sorted()
         let seenKeys = Set(view.names.map { $0.lowercased() })
         let notShown = served.filter { !seenKeys.contains($0.lowercased()) }
+        extra.forEach { seenOthers.insert($0.lowercased()) }
         if !extra.isEmpty {
             fails.append("token reaches \(extra.count) other private repo\(extra.count == 1 ? "" : "s") (e.g. \(shown(extra))); set Only select repositories")
         } else if let doubt = view.incomplete {
@@ -183,6 +194,10 @@ enum TokenScope {
             unknowns.append("the token's list of private repos doesn't show \(notShown.joined(separator: ", "))")
         }
 
+        if allRepos {
+            let n = seenOthers.count
+            return .ok("reaches all repositories, by choice (\(n) other private repo\(n == 1 ? "" : "s"))")
+        }
         if !fails.isEmpty { return .fail(fails.joined(separator: "; ")) }
         if !unknowns.isEmpty { return .unknown(unknowns.joined(separator: "; ")) }
         return .ok("denied \(reqs.count) other private repo\(reqs.count == 1 ? "" : "s"); the token lists only the served repos")
