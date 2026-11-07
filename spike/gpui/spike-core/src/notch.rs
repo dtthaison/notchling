@@ -33,11 +33,12 @@ pub fn notch_rect(s: &ScreenInfo) -> Option<Rect> {
     })
 }
 
-/// Half-open on the right and top edges, so a boundary pixel belongs to one side
-/// only; the shape grows downward by `slack_below`.
+/// Half-open on the right edge, so a boundary pixel belongs to one side only. The top
+/// edge is inside: a pointer pushed to the top of the screen reports exactly that y,
+/// and `NSMouseInRect` counts it in. The shape grows downward by `slack_below`.
 pub fn hit_test(shape: Rect, mouse: (f64, f64), slack_below: f64) -> bool {
     let (mx, my) = mouse;
-    mx >= shape.x && mx < shape.x + shape.w && my >= shape.y - slack_below && my < shape.y + shape.h
+    mx >= shape.x && mx < shape.x + shape.w && my >= shape.y - slack_below && my <= shape.y + shape.h
 }
 
 #[cfg(test)]
@@ -73,5 +74,13 @@ mod tests {
         assert!(!hit_test(shape, (300., 916.), 0.)); // right edge is outside (half-open)
         assert!(hit_test(shape, (150., 897.), 4.)); // inside the 4 pt slack below
         assert!(!hit_test(shape, (150., 895.), 4.));
+    }
+
+    #[test]
+    fn hit_test_top_edge_is_inside() {
+        // A pointer pushed to the top of the screen reports y = the shape's top edge;
+        // NSMouseInRect (the Swift app) counts that as inside.
+        let shape = Rect { x: 100., y: 900., w: 200., h: 32. };
+        assert!(hit_test(shape, (150., 932.), 0.));
     }
 }

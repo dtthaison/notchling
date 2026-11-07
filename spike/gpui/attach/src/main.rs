@@ -62,9 +62,28 @@ struct Cleanup {
     id: Option<String>,
 }
 
+/// The background job whose working folder is `dir`, for when `claude --bg`'s output
+/// had no id we could read.
+fn job_in(dir: &Path) -> Option<String> {
+    let jobs = std::fs::read_dir(home().join(".claude/jobs")).ok()?;
+    jobs.flatten().find_map(|e| {
+        let id = e.file_name().to_string_lossy().to_string();
+        let s = state(&id)?;
+        (s["cwd"].as_str().map(Path::new) == Some(dir)).then_some(id)
+    })
+}
+
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        if let Some(id) = &self.id {
+        let id = self.id.clone().or_else(|| job_in(&self.dir));
+        // Only ever stop or remove the job that runs in our own scratch folder.
+        let ours = id.as_ref().is_some_and(|id| {
+            state(id).and_then(|s| s["cwd"].as_str().map(PathBuf::from)).as_deref() == Some(self.dir.as_path())
+        });
+        if let (Some(id), false) = (&id, ours) {
+            eprintln!("not stopping {id}: its folder isn't {}", self.dir.display());
+        }
+        if let (Some(id), true) = (&id, ours) {
             let (_, out) = run(&["stop", id], &self.dir);
             eprintln!("claude stop {id}: {}", out.trim());
             let (_, out) = run(&["rm", id], &self.dir);

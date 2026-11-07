@@ -24,13 +24,17 @@ pub fn tail_has_user_text(path: &Path, needle: &str, max_bytes: u64) -> io::Resu
     let mut f = File::open(path)?;
     let len = f.metadata()?.len();
     let start = len.saturating_sub(max_bytes);
-    f.seek(SeekFrom::Start(start))?;
+    // Read one byte before the tail too: the first line is cut only when that byte
+    // isn't a newline.
+    let from = start.saturating_sub(1);
+    f.seek(SeekFrom::Start(from))?;
     let mut buf = Vec::new();
-    f.take(max_bytes).read_to_end(&mut buf)?;
-    let text = String::from_utf8_lossy(&buf);
+    f.take(max_bytes + (start - from)).read_to_end(&mut buf)?;
+    let starts_clean = start == 0 || buf.first() == Some(&b'\n');
+    let text = String::from_utf8_lossy(if start > 0 { &buf[1..] } else { &buf[..] });
     let mut lines: Vec<&str> = text.split_inclusive('\n').collect();
-    if start > 0 && !lines.is_empty() {
-        lines.remove(0); // may start mid-line
+    if !starts_clean && !lines.is_empty() {
+        lines.remove(0); // starts mid-line
     }
     Ok(lines
         .iter()
@@ -96,6 +100,15 @@ mod tests {
         let line = "{\"type\":\"user\",\"message\":{\"content\":\"spike ping abc123\"}}\n";
         let f = tmp_with(line);
         assert!(!tail_has_user_text(f.path(), "abc123", (line.len() - 5) as u64).unwrap());
+    }
+
+    #[test]
+    fn matcher_keeps_whole_first_line_of_tail() {
+        // The tail starts exactly after a newline: its first line is complete.
+        let first = "{\"type\":\"user\",\"message\":{\"content\":\"older\"}}\n";
+        let second = "{\"type\":\"user\",\"message\":{\"content\":\"spike ping abc123\"}}\n";
+        let f = tmp_with(&format!("{first}{second}"));
+        assert!(tail_has_user_text(f.path(), "abc123", second.len() as u64).unwrap());
     }
 
     #[test]
