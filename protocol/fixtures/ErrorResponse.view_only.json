@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "view_only",
+    "message": "Session mở ngoài Console — chỉ xem."
+  },
+  "id": 10,
+  "ok": false
+}

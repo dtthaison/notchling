@@ -128,7 +128,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_phone_checks_run_on_every_pull_request(self):
         # phone-analyze and phone-test are required on main; a paths: filter leaves them pending forever
-        # on a pull request that touches nothing under mobile/.
+        # on a pull request that touches nothing under apps/flutter/.
         text = read(".github/workflows/phone.yml")
         self.assertNotRegex(text, r"(?m)^\s*paths(-ignore)?:")
         self.assertRegex(text, r"(?m)^  pull_request:\s*$")
@@ -153,7 +153,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", text)
 
     def test_code_jobs_have_no_secrets(self):
-        for f in ("guard.yml", "build.yml", "phone.yml"):
+        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml"):
             self.assertNotIn("secrets.", read(".github/workflows/" + f), f)
 
     def test_every_workflow_sets_permissions(self):
@@ -162,8 +162,15 @@ class WorkflowTests(unittest.TestCase):
 
     def test_required_check_jobs_exist(self):
         found = {j for f in WORKFLOWS.glob("*.yml") for j in jobs(f.read_text())}
-        for name in ("build", "app-build", "guard", "phone-analyze", "phone-test"):
+        for name in ("build", "app-build", "guard", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"):
             self.assertIn(name, found)
+
+    def test_rust_clippy_job_checks_formatting_before_clippy(self):
+        text = read(".github/workflows/rust.yml")
+        job = text.split("\n  rust-clippy:\n", 1)[1].split("\n  rust-deny:\n", 1)[0]
+        self.assertIn("cargo fmt --all --check", job)
+        self.assertIn("cargo clippy", job)
+        self.assertLess(job.index("cargo fmt --all --check"), job.index("cargo clippy"))
 
     def test_guard_job_runs_every_check(self):
         text = read(".github/workflows/guard.yml")
@@ -171,7 +178,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(cmd, text)
 
     def test_pr_workflows_dont_persist_credentials(self):
-        for f in ("guard.yml", "build.yml", "phone.yml", "maintainer-gate.yml"):
+        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml", "maintainer-gate.yml"):
             text = read(".github/workflows/" + f)
             self.assertEqual(text.count("actions/checkout@"), text.count("persist-credentials: false"), f)
 

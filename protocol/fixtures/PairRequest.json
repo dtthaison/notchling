@@ -1,0 +1,9 @@
+{
+  "code": "ABCD2345",
+  "device": {
+    "name": "Son's iPhone",
+    "platform": "ios"
+  },
+  "id": 1,
+  "op": "pair"
+}

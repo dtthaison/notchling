@@ -1,7 +1,7 @@
 name: phone
 
 # No `paths:` filter: phone-analyze and phone-test are required checks on main, and a filtered
-# workflow never reports on a pull request that touches nothing under mobile/, so it would wait forever.
+# workflow never reports on a pull request that touches nothing under apps/flutter/, so it would wait forever.
 on:
   pull_request:
   push:
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/flutter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/flutter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

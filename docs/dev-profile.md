@@ -13,7 +13,7 @@ tools/dev-profile.sh shell [args]       # runs $SHELL inside the profile (shell 
 
 The profile is `${NOTCHLING_DEV_HOME:-$HOME/.notchling-dev/home}`. It starts empty: no settings, no hooks, no `claude` login of its own. The app still sees your real Claude Code login; see "What is not isolated". Sign in to `claude` inside it (`tools/dev-profile.sh claude`). `--copy-login` is not implemented, on purpose: copying a login means copying a refresh token, and refresh tokens rotate.
 
-`./build.sh --dev` takes no other flag and is never installed. It changes only the built copy of `Info.plist`: bundle id `local.notchling.dev`, name "Notchling Dev", and it drops the `agentconsole://` URL scheme so it doesn't compete with the installed app. Without `--dev`, `build.sh` does what it always did.
+`./build.sh --dev` takes no other flag and is never installed. It changes only the built copy of `legacy/macos/Info.plist`: bundle id `local.notchling.dev`, name "Notchling Dev", and it drops the `agentconsole://` URL scheme so it doesn't compete with the installed app. Without `--dev`, `build.sh` does what it always did.
 
 ## How it works
 

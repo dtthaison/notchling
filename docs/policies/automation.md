@@ -14,7 +14,12 @@ What exists and runs now:
 
 - **The `guard` workflow** (`.github/workflows/guard.yml`), on every pull request and push to `main`:
   the guard's own tests, the architecture lint against its baseline, pinned actions, CODEOWNERS
-  generated from the zones, the rulesets' validity, and the rules catalog. It has no secrets.
+  generated from the zones, the rulesets' validity, the rules catalog, and the generated protocol
+  types matching the schema (`GUARD-PROTOCOL-GEN`). It has no secrets.
+- **The `rust` workflow** (`.github/workflows/rust.yml`), on every pull request and push to `main`:
+  `rust-test` (`cargo test` on macOS, Linux and Windows), `rust-clippy` (`cargo fmt --all --check`,
+  then clippy with warnings as errors) and `rust-deny` (`cargo deny check` against `deny.toml`). No
+  third-party actions and no secrets.
 - **`maintainer-gate`** (`.github/workflows/maintainer-gate.yml`): a status on every pull request into
   `main`. It fails when the pull request touches anything outside the auto-merge zone, uses a
   capability, weakens a test or adds a path that differs from a protected one only by case, until the
@@ -39,7 +44,8 @@ From Phase 5, an agent's pull request merges on its own only when all of these h
 - it changes nothing outside the auto-merge zone;
 - it trips no capability check (`CAP-*`) and no test-weakening check (`WEAK-*`);
 - every required check is green on its head commit: `build`, `app-build`, `guard`, `maintainer-gate`,
-  `phone-analyze`, `phone-test`, plus the cross-model review once it exists;
+  `phone-analyze`, `phone-test`, `rust-test`, `rust-clippy`, `rust-deny`, plus the cross-model review
+  once it exists;
 - any approval came after the last push (`require_last_push_approval`), and the review is bound to the
   head commit, so only the reviewed commit merges.
 
@@ -47,9 +53,10 @@ It merges by GitHub auto-merge, squashed. Everything else waits for the maintain
 
 The zone is the list in `tools/guard/zones.json`, which is the source of truth: views, the design kit,
 search, the transcript readers, `docs/` except the manual's layers, the phone's features except
-pairing, and new tests, but not edits to existing ones. In the Rust tree it will be `crates/app/`,
-`crates/kit/`, and the transcript and search modules of `crates/engine/`. The zone file is protected,
-so widening it needs the maintainer.
+pairing, and new tests, but not edits to existing ones. In the Rust tree it is `crates/app/` and
+`crates/kit/` (but not their `Cargo.toml` or `build.rs`), and the transcript and search modules of
+`crates/engine/` once they are written. The zone file is protected, so widening it needs the
+maintainer.
 
 ## The agent's GitHub identity (Phase 5)
 

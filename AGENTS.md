@@ -1,6 +1,6 @@
 # Notchling: instructions for agents
 
-Notchling is a macOS menu bar app (Swift, AppKit + SwiftUI) that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Its Chat window is the full-size view of a session; a phone app (Flutter, `mobile/`) follows and answers sessions over the Mac's bridge. [README.md](README.md) says what it does for the people who use it.
+Notchling is a macOS menu bar app (Swift, AppKit + SwiftUI) that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Its Chat window is the full-size view of a session; a phone app (Flutter, `apps/flutter/`) follows and answers sessions over the Mac's bridge. [README.md](README.md) says what it does for the people who use it.
 
 This file is the start. Codex and Antigravity read AGENTS.md files themselves; Claude Code reads them through `CLAUDE.md`, which holds only `@AGENTS.md`. Don't add another `CLAUDE*.md` anywhere: CI fails on it (`GUARD-CLAUDE-MD`).
 
@@ -16,15 +16,15 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 | Feature map | [docs/feature-map.md](docs/feature-map.md) | Each feature's folders, tests and zone |
 | Skills | [.claude/skills/](.claude/skills/) | Steps for repeated work; one marked `Tried: not yet` is untested, so check its steps |
 | Dev profile | [docs/dev-profile.md](docs/dev-profile.md) | Running the app and hooks without touching your real `~/.claude/` |
-| Swift app | [Sources/AGENTS.md](Sources/AGENTS.md) | The working notes: architecture in one pass, things that bit before |
-| Phone app | [mobile/AGENTS.md](mobile/AGENTS.md) | The phone's rules and checks |
+| Swift app | [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) | The working notes: architecture in one pass, things that bit before |
+| Phone app | [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) | The phone's rules and checks |
 
 ## Build, test, check
 
 ```sh
 ./build.sh                # build/Notchling.app (arm64 + x86_64, signed ad hoc)
 ./build.sh --dev          # build/Notchling Dev.app, run it with tools/dev-profile.sh app
-swift test                # Tests/NotchlingTests and Tests/ConsoleCoreTests
+swift test                # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 export PYTHONPATH=tools/guard
 python3 -m unittest discover -s tools/guard/tests -t tools/guard   # the guard's own tests
 python3 -m guard lint                 # architecture lint; fails only on new or changed lines
@@ -33,9 +33,10 @@ python3 -m guard pins                 # workflow actions pinned and allowlisted
 python3 -m guard codeowners --check   # CODEOWNERS matches tools/guard/zones.json
 python3 -m guard rulesets             # the rulesets require checks the workflows run
 python3 -m guard claudemd             # CLAUDE.md is only @AGENTS.md, and there is no other
+cargo test --workspace --locked       # the Rust crates (also: cargo clippy --workspace --all-targets -- -D warnings, cargo fmt --check, cargo deny check)
 ```
 
-The phone app's checks are in [mobile/AGENTS.md](mobile/AGENTS.md) (`flutter analyze`, `flutter test`). Run `swift test` after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test` and `maintainer-gate`.
+The phone app's checks are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) (`flutter analyze`, `flutter test`). Run `swift test` after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test`, `rust-test`, `rust-clippy`, `rust-deny` and `maintainer-gate`.
 
 ## The line
 
@@ -49,7 +50,7 @@ Everything else waits, including logins, Keychain, the vault, lanes, Machines, t
 2. A branch `agent/<issue>-<slug>` (or a fork). A bug fix starts with a test that fails on `main`.
 3. The change with its tests, and the checks above run locally.
 4. A pull request. Until Phase 5 the maintainer merges every pull request and agents never merge one ([docs/policies/automation.md](docs/policies/automation.md)). After that, one that stays in the safe areas merges once every check is green; anything else waits for the maintainer.
-5. A release: Beta, then Stable (coming; until then `release.sh`).
+5. A release: Beta, then Stable (coming; until then `legacy/macos/release.sh`).
 
 Details and the PR checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -68,7 +69,7 @@ Details and the PR checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Folder notes
 
-- [Sources/AGENTS.md](Sources/AGENTS.md): the Swift app. Read it before changing `Sources/`, `Tests/`, `Fixtures/`, `Demo/` or `build.sh`. Claude Code loads it through the line below. It is longer than some tools load on their own (Codex cuts project docs at its `project_doc_max_bytes`), so read the whole file with a file read before working there.
-- [mobile/AGENTS.md](mobile/AGENTS.md): the phone app. Read it before changing `mobile/`.
+- [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md): the Swift app. Read it before changing `legacy/macos/` (`Sources/`, `Tests/`, `Fixtures/`, `Demo/`, `build.sh`). Claude Code loads it through the line below. It is longer than some tools load on their own (Codex cuts project docs at its `project_doc_max_bytes`), so read the whole file with a file read before working there.
+- [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md): the phone app. Read it before changing `apps/flutter/`.
 
-@Sources/AGENTS.md
+@legacy/macos/Sources/AGENTS.md

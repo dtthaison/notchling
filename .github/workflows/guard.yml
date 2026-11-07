@@ -2,7 +2,8 @@ name: Guard
 
 # The project's rules as checks: the guard's own tests, the architecture lint against its baseline,
 # pinned actions, CODEOWNERS generated from zones.json, the rulesets, and the rules catalog (each
-# rule in docs/rules.md has a check that fires on its bad example; CLAUDE.md is @AGENTS.md). No secrets.
+# rule in docs/rules.md has a check that fires on its bad example; CLAUDE.md is @AGENTS.md) and the
+# generated protocol types (regenerating them from the schema changes nothing). No secrets.
 on:
   pull_request:
   push:
@@ -39,3 +40,7 @@ jobs:
         run: |
           python3 -m guard rules
           python3 -m guard claudemd
+      - name: Protocol types
+        run: |
+          python3 tools/protocol/gen.py --check
+          python3 -m unittest discover -s tools/protocol/tests -t tools/protocol

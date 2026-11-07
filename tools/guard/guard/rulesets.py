@@ -20,7 +20,8 @@ ADMIN_BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "
 # release.yml's `gh release create` makes the v* tag with GITHUB_TOKEN, which is the GitHub Actions app.
 # Only a workflow holding contents: write can use this (test_workflows pins that to release.yml).
 ACTIONS_BYPASS = [{"actor_id": GITHUB_ACTIONS_APP, "actor_type": "Integration", "bypass_mode": "always"}]
-CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test"]
+CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test",
+            "rust-test", "rust-clippy", "rust-deny"]
 POSTED_STATUSES = {"maintainer-gate"}
 PULL_REQUEST = {
     "require_code_owner_review": True,

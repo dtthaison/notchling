@@ -35,7 +35,10 @@
           {"context": "guard", "integration_id": 15368},
           {"context": "maintainer-gate", "integration_id": 15368},
           {"context": "phone-analyze", "integration_id": 15368},
-          {"context": "phone-test", "integration_id": 15368}
+          {"context": "phone-test", "integration_id": 15368},
+          {"context": "rust-test", "integration_id": 15368},
+          {"context": "rust-clippy", "integration_id": 15368},
+          {"context": "rust-deny", "integration_id": 15368}
         ]
       }
     }

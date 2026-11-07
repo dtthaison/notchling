@@ -10,7 +10,7 @@
 - [ ] `swift test` passes
 - [ ] Guard passes: `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, plus the guard tests if `tools/guard/` changed)
 - [ ] `./build.sh` builds without warnings I added
-- [ ] If `mobile/` changed: `flutter analyze` and `flutter test` pass
+- [ ] If `apps/flutter/` changed: `flutter analyze` and `flutter test` pass
 - [ ] If users would see it: tried in the running app (macOS version: )
 - [ ] Changelog: a line under [Unreleased] in CHANGELOG.md, if users would notice (per-PR fragments replace this in Phase 6)
 - [ ] No secrets in the diff or screenshots: tokens, cookies, `~/.claude.json` contents, vault values

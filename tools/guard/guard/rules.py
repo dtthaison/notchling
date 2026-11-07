@@ -72,7 +72,7 @@ def _lint_probe(rule_id: str) -> Callable[[], bool]:
 
 # ---- capability ------------------------------------------------------------------------------
 
-ZONE_FILE = "Sources/Notchling/Search/X.swift"
+ZONE_FILE = "legacy/macos/Sources/Notchling/Search/X.swift"
 # One bad line for each capability rule (the tests hold more).
 CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-PROCESS": (ZONE_FILE, "let p = Process()"),
@@ -82,7 +82,7 @@ CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-NETWORK": (ZONE_FILE, "URLSession.shared.dataTask(with: url)"),
     "CAP-KEYCHAIN": (ZONE_FILE, "SecItemCopyMatching(query, &out)"),
     "CAP-FILEWRITE": (ZONE_FILE, "try data.write(to: url)"),
-    "CAP-PROTECTED-TYPE": ("Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(text, to: agent)"),
+    "CAP-PROTECTED-TYPE": ("legacy/macos/Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(text, to: agent)"),
     # More `*/` on one line than any real line has.
     "CAP-OBSCURE": (ZONE_FILE, "a /* b */ " * (capability.MAX_COMMENT_ENDS + 1)),
 }
@@ -175,7 +175,7 @@ def _guard_baseline() -> bool:
 
 def _guard_claude_md() -> bool:
     with _tmp() as root:
-        _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "Sources/CLAUDE.md": "a second source\n"})
+        _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "legacy/macos/Sources/CLAUDE.md": "a second source\n"})
         problems = claudemd.check(root)
     return any(p.startswith("GUARD-CLAUDE-MD") for p in problems)
 
@@ -189,6 +189,27 @@ def _guard_rules() -> bool:
     return any(p.startswith(RULE) and "NOT-A-RULE" in p for p in problems)
 
 
+def _guard_protocol_gen() -> bool:
+    """Types generated from a copy of the schema pass `gen.py --check`; the same copy with a field added fails it, by id."""
+    repo = PACKAGE_ROOT.parents[1]
+    gen = repo / "tools/protocol/gen.py"
+    schema = json.loads((repo / "protocol/agentconsole.v1.schema.json").read_text(encoding="utf-8"))
+    with _tmp() as root:
+        copy = root / "schema.json"
+        args = ["--schema", str(copy), "--rust", str(root / "generated.rs"), "--dart", str(root / "generated.dart")]
+
+        def run(*extra: str) -> "subprocess.CompletedProcess[str]":
+            return subprocess.run([sys.executable, str(gen), *args, *extra], capture_output=True, text=True, timeout=120)
+
+        copy.write_text(json.dumps(schema), encoding="utf-8")
+        if run().returncode != 0 or run("--check").returncode != 0:
+            return False
+        schema["$defs"]["Session"]["properties"]["guardProbe"] = {"type": "string", "description": "added by the probe"}
+        copy.write_text(json.dumps(schema), encoding="utf-8")
+        stale = run("--check")
+    return stale.returncode == 1 and "GUARD-PROTOCOL-GEN" in stale.stdout + stale.stderr
+
+
 Registry = Dict[str, Callable[[], bool]]
 REGISTRY: Registry = {}
 for _r in lint.RULES:
@@ -198,10 +219,10 @@ for _id in capability.RULES:
 REGISTRY[capability.BINARY_RULE] = _cap_binary
 REGISTRY[capability.OBSCURE_RULE] = _cap_probe(capability.OBSCURE_RULE)
 REGISTRY.update({
-    "WEAK-TEST-EDIT": _weak("WEAK-TEST-EDIT", Change("Tests/NotchlingTests/AThingTests.swift", "M")),
-    "WEAK-SKIP": _weak("WEAK-SKIP", Change("Tests/NotchlingTests/AThingTests.swift", "A",
+    "WEAK-TEST-EDIT": _weak("WEAK-TEST-EDIT", Change("legacy/macos/Tests/NotchlingTests/AThingTests.swift", "M")),
+    "WEAK-SKIP": _weak("WEAK-SKIP", Change("legacy/macos/Tests/NotchlingTests/AThingTests.swift", "A",
                                            None, ((1, "try XCTSkip(\"later\")"),))),
-    "WEAK-UNICODE": _weak("WEAK-UNICODE", Change("Sources/Notchling/A.swift", "M",
+    "WEAK-UNICODE": _weak("WEAK-UNICODE", Change("legacy/macos/Sources/Notchling/A.swift", "M",
                                                  None, ((1, "let a = 1 \u202e // reads differently\n"),))),
     "ZONE": _gate_zone,
     "CASE-COLLISION": _gate_case_collision,
@@ -211,6 +232,7 @@ REGISTRY.update({
     "GUARD-BASELINE": _guard_baseline,
     "GUARD-CLAUDE-MD": _guard_claude_md,
     "GUARD-RULES": _guard_rules,
+    "GUARD-PROTOCOL-GEN": _guard_protocol_gen,
 })
 del _r, _id
 

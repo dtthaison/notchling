@@ -14,7 +14,7 @@ from guard.capability import Trip
 from guard.changes import Change
 
 TEST_PATHS = [re.compile(p) for p in (
-    r"^Tests/", r"^Fixtures/", r"^mobile/test/", r"^tools/guard/tests/",
+    r"^legacy/macos/Tests/", r"^legacy/macos/Fixtures/", r"^apps/flutter/test/", r"^tools/guard/tests/",
     r"^crates/[^/]+/tests/", r"(^|/)goldens/.*\.png$",
 )]
 SKIPS = [re.compile(p) for p in (

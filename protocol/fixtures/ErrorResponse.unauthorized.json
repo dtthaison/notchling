@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "Token không đúng hoặc đã bị thu hồi."
+  },
+  "id": 1,
+  "ok": false
+}

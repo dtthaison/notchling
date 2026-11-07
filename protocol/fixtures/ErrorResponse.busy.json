@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "busy",
+    "message": "Vừa ngắt xong, đợi một chút."
+  },
+  "id": 11,
+  "ok": false
+}

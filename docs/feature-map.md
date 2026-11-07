@@ -2,18 +2,18 @@
 
 One row per feature area: where its code is, which tests cover it, whether a change there may merge on its own, and which parts of the port it becomes. Use it to find what to read before a change, and what to port for a part.
 
-- **Folders** are under `Sources/Notchling/` unless they start with another top folder. `CC/` is `Sources/ConsoleCore/`.
-- **Tests** are in `Tests/NotchlingTests/`, with `CC:` for `Tests/ConsoleCoreTests/` and phone tests in `mobile/test/`. Fixtures are in each test folder's `Fixtures/`.
+- **Folders** are under `legacy/macos/Sources/Notchling/` unless they start with another top folder. `CC/` is `legacy/macos/Sources/ConsoleCore/`.
+- **Tests** are in `legacy/macos/Tests/NotchlingTests/`, with `CC:` for `legacy/macos/Tests/ConsoleCoreTests/` and phone tests in `apps/flutter/test/`. Fixtures are in each test folder's `Fixtures/`, except the protocol's, which are in `protocol/fixtures/`. Rust and Python tests are named by their path.
 - **Zone** comes from [`tools/guard/zones.json`](../tools/guard/zones.json), which is the source of truth: `auto` may merge on its own once every check is green, `protected` waits for the maintainer, `mixed` names the files that are `auto`. A new test file is allowed in the zone; a change to an existing test is protected. Check one path with:
 
   ```sh
-  PYTHONPATH=tools/guard python3 -c "from guard.zones import load; print(load('tools/guard/zones.json').in_zone('Sources/Notchling/Search/SearchPanel.swift'))"
+  PYTHONPATH=tools/guard python3 -c "from guard.zones import load; print(load('tools/guard/zones.json').in_zone('legacy/macos/Sources/Notchling/Search/SearchPanel.swift'))"
   ```
 
   A file in the zone still goes to the maintainer when it adds a process, pty, network, Keychain, file write or protected-type use (the capability check), or weakens a test.
 - **Parts** are the port's part ids from the [design](superpowers/specs/2026-11-07-agent-run-open-source-design.md#parts): E (Rust engine), U (GPUI desktop app), P (phone). A part is done when its ported tests pass and its behavior fixtures match the Swift app.
 
-Checked against the tree on 2026-11-07. When you add, move or delete a file, update its row.
+Checked against the tree on 2026-11-08. When you add, move or delete a file, update its row.
 
 ## Mac app: reading
 
@@ -31,7 +31,7 @@ Checked against the tree on 2026-11-07. When you add, move or delete a file, upd
 | --- | --- | --- | --- | --- |
 | Replies and question dialogs | `Agents/ReplySender.swift`, `Agents/ReplySender+Dialog.swift`, `Agents/AskDialog.swift`, `Agents/ShellCommand.swift`, `CC/JobReplySender.swift`, `CC/MessageSending.swift`, `CC/PTYSession.swift`, `CC/SpawnEnvironment.swift` | `AskDialogTests`, `ShellCommandTests`, `HostReplyTests`, `ZLiveReplyTests` (live, opt-in); CC: `InputRoutingTests`, `SpawnTests`; fixtures `terminal/` | protected | E3 |
 | Terminal sheet | `Terminal/TerminalSession.swift`, `Terminal/TerminalScreen.swift`, `Terminal/TerminalView.swift` | `TerminalScreenTests`; fixtures `terminal/` | protected | E3, U1 |
-| Session host (hostd) | `Sources/hostd/main.swift`, `CC/Hostd/`, `tools/install-hostd.sh` | CC: `HostdTests` | protected | E3 |
+| Session host (hostd) | `legacy/macos/Sources/hostd/main.swift`, `CC/Hostd/`, `tools/install-hostd.sh` | CC: `HostdTests` | protected | E3 |
 | Hook | `Hook/HookBridge.swift`, `CC/HookResponder.swift` | `HookAndPagesTests`; CC: `HookResponderTests` | protected | E4, E13 |
 | Session control | `Agents/AgentActions.swift`, `Chat/NewSessionSheet.swift`, `Chat/Model/ChatModel+Sessions.swift`, `Chat/ChatTakeover.swift`, `App/WakeResumer.swift`, `Chat/GitInfo.swift`, `CC/Takeover.swift`, `CC/StopOriginal.swift`, `CC/SessionPidMapper.swift` | `GitInfoTests`; CC: `TakeoverTests`, `StopOriginalTests`, `OwnershipTests`, `SendNowTests` | protected | E11, U7 (Trust Folder), U8 |
 | Slash commands | `Agents/SlashCommands.swift`, `Agents/CodexCommands.swift` | `SlashCommandTests`; fixtures `installed_plugins.json`, `known_marketplaces.json` | protected | E11 |
@@ -65,32 +65,50 @@ Checked against the tree on 2026-11-07. When you add, move or delete a file, upd
 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |
-| Phone bridge and pairing | `Phone/BridgeController.swift`, `Phone/BridgeIdentity.swift`, `Phone/BridgeServer.swift`, `Phone/TunnelOriginServer.swift`, `Phone/LiveBridgeBackend.swift`, `Phone/PhoneModel.swift`, `Phone/PhoneService.swift`, `Phone/ForeignSessions.swift`, `Phone/PhonePanel.swift`, `CC/Bridge/` (17 files) | `ForeignSessionsTests`; CC: `BridgeRouterTests`, `BridgeSecurityTests`, `TunnelAccessTests`, `PhoneUploadTests`, `AppURLTests` | protected | E5, U6 |
+| Phone bridge and pairing | `Phone/BridgeController.swift`, `Phone/BridgeIdentity.swift`, `Phone/BridgeServer.swift`, `Phone/TunnelOriginServer.swift`, `Phone/LiveBridgeBackend.swift`, `Phone/PhoneModel.swift`, `Phone/PhoneService.swift`, `Phone/ForeignSessions.swift`, `Phone/PhonePanel.swift`, `CC/Bridge/` (17 files) | `ForeignSessionsTests`; CC: `BridgeRouterTests`, `BridgeSecurityTests`, `TunnelAccessTests`, `PhoneUploadTests`, `AppURLTests`, `ProtocolFixturesTests` (the bridge against `protocol/fixtures/`) | protected | E5, U6 |
 | Phone extras | `Phone/PhoneStreamer.swift`, `Phone/WebSnapshotter.swift`, `CC/VizEngine.swift`, `CC/VizSpec.swift`, `CC/VisualizeSuggester.swift`, `CC/WebURLResolver.swift`, `CC/DeviceWindowPicker.swift`, `CC/SchemaParsers.swift`, `CC/GitReader.swift`, `viz/` | CC: `VizEngineTests`, `VizBridgeTests`, `VisualizeSuggesterTests`, `SchemaParserTests` | protected | E15 |
 
-## Phone app (`mobile/`)
+## Phone app (`apps/flutter/`)
 
-The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for the folder are in [`mobile/AGENTS.md`](../mobile/AGENTS.md).
+The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for the folder are in [`apps/flutter/AGENTS.md`](../apps/flutter/AGENTS.md).
 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |
-| Phone shell, kit and strings | `mobile/lib/main.dart`, `mobile/lib/app/` (theme, widgets, alerts, notifications), `mobile/lib/l10n/`, `mobile/DESIGN.md` | `widgets_test`, `motion_test`, `background_alerts_test`, `message_alerts_test`, `keyboard_close_gap_test`, `goldens/kit_golden_test` | protected | P0, P3 |
-| Phone protocol and network | `mobile/lib/core/protocol/`, `mobile/lib/core/net/` | `bridge_client_test`, `tunnel_test`, `tunnel_socket_test`, `phase2_test` | protected | P1, E5 |
-| Phone pairing and Macs | `mobile/lib/core/pairing/`, `mobile/lib/features/pairing/`, `mobile/lib/features/macs/`, `mobile/lib/features/connection/` | `pairing_test`, `tunnel_test`, `chat_sync_test` | mixed: `features/macs/`, `features/connection/` auto | P2, U6 |
-| Phone chat | `mobile/lib/features/chat/` | `chat_kit_test`, `chat_sync_test`, `markdown_table_test`, `send_now_test`, `takeover_test`, `keyboard_composer_gap_test`, `keyboard_focus_test`, `goldens/kit_golden_test` | auto | P1 (generated types) |
-| Phone sessions | `mobile/lib/features/sessions/` | `takeover_row_test`, `state_test`, `widgets_test` | auto | P2 |
-| Phone voice | `mobile/lib/features/voice/` | `voice_controller_test`, `voice_logic_test` | auto | none |
-| Phone visualize | `mobile/lib/features/visualize/` | `state_test` | auto | E15 (Mac side) |
-| Phone settings | `mobile/lib/features/settings/` | `settings_test` | auto | none |
-| Phone debug tools | `mobile/lib/debug/` | none | protected | none |
+| Phone shell, kit and strings | `apps/flutter/lib/main.dart`, `apps/flutter/lib/app/` (theme, widgets, alerts, notifications), `apps/flutter/lib/l10n/`, `apps/flutter/DESIGN.md` | `widgets_test`, `motion_test`, `background_alerts_test`, `message_alerts_test`, `keyboard_close_gap_test`, `goldens/kit_golden_test` | protected | P0, P3 |
+| Phone protocol and network | `apps/flutter/lib/core/protocol/` (`models.dart`, hand-written, is what the app reads; `generated.dart` comes from `tools/protocol/gen.py`), `apps/flutter/lib/core/net/` | `bridge_client_test`, `tunnel_test`, `tunnel_socket_test`, `phase2_test`, `protocol_conformance_test` (every fixture through both) | protected | P1, E5 |
+| Phone pairing and Macs | `apps/flutter/lib/core/pairing/`, `apps/flutter/lib/features/pairing/`, `apps/flutter/lib/features/macs/`, `apps/flutter/lib/features/connection/` | `pairing_test`, `tunnel_test`, `chat_sync_test` | mixed: `features/macs/`, `features/connection/` auto | P2, U6 |
+| Phone chat | `apps/flutter/lib/features/chat/` | `chat_kit_test`, `chat_sync_test`, `markdown_table_test`, `send_now_test`, `takeover_test`, `keyboard_composer_gap_test`, `keyboard_focus_test`, `goldens/kit_golden_test` | auto | P1 (generated types) |
+| Phone sessions | `apps/flutter/lib/features/sessions/` | `takeover_row_test`, `state_test`, `widgets_test` | auto | P2 |
+| Phone voice | `apps/flutter/lib/features/voice/` | `voice_controller_test`, `voice_logic_test` | auto | none |
+| Phone visualize | `apps/flutter/lib/features/visualize/` | `state_test` | auto | E15 (Mac side) |
+| Phone settings | `apps/flutter/lib/features/settings/` | `settings_test` | auto | none |
+| Phone debug tools | `apps/flutter/lib/debug/` | none | protected | none |
+
+## Rust workspace (`crates/`)
+
+Since Phase 4. Every crate but `crates/protocol` is a stub that builds, has one unit test in its `src/`, and does nothing else; the ported code arrives part by part from Phase 7. A crate's `Cargo.toml` and `build.rs` are protected even where its code is `auto`.
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Workspace | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` (Rust 1.99.1), `deny.toml` (the license allowlist) | the `rust-test`, `rust-clippy` and `rust-deny` checks | protected | none |
+| Engine | `crates/engine/` | unit test in `src/lib.rs` | mixed: `src/transcript/`, `src/search/` auto (not written yet) | E1 to E3, E5 to E9, E11 to E15 |
+| Engine service | `crates/notchlingd/` (prints its version) | unit test in `src/main.rs` | protected | E4, E16 |
+| Terminal host | `crates/ptyhost/` (prints its version) | unit test in `src/main.rs` | protected | E3 |
+| Local API | `crates/local-api/` | unit test in `src/lib.rs` | protected | E17 |
+| Desktop app | `crates/app/` (no GPUI yet) | unit test in `src/lib.rs` | mixed: all but `Cargo.toml` and `build.rs` auto | U1 to U11 |
+| Kit | `crates/kit/` | unit test in `src/lib.rs` | mixed: all but `Cargo.toml` and `build.rs` auto | U0 |
+| Platform | `crates/platform/` | unit test in `src/lib.rs` | protected | U0, U2 |
+| Protocol types | `crates/protocol/src/lib.rs`, `crates/protocol/src/generated.rs` (from `tools/protocol/gen.py`; never edit it by hand) | `crates/protocol/tests/fixtures.rs` (every fixture parses and writes back the same JSON) | protected | P1, E5 |
 
 ## Repository
 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |
-| Build, release and demo | `build.sh`, `release.sh`, `Package.swift`, `Info.plist`, `Icon/`, `Demo/`, `Pet/` (pet art), `tools/migrate-and-install.sh` | the `app-build` check | protected | E16, U10 (`Demo/` renders real views offscreen), U11 |
+| Build, release and demo | `build.sh` (root wrapper), `legacy/macos/build.sh`, `legacy/macos/release.sh`, `Package.swift`, `legacy/macos/Info.plist`, `legacy/macos/Icon/`, `legacy/macos/Demo/`, `legacy/macos/Pet/` (pet art), `tools/migrate-and-install.sh` | the `app-build` check | protected | E16, U10 (`legacy/macos/Demo/` renders real views offscreen), U11 |
 | Guard rails | `tools/guard/`, `tools/github/`, `.github/` | `tools/guard/tests/` | protected | none (Phase 2) |
-| Operating manual | `AGENTS.md`, `Sources/AGENTS.md`, `mobile/AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `GOVERNANCE.md`, `docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`, `.claude/` (skills) | `guard rules` and `GUARD-CLAUDE-MD` | protected | none |
+| Bridge protocol | `protocol/README.md`, `protocol/agentconsole.v1.schema.json`, `protocol/fixtures/` (74 files) | CC: `ProtocolFixturesTests`; `tools/protocol/tests/test_fixtures.py`; `crates/protocol/tests/fixtures.rs`; `protocol_conformance_test` | protected | P1, E5 |
+| Protocol generator | `tools/protocol/gen.py`, `tools/protocol/schema_validate.py` | `tools/protocol/tests/` (`test_gen`, `test_validate`, `test_fixtures`); `GUARD-PROTOCOL-GEN` | protected | P1 |
+| Operating manual | `AGENTS.md`, `legacy/macos/Sources/AGENTS.md`, `apps/flutter/AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `GOVERNANCE.md`, `docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`, `.claude/` (skills) | `guard rules` and `GUARD-CLAUDE-MD` | protected | none |
 | Other docs | `docs/` except the manual: `features.md`, `architecture.md`, `chat-design.md`, `chat-kit.md`, `console-design.md`, `plans/`, `superpowers/`, this map | none | auto | none |
 | GPUI spike | `spike/` (throwaway, decision 0001) | none | protected | U0 to U10 (findings only) |
 
@@ -102,7 +120,7 @@ The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for 
 | E2 Sessions | Sessions and jobs |
 | E3 Terminal and replies | Replies and question dialogs; Terminal sheet; Session host (hostd) |
 | E4 Hook | Hook |
-| E5 Phone bridge | Phone bridge and pairing; Phone protocol and network |
+| E5 Phone bridge | Phone bridge and pairing; Phone protocol and network; Bridge protocol |
 | E6 Other tools | Codex and Antigravity runners; Delegate and Second Opinion |
 | E7 Pages and search index | Pages library; Search (index) |
 | E8 Accounts | Accounts and providers; Limits; Cost; Lanes and session moves |
@@ -125,9 +143,9 @@ The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for 
 | U7 Pop-ups outside Chat | Secret Vault (approval, request form); Limits (banners); Session control (Trust Folder) |
 | U8 Sheets | Session control (New Session); Accounts (Add Account, Settings); Delegate (Second Opinion); Chat views (pickers) |
 | U9 Usage and cost | Limits; Cost; Chat views (meters) |
-| U10 Rendering for agents | Notch views (`render-notch-view` skill); Build, release and demo (`Demo/`) |
+| U10 Rendering for agents | Notch views (`render-notch-view` skill); Build, release and demo (`legacy/macos/Demo/`) |
 | U11 First run and updates | App shell; Build, release and demo |
 | P0 Phone guard rails | Phone shell, kit and strings (goldens) |
-| P1 Generated protocol types | Phone protocol and network; Phone chat |
+| P1 Generated protocol types | Phone protocol and network; Phone chat; Bridge protocol; Protocol generator; Protocol types |
 | P2 Remote computers | Phone pairing and Macs; Phone sessions |
 | P3 Rename and docs | Phone shell, kit and strings |

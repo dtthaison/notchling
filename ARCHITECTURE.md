@@ -7,7 +7,7 @@ How Notchling's parts fit, in two layers:
 
 Why it is this way is in the [decision records](docs/decisions/README.md); changing a decision takes a new record. The plan behind the target is the [design](docs/superpowers/specs/2026-11-07-agent-run-open-source-design.md) (revision 2).
 
-Related: what Notchling is for, [docs/goals.md](docs/goals.md). The rules and their checks, [docs/rules.md](docs/rules.md). The Swift app in detail, [Sources/AGENTS.md](Sources/AGENTS.md). Which files make up each feature, [docs/feature-map.md](docs/feature-map.md). The earlier restructuring review of the Swift app, [docs/architecture.md](docs/architecture.md), is kept as history; its phase numbers are its own, not the design's.
+Related: what Notchling is for, [docs/goals.md](docs/goals.md). The rules and their checks, [docs/rules.md](docs/rules.md). The Swift app in detail, [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md). Which files make up each feature, [docs/feature-map.md](docs/feature-map.md). The earlier restructuring review of the Swift app, [docs/architecture.md](docs/architecture.md), is kept as history; its phase numbers are its own, not the design's.
 
 ## Today: the Swift app
 
@@ -30,7 +30,7 @@ Related: what Notchling is for, [docs/goals.md](docs/goals.md). The rules and th
 | `Notchling.app` | The menu bar app. One process: the notch, Chat, accounts, the vault, pages, search, Machines, keep awake and the phone bridge. | Reads Claude Code's files and runs `claude`, `codex`, `agy`, `ssh` and `/usr/bin/security` itself. |
 | The hook | `Notchling --hook`, the same binary, started by Claude Code for each hook event. | **Files only**, in `~/Library/Application Support/Notchling/`: it writes `requests/<id>.json` and waits for `responses/<id>.json`. It passes when the app's `heartbeat` file is older than 15 s. It always exits with an answer or a pass inside Claude Code's 300 s timeout (it waits up to 290 s). |
 | `agent-console-hostd` | The session host, shipped in `Contents/Helpers/`. A LaunchAgent, `local.agentconsole.hostd`, installed by `tools/install-hostd.sh` (`./build.sh --install` runs it). | Unix socket `~/Library/Application Support/AgentConsole/hostd.sock`. It owns the ptys of terminal sessions, so restarting or reinstalling the app never ends them. Without the LaunchAgent, the app keeps the ptys itself. |
-| Phone app | Flutter, in `mobile/`. Its users build it themselves. | WebSocket with subprotocol `agentconsole.v1`, after pairing: TLS on port 47821, or through the optional Cloudflare tunnel to loopback port 47822, where the Access JWT is checked. |
+| Phone app | Flutter, in `apps/flutter/`. Its users build it themselves. | WebSocket with subprotocol `agentconsole.v1`, after pairing: TLS on port 47821, or through the optional Cloudflare tunnel to loopback port 47822, where the Access JWT is checked. |
 | Vault command line | `Notchling --secret`, `--secret-request`. | Unix socket `vault.sock` (0600). The app answers only a peer that runs as this user from the app's own executable (`LOCAL_PEERPID` and `proc_pidpath`). The command line never touches Keychain. |
 | Other command-line modes | `Notchling --secrets`, `--delegate`, `--page`, `--pages`. | Standalone. They don't need the app running. `--secrets` reads only the vault's list, `vault.json`, which holds no values. |
 
@@ -38,12 +38,12 @@ Related: what Notchling is for, [docs/goals.md](docs/goals.md). The rules and th
 
 | Module | Where | What |
 | --- | --- | --- |
-| Notchling | `Sources/Notchling/`, about 41.7k lines | The app, in feature folders. One module, so any file can reach any other; the capability check stands in for module boundaries ([0002](docs/decisions/0002-the-line.md)). |
-| ConsoleCore | `Sources/ConsoleCore/` | A static module that Notchling and hostd import: the phone bridge's engine (`BridgeCore`, `BridgeRouter`), the session host's client and server, and transcript and session readers. It uses no Notchling types and no macOS 14 APIs; the app's minimum is macOS 13. |
-| hostd | `Sources/hostd/` | The session host's entry point, over ConsoleCore. ConsoleCore and hostd are about 7.4k lines together. |
-| Tests | `Tests/NotchlingTests`, `Tests/ConsoleCoreTests` | Run by `swift test` through `Package.swift`. `build.sh` builds the bundle itself with `swiftc`, for both architectures. |
+| Notchling | `legacy/macos/Sources/Notchling/`, about 41.7k lines | The app, in feature folders. One module, so any file can reach any other; the capability check stands in for module boundaries ([0002](docs/decisions/0002-the-line.md)). |
+| ConsoleCore | `legacy/macos/Sources/ConsoleCore/` | A static module that Notchling and hostd import: the phone bridge's engine (`BridgeCore`, `BridgeRouter`), the session host's client and server, and transcript and session readers. It uses no Notchling types and no macOS 14 APIs; the app's minimum is macOS 13. |
+| hostd | `legacy/macos/Sources/hostd/` | The session host's entry point, over ConsoleCore. ConsoleCore and hostd are about 7.4k lines together. |
+| Tests | `legacy/macos/Tests/NotchlingTests`, `legacy/macos/Tests/ConsoleCoreTests` | Run by `swift test` through `Package.swift`. `build.sh` builds the bundle itself with `swiftc`, for both architectures. |
 
-The feature folders in `Sources/Notchling/`:
+The feature folders in `legacy/macos/Sources/Notchling/`:
 
 - **App**: launch, menu bar, keep awake, Dock presence, resume after wake.
 - **Notch**: the overlay at the camera notch, its rows, cards, Peek and the pet.
@@ -84,18 +84,19 @@ The feature folders in `Sources/Notchling/`:
 Built in Phase 2; they exist today.
 
 - `tools/guard/zones.json` names the auto-merge zone. `.github/CODEOWNERS` is generated from it ([0002](docs/decisions/0002-the-line.md)).
-- `python3 -m guard` runs in `.github/workflows/guard.yml`: the architecture lint with a shrink-only baseline (the gate sends a PR that grows it to the maintainer), actions pinned and allowlisted, CODEOWNERS in step, rulesets matching the workflows.
+- `python3 -m guard` runs in `.github/workflows/guard.yml`: the architecture lint with a shrink-only baseline (the gate sends a PR that grows it to the maintainer), actions pinned and allowlisted, CODEOWNERS in step, rulesets matching the workflows. The same job checks that the generated protocol types match the schema (`tools/protocol/gen.py --check`, `GUARD-PROTOCOL-GEN`) and runs `tools/protocol/tests/`.
 - `maintainer-gate` (`.github/workflows/maintainer-gate.yml`, `python3 -m guard gate`): when a PR touches a protected path, uses a capability or weakens a test, it passes only with the maintainer's approval of the head commit.
 - `.github/rulesets/` and `tools/github/apply-settings.sh` hold the repository settings as code ([0009](docs/decisions/0009-rulesets-as-code.md)).
 - CI also runs `swift test`, `./build.sh`, and the phone's `flutter analyze` and `flutter test` (goldens included).
+- `.github/workflows/rust.yml` checks the Cargo workspace (since Phase 4): `rust-test` (`cargo test` on macOS, Linux and Windows), `rust-clippy` (`cargo fmt --all --check`, then clippy with warnings as errors) and `rust-deny` (`cargo deny check`: licenses, advisories, sources).
 
-Releases today: `./release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes. Builds are signed ad hoc. Phase 6 replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)).
+Releases today: `legacy/macos/release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes. Builds are signed ad hoc. Phase 6 replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)).
 
 ## Target
 
 Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), Flutter for the phone, and the engine as an always-on service.
 
-**None of the target's Rust tree (`crates/`) exists yet.** The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is on branch `spike/gpui-phase1` (and in git history) and never goes into `main`.
+**The target's Rust tree is a skeleton.** Since Phase 4 the Cargo workspace (`Cargo.toml`, Rust 1.99.1 pinned in `rust-toolchain.toml`, `deny.toml`) holds the eight crates in the layout below. Seven are stubs: each builds, has one test, and does nothing else. `crates/protocol` has the bridge protocol's generated types. No GPUI yet; it comes with part U0 in Milestone 1. The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is on branch `spike/gpui-phase1` (and in git history) and never goes into `main`.
 
 ```
   GPUI desktop app      hook            command line             phone, and apps on
@@ -127,8 +128,8 @@ Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), 
 | Remote computers | The desktop app and the phone connect to other computers' daemons the way the phone connects today, with the same pairing. Each session belongs to exactly one computer, which alone acts on it; session ids are host-qualified. Nothing is replicated: accounts, lanes and the vault never leave their computer. | Planned, with the phone work (part P2). A decision record must define identity, transport (LAN, tunnel with Access), reconnect cursors, simultaneous clients and revocation before any milestone uses it. Not written yet. | |
 | GPUI app and kit | One GPUI app on a pinned revision (`crates/app`) with our own widget layer (`crates/kit`). Platform pieces behind small traits (`crates/platform`): notch overlay and menu bar on macOS, tray and a top panel on Linux and Windows (the panel is a designer's call). | Planned: parts U0 to U11, from Milestone 1. Linux and Windows show sessions only until `claude attach` is proven there. | [0005](docs/decisions/0005-gpui-desktop-app.md), [0001](docs/decisions/0001-gpui-spike.md) |
 | Web content | Pages, artifacts and HTML files open in their own `wry` window, not inside a GPUI view, because GPUI has no web view. | Planned: part U4, Milestone 5. | [0005](docs/decisions/0005-gpui-desktop-app.md) |
-| Protocol | `protocol/`: a written spec in JSON Schema, conformance and behavior fixtures, version negotiation, additive only. Dart and Rust types are generated from it. | Planned: Phase 4. Today `agentconsole.v1` is written by hand twice, in `Sources/ConsoleCore/Bridge/BridgeProtocol.swift` and `mobile/lib/core/protocol/models.dart`. | [0006](docs/decisions/0006-flutter-phone-generated-types.md) (Proposed) |
-| Licenses | Only MIT, Apache and BSD crates, enforced by `cargo-deny`. Our own terminal and markdown views on permissive crates. | Planned, with the Cargo workspace in Phase 4. | [0008](docs/decisions/0008-mit-permissive-crates.md) |
+| Protocol | `protocol/`: a written spec in JSON Schema, conformance and behavior fixtures, version negotiation, additive only. Dart and Rust types are generated from it. | Exists since Phase 4, without version negotiation or behavior fixtures yet. `protocol/agentconsole.v1.schema.json` describes today's wire, and 74 fixtures hold it there: what the Mac sends is captured from the real Swift bridge (`ProtocolFixturesTests`), and what the phone sends is written from its client and fed to the bridge's router. `tools/protocol/gen.py` generates `crates/protocol/src/generated.rs` and `apps/flutter/lib/core/protocol/generated.dart` (never edited by hand; `GUARD-PROTOCOL-GEN`), and a Rust and a Dart test parse every fixture. The Mac still encodes with `BridgeProtocol.swift` and the phone still reads with its hand-written `models.dart`, pinned to the generated types by that Dart test. See [protocol/README.md](protocol/README.md). | [0006](docs/decisions/0006-flutter-phone-generated-types.md) (Proposed) |
+| Licenses | Only permissive crates, enforced by `cargo-deny`. Our own terminal and markdown views on permissive crates. | Exists since Phase 4: `deny.toml` allows only `MIT`, `Apache-2.0`, `Apache-2.0 WITH LLVM-exception`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Unicode-3.0` and `Zlib`, and only crates.io as a source; `rust-deny` runs it on every pull request. | [0008](docs/decisions/0008-mit-permissive-crates.md) |
 | Releases | Beta daily, build then sign apart, Stable by one click, one signed update feed. | Planned: Phase 6. | [0010](docs/decisions/0010-build-then-sign-beta-then-stable.md) |
 
 Machines stays a separate tool, not inside the daemon, and is ported last (part E10). That is a designer's call, not settled.
@@ -137,17 +138,19 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 
 | Folder | What | Today |
 | --- | --- | --- |
-| `crates/engine/` | Transcripts, sessions, accounts, lanes, vault, bridge (a library) | Planned |
-| `crates/notchlingd/` | The engine service | Planned |
-| `crates/ptyhost/` | The separately restartable terminal host (port of hostd) | Planned |
-| `crates/local-api/` | App and command line to daemon API, with tiers | Planned |
-| `crates/app/` | The GPUI desktop app | Planned |
-| `crates/platform/` | Notch and menu bar (macOS), tray and panel (Linux, Windows) | Planned |
-| `crates/kit/` | Our widget layer over GPUI | Planned |
-| `apps/flutter/` | The phone app | Today's `mobile/`; moves in Phase 4 |
-| `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Today's Swift app and ConsoleCore, in `Sources/`; moves in Phase 4 |
-| `protocol/` | Spec, JSON Schema, fixtures | Planned: Phase 4 |
-| `docs/`, `tools/`, `viz/` | Docs; the guard and setup tools; the web page behind the phone's Visualize tab | Exist |
+| `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml` | The Cargo workspace (every folder in `crates/`), the pinned toolchain, the license and source rules | Exist |
+| `crates/engine/` | Transcripts, sessions, accounts, lanes, vault, bridge (a library) | Exists as a stub |
+| `crates/notchlingd/` | The engine service | Exists as a stub that prints its version |
+| `crates/ptyhost/` | The separately restartable terminal host (port of hostd) | Exists as a stub that prints its version |
+| `crates/local-api/` | App and command line to daemon API, with tiers | Exists as a stub |
+| `crates/app/` | The GPUI desktop app | Exists as a stub (no GPUI yet) |
+| `crates/platform/` | Notch and menu bar (macOS), tray and panel (Linux, Windows) | Exists as a stub |
+| `crates/kit/` | Our widget layer over GPUI | Exists as a stub |
+| `crates/protocol/` | The bridge protocol's Rust types, generated from `protocol/` | Exists |
+| `apps/flutter/` | The phone app | Exists (moved here from the old top-level phone folder in Phase 4) |
+| `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Exists (moved from the repo root in Phase 4): `legacy/macos/Sources/`, `Tests/`, `Demo/`, `Icon/`, `Pet/`, `build.sh`, `release.sh`. `Package.swift` and a one-line `build.sh` wrapper stay at the root |
+| `protocol/` | Spec (`README.md`), JSON Schema, fixtures | Exists |
+| `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator); the web page behind the phone's Visualize tab | Exist |
 | `spike/` | The GPUI spike's results (`RESULTS.md`); its code stays on branch `spike/gpui-phase1` | Exists |
 
 ### Swift and Rust side by side
@@ -161,7 +164,7 @@ Today the Swift app owns all of them.
 1. Phase 1, the GPUI spike: done ([0001](docs/decisions/0001-gpui-spike.md)).
 2. Phase 2, guard rails and quality: merged. The maintainer applies the repository settings with `tools/github/apply-settings.sh`.
 3. Phase 3, the operating manual: this document, the decision records, goals, rules, governance and policies.
-4. Phase 4: the repo layout above, the Cargo workspace, the protocol spec and generated types.
+4. Phase 4: the repo layout above, the Cargo workspace, the protocol spec and generated types: done. Switching the phone to the generated types is a later change (part P1).
 5. Phase 5: agents on (the GitHub App, a separate agent user and push wrapper on workers, triage, the worker, the review agent).
 6. Phase 6: releases (notarization, build and sign apart, the Beta feed, Stable by one click).
 7. Phase 7: a recording phase that captures terminal byte fixtures for every reply behavior while the Swift app can still produce them, then Milestones 1 to 6:
