@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
-from guard import capability, weakening
+from guard import capability, lint, weakening
 from guard.changes import Change
 from guard.zones import Zones, case_shadowed, fold, protected_paths
 
@@ -82,6 +83,46 @@ def collision_reasons(repo: Path, base: str, head: str, changes: List[Change]) -
     return case_collisions(added, _tree(repo, base) + _tree(repo, head))
 
 
+def _show(repo: Path, sha: str, path: Path) -> Optional[str]:
+    """The file's text at a commit, or None when the commit has no such file."""
+    r = subprocess.run(["git", "-C", str(repo), "show", f"{sha}:{path.as_posix()}"],
+                       capture_output=True)
+    return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else None
+
+
+def _entries(text: Optional[str]) -> Counter:
+    """The baseline's entries as a multiset; no file is an empty baseline. Raises ValueError on a bad file."""
+    if text is None:
+        return Counter()
+    try:
+        entries = json.loads(text)["entries"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise ValueError(f"not a baseline ({e.__class__.__name__})")
+    if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
+        raise ValueError("entries is not a list of strings")
+    return Counter(entries)
+
+
+def baseline_reasons(repo: Path, base: str, head: str) -> List[str]:
+    """GUARD-BASELINE: the lint baseline may only shrink. Compares it at `head` with `base`
+    as multisets, so a second copy of an entry counts as growth too."""
+    path = lint.BASELINE
+    try:
+        after = _entries(_show(repo, head, path))
+    except ValueError as e:
+        return [f"GUARD-BASELINE: {path} at the head is unreadable: {e}"]
+    try:
+        before = _entries(_show(repo, base, path))
+    except ValueError:
+        before = Counter()  # an unreadable base counts as empty, so every entry reads as new
+    added = sorted((after - before).elements())
+    if not added:
+        return []
+    shown = "; ".join(a if len(a) <= 100 else a[:99] + "…" for a in added[:3])
+    more = f" (+{len(added) - 3} more)" if len(added) > 3 else ""
+    return [f"GUARD-BASELINE: {path} grew by {len(added)} entries, it can only shrink: {shown}{more}"]
+
+
 def approved_head(reviews: List[Dict], head_sha: str, maintainers: frozenset) -> bool:
     """Each maintainer's latest review decides: approved on this head. A dismissed review is
     still their latest word, so dismissing a change request can't bring an older approval back."""
@@ -131,6 +172,7 @@ def main(repo: Path, base: str, head: str, reviews_file: Optional[Path], post: b
                               capture_output=True, text=True).stdout.strip()
     changes = diff(Path(repo), base, head)
     reasons = needs_maintainer(changes, zones) + collision_reasons(Path(repo), base, head, changes)
+    reasons += baseline_reasons(Path(repo), base, head)
     decision = decide(reasons, reviews, head_sha)
     for line in decision.details:
         print(line)

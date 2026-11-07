@@ -8,8 +8,9 @@ from contextlib import redirect_stdout
 
 from guard.__main__ import main
 from guard.changes import Change, diff
-from guard.gate import (MAINTAINERS, added_paths, approved_head, case_collisions, collision_reasons, decide,
-                        needs_maintainer)
+from guard.gate import (MAINTAINERS, added_paths, approved_head, baseline_reasons, case_collisions,
+                        collision_reasons, decide, needs_maintainer)
+from guard.lint import BASELINE
 from guard.zones import Zones
 from tests.helpers import ENV, commit, git, head_of, make_repo
 
@@ -207,6 +208,60 @@ class CaseCollisionTests(unittest.TestCase):
         base = head_of(repo)
         head = commit(repo, {"docs/b.md": "y\n", "docs/sub/c.md": "z\n"})
         self.assertEqual(collision_reasons(repo, base, head, diff(repo, base, head)), [])
+
+
+class BaselineTests(unittest.TestCase):
+    PATH = str(BASELINE)
+
+    def baseline(self, *entries):
+        return json.dumps({"entries": list(entries)})
+
+    def reasons(self, base_entries, head_content):
+        repo = make_repo({self.PATH: self.baseline(*base_entries)})
+        base = head_of(repo)
+        head = commit(repo, {self.PATH: head_content})
+        return baseline_reasons(repo, base, head)
+
+    def test_grown_baseline_is_a_reason(self):
+        reasons = self.reasons(["A|a.swift|x"], self.baseline("A|a.swift|x", "B|b.swift|y"))
+        self.assertEqual(len(reasons), 1)
+        self.assertTrue(reasons[0].startswith("GUARD-BASELINE:"))
+        self.assertIn("1 ", reasons[0])
+        self.assertIn("B|b.swift|y", reasons[0])
+
+    def test_shrunk_baseline_is_fine(self):
+        self.assertEqual(self.reasons(["A|a|x", "B|b|y"], self.baseline("A|a|x")), [])
+
+    def test_equal_baseline_is_fine(self):
+        self.assertEqual(self.reasons(["A|a|x", "B|b|y"], self.baseline("B|b|y", "A|a|x")), [])
+
+    def test_duplicate_entry_added_is_growth(self):
+        reasons = self.reasons(["A|a|x"], self.baseline("A|a|x", "A|a|x"))
+        self.assertEqual(len(reasons), 1)
+        self.assertTrue(reasons[0].startswith("GUARD-BASELINE:"))
+
+    def test_invalid_json_at_head_is_a_reason(self):
+        reasons = self.reasons(["A|a|x"], "{ not json")
+        self.assertEqual(len(reasons), 1)
+        self.assertTrue(reasons[0].startswith("GUARD-BASELINE:"))
+
+    def test_file_added_fresh_with_entries_is_growth(self):
+        repo = make_repo({"x": "1\n"})
+        base = head_of(repo)
+        head = commit(repo, {self.PATH: self.baseline("A|a|x")})
+        self.assertEqual(len(baseline_reasons(repo, base, head)), 1)
+
+    def test_missing_at_both_is_fine(self):
+        repo = make_repo({"x": "1\n"})
+        base = head_of(repo)
+        head = commit(repo, {"y": "2\n"})
+        self.assertEqual(baseline_reasons(repo, base, head), [])
+
+    def test_deleted_at_head_is_fine(self):
+        repo = make_repo({self.PATH: self.baseline("A|a|x")})
+        base = head_of(repo)
+        head = commit(repo, {self.PATH: None})
+        self.assertEqual(baseline_reasons(repo, base, head), [])
 
 
 class GateCliTests(unittest.TestCase):

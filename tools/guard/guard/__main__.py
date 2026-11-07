@@ -64,6 +64,18 @@ def cmd_rulesets(args: argparse.Namespace) -> int:
     return rulesets.main()
 
 
+def cmd_rules(args: argparse.Namespace) -> int:
+    from guard import rules
+
+    return rules.main(Path(args.docs))
+
+
+def cmd_claudemd(args: argparse.Namespace) -> int:
+    from guard import claudemd
+
+    return claudemd.main(Path(args.repo))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -91,6 +103,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
     p.set_defaults(func=cmd_codeowners)
+    p = sub.add_parser("rules", help="every rule in docs/rules.md has a check that fires on its bad example")
+    p.add_argument("--docs", default="docs/rules.md")
+    p.set_defaults(func=cmd_rules)
+    p = sub.add_parser("claudemd", help="CLAUDE.md is exactly @AGENTS.md and no other CLAUDE*.md is tracked")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_claudemd)
     args = parser.parse_args(argv)
     return args.func(args)
 

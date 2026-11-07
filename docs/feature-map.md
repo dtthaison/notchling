@@ -1,0 +1,133 @@
+# Feature map
+
+One row per feature area: where its code is, which tests cover it, whether a change there may merge on its own, and which parts of the port it becomes. Use it to find what to read before a change, and what to port for a part.
+
+- **Folders** are under `Sources/Notchling/` unless they start with another top folder. `CC/` is `Sources/ConsoleCore/`.
+- **Tests** are in `Tests/NotchlingTests/`, with `CC:` for `Tests/ConsoleCoreTests/` and phone tests in `mobile/test/`. Fixtures are in each test folder's `Fixtures/`.
+- **Zone** comes from [`tools/guard/zones.json`](../tools/guard/zones.json), which is the source of truth: `auto` may merge on its own once every check is green, `protected` waits for the maintainer, `mixed` names the files that are `auto`. A new test file is allowed in the zone; a change to an existing test is protected. Check one path with:
+
+  ```sh
+  PYTHONPATH=tools/guard python3 -c "from guard.zones import load; print(load('tools/guard/zones.json').in_zone('Sources/Notchling/Search/SearchPanel.swift'))"
+  ```
+
+  A file in the zone still goes to the maintainer when it adds a process, pty, network, Keychain, file write or protected-type use (the capability check), or weakens a test.
+- **Parts** are the port's part ids from the [design](superpowers/specs/2026-11-07-agent-run-open-source-design.md#parts): E (Rust engine), U (GPUI desktop app), P (phone). A part is done when its ported tests pass and its behavior fixtures match the Swift app.
+
+Checked against the tree on 2026-11-07. When you add, move or delete a file, update its row.
+
+## Mac app: reading
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Claude Code transcripts | `Agents/TranscriptReader.swift`, `Agents/TranscriptCursor.swift`, `Chat/ConversationReader.swift`, `Agents/Subagents.swift`, `Chat/BackgroundShells.swift`, `Chat/CommandJob.swift` | `TranscriptTests`, `SnapshotTests`, `TranscriptCursorsTests`, `QueuedMessageTests`, `SuccessorTests`, `SubagentsTests`, `BackgroundShellsTests`, `CommandJobTests`, `ModelConfirmationTests`, `ZBenchmarkTests` (opt-in); fixtures `conversation.jsonl`, `notch.jsonl`, `compact.jsonl`, `bash-mode.jsonl`, `limit-hit.jsonl`, `rate-limited-429.jsonl` | mixed: `TranscriptReader.swift`, `ConversationReader.swift` auto | E1 |
+| Codex and Antigravity readers | `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, `Agents/AntigravityCLI.swift` | `CodexSessionsTests`, `ACPTranscriptTests`; fixtures `codex-rollout.jsonl`, `acp-agy.jsonl` | mixed: `CodexSessions.swift`, `ACPTranscript.swift` auto | E1 |
+| Phone-side transcripts | `CC/ChatTranscript.swift`, `CC/SubagentReader.swift`, `CC/TranscriptFacts.swift`, `CC/TranscriptLocator.swift`, `CC/ChatImages.swift` | CC: `ChatTranscriptTests`, `ChatRichTests`, `ChatPagingTests`, `ChatImagesTests`, `TranscriptLocatorTests`; fixtures `chat/` | mixed: `ChatTranscript.swift`, `SubagentReader.swift`, `TranscriptFacts.swift` auto | E1 |
+| Sessions and jobs | `Agents/AgentMonitor.swift`, `CC/SessionCatalog.swift`, `CC/SessionSource.swift`, `CC/SessionStore.swift`, `CC/Models.swift`, `CC/Support.swift`, `CC/PendingPromptReader.swift` | `SessionIDTests`, `JobTranscriptTests`, `MovedJobTests`; CC: `CatalogTests`, `SessionSourceTests`, `SessionSwitchTests`; fixtures `claude/`, `notchling/` | protected | E2 |
+| Search | `Search/SearchPanel.swift`, `Search/SessionIndex.swift`, `Search/SessionSearch.swift` | `SessionSearchTests` | auto | E1 (matching), E7 (index), U3 |
+
+## Mac app: acting
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Replies and question dialogs | `Agents/ReplySender.swift`, `Agents/ReplySender+Dialog.swift`, `Agents/AskDialog.swift`, `Agents/ShellCommand.swift`, `CC/JobReplySender.swift`, `CC/MessageSending.swift`, `CC/PTYSession.swift`, `CC/SpawnEnvironment.swift` | `AskDialogTests`, `ShellCommandTests`, `HostReplyTests`, `ZLiveReplyTests` (live, opt-in); CC: `InputRoutingTests`, `SpawnTests`; fixtures `terminal/` | protected | E3 |
+| Terminal sheet | `Terminal/TerminalSession.swift`, `Terminal/TerminalScreen.swift`, `Terminal/TerminalView.swift` | `TerminalScreenTests`; fixtures `terminal/` | protected | E3, U1 |
+| Session host (hostd) | `Sources/hostd/main.swift`, `CC/Hostd/`, `tools/install-hostd.sh` | CC: `HostdTests` | protected | E3 |
+| Hook | `Hook/HookBridge.swift`, `CC/HookResponder.swift` | `HookAndPagesTests`; CC: `HookResponderTests` | protected | E4, E13 |
+| Session control | `Agents/AgentActions.swift`, `Chat/NewSessionSheet.swift`, `Chat/Model/ChatModel+Sessions.swift`, `Chat/ChatTakeover.swift`, `App/WakeResumer.swift`, `Chat/GitInfo.swift`, `CC/Takeover.swift`, `CC/StopOriginal.swift`, `CC/SessionPidMapper.swift` | `GitInfoTests`; CC: `TakeoverTests`, `StopOriginalTests`, `OwnershipTests`, `SendNowTests` | protected | E11, U7 (Trust Folder), U8 |
+| Slash commands | `Agents/SlashCommands.swift`, `Agents/CodexCommands.swift` | `SlashCommandTests`; fixtures `installed_plugins.json`, `known_marketplaces.json` | protected | E11 |
+| Codex and Antigravity runners | `Agents/CodexRunner.swift`, `Agents/CodexModels.swift`, `Agents/ACPRunner.swift`, `Agents/ACPConnection.swift`, `Chat/AntigravityChat.swift`, `Chat/Model/ChatModel+Codex.swift`, `Chat/Model/ChatModel+ACP.swift` | `CodexSessionsTests` (runner arguments), `NotchForeignTests` | protected | E6 |
+| Delegate and Second Opinion | `Delegate/` (4 files), `Chat/Model/SecondOpinionStore.swift`, `Chat/Views/SecondOpinionViews.swift` | `DelegateTests`, `SecondOpinionTests` | mixed: `SecondOpinionViews.swift` auto | E6, E13 (`DelegateSkill`), U8 |
+| Pages library | `Pages/PageLibrary.swift`, `Pages/PageSkill.swift`, `Pages/OwnerPublish.swift`, `Pages/PagesWindow.swift` | `HookAndPagesTests` | mixed: `PagesWindow.swift` auto | E7 (owner publish protected), E13 (`PageSkill`), U4 |
+
+## Mac app: accounts and secrets
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Accounts and providers | `Accounts/Accounts.swift`, `Accounts/AccountLogin.swift`, `Accounts/ClaudeDesktop.swift`, `Accounts/Codex.swift`, `Accounts/Antigravity.swift`, `Accounts/AccountsWindow.swift` (also the Settings page), `Accounts/UsageMenuViews.swift`, `Providers/` (6 files), `Chat/AddAccountSheet.swift` | `UsageParsingTests`, `ProviderTests`, `CodexLoginTests`, `AntigravityLoginTests`, `AccountRemoveRaceTests` | protected | E8, E14 (settings), U5, U8 |
+| Limits | `Limits/LimitWatcher.swift` (also `NoticeBanner`), `Limits/ProviderLimits.swift` | `LimitLogicTests`, `ProviderLimitsTests` | protected | E8, U7 (banners), U9 |
+| Cost | `Accounts/CostTracker.swift`, `Accounts/CostSources.swift` | `CostTrackerTests`, `CostSourcesTests`; fixture `antigravity-transcript.jsonl` | protected | E8, U9 |
+| Lanes and session moves | `Lanes/Lanes.swift`, `Chat/MoveAll.swift`, `Chat/Model/ChatModel+Moves.swift`, `Chat/Model/ChatModel+Accounts.swift` | `MoveAllPlanTests`, `MovedJobTests` | protected | E8, E11 |
+| Secret Vault | `Vault/SecretVault.swift` (also `VaultSkill`), `Vault/VaultStore.swift`, `Vault/VaultServer.swift`, `Vault/VaultCLI.swift`, `Vault/VaultPrompt.swift`, `Vault/VaultReminders.swift`, `Vault/VaultSheet.swift` | `SecretVaultTests`, `VaultStoreRenameTests`, `ReviewFixTests` | protected | E9, E13 (`VaultSkill`), E16 (CLI), E17 (`VaultServer`'s peer check is the local API's model), U5, U7 |
+| Machines | `Machines/` (18 files) | `Machines*Tests` (16 files), `MachineSetupFakes.swift`, `MachineWindowFakes.swift`; fixtures `worker-status*.json`, `worker-templates/`, `simctl-ok.txt` | protected | E10, U5 |
+
+## Mac app: windows and shell
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Chat window and model | `Chat/ChatWindowController.swift`, `Chat/Model/ChatModel.swift`, `Chat/Model/ChatModel+Drops.swift`, `Chat/Model/ChatModel+Panel.swift`, `Chat/Model/ChatModel+Sending.swift`, `Chat/Model/ChatModel+Turns.swift`, `Chat/ChatParts.swift`, `Chat/ChatMarkdown.swift`, `Chat/ChatPaths.swift`, `Chat/FilePanel.swift`, `Chat/MediaPreview.swift`, `Chat/JSONPretty.swift`, `Chat/SubagentViews.swift`, `Chat/ToolIcon.swift` | `ChatPathsTests`, `FilePreviewKindTests`, `JSONPrettyTests`, `ComposeAttachmentsTests` | protected | U1 |
+| Chat views | `Chat/Views/` (17 files: sidebar, conversation, composer, cards, pickers, meters, shells, page panel) | `ReplyEditorTests` | auto | U1, U8 (pickers), U9 (`ChatSessionMeters`) |
+| Notch views and pet | `Notch/NotchView.swift`, `Notch/NotchRows.swift`, `Notch/NotchPeek.swift`, `Notch/NotchDetail.swift`, `Notch/NotchCardParts.swift`, `Notch/TabPerch.swift`, `Notch/Pet/` | none; check with the `render-notch-view` skill | auto | U2 |
+| Notch model, controller and cards | `Notch/NotchModel.swift`, `Notch/NotchController.swift`, `Notch/NotchForeign.swift`, `Notch/QuestionCard.swift`, `Notch/PermissionCard.swift`, `Notch/AgyPermissionCard.swift`, `Notch/PetLayer.swift` | `NotchForeignTests` | protected | U2 |
+| Design kit | `DesignKit/ChatKit.swift`, `DesignKit/PointerCursors.swift` | `PointerCursorsTests` | auto | U0 |
+| App shell, keep awake and system | `App/main.swift`, `App/AppDelegate.swift`, `App/AwakeController.swift`, `App/DockPresence.swift`, `App/PrivateFile.swift`, `App/TestRun.swift`, `System/FileEvents.swift` | `ReviewFixTests` (`PrivateFile`) | protected | E12, E14 (`migrateFromAwake`), E16 (`main.swift` modes), U0, U11 |
+
+## Mac app: phone bridge
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Phone bridge and pairing | `Phone/BridgeController.swift`, `Phone/BridgeIdentity.swift`, `Phone/BridgeServer.swift`, `Phone/TunnelOriginServer.swift`, `Phone/LiveBridgeBackend.swift`, `Phone/PhoneModel.swift`, `Phone/PhoneService.swift`, `Phone/ForeignSessions.swift`, `Phone/PhonePanel.swift`, `CC/Bridge/` (17 files) | `ForeignSessionsTests`; CC: `BridgeRouterTests`, `BridgeSecurityTests`, `TunnelAccessTests`, `PhoneUploadTests`, `AppURLTests` | protected | E5, U6 |
+| Phone extras | `Phone/PhoneStreamer.swift`, `Phone/WebSnapshotter.swift`, `CC/VizEngine.swift`, `CC/VizSpec.swift`, `CC/VisualizeSuggester.swift`, `CC/WebURLResolver.swift`, `CC/DeviceWindowPicker.swift`, `CC/SchemaParsers.swift`, `CC/GitReader.swift`, `viz/` | CC: `VizEngineTests`, `VizBridgeTests`, `VisualizeSuggesterTests`, `SchemaParserTests` | protected | E15 |
+
+## Phone app (`mobile/`)
+
+The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for the folder are in [`mobile/AGENTS.md`](../mobile/AGENTS.md).
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Phone shell, kit and strings | `mobile/lib/main.dart`, `mobile/lib/app/` (theme, widgets, alerts, notifications), `mobile/lib/l10n/`, `mobile/DESIGN.md` | `widgets_test`, `motion_test`, `background_alerts_test`, `message_alerts_test`, `keyboard_close_gap_test`, `goldens/kit_golden_test` | protected | P0, P3 |
+| Phone protocol and network | `mobile/lib/core/protocol/`, `mobile/lib/core/net/` | `bridge_client_test`, `tunnel_test`, `tunnel_socket_test`, `phase2_test` | protected | P1, E5 |
+| Phone pairing and Macs | `mobile/lib/core/pairing/`, `mobile/lib/features/pairing/`, `mobile/lib/features/macs/`, `mobile/lib/features/connection/` | `pairing_test`, `tunnel_test`, `chat_sync_test` | mixed: `features/macs/`, `features/connection/` auto | P2, U6 |
+| Phone chat | `mobile/lib/features/chat/` | `chat_kit_test`, `chat_sync_test`, `markdown_table_test`, `send_now_test`, `takeover_test`, `keyboard_composer_gap_test`, `keyboard_focus_test`, `goldens/kit_golden_test` | auto | P1 (generated types) |
+| Phone sessions | `mobile/lib/features/sessions/` | `takeover_row_test`, `state_test`, `widgets_test` | auto | P2 |
+| Phone voice | `mobile/lib/features/voice/` | `voice_controller_test`, `voice_logic_test` | auto | none |
+| Phone visualize | `mobile/lib/features/visualize/` | `state_test` | auto | E15 (Mac side) |
+| Phone settings | `mobile/lib/features/settings/` | `settings_test` | auto | none |
+| Phone debug tools | `mobile/lib/debug/` | none | protected | none |
+
+## Repository
+
+| Area | Folders and files | Tests | Zone | Parts |
+| --- | --- | --- | --- | --- |
+| Build, release and demo | `build.sh`, `release.sh`, `Package.swift`, `Info.plist`, `Icon/`, `Demo/`, `Pet/` (pet art), `tools/migrate-and-install.sh` | the `app-build` check | protected | E16, U10 (`Demo/` renders real views offscreen), U11 |
+| Guard rails | `tools/guard/`, `tools/github/`, `.github/` | `tools/guard/tests/` | protected | none (Phase 2) |
+| Operating manual | `AGENTS.md`, `Sources/AGENTS.md`, `mobile/AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `GOVERNANCE.md`, `docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`, `.claude/` (skills) | `guard rules` and `GUARD-CLAUDE-MD` | protected | none |
+| Other docs | `docs/` except the manual: `features.md`, `architecture.md`, `chat-design.md`, `chat-kit.md`, `console-design.md`, `plans/`, `superpowers/`, this map | none | auto | none |
+| GPUI spike | `spike/` (throwaway, decision 0001) | none | protected | U0 to U10 (findings only) |
+
+## Parts to areas
+
+| Part | Areas |
+| --- | --- |
+| E1 Transcripts | Claude Code transcripts; Codex and Antigravity readers; Phone-side transcripts; Search (matching) |
+| E2 Sessions | Sessions and jobs |
+| E3 Terminal and replies | Replies and question dialogs; Terminal sheet; Session host (hostd) |
+| E4 Hook | Hook |
+| E5 Phone bridge | Phone bridge and pairing; Phone protocol and network |
+| E6 Other tools | Codex and Antigravity runners; Delegate and Second Opinion |
+| E7 Pages and search index | Pages library; Search (index) |
+| E8 Accounts | Accounts and providers; Limits; Cost; Lanes and session moves |
+| E9 Vault | Secret Vault |
+| E10 Machines | Machines |
+| E11 Session control | Session control; Slash commands; Lanes and session moves |
+| E12 Keep awake and system | App shell, keep awake and system |
+| E13 Installing into other tools | Hook; Delegate (`DelegateSkill`); Pages (`PageSkill`); Secret Vault (`VaultSkill`) |
+| E14 Settings and data | App shell (`migrateFromAwake`); Accounts (Settings page) |
+| E15 Phone extras | Phone extras; Phone visualize |
+| E16 Command line and services | App shell (`main.swift`); Secret Vault (CLI); Build, release and demo |
+| E17 Local API | none today; `VaultServer` is the model |
+| U0 Kit and shell | Design kit; App shell |
+| U1 Chat | Chat window and model; Chat views; Terminal sheet |
+| U2 Notch | Notch views and pet; Notch model, controller and cards |
+| U3 Search | Search |
+| U4 Pages | Pages library |
+| U5 Accounts, Vault, Machines | Accounts and providers; Secret Vault; Machines |
+| U6 Phone pairing | Phone bridge and pairing (`PhonePanel`) |
+| U7 Pop-ups outside Chat | Secret Vault (approval, request form); Limits (banners); Session control (Trust Folder) |
+| U8 Sheets | Session control (New Session); Accounts (Add Account, Settings); Delegate (Second Opinion); Chat views (pickers) |
+| U9 Usage and cost | Limits; Cost; Chat views (meters) |
+| U10 Rendering for agents | Notch views (`render-notch-view` skill); Build, release and demo (`Demo/`) |
+| U11 First run and updates | App shell; Build, release and demo |
+| P0 Phone guard rails | Phone shell, kit and strings (goldens) |
+| P1 Generated protocol types | Phone protocol and network; Phone chat |
+| P2 Remote computers | Phone pairing and Macs; Phone sessions |
+| P3 Rename and docs | Phone shell, kit and strings |

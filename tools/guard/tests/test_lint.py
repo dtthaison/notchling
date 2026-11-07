@@ -69,6 +69,12 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(rule("LINT-DEFAULTS-MIGRATED").check(
             "Sources/Notchling/A.swift", ['coder.encode(x, forKey: "nope")'], FIXTURE_REPO), [])
 
+    def test_applescript_rule_reads_only_code(self):
+        r = rule("LINT-NO-APPLESCRIPT")
+        self.assertFalse(r.applies("Sources/AGENTS.md"))
+        self.assertTrue(r.applies("Sources/Notchling/Agents/AgentActions.swift"))
+        self.assertTrue(r.applies("crates/engine/src/lib.rs"))
+
     def test_tests_and_demo_excluded(self):
         r = rule("LINT-NO-FORCE-UNWRAP")
         self.assertFalse(r.applies("Tests/NotchlingTests/A.swift"))

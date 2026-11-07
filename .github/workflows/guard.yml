@@ -1,7 +1,8 @@
 name: Guard
 
 # The project's rules as checks: the guard's own tests, the architecture lint against its baseline,
-# pinned actions, CODEOWNERS generated from zones.json, and the rulesets. No secrets.
+# pinned actions, CODEOWNERS generated from zones.json, the rulesets, and the rules catalog (each
+# rule in docs/rules.md has a check that fires on its bad example; CLAUDE.md is @AGENTS.md). No secrets.
 on:
   pull_request:
   push:
@@ -34,3 +35,7 @@ jobs:
         run: python3 -m guard codeowners --check
       - name: Rulesets
         run: python3 -m guard rulesets
+      - name: Rules
+        run: |
+          python3 -m guard rules
+          python3 -m guard claudemd
