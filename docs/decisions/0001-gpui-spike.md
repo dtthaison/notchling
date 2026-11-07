@@ -16,7 +16,7 @@ Phase 1 of that design is a throwaway spike. It answers five questions before an
 - S4: a PNG of a view for agents
 - S5: `claude attach` over a pty
 
-S0 asks whether GPUI builds at all. The rule: the rebuild goes ahead only if S0 to S4 are all yes. A no sends the decision back to the maintainer.
+S0 asks whether GPUI builds at all. The rule: the rebuild goes ahead only if S0 to S4 are all yes. Any no sends the decision back to the maintainer.
 
 The results, with evidence, are in [`spike/RESULTS.md`](../../spike/RESULTS.md). The spike code is on branch `spike/gpui-phase1` and is never merged.
 
@@ -26,36 +26,35 @@ The results, with evidence, are in [`spike/RESULTS.md`](../../spike/RESULTS.md).
 
 | Check | Result |
 |---|---|
-| S0 GPUI builds | yes |
-| S1 notch overlay | yes, by an automatic check of the real panel |
-| S2 web view | yes |
-| S3 Vietnamese input | yes, through GPUI's input handler |
+| S0 GPUI builds | yes, with GPUI's `runtime_shaders` |
+| S1 notch overlay | yes, checked by hand by the maintainer on 2026-11-07 and read back by an automatic check |
+| S2 web view | yes, checked by hand and by an automatic check |
+| S3 Vietnamese input | yes with macOS's own Telex and VNI, checked by hand; the automatic check covers only GPUI's input handler |
 | S4 PNG of a view | yes, by capturing a window; GPUI can't render offscreen |
-| S5 attach | yes on macOS, on two Macs |
+| S5 attach | yes on macOS, one run on each of two Macs |
 
-S5 is unverified on Linux and Windows. Per the design, those apps ship **able to show sessions only**, without sending replies, until S5 passes there.
+S5 is unverified on Linux and Windows. The design says Linux and Windows control their own sessions; the Phase 1 plan narrows that until S5 passes there. So until then, those apps ship **able to show sessions only**, without sending replies.
 
 ## Consequences
 
-**The rebuild must carry these fixes:**
+**The rebuild carries these findings:**
 
-- Build GPUI's Metal shaders ahead of time on a macOS runner that has the Metal Toolchain. The spike used `runtime_shaders`.
-- Make the notch panel borderless and non-activating after GPUI opens it, and set its frame afterwards. GPUI makes every window Titled, which macOS keeps below the menu bar.
-- Code that calls GPUI's `NSView` through objc2 uses GPUI's `NSRange` encoding.
-- Agents get screenshots of a view by capturing the app's own window. Moving from `CGWindowListCreateImage` to ScreenCaptureKit is planned work.
-
-**Before Milestone 1 ships, a person checks what the spike checked only in code:**
-
-- typing with the real Telex and VNI input sources;
-- a real click passing through the notch to the app below;
-- the notch staying visible over a full-screen app.
-
-If any of these fails, it becomes a fix in Milestone 1, not a reason to reopen this decision. The exception is a failure that GPUI can't fix without a fork; that comes back to the maintainer.
+- **Shaders.** Build GPUI's Metal shaders ahead of time on a macOS runner that has the Metal Toolchain. The spike used `runtime_shaders` and didn't try the ahead-of-time build.
+- **Notch panel position.** Make the panel borderless and non-activating after GPUI opens it, and set its frame afterwards. GPUI makes every window Titled, which macOS keeps below the menu bar.
+- **Notch panel focus.** Let the panel become key only while the user replies. GPUI's pop-up panel can always become key, and did at launch.
+- **Hit test.** Count the top edge of the notch's hit test as inside, as `NSMouseInRect` does.
+- **objc2 calls.** Code that calls GPUI's `NSView` through objc2 uses GPUI's `NSRange` encoding.
+- **Screenshots for agents.** Agents get screenshots of a view by capturing the app's own window. Moving from `CGWindowListCreateImage` to ScreenCaptureKit is planned work.
+- **Replies.** Keep `ReplySender`'s check that no dialog is open before typing into a session.
 
 **Still unverified:**
 
-- Linux and Windows input methods.
+- a display without a notch;
+- a multi-line text field with Vietnamese input;
+- Linux and Windows input methods;
 - Linux and Windows attach (S5).
+
+A failure found in any of these later goes back to the maintainer, as the spec says.
 
 ## Date
 
