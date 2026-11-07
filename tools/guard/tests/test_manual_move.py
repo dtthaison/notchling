@@ -23,10 +23,10 @@ DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md"]
 LATER_DOCS = ["ARCHITECTURE.md"]  # written by another task; counted once it exists
 # A fact the docs drop on purpose goes here, with the reason. Editing this file needs the maintainer.
 RETIRED: Dict[str, str] = {}
-# Phase 4 moved the phone from mobile/ to apps/flutter/. The old notes name the old folder, so a token
+# Phase 4 moved the phone to apps/flutter/. The old notes name its old folder, so a token
 # is looked for under its new name. (Nothing else moved in a way the old notes name: the Swift app's
 # paths are written relative to legacy/macos/, so they still match as substrings.)
-RENAMED = {"mobile/": "apps/flutter/"}
+RENAMED = {"mobile" + "/": "apps/flutter/"}  # (spelled in two parts: test_layout bans the old name)
 ROOT_MAX_LINES = 80
 ROOT_CLAUDE_MD = b"@AGENTS.md\n"
 

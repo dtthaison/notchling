@@ -1,0 +1,3065 @@
+{
+ "_comment": "in_zone and new_file_ok for every tracked file before the Phase 4 move (old paths). test_layout.py maps each to its new path and compares.",
+ "files": {
+  ".claude/settings.json": [
+   false,
+   false
+  ],
+  ".claude/skills/add-protocol-field/SKILL.md": [
+   false,
+   false
+  ],
+  ".claude/skills/add-provider/SKILL.md": [
+   false,
+   false
+  ],
+  ".claude/skills/fix-bug-reproduction-first/SKILL.md": [
+   false,
+   false
+  ],
+  ".claude/skills/port-swift-part/SKILL.md": [
+   false,
+   false
+  ],
+  ".claude/skills/render-notch-view/SKILL.md": [
+   false,
+   false
+  ],
+  ".github/CODEOWNERS": [
+   false,
+   false
+  ],
+  ".github/ISSUE_TEMPLATE/bug_report.yml": [
+   false,
+   false
+  ],
+  ".github/ISSUE_TEMPLATE/config.yml": [
+   false,
+   false
+  ],
+  ".github/ISSUE_TEMPLATE/feature_request.yml": [
+   false,
+   false
+  ],
+  ".github/PULL_REQUEST_TEMPLATE.md": [
+   false,
+   false
+  ],
+  ".github/dependabot.yml": [
+   false,
+   false
+  ],
+  ".github/rulesets/agent-branches.json": [
+   false,
+   false
+  ],
+  ".github/rulesets/main.json": [
+   false,
+   false
+  ],
+  ".github/rulesets/release-tags.json": [
+   false,
+   false
+  ],
+  ".github/workflows/build.yml": [
+   false,
+   false
+  ],
+  ".github/workflows/guard.yml": [
+   false,
+   false
+  ],
+  ".github/workflows/maintainer-gate.yml": [
+   false,
+   false
+  ],
+  ".github/workflows/phone.yml": [
+   false,
+   false
+  ],
+  ".github/workflows/release.yml": [
+   false,
+   false
+  ],
+  ".github/workflows/review-signal.yml": [
+   false,
+   false
+  ],
+  ".gitignore": [
+   false,
+   false
+  ],
+  "AGENTS.md": [
+   false,
+   false
+  ],
+  "ARCHITECTURE.md": [
+   false,
+   false
+  ],
+  "CHANGELOG.md": [
+   false,
+   false
+  ],
+  "CLAUDE.md": [
+   false,
+   false
+  ],
+  "CODE_OF_CONDUCT.md": [
+   false,
+   false
+  ],
+  "CONTRIBUTING.md": [
+   false,
+   false
+  ],
+  "Demo/accounts.swift": [
+   false,
+   false
+  ],
+  "Demo/encode.swift": [
+   false,
+   false
+  ],
+  "Demo/make-demo.sh": [
+   false,
+   false
+  ],
+  "Demo/render.swift": [
+   false,
+   false
+  ],
+  "GOVERNANCE.md": [
+   false,
+   false
+  ],
+  "Icon/AppIcon.icns": [
+   false,
+   false
+  ],
+  "Icon/icon-1024.png": [
+   false,
+   false
+  ],
+  "Icon/make-icon.swift": [
+   false,
+   false
+  ],
+  "Info.plist": [
+   false,
+   false
+  ],
+  "LICENSE": [
+   false,
+   false
+  ],
+  "Package.swift": [
+   false,
+   false
+  ],
+  "Pet/doze-1.png": [
+   false,
+   false
+  ],
+  "Pet/doze-2.png": [
+   false,
+   false
+  ],
+  "Pet/doze-3.png": [
+   false,
+   false
+  ],
+  "Pet/doze-4.png": [
+   false,
+   false
+  ],
+  "Pet/fly-flip.png": [
+   false,
+   false
+  ],
+  "Pet/fly-star.png": [
+   false,
+   false
+  ],
+  "Pet/fly-superhero.png": [
+   false,
+   false
+  ],
+  "Pet/hang-ball.png": [
+   false,
+   false
+  ],
+  "Pet/hang-cheer.png": [
+   false,
+   false
+  ],
+  "Pet/hop-1.png": [
+   false,
+   false
+  ],
+  "Pet/hop-2.png": [
+   false,
+   false
+  ],
+  "Pet/hop-3.png": [
+   false,
+   false
+  ],
+  "Pet/hop-4.png": [
+   false,
+   false
+  ],
+  "Pet/hop-5.png": [
+   false,
+   false
+  ],
+  "Pet/look-1.png": [
+   false,
+   false
+  ],
+  "Pet/look-2.png": [
+   false,
+   false
+  ],
+  "Pet/look-3.png": [
+   false,
+   false
+  ],
+  "Pet/look-4.png": [
+   false,
+   false
+  ],
+  "Pet/run-1.png": [
+   false,
+   false
+  ],
+  "Pet/run-2.png": [
+   false,
+   false
+  ],
+  "Pet/run-3.png": [
+   false,
+   false
+  ],
+  "Pet/run-4.png": [
+   false,
+   false
+  ],
+  "Pet/run-5.png": [
+   false,
+   false
+  ],
+  "Pet/run-6.png": [
+   false,
+   false
+  ],
+  "Pet/run-7.png": [
+   false,
+   false
+  ],
+  "Pet/run-8.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-1.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-10.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-11.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-2.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-3.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-4.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-5.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-6.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-7.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-8.png": [
+   false,
+   false
+  ],
+  "Pet/shoot-9.png": [
+   false,
+   false
+  ],
+  "Pet/sit-1.png": [
+   false,
+   false
+  ],
+  "Pet/sit-2.png": [
+   false,
+   false
+  ],
+  "Pet/sit-3.png": [
+   false,
+   false
+  ],
+  "Pet/sit-4.png": [
+   false,
+   false
+  ],
+  "Pet/sit-5.png": [
+   false,
+   false
+  ],
+  "Pet/sit-6.png": [
+   false,
+   false
+  ],
+  "Pet/sleepy-1.png": [
+   false,
+   false
+  ],
+  "Pet/sleepy-2.png": [
+   false,
+   false
+  ],
+  "Pet/sleepy-3.png": [
+   false,
+   false
+  ],
+  "Pet/sleepy-4.png": [
+   false,
+   false
+  ],
+  "Pet/swing-1.png": [
+   false,
+   false
+  ],
+  "Pet/swing-10.png": [
+   false,
+   false
+  ],
+  "Pet/swing-11.png": [
+   false,
+   false
+  ],
+  "Pet/swing-12.png": [
+   false,
+   false
+  ],
+  "Pet/swing-2.png": [
+   false,
+   false
+  ],
+  "Pet/swing-3.png": [
+   false,
+   false
+  ],
+  "Pet/swing-4.png": [
+   false,
+   false
+  ],
+  "Pet/swing-5.png": [
+   false,
+   false
+  ],
+  "Pet/swing-6.png": [
+   false,
+   false
+  ],
+  "Pet/swing-7.png": [
+   false,
+   false
+  ],
+  "Pet/swing-8.png": [
+   false,
+   false
+  ],
+  "Pet/swing-9.png": [
+   false,
+   false
+  ],
+  "Pet/walk-1.png": [
+   false,
+   false
+  ],
+  "Pet/walk-2.png": [
+   false,
+   false
+  ],
+  "Pet/walk-3.png": [
+   false,
+   false
+  ],
+  "Pet/walk-4.png": [
+   false,
+   false
+  ],
+  "Pet/walk-5.png": [
+   false,
+   false
+  ],
+  "Pet/walk-6.png": [
+   false,
+   false
+  ],
+  "Pet/wave-1.png": [
+   false,
+   false
+  ],
+  "Pet/wave-2.png": [
+   false,
+   false
+  ],
+  "Pet/wave-3.png": [
+   false,
+   false
+  ],
+  "Pet/wave-4.png": [
+   false,
+   false
+  ],
+  "Pet/wave-5.png": [
+   false,
+   false
+  ],
+  "Pet/yawn-1.png": [
+   false,
+   false
+  ],
+  "Pet/yawn-2.png": [
+   false,
+   false
+  ],
+  "Pet/yawn-3.png": [
+   false,
+   false
+  ],
+  "Pet/yawn-4.png": [
+   false,
+   false
+  ],
+  "Pet/yawn-5.png": [
+   false,
+   false
+  ],
+  "README.md": [
+   false,
+   false
+  ],
+  "SECURITY.md": [
+   false,
+   false
+  ],
+  "Sources/AGENTS.md": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/AccessJWT.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/AddressFilter.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/AppURL.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/AuditLog.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/AuthRateLimiter.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/BridgeConnection.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/BridgeCrypto.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/BridgeHub.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/BridgeProtocol.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/BridgeRouter.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/DeviceStore.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/LocalAddresses.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/PairingCodes.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/PhoneUpload.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/RecentProjects.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/TunnelAccess.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Bridge/WebSocketWire.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/ChatImages.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/ChatTranscript.swift": [
+   true,
+   false
+  ],
+  "Sources/ConsoleCore/DeviceWindowPicker.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/GitReader.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/HookResponder.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/HostClient.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/HostServer.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/HostState.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/HostWire.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/SessionHost.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/TerminalBackend.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Hostd/TerminalHandle.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/JobReplySender.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/MessageSending.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Models.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/PTYSession.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/PendingPromptReader.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SchemaParsers.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SessionCatalog.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SessionPidMapper.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SessionSource.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SessionStore.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SpawnEnvironment.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/StopOriginal.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/SubagentReader.swift": [
+   true,
+   false
+  ],
+  "Sources/ConsoleCore/Support.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/Takeover.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/TranscriptFacts.swift": [
+   true,
+   false
+  ],
+  "Sources/ConsoleCore/TranscriptLocator.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/VisualizeSuggester.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/VizEngine.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/VizSpec.swift": [
+   false,
+   false
+  ],
+  "Sources/ConsoleCore/WebURLResolver.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/AccountLogin.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/Accounts.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/AccountsWindow.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/Antigravity.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/ClaudeDesktop.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/Codex.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/CostSources.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/CostTracker.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Accounts/UsageMenuViews.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/ACPConnection.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/ACPRunner.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/ACPTranscript.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Agents/AgentActions.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/AgentMonitor.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/AntigravityCLI.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/AskDialog.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/CodexCommands.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/CodexModels.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/CodexRunner.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/CodexSessions.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Agents/ReplySender+Dialog.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/ReplySender.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/ShellCommand.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/SlashCommands.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/Subagents.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/TranscriptCursor.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Agents/TranscriptReader.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/App/AppDelegate.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/AwakeController.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/DockPresence.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/PrivateFile.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/TestRun.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/WakeResumer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/App/main.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/AddAccountSheet.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/AntigravityChat.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/BackgroundShells.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ChatMarkdown.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ChatParts.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ChatPaths.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ChatTakeover.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ChatWindowController.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/CommandJob.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ConversationReader.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/FilePanel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/GitInfo.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/JSONPretty.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/MediaPreview.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+ACP.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Accounts.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Codex.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Drops.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Moves.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Panel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Sending.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Sessions.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel+Turns.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/ChatModel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Model/SecondOpinionStore.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/MoveAll.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/NewSessionSheet.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/SubagentViews.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/ToolIcon.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatAccountMenu.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatAttachments.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatCards.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatComposer.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatConversation.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatDetail.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatFormat.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatMessages.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatNotices.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatPagePanel.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatPickers.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatSessionMeters.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatShells.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatSidebar.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ChatView.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/ReplyEditor.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Chat/Views/SecondOpinionViews.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Delegate/Delegate.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Delegate/DelegateCLI.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Delegate/DelegateSkill.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Delegate/SecondOpinion.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/DesignKit/ChatKit.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/DesignKit/PointerCursors.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Hook/HookBridge.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Lanes/Lanes.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Limits/LimitWatcher.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Limits/ProviderLimits.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/CommandRunning.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachineCards.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachineHealth.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachinePoller.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachineRegistry.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachineSetup.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachineSteps.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MachinesWindow.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MergePlan.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MorningActions.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/MorningItems.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/RepoSteps.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/SDWorkerSteps.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/SecretSteps.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/SetupEngine.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/SetupLog.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/TokenScope.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Machines/WorkerStatus.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/AgyPermissionCard.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchCardParts.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchController.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchDetail.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchForeign.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchModel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchPeek.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchRows.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/NotchView.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/PermissionCard.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/Pet/PetSwing.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/Pet/PetView+Frames.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/Pet/PetView+Perch.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/Pet/PetView.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Notch/PetLayer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/QuestionCard.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Notch/TabPerch.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Pages/OwnerPublish.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Pages/PageLibrary.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Pages/PageSkill.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Pages/PagesWindow.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Phone/BridgeController.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/BridgeIdentity.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/BridgeServer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/ForeignSessions.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/LiveBridgeBackend.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/PhoneModel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/PhonePanel.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/PhoneService.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/PhoneStreamer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/TunnelOriginServer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Phone/WebSnapshotter.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/AccountProvider.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/AntigravityProvider.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/ClaudeCodeProvider.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/ClaudeDesktopProvider.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/CodexProvider.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Providers/UsageReport.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Search/SearchPanel.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Search/SessionIndex.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/Search/SessionSearch.swift": [
+   true,
+   false
+  ],
+  "Sources/Notchling/System/FileEvents.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Terminal/TerminalScreen.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Terminal/TerminalSession.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Terminal/TerminalView.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/SecretVault.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultCLI.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultPrompt.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultReminders.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultServer.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultSheet.swift": [
+   false,
+   false
+  ],
+  "Sources/Notchling/Vault/VaultStore.swift": [
+   false,
+   false
+  ],
+  "Sources/hostd/main.swift": [
+   false,
+   false
+  ],
+  "Tests/ConsoleCoreTests/AppURLTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/BridgeRouterTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/BridgeSecurityTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/BridgeTestSupport.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/CatalogTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/ChatImagesTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/ChatPagingTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/ChatRichTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/ChatTranscriptTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/chat/main.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/chat/subagent.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00001/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00002/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00003/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00004/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00005/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/jobs/job00006/state.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-private-tmp-my-proj/sess-tmp.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-some-other-dir/sess-idle.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-alpha/sess-busy.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-alpha/sess-wait.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-gamma/sess-parent.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-gamma/sess-parent/subagents/agent-aaa111.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-gamma/sess-parent/subagents/agent-aaa111.meta.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-gamma/sess-parent/subagents/agent-bbb222.jsonl": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/projects/-work-gamma/sess-parent/subagents/agent-bbb222.meta.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/101.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/102.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/103.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/104.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/105.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/106.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/107.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/108.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/108.not-a-session.key": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/claude/sessions/109.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/notchling/requests/req-permission.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/notchling/requests/req-question.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/Fixtures/notchling/requests/req-stale.json": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/HookResponderTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/HostdTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/InputRoutingTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/OwnershipTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/PhoneUploadTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/SchemaParserTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/SendNowTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/SessionSourceTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/SessionSwitchTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/SpawnTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/StopOriginalTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/TakeoverTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/TestSupport.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/TranscriptLocatorTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/TunnelAccessTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/VisualizeSuggesterTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/VizBridgeTests.swift": [
+   false,
+   true
+  ],
+  "Tests/ConsoleCoreTests/VizEngineTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ACPTranscriptTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/AccountRemoveRaceTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/AntigravityLoginTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/AskDialogTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/BackgroundShellsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ChatPathsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/CodexLoginTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/CodexSessionsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/CommandJobTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ComposeAttachmentsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/CostSourcesTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/CostTrackerTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/DelegateTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/FilePreviewKindTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/acp-agy.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/antigravity-transcript.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/bash-mode.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/codex-rollout.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/compact.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/conversation.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/installed_plugins.json": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/known_marketplaces.json": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/limit-hit.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/notch.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/rate-limited-429.jsonl": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/simctl-ok.txt": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/plugin-0-attach.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/plugin-1-typed.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/plugin-2-enter.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/plugin-3-down.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/plugin-4-esc.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/terminal/question-open.bin": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-status-old.json": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-status-paused.json": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-status.json": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-templates/com.sd.worker.plist": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-templates/sd-testflight.service": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-templates/sd-testflight.timer": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-templates/sd-worker.service": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/Fixtures/worker-templates/sd-worker.slice": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ForeignSessionsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/GitInfoTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/HookAndPagesTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/HostReplyTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/JSONPrettyTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/JobTranscriptTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/LimitLogicTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachineSetupFakes.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachineWindowFakes.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesMachineStepsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesMergeGitTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesMergeTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesMorningTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesPollerTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesRegistryTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesRemoteShellTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesRepoStepsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesRunnerTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesSDWorkerStepsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesSafetyTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesSecretsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesSetupEngineTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesStatusTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesStepCatalogTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesTokenScopeTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MachinesWindowTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ModelConfirmationTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MoveAllPlanTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/MovedJobTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/NotchForeignTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/PointerCursorsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ProviderLimitsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ProviderTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/QueuedMessageTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ReplyEditorTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ReviewFixTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SecondOpinionTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SecretVaultTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SessionIDTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SessionSearchTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ShellCommandTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SlashCommandTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SnapshotTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SubagentsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/SuccessorTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/TerminalScreenTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/TranscriptCursorsTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/TranscriptTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/UsageParsingTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/VaultStoreRenameTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ZBenchmarkTests.swift": [
+   false,
+   true
+  ],
+  "Tests/NotchlingTests/ZLiveReplyTests.swift": [
+   false,
+   true
+  ],
+  "build.sh": [
+   false,
+   false
+  ],
+  "docs/accounts.gif": [
+   true,
+   false
+  ],
+  "docs/architecture.md": [
+   false,
+   false
+  ],
+  "docs/chat-design.md": [
+   true,
+   false
+  ],
+  "docs/chat-kit.md": [
+   true,
+   false
+  ],
+  "docs/console-design.md": [
+   true,
+   false
+  ],
+  "docs/decisions/0001-gpui-spike.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0002-the-line.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0003-agent-instructions-in-agents-md.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0004-notchlingd-engine-service.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0005-gpui-desktop-app.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0006-flutter-phone-generated-types.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0007-local-api-tiers.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0008-mit-permissive-crates.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0009-rulesets-as-code.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0010-build-then-sign-beta-then-stable.md": [
+   false,
+   false
+  ],
+  "docs/decisions/0011-one-owner-per-resource.md": [
+   false,
+   false
+  ],
+  "docs/decisions/README.md": [
+   false,
+   false
+  ],
+  "docs/demo.gif": [
+   true,
+   false
+  ],
+  "docs/dev-profile.md": [
+   false,
+   false
+  ],
+  "docs/feature-map.md": [
+   false,
+   false
+  ],
+  "docs/features.md": [
+   true,
+   false
+  ],
+  "docs/goals.md": [
+   false,
+   false
+  ],
+  "docs/plans/2026-11-02-agent-console.md": [
+   true,
+   false
+  ],
+  "docs/plans/2026-11-02-p0-spike.md": [
+   true,
+   false
+  ],
+  "docs/policies/automation.md": [
+   false,
+   false
+  ],
+  "docs/policies/privacy.md": [
+   false,
+   false
+  ],
+  "docs/rules.md": [
+   false,
+   false
+  ],
+  "docs/superpowers/plans/2026-11-07-phase1-gpui-spike.md": [
+   false,
+   false
+  ],
+  "docs/superpowers/plans/2026-11-07-phase2-guard-rails.md": [
+   false,
+   false
+  ],
+  "docs/superpowers/plans/2026-11-07-phase3-operating-manual.md": [
+   false,
+   false
+  ],
+  "docs/superpowers/plans/2026-11-07-phase4-layout-protocol.md": [
+   false,
+   false
+  ],
+  "docs/superpowers/specs/2026-11-07-agent-run-open-source-design.md": [
+   false,
+   false
+  ],
+  "mobile/.gitignore": [
+   false,
+   false
+  ],
+  "mobile/.metadata": [
+   false,
+   false
+  ],
+  "mobile/AGENTS.md": [
+   false,
+   false
+  ],
+  "mobile/DESIGN.md": [
+   false,
+   false
+  ],
+  "mobile/README.md": [
+   false,
+   false
+  ],
+  "mobile/analysis_options.yaml": [
+   false,
+   false
+  ],
+  "mobile/android/.gitignore": [
+   false,
+   false
+  ],
+  "mobile/android/app/build.gradle.kts": [
+   false,
+   false
+  ],
+  "mobile/android/app/proguard-rules.pro": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/debug/AndroidManifest.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/AndroidManifest.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/kotlin/com/trietdigital/agentconsole/KeepAliveService.kt": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/kotlin/com/trietdigital/agentconsole/MainActivity.kt": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/drawable-v21/launch_background.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/drawable/launch_background.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/raw/keep.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/raw/needs_you.wav": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/raw/new_message.wav": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/values-night/styles.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/main/res/values/styles.xml": [
+   false,
+   false
+  ],
+  "mobile/android/app/src/profile/AndroidManifest.xml": [
+   false,
+   false
+  ],
+  "mobile/android/build.gradle.kts": [
+   false,
+   false
+  ],
+  "mobile/android/gradle.properties": [
+   false,
+   false
+  ],
+  "mobile/android/gradle/wrapper/gradle-wrapper.properties": [
+   false,
+   false
+  ],
+  "mobile/android/settings.gradle.kts": [
+   false,
+   false
+  ],
+  "mobile/assets/fonts/GeistMono-Medium.ttf": [
+   false,
+   false
+  ],
+  "mobile/assets/fonts/GeistMono-Regular.ttf": [
+   false,
+   false
+  ],
+  "mobile/assets/fonts/OFL.txt": [
+   false,
+   false
+  ],
+  "mobile/assets/icon/icon-1024.png": [
+   false,
+   false
+  ],
+  "mobile/assets/pet/hop-1.png": [
+   false,
+   false
+  ],
+  "mobile/assets/pet/look-2.png": [
+   false,
+   false
+  ],
+  "mobile/assets/pet/sit-1.png": [
+   false,
+   false
+  ],
+  "mobile/assets/pet/sleepy-1.png": [
+   false,
+   false
+  ],
+  "mobile/assets/pet/wave-1.png": [
+   false,
+   false
+  ],
+  "mobile/ios/.gitignore": [
+   false,
+   false
+  ],
+  "mobile/ios/Flutter/AppFrameworkInfo.plist": [
+   false,
+   false
+  ],
+  "mobile/ios/Flutter/Debug.xcconfig": [
+   false,
+   false
+  ],
+  "mobile/ios/Flutter/Release.xcconfig": [
+   false,
+   false
+  ],
+  "mobile/ios/Podfile": [
+   false,
+   false
+  ],
+  "mobile/ios/Podfile.lock": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcodeproj/project.pbxproj": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcworkspace/contents.xcworkspacedata": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/AppDelegate.swift": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ios-marketing-1024x1024@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-20x20@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-20x20@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-29x29@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-29x29@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-40x40@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-40x40@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-76x76@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-76x76@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-ipad-83.5x83.5@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-20x20@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-20x20@3x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-29x29@1x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-29x29@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-29x29@3x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-40x40@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-40x40@3x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-60x60@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-iphone-60x60@3x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/Contents.json": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/LaunchImage.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/LaunchImage@2x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/LaunchImage@3x.png": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Base.lproj/LaunchScreen.storyboard": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Base.lproj/Main.storyboard": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Info.plist": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/Runner-Bridging-Header.h": [
+   false,
+   false
+  ],
+  "mobile/ios/Runner/SceneDelegate.swift": [
+   false,
+   false
+  ],
+  "mobile/ios/RunnerTests/RunnerTests.swift": [
+   false,
+   false
+  ],
+  "mobile/l10n.yaml": [
+   false,
+   false
+  ],
+  "mobile/lib/app/alerts.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/app.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/message_alerts.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/nav_state.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/notifications.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/providers.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/shell.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/theme/tokens.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/widgets/alert_banner.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/widgets/common.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/widgets/glass_nav.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/widgets/kit.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/app/widgets/motion.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/net/bridge_client.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/net/tunnel.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/net/ws_transport.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/pairing/mac_profile.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/pairing/mac_store.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/pairing/pairing_payload.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/protocol/json.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/core/protocol/models.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/debug/frame_stats.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/debug/kb_trace.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/debug/voice_bench.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/features/chat/chat_cache.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/chat_header.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/chat_notifier.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/chat_parts.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/chat_pictures.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/chat_screen.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/code_highlight.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/composer.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/conversation_view.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/markdown_text.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/pending_card.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/photo_send.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/send_now.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/shell_command.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/slash_commands.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/chat/takeover_flow.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/connection/connection.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/connection/subscription_sync.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/macs/macs_notifier.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/macs/macs_screen.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/pairing/pairing_controller.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/features/pairing/pairing_screen.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/features/sessions/archive_store.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/new_session_sheet.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/session_row.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/sessions_notifier.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/sessions_screen.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/status_style.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/sessions/takeover_row_button.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/settings/app_settings.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/settings/settings_screen.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/visualize/visualize_screen.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/visualize/viz_providers.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/visualize/viz_webview.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/visualize/web_tab.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/insertion.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/mic_button.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/prompt_builder.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/silence_trim.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/speech_engine.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/transcript_cleanup.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/voice_controller.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/features/voice/voice_recorder.dart": [
+   true,
+   false
+  ],
+  "mobile/lib/l10n/app_en.arb": [
+   false,
+   false
+  ],
+  "mobile/lib/l10n/app_localizations.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/l10n/app_localizations_en.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/l10n/app_localizations_vi.dart": [
+   false,
+   false
+  ],
+  "mobile/lib/l10n/app_vi.arb": [
+   false,
+   false
+  ],
+  "mobile/lib/main.dart": [
+   false,
+   false
+  ],
+  "mobile/pubspec.lock": [
+   false,
+   false
+  ],
+  "mobile/pubspec.yaml": [
+   false,
+   false
+  ],
+  "mobile/test/background_alerts_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/bridge_client_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/chat_kit_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/chat_sync_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/goldens/kit_bubble_dark.png": [
+   false,
+   true
+  ],
+  "mobile/test/goldens/kit_bubble_light.png": [
+   false,
+   true
+  ],
+  "mobile/test/goldens/kit_golden_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/keyboard_close_gap_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/keyboard_composer_gap_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/keyboard_focus_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/markdown_table_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/message_alerts_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/motion_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/pairing_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/phase2_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/send_now_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/settings_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/state_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/support/fake_ws.dart": [
+   false,
+   true
+  ],
+  "mobile/test/support/harness.dart": [
+   false,
+   true
+  ],
+  "mobile/test/support/preview_data.dart": [
+   false,
+   true
+  ],
+  "mobile/test/takeover_row_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/takeover_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/tunnel_socket_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/tunnel_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/voice_controller_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/voice_logic_test.dart": [
+   false,
+   true
+  ],
+  "mobile/test/widgets_test.dart": [
+   false,
+   true
+  ],
+  "mobile/tool/fetch_model.sh": [
+   false,
+   false
+  ],
+  "mobile/tool/make_icons.py": [
+   false,
+   false
+  ],
+  "mobile/tool/sync_viz.sh": [
+   false,
+   false
+  ],
+  "release.sh": [
+   false,
+   false
+  ],
+  "spike/RESULTS.md": [
+   false,
+   false
+  ],
+  "tools/dev-profile.sh": [
+   false,
+   false
+  ],
+  "tools/github/apply-settings.sh": [
+   false,
+   false
+  ],
+  "tools/guard/.gitignore": [
+   false,
+   false
+  ],
+  "tools/guard/actions-allowlist.json": [
+   false,
+   false
+  ],
+  "tools/guard/guard/__init__.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/__main__.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/capability.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/changes.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/claudemd.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/codeowners.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/gate.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/lint.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/pins.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/rules.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/rulesets.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/source.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/weakening.py": [
+   false,
+   false
+  ],
+  "tools/guard/guard/zones.py": [
+   false,
+   false
+  ],
+  "tools/guard/lint-baseline.json": [
+   false,
+   false
+  ],
+  "tools/guard/tests/__init__.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/fixtures/notes-before-phase3.txt": [
+   false,
+   false
+  ],
+  "tools/guard/tests/helpers.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_capability.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_changes.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_codeowners.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_gate.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_lint.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_manual_move.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_pins.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_rules.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_rulesets.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_source.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_weakening.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_workflows.py": [
+   false,
+   false
+  ],
+  "tools/guard/tests/test_zones.py": [
+   false,
+   false
+  ],
+  "tools/guard/zones.json": [
+   false,
+   false
+  ],
+  "tools/install-hostd.sh": [
+   false,
+   false
+  ],
+  "tools/migrate-and-install.sh": [
+   false,
+   false
+  ],
+  "viz/fonts/Geist-Medium.ttf": [
+   false,
+   false
+  ],
+  "viz/fonts/Geist-Regular.ttf": [
+   false,
+   false
+  ],
+  "viz/fonts/Geist-SemiBold.ttf": [
+   false,
+   false
+  ],
+  "viz/fonts/GeistMono-Regular.ttf": [
+   false,
+   false
+  ],
+  "viz/fonts/OFL.txt": [
+   false,
+   false
+  ],
+  "viz/index.html": [
+   false,
+   false
+  ],
+  "viz/vendor/LICENSE-chartjs.txt": [
+   false,
+   false
+  ],
+  "viz/vendor/LICENSE-mermaid.txt": [
+   false,
+   false
+  ],
+  "viz/vendor/chart.umd.min.js": [
+   false,
+   false
+  ],
+  "viz/vendor/mermaid.min.js": [
+   false,
+   false
+  ],
+  "viz/viz.css": [
+   false,
+   false
+  ],
+  "viz/viz.js": [
+   false,
+   false
+  ]
+ }
+}
