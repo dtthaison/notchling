@@ -174,7 +174,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_guard_job_runs_every_check(self):
         text = read(".github/workflows/guard.yml")
-        for cmd in ("unittest discover", "guard lint", "guard pins", "guard codeowners --check", "guard rulesets"):
+        for cmd in ("unittest discover -s tools/guard/tests", "unittest discover -s tools/agents/tests",
+                    "guard lint", "guard pins", "guard codeowners --check", "guard rulesets"):
             self.assertIn(cmd, text)
 
     def test_pr_workflows_dont_persist_credentials(self):

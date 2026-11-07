@@ -1,9 +1,11 @@
 name: Guard
 
-# The project's rules as checks: the guard's own tests, the architecture lint against its baseline,
-# pinned actions, CODEOWNERS generated from zones.json, the rulesets, and the rules catalog (each
-# rule in docs/rules.md has a check that fires on its bad example; CLAUDE.md is @AGENTS.md) and the
-# generated protocol types (regenerating them from the schema changes nothing). No secrets.
+# The project's rules as checks: the guard's own tests, the tests of the agents' scripts in
+# tools/agents/ (triage, preflight, push wrapper, review; against local fakes only), the architecture
+# lint against its baseline, pinned actions, CODEOWNERS generated from zones.json, the rulesets, and
+# the rules catalog (each rule in docs/rules.md has a check that fires on its bad example; CLAUDE.md
+# is @AGENTS.md) and the generated protocol types (regenerating them from the schema changes
+# nothing). No secrets.
 on:
   pull_request:
   push:
@@ -28,6 +30,8 @@ jobs:
           persist-credentials: false
       - name: Guard tests
         run: python3 -m unittest discover -s tools/guard/tests -t tools/guard
+      - name: Agents tests
+        run: python3 -m unittest discover -s tools/agents/tests -t tools/agents
       - name: Architecture lint
         run: python3 -m guard lint
       - name: Actions pinned

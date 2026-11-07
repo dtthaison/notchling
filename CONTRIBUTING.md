@@ -37,7 +37,7 @@ Expect a first reply within about a week.
 
 | Check | What it runs | Run it locally |
 | --- | --- | --- |
-| `guard` | The guard's own tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check, then the protocol step: the generated types match the schema and the protocol tools' tests pass | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, `claudemd` in place of `lint`); `python3 tools/protocol/gen.py --check` and `python3 -m unittest discover -s tools/protocol/tests -t tools/protocol` |
+| `guard` | The guard's own tests, the agents' scripts' tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check, then the protocol step: the generated types match the schema and the protocol tools' tests pass | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard` and `python3 -m unittest discover -s tools/agents/tests -t tools/agents`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, `claudemd` in place of `lint`); `python3 tools/protocol/gen.py --check` and `python3 -m unittest discover -s tools/protocol/tests -t tools/protocol` |
 | `build` | `swift test` | `swift test` |
 | `app-build` | `./build.sh`, arm64 and x86_64 | `./build.sh` |
 | `phone-analyze` | `flutter analyze` in `apps/flutter/` | `cd apps/flutter && flutter analyze` |
@@ -49,12 +49,15 @@ Expect a first reply within about a week.
 
 Each rule a check enforces has an id (`LINT-…`, `CAP-…`, `WEAK-…`, `ZONE`, `GUARD-…`), and the failure names it. [docs/rules.md](docs/rules.md) says why each rule exists.
 
-`.github/rulesets/main.json` requires all nine checks on `main`, the three Rust ones included, once the rulesets are applied (see below). A cross-model review of agent pull requests comes with the agents in Phase 5.
+`.github/rulesets/main.json` requires all nine checks on `main`, the three Rust ones included, once the rulesets are applied (see below).
+
+A pull request may also get a `review-agent` status from the review agent. It isn't one of the required checks: it is a recommendation, and the agent never approves or merges. It reviews only the agent App's pull requests and ones the maintainer labeled `notchling:review`.
 
 ### What's in place now, and what comes later
 
 - **Now:** the rulesets for `main`, `agent/**` and release tags, kept as code in `.github/rulesets/` (not applied yet: the maintainer runs `tools/github/apply-settings.sh`); CODEOWNERS that protects everything outside the zone; the checks above, `maintainer-gate` included; the auto-merge zone as a list (merging on its own starts in Phase 5).
-- **Phase 5:** the GitHub App that agent pull requests come from, the workers that pick up `notchling:queued` issues, a triage Action for new issues, and a review agent that starts recommend-only. Outside pull requests get a model review only after the maintainer labels them `notchling:review`.
+- **Built, and off until their credentials exist:** the triage Action for new issues (`.github/workflows/triage.yml`), the review agent, recommend-only (`.github/workflows/review-run.yml` and `review-post.yml`), and the worker's pre-start check and push wrapper (`tools/agents/`). Without the `ANTHROPIC_API_KEY` secret, triage does nothing and the review agent reports "review missing". [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what is still missing and how the maintainer turns each part on; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on a worker.
+- **Phase 5, still to come:** the GitHub App that agent pull requests come from, the agent user and the push wrapper on each worker, and the workers picking up `notchling:queued` issues.
 - **Phase 6:** Beta and Stable channels, updates the app installs on its own, per-PR changelog fragments, and a release build that is signed apart from the code that built it.
 
 ## The auto-merge zone
@@ -63,7 +66,7 @@ Each rule a check enforces has an id (`LINT-…`, `CAP-…`, `WEAK-…`, `ZONE`,
 
 - Chat's views (`legacy/macos/Sources/Notchling/Chat/Views/`), the notch's views (`NotchView`, `NotchRows`, `NotchPeek`, `NotchDetail`, `NotchCardParts`, `TabPerch`, `Notch/Pet/`), Search, the design kit and `Pages/PagesWindow.swift`.
 - The transcript readers: `Chat/ConversationReader.swift`, `Agents/TranscriptReader.swift`, `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, and ConsoleCore's `ChatTranscript.swift`, `SubagentReader.swift` and `TranscriptFacts.swift`.
-- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`).
+- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`), `docs/dev-profile.md`, `docs/feature-map.md`, `docs/architecture.md` and `docs/superpowers/`.
 - The phone's `apps/flutter/lib/features/`, except `pairing/`.
 - New files under `legacy/macos/Tests/`, `legacy/macos/Fixtures/` and `apps/flutter/test/`. Changing an existing test or golden is protected.
 - In the Rust tree: `crates/app/` and `crates/kit/` (except their `Cargo.toml` and `build.rs`), and the engine's transcript and search modules (`crates/engine/src/transcript/`, `crates/engine/src/search/`, not written yet).
@@ -85,10 +88,11 @@ swift test            # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests
 
 Add a test with any new logic or parser. Tests never touch Keychain, real logins, ssh or `gh`; Machines tests use the fakes in `MachineSetupFakes.swift` and `MachineWindowFakes.swift`. `ZLiveReplyTests` and `ZBenchmarkTests` skip unless you ask for them; their headers say how.
 
-The guard (Python 3.9 or later, standard library only):
+The guard and the agents' scripts (Python 3.9 or later, standard library only):
 
 ```sh
 PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard
+python3 -m unittest discover -s tools/agents/tests -t tools/agents   # triage, preflight, push wrapper, review
 PYTHONPATH=tools/guard python3 -m guard lint
 PYTHONPATH=tools/guard python3 -m guard pins
 PYTHONPATH=tools/guard python3 -m guard codeowners --check

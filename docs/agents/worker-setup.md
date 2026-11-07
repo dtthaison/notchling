@@ -35,7 +35,7 @@ sudo -u notchling-agent -H sh -c 'gh auth status; ls ~/.ssh ~/.git-credentials ~
 sudo -u notchling-agent -H git ls-remote https://github.com/OWNER/REPO.git agent/none   # must ask for a login or fail
 ```
 
-The worktrees it works in are readable by `notchling-push` (the wrapper only reads them): mode 0750 on the worktree root, with `notchling-push` in a shared group, or 0755.
+The worktrees it works in are readable by `notchling-push` (the wrapper only reads them): mode 0750 on the worktree root, with `notchling-push` in a shared group, or 0755. The wrapper also reads the worktree's index and the clone's objects, so the clone's `.git` folder (which a linked worktree shares) must be readable by `notchling-push` too.
 
 ## 2. The wrapper user
 
@@ -53,17 +53,19 @@ sudo useradd --create-home --shell /usr/sbin/nologin notchling-push
 
 It must not be able to log in over ssh and must not be in the admin group.
 
-Install the scripts where neither the agent nor sd can change them:
+Install the scripts where neither the agent nor sd can change them (on Linux, use group `root` wherever this says `wheel`):
 
 ```sh
-sudo install -d -o root -g wheel -m 0755 /opt/notchling/agents      # Linux: -g root
+sudo install -d -o root -g wheel -m 0755 /opt/notchling/agents
 sudo cp tools/agents/preflight.py tools/agents/push_wrapper.py /opt/notchling/agents/
 sudo install -d -o root -g wheel -m 0755 /opt/notchling/guard
 sudo cp -R tools/guard/guard /opt/notchling/guard/guard             # preflight imports MAINTAINERS from it
 sudo chown -R root:wheel /opt/notchling && sudo chmod -R go-w /opt/notchling
 ```
 
-`preflight.py` finds `guard` at `../guard` from its own folder, so keep `/opt/notchling/agents` and `/opt/notchling/guard` side by side. Update both from a merged `main` after a change, and never from an agent branch.
+`push_wrapper.py` imports `preflight.py` from its own folder, and `preflight.py` finds `guard` at `../guard` from that folder, so keep the two scripts together and `/opt/notchling/agents` and `/opt/notchling/guard` side by side. Update both from a merged `main` after a change, and never from an agent branch.
+
+The wrapper needs Python 3.9 or newer, git 2.31 or newer (it uses `rev-parse --path-format`) and `openssl`, all on the `PATH` sudo gives it.
 
 ## 3. The App key and the wrapper's config
 
@@ -72,13 +74,13 @@ Create the GitHub App first (the maintainer does this in GitHub; see the spec's 
 The **Secret Vault** on the maintainer's Mac keeps the master copy (name it `notchling-app-key`, with a note on how to renew it). The wrapper reads a file, so each worker gets one copy of it, written once by the maintainer over ssh stdin and never through the agent's account:
 
 ```sh
-sudo install -d -o notchling-push -g notchling-push -m 0700 /var/lib/notchling-push     # macOS: /Users/notchling-push/keys
+sudo install -d -o notchling-push -g notchling-push -m 0700 /var/lib/notchling-push     # macOS: -g staff, and /Users/notchling-push/keys
 sudo -u notchling-push sh -c 'umask 077; cat > /var/lib/notchling-push/app.pem'
 # paste the key (or pipe it: ssh worker 'sudo -u notchling-push sh -c "umask 077; cat > /var/lib/notchling-push/app.pem"' < key.pem), then Ctrl-D
 sudo chmod 0600 /var/lib/notchling-push/app.pem
 ```
 
-The wrapper refuses a key that isn't a regular file, isn't owned by its user, or is readable by group or others.
+The wrapper refuses a key that isn't a regular file (a symlink is refused too), isn't owned by the user running it, or gives group or others any access (0600 and 0400 pass).
 
 The config, `~notchling-push/.config/notchling/push-wrapper.json` (mode 0600):
 
@@ -86,7 +88,9 @@ The config, `~notchling-push/.config/notchling/push-wrapper.json` (mode 0600):
 {"app_id": 123456, "key_path": "/var/lib/notchling-push/app.pem", "repo": "OWNER/REPO"}
 ```
 
-`api_url` and `remote_url` default to GitHub's and are there for tests. The App key is never in CI, never in a repository secret and never in the agent's home.
+`key_path` is used as written (`~` isn't expanded), so give the full path. `api_url` and `remote_url` default to GitHub's (`https://api.github.com`, `https://github.com/OWNER/REPO.git`) and are there for tests. The App key is never in CI, never in a repository secret and never in the agent's home.
+
+The wrapper reads its config from `--config`, else the file named by `NOTCHLING_PUSH_WRAPPER_CONFIG`, else `$HOME/.config/notchling/push-wrapper.json`. sudo doesn't always set `HOME` to the target user's, so sd passes `--config` (step 4).
 
 ## 4. The sudoers line
 
@@ -100,11 +104,14 @@ sd then calls:
 
 ```sh
 sudo -u notchling-push /usr/bin/python3 /opt/notchling/agents/push_wrapper.py \
+  --config /Users/notchling-push/.config/notchling/push-wrapper.json \
   --worktree /Users/notchling-agent/work/issue-42 --issue 42 \
   --title "Fix the thing" --body-file /tmp/body-42.md --agent-model claude-opus-5-5
 ```
 
-The `*` is safe only because the script validates every argument (branch name, issue number, title, model, body size). It prints the PR URL on exit 0; exit 1 is a refusal, exit 2 an error.
+On Linux the config is under `/home/notchling-push`. The body file must be readable by `notchling-push`.
+
+The `*` is safe only because the script checks everything it's given: the branch it reads from the worktree (`agent/<issue>-<slug>`, matching `--issue`), the title (one plain line), the model id, and the body (text, at most 60,000 bytes). It adds `Refs #<issue>` and, with `--agent-model`, an `Agent-Model:` line to the body. It prints the PR URL on exit 0; exit 1 is a refusal, exit 2 an error (including "the branch is pushed, but the pull request failed").
 
 ## 5. The pre-start check
 
@@ -114,7 +121,7 @@ Before sd starts an issue, it runs `preflight.py` as itself:
 GITHUB_TOKEN="$(gh auth token)" python3 /opt/notchling/agents/preflight.py OWNER/REPO 42
 ```
 
-Exit 0 means go. Exit 1 or 2 means do not start (2 is an API error, which counts as refused). It checks that a maintainer added `notchling:queued`, that it wasn't removed since, that the body wasn't edited after the label, and that the issue is open, isn't a pull request and isn't `notchling:stuck`.
+Exit 0 means go. Exit 1 or 2 means do not start (2 is an API or usage error, which counts as refused). It checks that the latest `notchling:queued` label event was a maintainer's (`MAINTAINERS` in `guard/gate.py`), that the label wasn't removed since, that the issue wasn't edited at or after that event, and that the issue is open, isn't a pull request and isn't `notchling:stuck`. It also refuses an issue whose edit history is longer than it reads (100 edits).
 
 The body-edit check uses GitHub's GraphQL `userContentEdits`, and GraphQL needs a token even on a public repository. The token only has to read issues. Use the maintainer's own `gh` login in sd's account, which the agent user can't see, or a fine-grained read-only token. Do not give it to the agent.
 
@@ -126,9 +133,9 @@ The agent's builds and tests may reach package registries and nothing else. On t
 
 1. `preflight.py` on an issue the maintainer queued: exit 0. On the same issue after editing its body: exit 1.
 2. As `notchling-agent`, make a branch `agent/<issue>-test` with one commit in a scratch clone. Try `git push`: it must fail.
-3. Run the wrapper on it: a PR opens, authored by the App, and `agent/<issue>-test` exists on GitHub.
+3. Run the wrapper on it: a PR opens, authored by the App, and `agent/<issue>-test` exists on GitHub. Once the rulesets are applied, this needs the App in the `agent-branches` ruleset's bypass list.
 4. Run the wrapper on a branch called `main`, then on one with uncommitted files: both refuse with exit 1 before any network call.
-5. `ps aux | grep -i x-access-token` while a push runs: nothing. The token is only in the environment of the one `git push`.
+5. `ps auxww | grep -E 'ghs_|x-access-token'` while a push runs: nothing. The token is in no argument list; it reaches git only through the environment of the one `git push` (`GIT_CONFIG_*`).
 
 ## 8. What changes in Machines later
 
