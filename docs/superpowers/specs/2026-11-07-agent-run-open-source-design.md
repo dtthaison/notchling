@@ -138,11 +138,13 @@ Flutter app for iOS and Android (`mobile/`, ~15.6k lines) that knows the Mac onl
 Shape: **one engine per computer, many apps talking to it.**
 
 - **Engine** (`notchlingd`): finds Claude Code (and Codex, Antigravity) sessions, reads transcripts,
-  hosts terminals, keeps the vault and logins, serves the protocol to local and remote apps. Rust, so
-  one engine runs on macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`,
+  hosts terminals, keeps the vault and logins, serves the protocol to local and remote apps. **Rust**
+  *(maintainer's decision, over Go)*, so one engine runs on macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`,
   `sysinfo`, `keepawake`, `tray-icon`).
 - **Apps**: the native macOS app stays Swift (the notch is Mac-only) and calls the engine through
-  UniFFI or the protocol; one Flutter app covers iOS, Android, and later Linux and Windows desktops.
+  UniFFI or the protocol; one Flutter app covers iOS, Android, and later Linux and Windows desktops
+  *(my call: Flutter over Tauri or a Rust UI, since the phone app is already Flutter; it calls the engine
+  through `flutter_rust_bridge` or the protocol)*.
 - **Protocol** is the contract between them: a written spec (JSON Schema) plus conformance fixtures
   every engine and app must pass. It stays additive (older apps ignore new fields), as today.
 
