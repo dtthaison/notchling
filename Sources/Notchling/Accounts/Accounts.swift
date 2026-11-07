@@ -49,6 +49,11 @@ final class AccountStore: ObservableObject {
 
     private let queue = DispatchQueue(label: "local.notchling.accounts", qos: .utility)
     private var syncing = false
+    /// Counts snapshots and removals (main thread), so `apply` can tell a removal that came after the
+    /// snapshot it is writing back.
+    private var stamp = 0
+    /// Removed account ids, with the stamp of the removal.
+    private var removedAt: [String: Int] = [:]
     /// Access tokens already matched to an account, so the profile is fetched once per token.
     private var known: [String: String] = [:]
 
@@ -148,6 +153,8 @@ final class AccountStore: ObservableObject {
 
     /// Forgets a saved account. Claude Code stays signed in if it's the current one.
     func remove(_ id: String) {
+        stamp += 1
+        removedAt[id] = stamp
         accounts.removeAll { $0.id == id }
         usage[id] = nil
         save()
@@ -161,22 +168,35 @@ final class AccountStore: ObservableObject {
         var accounts: [ClaudeAccount]
         var activeID: String?
         var usage: [String: AccountUsage]
+        /// When the snapshot was taken (`stamp`).
+        var taken = 0
     }
 
     /// Runs on the queue (every caller is inside `queue.async`), never on the main thread, which it waits for.
     private func snapshot() -> State {
-        DispatchQueue.main.sync { State(accounts: accounts, activeID: activeID, usage: usage) }
+        DispatchQueue.main.sync {
+            stamp += 1
+            return State(accounts: accounts, activeID: activeID, usage: usage, taken: stamp)
+        }
     }
 
+    /// Writes back a snapshot after work on the queue. An account removed after the snapshot was taken stays
+    /// removed: the list in the snapshot still had it, and its saved login is already deleted (issue #7).
     private func apply(_ state: State) {
         let before = (accounts, activeID, usage)
-        accounts = state.accounts
+        let gone = Self.removedSince(state.taken, removedAt)
+        accounts = state.accounts.filter { !gone.contains($0.id) }
         activeID = state.activeID
-        usage = state.usage
+        usage = state.usage.filter { !gone.contains($0.key) }
         lastSync = Date()
         if let id = activeID { AccountLog.record(id) }
         save()
         if before.0 != accounts || before.1 != activeID || before.2 != usage { changed?() }
+    }
+
+    /// The ids removed after the snapshot stamped `taken`.
+    static func removedSince(_ taken: Int, _ removedAt: [String: Int]) -> Set<String> {
+        Set(removedAt.filter { $0.value > taken }.keys)
     }
 
     private func save() {
