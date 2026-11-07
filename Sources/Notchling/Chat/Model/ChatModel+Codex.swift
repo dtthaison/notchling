@@ -70,7 +70,7 @@ extension ChatModel {
     /// interface in the terminal sheet (`codex exec`, which Chat's turns use, has no slash commands).
     func runCodexCommand(_ name: String, text: String, agent: Agent, session: String, clearDraft: Bool) {
         let id = agent.id
-        let done = { [weak self] in if clearDraft { self?.drafts[id] = "" } }
+        let done = { [weak self] in if clearDraft { self?.clearComposer(id) } }
         switch CodexCommands.route(name) {
         case .modelPicker:
             done()
