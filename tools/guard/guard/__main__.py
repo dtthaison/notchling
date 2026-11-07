@@ -29,9 +29,22 @@ def cmd_codeowners(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lint(args: argparse.Namespace) -> int:
+    from guard import lint
+
+    return lint.main(Path("."), write_new=args.write_baseline, update=args.update_baseline,
+                     show_warnings=args.warnings)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("lint", help="the architecture lint against its baseline")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--write-baseline", action="store_true", help="first run only: record what exists")
+    mode.add_argument("--update-baseline", action="store_true", help="shrink the baseline to what's left")
+    p.add_argument("--warnings", action="store_true")
+    p.set_defaults(func=cmd_lint)
     p = sub.add_parser("codeowners", help="render or check .github/CODEOWNERS")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true")
