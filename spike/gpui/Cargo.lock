@@ -3176,6 +3176,7 @@ version = "0.0.0"
 dependencies = [
  "gpui",
  "spike-core",
+ "unicode-segmentation",
 ]
 
 [[package]]
