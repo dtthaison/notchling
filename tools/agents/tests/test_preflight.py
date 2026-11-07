@@ -305,6 +305,9 @@ class MainTests(unittest.TestCase):
                      ["../r", "5"], ["o/r/x", "5"]):
             self.assertEqual(self.run_main(argv)[0], 2, argv)
 
+    def test_repo_with_a_trailing_newline_is_a_usage_error(self):
+        self.assertEqual(self.run_main(["o/r\n", "5"])[0], 2)
+
     def serve(self, **kw):
         srv = FakeGitHub(routes_for(**kw))
         self.addCleanup(srv.close)

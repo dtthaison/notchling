@@ -269,7 +269,7 @@ def parse_args(argv: List[str]) -> Optional[Tuple[str, int, Optional[str]]]:
         else:
             positional.append(arg)
         i += 1
-    if len(positional) != 2 or not REPO_RE.match(positional[0]) \
+    if len(positional) != 2 or not REPO_RE.fullmatch(positional[0]) \
             or not re.fullmatch(r"[0-9]+", positional[1]) or int(positional[1]) < 1:
         return None
     return positional[0], int(positional[1]), expect

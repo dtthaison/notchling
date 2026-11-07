@@ -66,7 +66,7 @@ A pull request may also get a `review-agent` status from the review agent. It is
 
 - Chat's views (`legacy/macos/Sources/Notchling/Chat/Views/`), the notch's views (`NotchView`, `NotchRows`, `NotchPeek`, `NotchDetail`, `NotchCardParts`, `TabPerch`, `Notch/Pet/`), Search, the design kit and `Pages/PagesWindow.swift`.
 - The transcript readers: `Chat/ConversationReader.swift`, `Agents/TranscriptReader.swift`, `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, and ConsoleCore's `ChatTranscript.swift`, `SubagentReader.swift` and `TranscriptFacts.swift`.
-- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`), `docs/dev-profile.md`, `docs/feature-map.md`, `docs/architecture.md` and `docs/superpowers/`.
+- `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`), `docs/dev-profile.md`, `docs/feature-map.md`, `docs/architecture.md`, `docs/agents/` and `docs/superpowers/`.
 - The phone's `apps/flutter/lib/features/`, except `pairing/`.
 - New files under `legacy/macos/Tests/`, `legacy/macos/Fixtures/` and `apps/flutter/test/`. Changing an existing test or golden is protected.
 - In the Rust tree: `crates/app/` and `crates/kit/` (except their `Cargo.toml` and `build.rs`), and the engine's transcript and search modules (`crates/engine/src/transcript/`, `crates/engine/src/search/`, not written yet).

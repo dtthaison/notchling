@@ -140,6 +140,10 @@ GITHUB_TOKEN="$(gh auth token)" python3 /opt/notchling/agents/preflight.py OWNER
 
 Exit 0 means go. Exit 1 or 2 means do not start (2 is an API or usage error, which counts as refused). It checks that the latest `notchling:queued` label event was a maintainer's (`MAINTAINERS` in `guard/gate.py`), that the label wasn't removed since, that the issue wasn't edited at or after that event, and that the issue is open, isn't a pull request and isn't `notchling:stuck`. It also refuses an issue whose edit history is longer than it reads (100 edits).
 
+A renamed title after the label refuses too (the `renamed` timeline event and GraphQL `lastEditedAt`).
+
+On exit 0, stdout is one JSON line: `ok`, `repo`, `issue`, `title`, `body`, `title_sha256`, `body_sha256` and `sha256` (of title, a newline, then body, as UTF-8). Stdout is empty on exit 1 or 2, and stderr never holds issue text. The worker hands the agent exactly that `title` and `body`, as data, and never re-reads the issue or passes its comments on. A worker that must read the issue itself reads it first and passes its own hash with `--expect-sha256 <hex>`; a different text refuses with exit 1. Parse the line as JSON and never paste a field into a shell.
+
 The body-edit check uses GitHub's GraphQL `userContentEdits`, and GraphQL needs a token even on a public repository. The token only has to read issues. Use the maintainer's own `gh` login in sd's account, which the agent user can't see, or a fine-grained read-only token. Do not give it to the agent.
 
 ## 6. Network allowlist
