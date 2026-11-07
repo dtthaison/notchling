@@ -9,10 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let resumer = WakeResumer()
     /// Long sd runs: shown in the notch, their session told when one ends, and the Mac kept awake meanwhile.
     private lazy var runs = RunWatcher(
-        extraRepos: {
-            guard case .loaded(let machines, _) = MachineRegistry.load() else { return [] }
-            return machines.flatMap { $0.repos.map(\.localPath) }
-        },
+        extraRepos: { RunWatcher.machineRepositories() },
         enabled: { RunWatcher.wakeOnFinish },
         send: { job, text in try ReplySender.send(text, toJob: job) },
         notify: { UserNotifier.post($0, $1) })

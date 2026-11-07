@@ -294,6 +294,12 @@ final class RunWatcher {
 
     // MARK: System
 
+    /// The checkouts on `machines.json` (the MacBook side of each repo). Read-only: `MachineRegistry.load` would
+    /// migrate a v1 file, and that belongs to the Machines window.
+    static func machineRepositories(at url: URL = MachineRegistry.fileURL) -> [String] {
+        MachineRegistry.peek(at: url).flatMap { $0.repos.map(\.localPath) }
+    }
+
     /// "Wake agents when runs finish" (default on).
     static var wakeOnFinish: Bool {
         get { UserDefaults.standard.object(forKey: "wakeOnRunFinish") as? Bool ?? true }
