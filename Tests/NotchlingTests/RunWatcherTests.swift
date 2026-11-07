@@ -25,7 +25,8 @@ final class RunWatcherTests: XCTestCase {
     override func tearDown() { try? FileManager.default.removeItem(at: root) }
 
     var runsFile: URL { repo.appendingPathComponent(".git/sd/runs.jsonl") }
-    var log: String { root.appendingPathComponent("logs/n-1.log").path }
+    var logOverride: String?
+    var log: String { logOverride ?? root.appendingPathComponent("logs/n-1.log").path }
 
     func makeWatcher(extra: [String] = [], watchFiles: Bool = false) -> RunWatcher {
         let w = RunWatcher(now: { self.clock }, pidAlive: { _ in self.alive }, load: { 2.5 }, extraRepos: { extra },
@@ -274,6 +275,78 @@ final class RunWatcherTests: XCTestCase {
         try? "".write(to: runsFile, atomically: true, encoding: .utf8)
         w.runsFileChanged()
         XCTAssertTrue(items.isEmpty)
+    }
+
+    // MARK: Watching
+
+    func appendToLog(_ text: String, at path: String? = nil) {
+        let h = try! FileHandle(forWritingTo: URL(fileURLWithPath: path ?? log))
+        h.seekToEndOfFile()
+        h.write(text.data(using: .utf8)!)
+        try? h.close()
+    }
+
+    func testALogChangeIsMatchedAcrossPrivateAndPlainPaths() {
+        writeLog("one\n")
+        let real = FileEvents.realPath(log)
+        XCTAssertNotEqual(real, log, "temporary folders live behind /var -> /private/var")
+        logOverride = real
+        appendStart()
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .working)])
+        XCTAssertEqual(items[0].detail, "one")
+        writeLog("one\ntwo\n")
+        w.logChanged([URL(fileURLWithPath: real).standardizedFileURL.path])
+        XCTAssertEqual(items[0].detail, "two", "FSEvents paths come back as /var/..., the record says /private/var/...")
+    }
+
+    func testFSEventsUpdateTheLastLineOfALogNamedByItsRealPath() {
+        writeLog("one\n")
+        logOverride = FileEvents.realPath(log)
+        appendStart()
+        let w = makeWatcher(watchFiles: true)
+        w.tick(agents: [agent("s1", .working)])
+        XCTAssertEqual(items[0].detail, "one")
+        let seen = expectation(description: "last line follows the log")
+        let previous = w.onChange
+        w.onChange = { previous?($0); if $0.first?.detail == "two" { seen.fulfill() } }
+        appendToLog("two\n")
+        wait(for: [seen], timeout: 10)
+        w.stop()
+    }
+
+    func testFSEventsUpdateALogOfARunThatStartedAfterTheStreamWasMade() {
+        let second = root.appendingPathComponent("logs/n-2.log").path
+        writeLog("a1\n")
+        try? "b1\n".write(toFile: second, atomically: true, encoding: .utf8)
+        appendStart()
+        let w = makeWatcher(watchFiles: true)
+        w.tick(agents: [agent("s1", .working)])
+        // a second run starts in the same folder: no new folder, so no new stream
+        append(#"{"event":"start","key":"just other","log":"\#(second)","cwd":"\#(repo.path)","pid":98,"session":"s1","limit":7200,"started_at":"\#(iso(clock))"}"# + "\n")
+        w.runsFileChanged()
+        XCTAssertEqual(items.count, 2)
+        let seen = expectation(description: "second log followed")
+        let previous = w.onChange
+        w.onChange = { previous?($0); if $0.contains(where: { $0.log == second && $0.detail == "b2" }) { seen.fulfill() } }
+        appendToLog("b2\n", at: second)
+        wait(for: [seen], timeout: 10)
+        w.stop()
+    }
+
+    func testAnAppendBetweenTheFirstReadAndTheStreamIsStillRead() {
+        appendStart()
+        let w = makeWatcher(watchFiles: true)
+        w.beforeWatching = { [self] in
+            // after the repository's first read, before FSEvents is listening
+            clock = clock.addingTimeInterval(30)
+            appendFinish(at: clock)
+            w.beforeWatching = nil
+        }
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].kind, .finished, "the finish written in that gap is read once the stream runs")
+        w.stop()
     }
 
     // MARK: A run that vanishes

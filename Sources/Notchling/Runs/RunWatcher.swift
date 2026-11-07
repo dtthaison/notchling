@@ -46,6 +46,8 @@ final class RunWatcher {
     private let notify: (_ title: String, _ body: String) -> Void
     private let dispatch: (@escaping () -> Void) -> Void
     private let watchFiles: Bool
+    /// Test seam: runs after a repository's first read and before FSEvents listens to `sd/`.
+    var beforeWatching: (() -> Void)?
 
     private var repos: [String: Repo] = [:]
     private var waker: RunWaker
@@ -101,22 +103,21 @@ final class RunWatcher {
     func tick(agents: [Agent]) {
         self.agents = agents
         let wanted = repoDirs(for: agents)
-        var added = false
         for dir in wanted where repos[dir] == nil {
             repos[dir] = Repo(dir: dir)
             read(dir)
-            added = true
         }
         let sd = Set(repos.keys.map { $0 + "/sd" }.filter { FileManager.default.fileExists(atPath: $0) })
         if watchFiles, sd != watchedSD {
             watchedSD = sd
+            beforeWatching?()
             runsEvents = sd.isEmpty ? nil : FileEvents(folders: sd.map { URL(fileURLWithPath: $0) }, latency: 1, queue: queue) { [weak self] batch in
                 // Both the runs file and anything else in sd/ (nightly results) land here; only runs.jsonl matters.
                 guard batch.rescan || batch.paths.contains(where: { $0.hasSuffix("/runs.jsonl") }) else { return }
                 DispatchQueue.main.async { self?.runsFileChanged() }
             }
-            // anything appended between the first read and the stream starting
-            if !added { readAll() }
+            // anything appended between a repository's first read and the stream starting
+            readAll()
         }
         refresh()
     }
@@ -133,10 +134,12 @@ final class RunWatcher {
         refresh()
     }
 
-    /// A watched log changed: its last line is stale.
-    func logChanged(_ paths: Set<String>) {
+    /// A watched log changed (`rescan`: FSEvents lost track, so any might have): its last line is stale.
+    /// FSEvents names a file as `/var/...` where sd's record says `/private/var/...`, so both sides are resolved.
+    func logChanged(_ paths: Set<String>, rescan: Bool = false) {
+        let real = Set(paths.map(FileEvents.realPath))
         var changed = false
-        for run in activeRuns() where paths.contains(run.log) {
+        for run in activeRuns() where rescan || real.contains(FileEvents.realPath(run.log)) {
             lastLines[run.log] = RunLog.lastLine(of: run.log)
             changed = true
         }
@@ -218,11 +221,10 @@ final class RunWatcher {
         let folders = Set(active.map { ($0.log as NSString).deletingLastPathComponent }.filter { FileManager.default.fileExists(atPath: $0) })
         guard folders != watchedLogFolders else { return }
         watchedLogFolders = folders
-        let logs = Set(active.map(\.log))
+        // Which logs matter is decided on the main thread against the runs active by then, not the ones
+        // active when the stream was made: a run that starts in a folder already watched gets no new stream.
         logEvents = folders.isEmpty ? nil : FileEvents(folders: folders.map { URL(fileURLWithPath: $0) }, latency: 1, queue: queue) { [weak self] batch in
-            let hit = batch.rescan ? logs : batch.paths.intersection(logs)
-            guard !hit.isEmpty else { return }
-            DispatchQueue.main.async { self?.logChanged(hit) }
+            DispatchQueue.main.async { self?.logChanged(batch.paths, rescan: batch.rescan) }
         }
     }
 
