@@ -82,9 +82,19 @@ class ReviewRunTests(unittest.TestCase):
 
 class ReviewPostTests(unittest.TestCase):
     def test_trusted_job_permissions_are_the_minimum(self):
+        """Nothing at the top; the one job asks for what review.py uses: the diff (contents), the check
+        results (checks), comments and labels (pull requests) and the commit status (statuses)."""
         text = read(POST)
-        self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n  pull-requests: write\n  statuses: write\n")
-        self.assertNotRegex(text, r"(?m)^\s*(issues|actions|checks|id-token|packages|deployments):")
+        self.assertRegex(text, r"(?m)^permissions: \{\}\s*$")
+        self.assertNotRegex(text, r"(?m)^permissions:\n")
+        job = text.split("\njobs:\n", 1)[1]
+        m = re.search(r"(?m)^    permissions:\n((?:      [a-z-]+: (?:read|write)\n)+)", job)
+        self.assertIsNotNone(m, "the job needs its own permissions block")
+        granted = dict(re.findall(r"([a-z-]+): (read|write)", m.group(1)))
+        self.assertEqual(granted, {"checks": "read", "contents": "read", "pull-requests": "write", "statuses": "write"})
+        self.assertEqual(text.count("permissions:"), 2)
+        self.assertNotRegex(text, r"(?m)^\s*(issues|actions|id-token|packages|deployments):")
+        self.assertNotRegex(text, r"checks:\s*write")
         self.assertNotRegex(text, r"contents:\s*write")
 
     def test_a_run_is_never_cancelled_after_it_may_have_asked_the_model(self):

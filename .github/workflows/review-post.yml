@@ -30,10 +30,7 @@ on:
     workflows: ["Review run"]
     types: [completed]
 
-permissions:
-  contents: read
-  pull-requests: write
-  statuses: write
+permissions: {}
 
 # Runs for one head commit queue instead of cancelling each other: a run cancelled after it asked the
 # model, before it wrote the comment that records that, would make the next one ask again.
@@ -46,6 +43,13 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Nothing at the top; what review.py uses: the diff (contents), the check results (checks), the
+    # comments, events and label (pull-requests) and the commit status (statuses).
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+      statuses: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
