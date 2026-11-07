@@ -14,6 +14,6 @@ jobs:
   build:  # the job id is the check name main requires; it only runs the tests
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Run tests
         run: swift test

@@ -43,9 +43,27 @@ def cmd_gate(args: argparse.Namespace) -> int:
                      args.post, args.target_url)
 
 
+def cmd_pins(args: argparse.Namespace) -> int:
+    from guard import pins
+
+    workflows = Path(".github/workflows")
+    if args.fix:
+        for line in pins.pin(workflows):
+            print(line)
+    problems = pins.check(workflows, pins.load_allowlist(pins.ALLOWLIST))
+    for p in problems:
+        print(p)
+    if not problems:
+        print("actions pinned and allowlisted")
+    return 1 if problems else 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("pins", help="every workflow action pinned to a SHA and allowlisted")
+    p.add_argument("--fix", action="store_true", help="pin tag references to their SHA (uses git ls-remote)")
+    p.set_defaults(func=cmd_pins)
     p = sub.add_parser("gate", help="does this change need the maintainer, and is it approved")
     p.add_argument("--repo", default=".")
     p.add_argument("--base", required=True)
