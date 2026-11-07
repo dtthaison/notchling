@@ -8,3 +8,8 @@ publish.workspace = true
 [dependencies]
 spike-core = { path = "../spike-core" }
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+objc2 = "=0.6.5"
+objc2-foundation = "=0.3.2"
+objc2-app-kit = "=0.3.2"
+objc2-core-graphics = { version = "=0.3.2", features = ["CGWindow", "CGImage", "CGGeometry"] }
+raw-window-handle = "=0.6.2"
