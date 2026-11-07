@@ -1,0 +1,2 @@
+{"type":"user","uuid":"s01","isSidechain":true,"timestamp":"2026-11-01T13:10:00.000Z","message":{"role":"user","content":"Scan the repo"}}
+{"type":"assistant","uuid":"s02","isSidechain":true,"timestamp":"2026-11-01T13:10:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Scanning now"}]}}

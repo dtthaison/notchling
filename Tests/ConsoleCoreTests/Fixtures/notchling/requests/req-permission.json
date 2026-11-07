@@ -1,0 +1,1 @@
+{"id":"req-permission","session_id":"sess-busy","pid":4242,"created":1793541460.5,"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build","description":"Remove build output"}}

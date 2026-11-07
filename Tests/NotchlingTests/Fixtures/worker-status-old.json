@@ -1,0 +1,38 @@
+{
+  "machine": "m1",
+  "version": "1.13.0",
+  "paused": null,
+  "health": {
+    "github": "ok",
+    "claude": "ok",
+    "host": "ok"
+  },
+  "current": null,
+  "ready": [
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 88,
+      "branch": "sd/m1/88-x",
+      "commit": "abc1234",
+      "worktree": "/Users/sondoan/wt/88"
+    }
+  ],
+  "needs_you": [
+    {
+      "repo": "dtthaison/lingeva-mono",
+      "issue": 90,
+      "branch": "sd/m1/90-y",
+      "worktree": "/Users/sondoan/wt/90",
+      "reason": "verify stopped"
+    }
+  ],
+  "stuck": [],
+  "jobs_tonight": 1,
+  "future_field": {
+    "anything": [
+      1,
+      2,
+      3
+    ]
+  }
+}

@@ -1,5 +1,7 @@
-name: Build
+name: Tests
 
+# Tests only. The app and its disk image are built by release.yml, when a release/<version> pull
+# request is merged and v<version> is tagged.
 on:
   push:
     branches: [main]
@@ -9,13 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build:  # the job id is the check name main requires; it only runs the tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build app and disk image
-        run: ./build.sh --dmg
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Notchling
-          path: build/Notchling-*.dmg
+      - name: Run tests
+        run: swift test

@@ -1,0 +1,13 @@
+# One TestFlight feedback poll (Linux). Started every 15 minutes by sd-testflight.timer. Only the one machine
+# whose worker.json has a testflight block runs it (see README.md, Limits).
+# Placeholders @SD_PY@ and @PYTHON3@ as in sd-worker.service. PATH as in sd-worker.service.
+# The poll reads claude_env from worker.json itself, like the worker.
+[Unit]
+Description=sd TestFlight feedback poll (one run)
+
+[Service]
+Type=oneshot
+Slice=sd-worker.slice
+User=agent
+Environment=PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@PYTHON3@ @SD_PY@ worker testflight

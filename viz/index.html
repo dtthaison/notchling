@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<!-- No network: nothing loads except files next to this page. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; font-src file:; img-src file: data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Console viz</title>
+<link rel="stylesheet" href="viz.css">
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<script src="vendor/mermaid.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="viz.js"></script>
+</body>
+</html>

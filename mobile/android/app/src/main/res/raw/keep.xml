@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The sounds are looked up by name at run time (notification channels and the in-app player), so the resource
+     shrinker must not remove them. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/needs_you,@raw/new_message" />

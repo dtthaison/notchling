@@ -32,7 +32,7 @@ PLIST
 
 # Top-level code has to live in a file called main.swift.
 cp "$SCENE" "$OUT/src/main.swift"
-SOURCES=$(ls Sources/*.swift | grep -vE '/(main|AppDelegate)\.swift$')
+SOURCES=$(find Sources/Notchling -name '*.swift' | grep -vE '/(main|AppDelegate)\.swift$')
 # shellcheck disable=SC2086
 swiftc -O -D DEMO -o "$APP/Contents/MacOS/render" $SOURCES "$OUT/src/main.swift"
 swiftc -O -o "$OUT/encode" Demo/encode.swift

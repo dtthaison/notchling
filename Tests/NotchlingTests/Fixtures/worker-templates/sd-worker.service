@@ -1,0 +1,24 @@
+# The sd worker (Linux). Install as /etc/systemd/system/sd-worker.service; see README.md, section Install (Linux).
+# Placeholders, replaced before installing:
+#   @SD_PY@   = the absolute path of plugin/scripts/sd.py on this machine.
+#   @PYTHON3@ = a python3 of 3.10 or newer (sd needs it; see README.md).
+# PATH: claude, git, gh, just and docker must be found on this PATH. Edit it to list where they are installed here.
+# The GitHub token is read from worker.json (token_file); the Claude login is read by the worker itself from the
+# file worker.json names as claude_env (default ~/.config/sd/claude.env, mode 600). Tokens never go in this file.
+# KillMode=control-group: stopping the unit also kills the autopilot and verify process groups the worker started.
+[Unit]
+Description=sd worker (takes queued GitHub issues and leaves verified branches; never pushes)
+
+[Service]
+Slice=sd-worker.slice
+User=agent
+Environment=PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@PYTHON3@ @SD_PY@ worker run
+Restart=on-failure
+RestartSec=60
+Nice=10
+IOWeight=20
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

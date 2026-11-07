@@ -1,0 +1,42 @@
+Xcode 26.1
+@@runtimes
+iOS 26.5 (26.5 - 23F77) - com.apple.CoreSimulator.SimRuntime.iOS-26-5
+@@devices
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.tvOS-26-5" : [
+      {
+        "isAvailable" : true,
+        "state" : "Shutdown",
+        "name" : "Apple TV 4K (3rd generation)",
+        "udid" : "0A1B2C3D-0000-4000-8000-000000000001"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-5" : [
+      {
+        "isAvailable" : true,
+        "state" : "Shutdown",
+        "name" : "iPhone 17",
+        "udid" : "0A1B2C3D-0000-4000-8000-000000000002"
+      },
+      {
+        "isAvailable" : true,
+        "state" : "Shutdown",
+        "name" : "iPhone 17 Pro",
+        "udid" : "0A1B2C3D-0000-4000-8000-000000000003"
+      },
+      {
+        "isAvailable" : true,
+        "state" : "Shutdown",
+        "name" : "iPhone 17 Pro Max",
+        "udid" : "0A1B2C3D-0000-4000-8000-000000000004"
+      },
+      {
+        "isAvailable" : true,
+        "state" : "Shutdown",
+        "name" : "iPad Pro 13-inch (M5)",
+        "udid" : "0A1B2C3D-0000-4000-8000-000000000005"
+      }
+    ]
+  }
+}

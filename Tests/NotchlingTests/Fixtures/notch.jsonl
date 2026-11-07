@@ -1,0 +1,11 @@
+{"type":"user","message":{"role":"user","content":"Find the config <pasted_content>\na\nb\n</pasted_content>"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I'll look."},{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/a.swift"}},{"type":"tool_use","id":"r2","name":"Read","input":{"file_path":"/b.swift"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"r1","content":"..."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"g1","name":"Bash","input":{"command":"grep -r foo ."}},{"type":"tool_use","id":"m1","name":"mcp__notion__search","input":{}}]}}
+{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"sidechain, hidden"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Found it in b.swift."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Second paragraph."}]}}
+{"type":"user","isMeta":true,"message":{"content":"meta, hidden"}}
+{"type":"user","message":{"content":"<system-reminder>hidden</system-reminder>"}}
+{"type":"user","message":{"content":"Now fix it"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/b.swift"}},{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"header":"Scope","question":"Fix both?","multiSelect":false,"options":[{"label":"Yes","description":"both files"},{"label":"No"}]}]}}]}}

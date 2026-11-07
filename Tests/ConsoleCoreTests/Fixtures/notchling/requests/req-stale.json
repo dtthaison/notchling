@@ -1,0 +1,1 @@
+{"id":"req-stale","session_id":"sess-wait","pid":9999,"created":1793541000.0,"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}
