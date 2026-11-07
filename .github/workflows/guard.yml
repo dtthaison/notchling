@@ -1,0 +1,36 @@
+name: Guard
+
+# The project's rules as checks: the guard's own tests, the architecture lint against its baseline,
+# pinned actions, CODEOWNERS generated from zones.json, and the rulesets. No secrets.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: tools/guard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Guard tests
+        run: python3 -m unittest discover -s tools/guard/tests -t tools/guard
+      - name: Architecture lint
+        run: python3 -m guard lint
+      - name: Actions pinned
+        run: python3 -m guard pins
+      - name: CODEOWNERS
+        run: python3 -m guard codeowners --check
+      - name: Rulesets
+        run: python3 -m guard rulesets

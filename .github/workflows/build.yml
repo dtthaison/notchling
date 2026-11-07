@@ -1,7 +1,7 @@
 name: Tests
 
-# Tests only. The app and its disk image are built by release.yml, when a release/<version> pull
-# request is merged and v<version> is tagged.
+# Tests and an app build on every PR. The signed app and its disk image are built by release.yml,
+# when a release/<version> pull request is merged and v<version> is tagged.
 on:
   push:
     branches: [main]
@@ -13,7 +13,20 @@ permissions:
 jobs:
   build:  # the job id is the check name main requires; it only runs the tests
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Run tests
         run: swift test
+
+  app-build:  # build.sh compiles arm64 and x86_64 and joins them
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build the app
+        run: ./build.sh

@@ -1,0 +1,80 @@
+name: Maintainer gate
+
+# Posts the `maintainer-gate` commit status on a PR's head: success when the PR touches nothing
+# protected, or when the maintainer approved that exact head; failure otherwise.
+#
+# Safety: this runs with a write token (statuses), so it runs only main's code. The checkout has no
+# `ref:` (pull_request_target and workflow_run both check out the default branch); the PR head is
+# fetched as data for `git diff` and never checked out or run. Event fields reach the shell only
+# through `env:`.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["Review signal"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: maintainer-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EVENT_PR: ${{ github.event.pull_request.number }}
+      RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+      RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      PYTHONPATH: tools/guard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Find the pull request
+        id: pr
+        run: |
+          set -euo pipefail
+          n="$EVENT_PR"
+          if [ -z "$n" ]; then
+            n="$(printf '%s' "${RUN_PRS:-[]}" | python3 -c 'import json,sys; p=json.load(sys.stdin) or []; print(p[0]["number"] if p else "")')"
+          fi
+          if [ -z "$n" ]; then
+            # Fork PRs aren't listed on workflow_run; look the head commit up instead.
+            n="$(gh api "repos/$GH_REPO/commits/$RUN_HEAD/pulls" --jq '.[0].number // empty')"
+          fi
+          [ -n "$n" ] || { echo "no pull request for this event"; exit 1; }
+          case "$n" in *[!0-9]*) echo "bad PR number"; exit 1;; esac
+          head="$(gh api "repos/$GH_REPO/pulls/$n" --jq .head.sha)"
+          base_ref="$(gh api "repos/$GH_REPO/pulls/$n" --jq .base.ref)"
+          case "$head" in *[!0-9a-f]*|"") echo "bad head sha"; exit 1;; esac
+          { echo "number=$n"; echo "head=$head"; echo "base_ref=$base_ref"; } >> "$GITHUB_OUTPUT"
+      - name: Fetch the PR head as data (never checked out)
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth" fetch --no-tags origin "pull/$PR_NUMBER/head" "refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+      - name: Decide and post the status
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" --jq '.[]' \
+            | python3 -c 'import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()]))' > "$RUNNER_TEMP/reviews.json"
+          base="$(git merge-base "origin/$BASE_REF" "$HEAD_SHA")"
+          python3 -m guard gate --repo . --base "$base" --head "$HEAD_SHA" \
+            --reviews "$RUNNER_TEMP/reviews.json" --post --target-url "$RUN_URL"
