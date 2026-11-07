@@ -8,11 +8,11 @@ extension ChatModel {
     /// any account), anything else in the browser.
     func open(_ url: URL) -> OpenURLAction.Result {
         // A path from a message (`ChatPaths`): a folder opens in Finder, a file beside the chat.
-        if url.isFileURL {
-            if url.hasDirectoryPath || ChatPaths.isFolder(url.path) {
-                NSWorkspace.shared.open(url)
+        if let local = ChatPaths.fileURL(for: url, bases: selected.map { [$0.cwd] } ?? []) {
+            if local.hasDirectoryPath || ChatPaths.isFolder(local.path) {
+                NSWorkspace.shared.open(local)
             } else {
-                withAnimation(KitMotion.appear) { file = url.standardizedFileURL }
+                withAnimation(KitMotion.appear) { file = local }
             }
             return .handled
         }

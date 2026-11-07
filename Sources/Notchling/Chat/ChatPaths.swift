@@ -36,6 +36,24 @@ enum ChatPaths {
         return nil
     }
 
+    /// Markdown destinations such as `/Users/me/image.png` have no scheme. Convert them to file
+    /// URLs so they reach the file panel instead of Launch Services as an application URL.
+    static func fileURL(for url: URL, bases: [String], exists: Exists = onDisk) -> URL? {
+        if url.isFileURL { return url.standardizedFileURL }
+        guard url.scheme == nil, url.host == nil else { return nil }
+        let path = url.path
+        if path.hasPrefix("/") || path.hasPrefix("~/") {
+            return URL(fileURLWithPath: expand(path), isDirectory: url.hasDirectoryPath)
+        }
+        guard !path.isEmpty else { return nil }
+        // Explicit markdown destinations can be bare filenames, unlike tokens detected in prose.
+        for base in bases {
+            let resolved = ((base as NSString).appendingPathComponent(path) as NSString).standardizingPath
+            if exists(resolved) { return URL(fileURLWithPath: resolved, isDirectory: url.hasDirectoryPath) }
+        }
+        return nil
+    }
+
     /// Ranges (UTF-16, for NSAttributedString) of tokens that name existing paths, with the path.
     static func links(in text: String, bases: [String], exists: Exists = onDisk) -> [(NSRange, String)] {
         tokens(in: text).compactMap { range, token in

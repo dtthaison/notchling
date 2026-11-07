@@ -29,6 +29,35 @@ final class ChatPathsTests: XCTestCase {
         XCTAssertTrue(ChatPaths.links(in: text, bases: [edit], exists: exists).isEmpty)
     }
 
+    func testMarkdownFileDestinationsUseFileURLs() throws {
+        let path = home + "/.codex/generated_images/test image \u{1F916}.png"
+        let destination = try XCTUnwrap(URL(string: path))
+        XCTAssertFalse(destination.isFileURL, "Foundation's markdown links can be absolute paths without a file scheme")
+        let local = try XCTUnwrap(ChatPaths.fileURL(for: destination, bases: []))
+        XCTAssertTrue(local.isFileURL)
+        XCTAssertEqual(local.path, path, "decode spaces and Unicode exactly once")
+
+        let fileURL = URL(fileURLWithPath: path)
+        XCTAssertEqual(ChatPaths.fileURL(for: fileURL, bases: []), fileURL)
+        let missing = try XCTUnwrap(URL(string: "/missing/image.png"))
+        XCTAssertEqual(ChatPaths.fileURL(for: missing, bases: [], exists: { _ in false })?.path,
+                       "/missing/image.png", "missing local files should still reach the file panel")
+    }
+
+    func testMarkdownRelativePathsUseTheMessageFolders() throws {
+        let relative = try XCTUnwrap(URL(string: "src/timeline.ts"))
+        XCTAssertEqual(ChatPaths.fileURL(for: relative, bases: [edit, "/repo"], exists: exists)?.path,
+                       edit + "/src/timeline.ts")
+        XCTAssertNil(ChatPaths.fileURL(for: relative, bases: [], exists: exists))
+    }
+
+    func testRemoteAndCommandURLsStayWithTheirHandlers() throws {
+        for destination in ["https://example.com/image.png", "//example.com/image.png", "mailto:test@example.com",
+                            "notchling-run://run?c=pwd"] {
+            XCTAssertNil(ChatPaths.fileURL(for: try XCTUnwrap(URL(string: destination)), bases: [edit], exists: exists))
+        }
+    }
+
     func testCommandRunsWhereItsFilesAre() {
         let cmd = "npx remotion render src/index.ts AptusReel out/aptusfit-reel-v2.mp4 --codec h264 --crf 16 --overwrite"
         XCTAssertEqual(ChatPaths.directory(for: cmd, bases: [edit, "/repo"], exists: exists), edit)
