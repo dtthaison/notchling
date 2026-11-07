@@ -41,6 +41,8 @@ struct Notch {
     notch: Rect,
     hovered: bool,
     clicks: u32,
+    /// `--auto` drives the hit test with this instead of the real mouse.
+    fake_mouse: Option<(f64, f64)>,
 }
 
 impl Notch {
@@ -53,8 +55,34 @@ impl Notch {
         Rect { x: mid - OPEN.0 / 2., y: top - OPEN.1, w: OPEN.0, h: OPEN.1 }
     }
 
+    /// AppKit keeps new windows below the menu bar, and GPUI sets the frame again after
+    /// opening, so the frame goes over the notch here, on the first tick, as
+    /// `NotchController` sets its own.
+    fn place(&mut self) {
+        let Some(w) = &self.ns_window else { return };
+        let top = self.notch.y + self.notch.h;
+        let x = self.notch.x + self.notch.w / 2. - CANVAS.0 / 2.;
+        let want = objc2_foundation::NSRect::new(
+            objc2_foundation::NSPoint::new(x, top - CANVAS.1),
+            objc2_foundation::NSSize::new(CANVAS.0, CANVAS.1),
+        );
+        if w.frame() != want {
+            w.setFrame_display(want, true);
+        }
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) {
+        self.place();
         let m = NSEvent::mouseLocation();
+        if self.fake_mouse.is_none() {
+            self.tick_at((m.x, m.y), cx);
+        } else {
+            self.tick_at(self.fake_mouse.unwrap(), cx);
+        }
+    }
+
+    fn tick_at(&mut self, m: (f64, f64), cx: &mut Context<Self>) {
+        let m = objc2_foundation::NSPoint::new(m.0, m.1);
         let slack = if self.hovered { 0. } else { SLACK };
         let inside = hit_test(self.shape(), (m.x, m.y), slack);
         if let Some(w) = &self.ns_window {
@@ -149,12 +177,22 @@ fn main() {
                             | NSWindowCollectionBehavior::IgnoresCycle,
                     );
                     w.setHasShadow(false);
+                    // GPUI makes every window Titled, even with no titlebar. A titled window is
+                    // kept below the menu bar and can become key; the notch panel is borderless
+                    // and non-activating, like NotchController's.
+                    w.setStyleMask(
+                        objc2_app_kit::NSWindowStyleMask::Borderless
+                            | objc2_app_kit::NSWindowStyleMask::NonactivatingPanel,
+                    );
                     w.setIgnoresMouseEvents(true);
                     eprintln!("ns window found through raw-window-handle");
                 }
                 None => eprintln!("no ns window from raw-window-handle"),
             }
             cx.new(|cx| {
+                if std::env::args().any(|a| a == "--auto") {
+                    cx.spawn(async move |this, cx| auto::run(this, cx).await).detach();
+                }
                 cx.spawn(async move |this, cx| loop {
                     cx.background_executor().timer(Duration::from_millis(50)).await;
                     if this.update(cx, |n: &mut Notch, cx| n.tick(cx)).is_err() {
@@ -162,9 +200,118 @@ fn main() {
                     }
                 })
                 .detach();
-                Notch { ns_window: ns, notch, hovered: false, clicks: 0 }
+                Notch { ns_window: ns, notch, hovered: false, clicks: 0, fake_mouse: None }
             })
         })
         .expect("open window");
     });
+}
+
+/// `notch --auto`: checks S1 without a person. It reads back the panel's level,
+/// Spaces behaviour and key state, drives the hit test with a fake mouse inside
+/// and outside the shape, sends a real mouse-down/up NSEvent to the window (in
+/// process, so no Accessibility permission), captures the panel in both states,
+/// and checks the front app never changed.
+mod auto {
+    use super::*;
+    use objc2_app_kit::{NSEventType, NSWorkspace};
+    use objc2_core_graphics::{CGRectNull, CGWindowImageOption, CGWindowListCreateImage, CGWindowListOption};
+    use objc2_foundation::NSDictionary;
+
+    fn front() -> String {
+        NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .and_then(|a| a.localizedName())
+            .map(|n| n.to_string())
+            .unwrap_or_default()
+    }
+
+    #[allow(deprecated)]
+    fn capture(window: &NSWindow, name: &str) -> String {
+        let image = CGWindowListCreateImage(
+            unsafe { CGRectNull },
+            CGWindowListOption::OptionIncludingWindow,
+            window.windowNumber() as u32,
+            CGWindowImageOption::BoundsIgnoreFraming | CGWindowImageOption::BestResolution,
+        );
+        let Some(image) = image else { return "capture failed".into() };
+        let rep = objc2_app_kit::NSBitmapImageRep::initWithCGImage(
+            <objc2_app_kit::NSBitmapImageRep as objc2::AllocAnyThread>::alloc(),
+            &image,
+        );
+        let data = unsafe {
+            rep.representationUsingType_properties(objc2_app_kit::NSBitmapImageFileType::PNG, &NSDictionary::new())
+        };
+        let path = format!("{}/Desktop/notchling-spike/{name}", std::env::var("HOME").unwrap_or_default());
+        match data.map(|d| std::fs::write(&path, d.to_vec())) {
+            Some(Ok(())) => path,
+            _ => "write failed".into(),
+        }
+    }
+
+    fn click(window: &NSWindow, at_screen: (f64, f64)) {
+        let p = window.convertPointFromScreen(objc2_foundation::NSPoint::new(at_screen.0, at_screen.1));
+        for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
+            let e = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                kind,
+                p,
+                objc2_app_kit::NSEventModifierFlags::empty(),
+                0.,
+                window.windowNumber(),
+                None,
+                0,
+                1,
+                1.,
+            );
+            if let Some(e) = e {
+                window.sendEvent(&e);
+            }
+        }
+    }
+
+    pub async fn run(this: gpui::WeakEntity<Notch>, cx: &mut gpui::AsyncApp) {
+        let exec = cx.background_executor().clone();
+        let wait = move |ms| exec.timer(Duration::from_millis(ms));
+        wait(800).await;
+        let before = front();
+        let Ok((w, notch)) = this.update(cx, |n, _| (n.ns_window.clone(), n.notch)) else { return };
+        let Some(w) = w else {
+            println!("S1 auto: no NSWindow");
+            return;
+        };
+        let f = w.frame();
+        let behavior = w.collectionBehavior();
+        let want = NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::Stationary
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle;
+        println!("S1 notch {notch:?}");
+        println!(
+            "S1 panel frame x={} y={} w={} h={}; centred on notch: {}; top at screen top: {}",
+            f.origin.x, f.origin.y, f.size.width, f.size.height,
+            (f.origin.x + f.size.width / 2. - (notch.x + notch.w / 2.)).abs() <= 1.0,
+            (f.origin.y + f.size.height - (notch.y + notch.h)).abs() < 0.5,
+        );
+        println!("S1 level {} (status = 25); all Spaces + full screen behaviour: {}", w.level(), behavior.contains(want));
+        println!("S1 key window: {} (want false); can become key: {}", w.isKeyWindow(), w.canBecomeKeyWindow());
+
+        let outside = (notch.x - 30., notch.y + notch.h / 2.);
+        let inside = (notch.x + notch.w / 2., notch.y + notch.h / 2.);
+        this.update(cx, |n, cx| { n.fake_mouse = Some(outside); n.tick(cx) }).ok();
+        wait(150).await;
+        println!("S1 mouse beside the notch: ignores mouse events = {} (want true: clicks fall through)", w.ignoresMouseEvents());
+        println!("S1 collapsed capture: {}", capture(&w, "s1-auto-collapsed.png"));
+        this.update(cx, |n, cx| { n.fake_mouse = Some(inside); n.tick(cx) }).ok();
+        wait(300).await;
+        let hovered = this.update(cx, |n, _| n.hovered).unwrap_or(false);
+        println!("S1 mouse on the notch: hovered = {hovered}, ignores mouse events = {} (want false)", w.ignoresMouseEvents());
+        println!("S1 open capture: {}", capture(&w, "s1-auto-open.png"));
+        click(&w, (inside.0, notch.y + notch.h - 60.));
+        wait(200).await;
+        let clicks = this.update(cx, |n, _| n.clicks).unwrap_or(0);
+        println!("S1 click inside the open shape: received {clicks} (want 1)");
+        let after = front();
+        println!("S1 front app before {before:?}, after {after:?}: unchanged = {}", before == after);
+        let _ = cx.update(|cx| cx.quit());
+    }
 }
