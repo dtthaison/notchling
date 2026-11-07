@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "guard"))
 
-from guard.zones import load  # noqa: E402
+from guard.zones import Zones, load  # noqa: E402
 
 ZONES_BEFORE = Path(__file__).resolve().parent / "fixtures" / "zones-before-phase4.json"
 
@@ -66,6 +66,31 @@ def new_path(old: str) -> str:
     if old.startswith(PHONE_OLD + "/"):
         return PHONE_NEW + old[len(PHONE_OLD):]
     return old
+
+
+def survivors(before: Dict[str, List[bool]], have) -> List[Tuple[str, str, List[bool]]]:
+    """(old path, new path, flags before) for each pre-move file still tracked at its new path. A file
+    deleted or renamed after the move left the zone question with it, so it is neither compared nor counted."""
+    return [(old, new_path(old), flags) for old, flags in before.items() if new_path(old) in have]
+
+
+def zone_diffs(before: Dict[str, List[bool]], zones: Zones, have) -> List[str]:
+    """Surviving files whose (in_zone, new_file_ok) is not what it was before the move."""
+    diffs = []
+    for old, new, (in_zone, new_ok) in survivors(before, have):
+        now = (zones.in_zone(new), zones.new_file_ok(new))
+        if now != (in_zone, new_ok):
+            diffs.append(f"{old} -> {new}: was {(in_zone, new_ok)}, now {now}")
+    return diffs
+
+
+def zone_counts(before: Dict[str, List[bool]], zones: Zones, have) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    """((in zone now, in zone before), (new-files-only now, before)), over the surviving files only."""
+    alive = survivors(before, have)
+    return (
+        (sum(zones.in_zone(new) for _, new, _ in alive), sum(flags[0] for _, _, flags in alive)),
+        (sum(zones.new_file_ok(new) for _, new, _ in alive), sum(flags[1] for _, _, flags in alive)),
+    )
 
 
 class LayoutTests(unittest.TestCase):
@@ -141,24 +166,59 @@ class LayoutTests(unittest.TestCase):
         zones = load(ROOT / "tools" / "guard" / "zones.json")
         have = set(self.files)
         self.assertGreater(len(before), 700)
-        diffs = []
-        for old, (in_zone, new_ok) in before.items():
-            new = new_path(old)
-            if new not in have:
-                if old.startswith("tools/guard/tests/fixtures/") or old == "tools/guard/lint-baseline.json":
-                    continue
-                diffs.append(f"{old} -> {new}: missing")
-                continue
-            if (zones.in_zone(new), zones.new_file_ok(new)) != (in_zone, new_ok):
-                diffs.append(f"{old} -> {new}: was {(in_zone, new_ok)}, now {(zones.in_zone(new), zones.new_file_ok(new))}")
+        # A later deletion or rename of a pre-move file is not a zone change; most of them must survive.
+        self.assertGreater(len(survivors(before, have)), len(before) // 2)
+        diffs = zone_diffs(before, zones, have)
         self.assertEqual(diffs, [], "\n".join(diffs[:20]))
 
     def test_zone_count_is_unchanged(self):
         before = json.loads(ZONES_BEFORE.read_text())["files"]
         zones = load(ROOT / "tools" / "guard" / "zones.json")
-        moved = [new_path(p) for p in before if new_path(p) in set(self.files)]
-        self.assertEqual(sum(zones.in_zone(p) for p in moved), sum(v[0] for v in before.values()))
-        self.assertEqual(sum(zones.new_file_ok(p) for p in moved), sum(v[1] for v in before.values()))
+        (now_zone, was_zone), (now_new, was_new) = zone_counts(before, zones, set(self.files))
+        self.assertEqual(now_zone, was_zone)
+        self.assertEqual(now_new, was_new)
+
+
+class ZoneCompareTests(unittest.TestCase):
+    """The comparison helpers on a small zone: only files that survive are compared."""
+
+    ZONES = Zones(("docs/**", "!docs/rules.md", "legacy/macos/Sources/Notchling/Chat/Views/**"), ("legacy/macos/Tests/**",))
+    BEFORE = {
+        "docs/a.md": [True, False],
+        "docs/b.md": [True, False],
+        "Sources/Notchling/Chat/Views/V.swift": [True, False],
+        "Tests/NotchlingTests/T.swift": [False, True],
+    }
+    ALL = {"docs/a.md", "docs/b.md", "legacy/macos/Sources/Notchling/Chat/Views/V.swift", "legacy/macos/Tests/NotchlingTests/T.swift"}
+
+    def test_nothing_deleted_nothing_flipped(self):
+        self.assertEqual(zone_diffs(self.BEFORE, self.ZONES, self.ALL), [])
+        self.assertEqual(zone_counts(self.BEFORE, self.ZONES, self.ALL), ((3, 3), (1, 1)))
+
+    def test_a_deleted_file_is_not_a_failure(self):
+        have = self.ALL - {"docs/a.md", "legacy/macos/Tests/NotchlingTests/T.swift"}
+        self.assertEqual(zone_diffs(self.BEFORE, self.ZONES, have), [])
+        self.assertEqual(zone_counts(self.BEFORE, self.ZONES, have), ((2, 2), (0, 0)))
+
+    def test_a_file_whose_zone_flag_flipped_still_fails(self):
+        before = dict(self.BEFORE, **{"docs/rules.md": [True, False]})  # the zone now keeps rules.md out
+        have = self.ALL | {"docs/rules.md"}
+        diffs = zone_diffs(before, self.ZONES, have)
+        self.assertEqual(len(diffs), 1, diffs)
+        self.assertIn("docs/rules.md", diffs[0])
+        self.assertEqual(zone_counts(before, self.ZONES, have), ((3, 4), (1, 1)))
+
+    def test_a_new_file_flag_that_flipped_still_fails(self):
+        before = dict(self.BEFORE, **{"Tests/NotchlingTests/T.swift": [False, False]})
+        diffs = zone_diffs(before, self.ZONES, self.ALL)
+        self.assertEqual(len(diffs), 1, diffs)
+        self.assertEqual(zone_counts(before, self.ZONES, self.ALL)[1], (1, 0))
+
+    def test_a_flipped_file_is_still_caught_when_another_one_is_deleted(self):
+        before = dict(self.BEFORE, **{"docs/rules.md": [True, False]})
+        have = (self.ALL | {"docs/rules.md"}) - {"docs/b.md"}
+        self.assertEqual(len(zone_diffs(before, self.ZONES, have)), 1)
+        self.assertEqual(zone_counts(before, self.ZONES, have)[0], (2, 3))
 
 
 if __name__ == "__main__":
