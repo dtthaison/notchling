@@ -60,8 +60,9 @@ The SD guidance this follows:
 ## Phases
 
 ### Phase 0: safety net (done)
-- Moved the flat folder into `legacy/macos/Sources/Notchling/<Feature>/`: App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search. `build.sh` and `Demo/make-demo.sh` compile that tree.
-- Added `Package.swift` and `legacy/macos/Tests/NotchlingTests`, using `@testable import Notchling`. The 30 characterization tests cover:
+At the time the app sat at the repository root. The rebuild's Phase 4 (in [ARCHITECTURE.md](../ARCHITECTURE.md), not this plan's Phase 4) moved it under `legacy/macos/`, so these folders are now `legacy/macos/Sources/Notchling/<Feature>/` and `legacy/macos/Tests/NotchlingTests`.
+- Moved the flat folder into one folder per feature under the root's `Sources/`: App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search. `build.sh` and `Demo/make-demo.sh` compile that tree.
+- Added `Package.swift` and the `NotchlingTests` target under the root's `Tests/`, using `@testable import Notchling`. The 30 characterization tests cover:
   - `LimitLogic`
   - the usage JSON mapping, including the `limits` list
   - the conversation and transcript parsers (fixtures)

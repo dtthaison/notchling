@@ -46,7 +46,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 ./build.sh --install  # also quits the running copy, installs to /Applications and opens it
 ```
 
-`build.sh` compiles every file under `legacy/macos/Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
+`build.sh` compiles every file under `legacy/macos/Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `legacy/macos/Icon/make-icon.swift` changes, and signs the app ad hoc.
 
 To start at login, turn on **Launch at Login** in Settings, or run:
 
@@ -142,6 +142,8 @@ legacy/macos/Icon/make-icon.swift      draws the app icon
 legacy/macos/Pet/         the pet's drawings (swing, sit, look, yawn, doze, hop poses)
 legacy/macos/Demo/        renders docs/demo.gif from the real views with made-up agents
 apps/flutter/             the phone app
+protocol/                 the bridge protocol the Mac and the phone speak: JSON Schema and fixtures
+crates/                   the Rust rebuild: stubs for now, and the generated protocol types
 ```
 
 ## Uninstall

@@ -37,16 +37,19 @@ Expect a first reply within about a week.
 
 | Check | What it runs | Run it locally |
 | --- | --- | --- |
-| `guard` | The guard's own tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules` in place of `lint`) |
+| `guard` | The guard's own tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check, then the protocol step: the generated types match the schema and the protocol tools' tests pass | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, `claudemd` in place of `lint`); `python3 tools/protocol/gen.py --check` and `python3 -m unittest discover -s tools/protocol/tests -t tools/protocol` |
 | `build` | `swift test` | `swift test` |
 | `app-build` | `./build.sh`, arm64 and x86_64 | `./build.sh` |
 | `phone-analyze` | `flutter analyze` in `apps/flutter/` | `cd apps/flutter && flutter analyze` |
 | `phone-test` | `flutter test` in `apps/flutter/`, goldens included | `cd apps/flutter && flutter test` |
+| `rust-test` | `cargo test --workspace --locked` on macOS, Linux and Windows; it fails unless all three pass | `cargo test --workspace --locked` |
+| `rust-clippy` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets --locked -- -D warnings` | the same two commands |
+| `rust-deny` | `cargo deny check`: only the licenses `deny.toml` allows, no known advisories, crates only from crates.io | `cargo deny check` (install with `cargo install cargo-deny --locked`) |
 | `maintainer-gate` | Passes when the PR touches nothing protected, trips no capability and weakens no test, or when the maintainer approved its head commit | `PYTHONPATH=tools/guard python3 -m guard gate --base main --head HEAD` lists what would wait |
 
 Each rule a check enforces has an id (`LINT-…`, `CAP-…`, `WEAK-…`, `ZONE`, `GUARD-…`), and the failure names it. [docs/rules.md](docs/rules.md) says why each rule exists.
 
-Rust checks (`cargo test`, `cargo clippy`, `cargo-deny`) join once Rust code lands. A cross-model review of agent pull requests comes with the agents in Phase 5.
+`.github/rulesets/main.json` requires all nine checks on `main`, the three Rust ones included, once the rulesets are applied (see below). A cross-model review of agent pull requests comes with the agents in Phase 5.
 
 ### What's in place now, and what comes later
 
@@ -63,9 +66,9 @@ Rust checks (`cargo test`, `cargo clippy`, `cargo-deny`) join once Rust code lan
 - `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`).
 - The phone's `apps/flutter/lib/features/`, except `pairing/`.
 - New files under `legacy/macos/Tests/`, `legacy/macos/Fixtures/` and `apps/flutter/test/`. Changing an existing test or golden is protected.
-- Later, in the Rust tree: `crates/app/`, `crates/kit/`, and the engine's transcript and search modules.
+- In the Rust tree: `crates/app/` and `crates/kit/` (except their `Cargo.toml` and `build.rs`), and the engine's transcript and search modules (`crates/engine/src/transcript/`, `crates/engine/src/search/`, not written yet).
 
-Everything else waits for the maintainer: logins, Keychain, the vault, lanes, Machines, the hook, replies and terminals, the phone bridge and pairing, `.github/`, `tools/`, the build and release scripts, every `AGENTS.md` and `CLAUDE.md`, and `.claude/`.
+Everything else waits for the maintainer: logins, Keychain, the vault, lanes, Machines, the hook, replies and terminals, the phone bridge and pairing, `.github/`, `tools/`, the build and release scripts, `protocol/` and the generated types, the rest of `crates/` and the Cargo files, every `AGENTS.md` and `CLAUDE.md`, and `.claude/`.
 
 A file in the zone still goes to the maintainer when the change adds a process launch, a pty, AppleScript, dynamic loading, a network call, Keychain access, a file write, or a protected type used from outside its own files (the capability check). It also goes to him when it edits, deletes or skips an existing test, or adds invisible Unicode. [docs/feature-map.md](docs/feature-map.md) gives the zone for each area.
 
@@ -91,6 +94,21 @@ PYTHONPATH=tools/guard python3 -m guard pins
 PYTHONPATH=tools/guard python3 -m guard codeowners --check
 PYTHONPATH=tools/guard python3 -m guard rulesets
 PYTHONPATH=tools/guard python3 -m guard rules
+PYTHONPATH=tools/guard python3 -m guard claudemd
+python3 tools/protocol/gen.py --check      # the generated protocol types match protocol/agentconsole.v1.schema.json
+python3 -m unittest discover -s tools/protocol/tests -t tools/protocol
+```
+
+After a change to the schema, run `python3 tools/protocol/gen.py` and commit what it writes; never edit `crates/protocol/src/generated.rs` or `apps/flutter/lib/core/protocol/generated.dart` by hand. [protocol/README.md](protocol/README.md) has the rules, and the `add-protocol-field` skill the steps.
+
+The Rust workspace (`rustup` installs the toolchain `rust-toolchain.toml` pins, 1.99.1, with clippy and rustfmt):
+
+```sh
+cargo test --workspace --locked
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo install cargo-deny --locked   # once
+cargo deny check
 ```
 
 The phone app, from `apps/flutter/` (the placeholder asset steps are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md)):
