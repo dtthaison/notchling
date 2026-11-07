@@ -1,6 +1,6 @@
 import unittest
 
-from guard.source import strip_code
+from guard.source import strip_code, strip_comments
 
 
 class StripTests(unittest.TestCase):
@@ -32,6 +32,9 @@ class StripTests(unittest.TestCase):
 
     def test_unknown_language_unchanged(self):
         self.assertEqual(strip_code("a.md", "// keep"), "// keep")
+
+    def test_strip_comments_keeps_strings(self):
+        self.assertEqual(strip_comments("x.swift", 'run("/usr/bin/security") // x').rstrip(), 'run("/usr/bin/security")')
 
     def test_length_kept(self):
         line = 'let s = "abc" // c'

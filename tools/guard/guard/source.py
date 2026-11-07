@@ -23,7 +23,13 @@ def _rust_char_literal(line: str, i: int) -> bool:
     return line[i + 2:i + 3] == "'"
 
 
-def strip_code(path: str, line: str) -> str:
+def strip_comments(path: str, line: str) -> str:
+    """Like `strip_code`, but string contents stay: for patterns that live inside strings
+    (`"/usr/bin/security"`, `import 'package:http/...'`)."""
+    return strip_code(path, line, keep_strings=True)
+
+
+def strip_code(path: str, line: str, keep_strings: bool = False) -> str:
     ext = _ext(path)
     if ext not in SLASH and ext not in HASH:
         return line
@@ -51,8 +57,9 @@ def strip_code(path: str, line: str) -> str:
             j = i + 1
             while j < n and line[j] != c:
                 j += 2 if line[j] == "\\" else 1
-            for k in range(i + 1, min(j, n)):
-                out[k] = " "
+            if not keep_strings:
+                for k in range(i + 1, min(j, n)):
+                    out[k] = " "
             i = j + 1
             continue
         i += 1
