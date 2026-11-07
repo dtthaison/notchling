@@ -107,8 +107,55 @@ ConsoleCore, docs, tests, fixtures) is the auto-merge zone.
 6. **Sample and sharpen.** Each morning the maintainer samples merged PRs. Anything bad becomes a new
    check, test, lint rule or skill change (pstack `reflect`/`recall`), never just a review comment.
 
-Release stays as today: `./release.sh` opens `release/<version>`, a protected path, so releases are
-always the maintainer's.
+## Releases and updates
+
+The end goal: agents run the repository, releases included, and users' apps update themselves.
+*(Maintainer's decision: Stable is promoted automatically after Beta.)*
+
+1. **Beta, daily.** On a day `main` has new merged changes, the release workflow cuts a Beta: version
+   from the merged PRs' types (fix → patch, feature → minor, a breaking protocol or data change →
+   needs the maintainer), release notes written by an agent from the PRs, builds for every platform,
+   signed, published to the Beta update feed. The maintainer's own machines run Beta.
+2. **Stable, automatic.** A Beta is promoted to Stable after a soak period *(my call: 3 days)* when
+   all of these hold: no new issue labeled `regression` against it, no rise in crash reports from the
+   update check, every check still green on its commit. Otherwise promotion waits and an agent opens an
+   issue saying why.
+3. **Updates.** The app checks a signed update feed, downloads, verifies the signature and restarts
+   into the new version. The Swift app uses Sparkle until it is retired; the Rust app its own updater
+   (feed format and signatures as in Zed's; installers from `cargo-dist`) *(my call)*.
+4. **Rollback.** Republishing the previous version as newer brings everyone back. A kill-switch file
+   in the repo stops all promotions; flipping it is a one-line PR the maintainer merges.
+5. **Kept from agents.** The signing keys live only in a GitHub environment the release workflow can
+   use; agents trigger releases but never see the keys. The release workflow, the updater, the feed and
+   the kill switch are protected paths.
+6. **Constraints.** Auto-update on macOS needs the app signed with an Apple Developer ID and notarized;
+   until the maintainer has one, Mac updates hit the same Gatekeeper warning as today's installs. Phone
+   store releases come later (build it yourself for now).
+
+`./release.sh` and the `release/<version>` pull request are replaced by this workflow.
+
+## The operating manual
+
+So that another developer or an agent can work correctly without asking, the repository explains
+itself in layers. The root `AGENTS.md` stays short and points to them; each folder's `AGENTS.md` adds
+only that folder's rules.
+
+| Layer | Where | What it answers |
+| --- | --- | --- |
+| Goals | `docs/goals.md` | What Notchling is, who it's for, what it will never do; the review agent judges PRs against it |
+| Architecture | `ARCHITECTURE.md`, one decision record per choice in `docs/decisions/` | How the parts fit and why; changing a decision takes a new record, not just code |
+| Rules | `docs/rules.md` | Each rule with an id, why it exists and the check that enforces it |
+| Flow | `CONTRIBUTING.md`, PR template | Issue → `notchling:queued` → branch → PR → checks → merge → Beta → Stable, the same for people and agents |
+| Guard rails | CODEOWNERS, branch protection settings as a checked-in file, protected paths | What can't happen without the maintainer |
+| Validation | per part: fixtures, goldens, renders, protocol conformance | How to prove a change works |
+| Skills | repo skills: port a Swift part to Rust, add a protocol field, add a provider, fix a bug reproduction-first | Step by step for repeated work, each tried once before it's trusted |
+| Learning loop | incident → postmortem → new rule id → new check | So the same mistake can't land twice |
+
+**Every rule has an automatic check** *(maintainer's decision)*. A rule is added only together with the
+lint, test or CI step that enforces it, and that check's failure message names the rule id. A rule that
+can't be checked automatically isn't a rule: it belongs in the goals or the architecture, which the
+review agent reads, or it waits until someone writes the check. A CI job fails if `docs/rules.md` lists
+a rule with no check.
 
 ## Quality: rules that fail the build
 
@@ -345,14 +392,17 @@ Linux and Windows apps can show sessions but not drive them.
 3. Repo layout and protocol: move into the layout above (Swift to `legacy/macos/`, Flutter to
    `apps/flutter/`), write the protocol spec and its conformance fixtures, and generate the Dart types
    from it (P1).
-4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per folder; feature map.
+4. Agent context and the operating manual: CLAUDE.md becomes a short root AGENTS.md plus one per
+   folder; goals, architecture with decision records, the rules catalog with a check per rule, the
+   first repo skills; feature map. The review agent needs these before it can judge a PR.
 5. Turn on the worker for `notchling:queued` issues in the auto-merge zone only; watch a week of sampling.
-6. GPUI spike (throwaway): the notch overlay, a web view in a GPUI window, Vietnamese input in a text
+6. Releases: the Beta and Stable workflow, signed feeds, Sparkle in the Swift app, the kill switch.
+7. GPUI spike (throwaway): the notch overlay, a web view in a GPUI window, Vietnamese input in a text
    field, offscreen render to PNG, and Claude Code background sessions on Linux and Windows. If any
-   fails, the maintainer decides again before phase 7.
-7. Milestones 1 to 5 above, in order, engine and app parts together. Linux and Windows builds from the
+   fails, the maintainer decides again before phase 8.
+8. Milestones 1 to 5 above, in order, engine and app parts together. Linux and Windows builds from the
    same app as each milestone lands.
-8. Retire the Swift app in one release once the GPUI app covers every part.
+9. Retire the Swift app in one release once the GPUI app covers every part.
 
 Dropped from the earlier draft: splitting the Swift app into Swift modules (it is being replaced; it
 gets fixes only).
