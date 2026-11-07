@@ -25,6 +25,9 @@ final class RunWatcher {
     /// A finished run stays in the Completed tab this long.
     static let finishedShown: TimeInterval = 600
     private static let pathTTL: TimeInterval = 60
+    /// Every message to a session goes through here, one at a time: `claude attach` for two jobs at once is two
+    /// pseudo-terminals racing for the same `claude` start-up.
+    private static let sendQueue = DispatchQueue(label: "local.notchling.runs.send", qos: .userInitiated)
 
     private struct Repo {
         var dir: String
@@ -57,6 +60,10 @@ final class RunWatcher {
     private var watchedSD: Set<String> = []
     private var logEvents: FileEvents?
     private var watchedLogFolders: Set<String> = []
+    /// Messages waiting for their job, and the jobs with a send in flight (a job never has two).
+    private var outbox: [String: (texts: [String], fallbacks: [String])] = [:]
+    private var outboxOrder: [String] = []
+    private var sending = Set<String>()
 
     /// Called on the main thread when the items change.
     var onChange: (([RunItem]) -> Void)?
@@ -69,7 +76,7 @@ final class RunWatcher {
          enabled: @escaping () -> Bool = { true },
          send: @escaping (String, String) throws -> Void,
          notify: @escaping (String, String) -> Void,
-         dispatch: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
+         dispatch: @escaping (@escaping () -> Void) -> Void = { RunWatcher.sendQueue.async(execute: $0) },
          watchFiles: Bool = true) {
         self.now = now
         self.pidAlive = pidAlive
@@ -206,23 +213,42 @@ final class RunWatcher {
 
     private func wake() {
         let actions = waker.plan(ends: recentEnds(), agents: agents, enabled: enabled(), now: now()) { RunLog.lastLine(of: $0) }
+        guard !actions.isEmpty else { return }
+        let ends = recentEnds()
         for action in actions {
             switch action {
             case .notify(let title, let body, _):
                 notify(title, body)
-            case .send(let job, let text, let id):
-                let fallback = (title: "Run finished", body: Self.fallbackBody(id: id, ends: recentEnds()))
-                dispatch { [send, notify] in
-                    do { try send(job, text) } catch {
-                        DispatchQueue.main.async { notify(fallback.title, fallback.body + " (couldn't reach its session)") }
-                    }
+            case .send(let job, let text, let ids):
+                if outbox[job] == nil { outboxOrder.append(job) }
+                var entry = outbox[job] ?? (texts: [], fallbacks: [])
+                entry.texts.append(text)
+                entry.fallbacks += ids.map { id in ends.first { $0.id == id }.map(RunWaker.summary) ?? "A run finished" }
+                outbox[job] = entry
+            }
+        }
+        flushOutbox()
+    }
+
+    /// Sends what waits, to each job that has no send in flight. What piled up meanwhile goes out as one message.
+    private func flushOutbox() {
+        for job in outboxOrder where !sending.contains(job) {
+            guard let entry = outbox[job] else { continue }
+            outbox[job] = nil
+            sending.insert(job)
+            let text = entry.texts.joined(separator: "\n")
+            let fallback = entry.fallbacks.joined(separator: "; ")
+            dispatch { [weak self, send, notify] in
+                var failed = false
+                do { try send(job, text) } catch { failed = true }
+                DispatchQueue.main.async {
+                    if failed { notify("Run finished", fallback + " (couldn't reach its session)") }
+                    self?.sending.remove(job)
+                    self?.flushOutbox()
                 }
             }
         }
-    }
-
-    private static func fallbackBody(id: String, ends: [RunEnd]) -> String {
-        ends.first { $0.id == id }.map(RunWaker.summary) ?? "A run finished"
+        outboxOrder.removeAll { outbox[$0] == nil }
     }
 
     private func publish() {

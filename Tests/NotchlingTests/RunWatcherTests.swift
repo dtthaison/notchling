@@ -40,9 +40,17 @@ final class RunWatcherTests: XCTestCase {
         return w
     }
 
-    func agent(_ id: String, _ group: AgentGroup, cwd: String? = nil) -> Agent {
-        Agent(id: id, name: id, project: "repo", cwd: cwd ?? repo.path, group: group, label: "", detail: nil, since: clock,
-              target: .job("job-\(id)"))
+    /// `since`: when the agent last changed state; a day ago unless a test says otherwise (so it is idle since before any finish).
+    func agent(_ id: String, _ group: AgentGroup, cwd: String? = nil, since: Date? = nil) -> Agent {
+        Agent(id: id, name: id, project: "repo", cwd: cwd ?? repo.path, group: group, label: "", detail: nil,
+              since: since ?? clock.addingTimeInterval(-86400), target: .job("job-\(id)"))
+    }
+
+    /// Lets the watcher's hop back to the main queue run.
+    func settle() {
+        let done = expectation(description: "main queue drained")
+        DispatchQueue.main.async { done.fulfill() }
+        wait(for: [done], timeout: 2)
     }
 
     func iso(_ d: Date) -> String { ISO8601DateFormatter().string(from: d) }
@@ -122,6 +130,9 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertEqual(items[0].kind, .finished)
         XCTAssertEqual(items[0].rc, 0)
         XCTAssertTrue(items[0].detail.hasPrefix("ok"))
+        XCTAssertTrue(sent.isEmpty, "the session gets a minute to wake itself")
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
         XCTAssertEqual(sent.count, 1)
         XCTAssertEqual(sent[0].job, "job-s1")
         XCTAssertTrue(sent[0].text.hasPrefix("Run finished: caffeinate -i just perf suite=x — exit 0 after 2m. Log: \(log)."))
@@ -132,18 +143,23 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertTrue(notices.isEmpty)
     }
 
-    func testAWorkingSessionIsWokenWhenItStops() {
+    func testASessionThatWorkedAfterTheFinishIsNotWoken() {
         appendStart()
         let w = makeWatcher()
         w.tick(agents: [agent("s1", .working)])
         clock = clock.addingTimeInterval(60)
-        appendFinish(at: clock)
+        let finished = clock
+        appendFinish(at: finished)
         w.runsFileChanged()
-        XCTAssertTrue(sent.isEmpty)
-        w.tick(agents: [agent("s1", .working)])
-        XCTAssertTrue(sent.isEmpty)
-        w.tick(agents: [agent("s1", .completed)])
-        XCTAssertEqual(sent.count, 1)
+        clock = clock.addingTimeInterval(10)
+        w.tick(agents: [agent("s1", .working, since: finished.addingTimeInterval(5))])
+        clock = clock.addingTimeInterval(120)
+        w.tick(agents: [agent("s1", .completed, since: finished.addingTimeInterval(30))])
+        clock = clock.addingTimeInterval(120)
+        w.tick(agents: [agent("s1", .completed, since: finished.addingTimeInterval(30))])
+        XCTAssertTrue(sent.isEmpty, "waiting in Monitor or `sd.py wait` woke it already")
+        XCTAssertTrue(notices.isEmpty)
+        XCTAssertEqual(items.count, 1, "the Completed tab still shows it")
     }
 
     func testNoBackgroundJobPostsANotification() {
@@ -168,6 +184,8 @@ final class RunWatcherTests: XCTestCase {
         clock = clock.addingTimeInterval(60)
         appendFinish(at: clock)
         w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
         XCTAssertTrue(sent.isEmpty)
         let expectation = expectation(description: "notified")
         DispatchQueue.main.async { expectation.fulfill() }
@@ -244,6 +262,85 @@ final class RunWatcherTests: XCTestCase {
         try? "".write(to: runsFile, atomically: true, encoding: .utf8)
         w.runsFileChanged()
         XCTAssertTrue(items.isEmpty)
+    }
+
+    // MARK: Sending
+
+    func appendOtherRun(_ n: Int, session: String, finishedAt: Date) {
+        let other = root.appendingPathComponent("logs/n-\(n).log").path
+        append(#"{"event":"start","key":"just perf","log":"\#(other)","cwd":"\#(repo.path)","pid":99,"session":"\#(session)","limit":7200,"started_at":"\#(iso(finishedAt.addingTimeInterval(-30)))"}"# + "\n")
+        append(#"{"key":"just perf","cmd":"x","seconds":60,"rc":\#(n),"head":"h","clean":true,"log":"\#(other)","at":"\#(iso(finishedAt))"}"# + "\n")
+    }
+
+    func testSeveralRunsEndedForOneSessionAreOneMessage() {
+        appendStart()
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        clock = clock.addingTimeInterval(60)
+        appendFinish(rc: 0, at: clock)
+        appendOtherRun(2, session: "s1", finishedAt: clock.addingTimeInterval(1))
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 5)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertEqual(sent[0].text.split(separator: "\n").count, 2)
+    }
+
+    func testNoSecondSendGoesToAJobWhileOneIsInFlight() {
+        var held: [() -> Void] = []
+        let w = RunWatcher(now: { self.clock }, pidAlive: { _ in true }, load: { 1 }, extraRepos: { [] }, enabled: { true },
+                           send: { self.sent.append(($0, $1)) }, notify: { self.notices.append(($0, $1)) },
+                           dispatch: { held.append($0) }, watchFiles: false)
+        appendStart()
+        w.tick(agents: [agent("s1", .completed)])
+        clock = clock.addingTimeInterval(60)
+        appendFinish(at: clock)
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(held.count, 1)
+
+        appendOtherRun(2, session: "s1", finishedAt: clock.addingTimeInterval(-5))
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(held.count, 1, "the first send has not returned: nothing else goes to its job")
+        XCTAssertTrue(sent.isEmpty)
+
+        held.removeFirst()()
+        XCTAssertEqual(sent.count, 1)
+        settle()
+        XCTAssertEqual(held.count, 1, "the waiting run goes out once the first one is done")
+        held.removeFirst()()
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual(sent[1].job, "job-s1")
+        XCTAssertTrue(sent[1].text.contains("exit 2"))
+    }
+
+    func testSendsToDifferentJobsRunOneAfterAnother() {
+        let lock = NSLock()
+        var running = 0, most = 0, done = 0
+        let both = expectation(description: "both sent")
+        both.expectedFulfillmentCount = 2
+        let w = RunWatcher(now: { self.clock }, pidAlive: { _ in true }, load: { 1 }, extraRepos: { [] }, enabled: { true },
+                           send: { _, _ in
+                               lock.lock(); running += 1; most = max(most, running); lock.unlock()
+                               Thread.sleep(forTimeInterval: 0.15)
+                               lock.lock(); running -= 1; done += 1; lock.unlock()
+                               both.fulfill()
+                           },
+                           notify: { self.notices.append(($0, $1)) }, watchFiles: false)
+        appendStart(session: "s1")
+        w.tick(agents: [agent("s1", .completed), agent("s2", .completed)])
+        clock = clock.addingTimeInterval(60)
+        appendFinish(at: clock)
+        appendOtherRun(2, session: "s2", finishedAt: clock)
+        w.runsFileChanged()
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed), agent("s2", .completed)])
+        wait(for: [both], timeout: 5)
+        XCTAssertEqual(most, 1)
     }
 
     /// The real FSEvents path: nothing calls `runsFileChanged` and `tick` runs once.
