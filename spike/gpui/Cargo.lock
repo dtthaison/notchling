@@ -449,6 +449,7 @@ name = "attach"
 version = "0.0.0"
 dependencies = [
  "portable-pty",
+ "serde_json",
  "spike-core",
 ]
 
@@ -5947,6 +5948,10 @@ dependencies = [
 [[package]]
 name = "spike-core"
 version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "spin"
