@@ -36,9 +36,24 @@ def cmd_lint(args: argparse.Namespace) -> int:
                      show_warnings=args.warnings)
 
 
+def cmd_gate(args: argparse.Namespace) -> int:
+    from guard import gate
+
+    return gate.main(Path(args.repo), args.base, args.head, Path(args.reviews) if args.reviews else None,
+                     args.post, args.target_url)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("gate", help="does this change need the maintainer, and is it approved")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--base", required=True)
+    p.add_argument("--head", required=True)
+    p.add_argument("--reviews", help="the PR's reviews as GitHub's list-reviews JSON")
+    p.add_argument("--post", action="store_true", help="post the maintainer-gate commit status (workflow only)")
+    p.add_argument("--target-url")
+    p.set_defaults(func=cmd_gate)
     p = sub.add_parser("lint", help="the architecture lint against its baseline")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--write-baseline", action="store_true", help="first run only: record what exists")
