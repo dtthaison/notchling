@@ -55,6 +55,13 @@ WORKFLOWS_DIR = ".github/workflows/"
 # The agent repository's idea of the base branch, tried in order (see workflow_changes).
 BASE_REFS = ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
              "refs/heads/main", "refs/heads/master")
+ZWJ = "‍"
+MENTION_RE = re.compile(r"@(?=[A-Za-z0-9_])")
+_REPO = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+CLOSING_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?P<kw>clos(?:e[sd]?)|fix(?:e[sd])?|resolv(?:e[sd]?))(?![A-Za-z0-9])[\s:*_\[(]*"
+    r"(?:(?P<repo>%s)?#(?P<num>[0-9]+)|https?://github\.com/(?P<urepo>%s)/(?:issues|pull)/(?P<unum>[0-9]+))"
+    % (_REPO, _REPO), re.IGNORECASE)
 REJECT_RE = re.compile(r"\s*!\s*\[(?:remote )?rejected\]")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 FAILURE_MAX = 600
@@ -458,9 +465,28 @@ def _scrub(text: str, token: str) -> str:
     return text.replace(token, "[token]") if token else text
 
 
+def neutralize_text(text: str, repo: str, issue: int) -> str:
+    """The agent's words, made inert: `@name` gets a zero-width joiner after the @ (no ping), and a
+    closing keyword (close, fix or resolve, in any of GitHub's forms) before an issue reference gets one
+    inside the keyword (no issue closes on merge). A reference to this PR's own issue is left alone, and
+    the wrapper's own `Refs #<issue>` line is added after, so it is not touched."""
+    own_repo = repo.lower()
+
+    def closing(m: "re.Match[str]") -> str:
+        where = (m.group("repo") or m.group("urepo") or "").lower()
+        number = int(m.group("num") or m.group("unum"))
+        if number == issue and where in ("", own_repo):
+            return m.group(0)
+        kw = m.group("kw")
+        return kw[0] + ZWJ + kw[1:] + m.group(0)[len(kw):]
+
+    return CLOSING_RE.sub(closing, MENTION_RE.sub("@" + ZWJ, text))
+
+
 def open_pr(api: Api, repo: str, token: str, branch: str, base: str, title: str, body: str, issue: int,
             model: Optional[str]) -> str:
-    text = body.rstrip() + "\n\nRefs #%d\n" % issue
+    title = neutralize_text(title, repo, issue)
+    text = neutralize_text(body, repo, issue).rstrip() + "\n\nRefs #%d\n" % issue
     if model:
         text += "Agent-Model: %s\n" % model
     try:

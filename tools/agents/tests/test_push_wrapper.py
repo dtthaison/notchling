@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -415,6 +416,62 @@ class ApiErrors(Base):
         res = self.go()
         self.assertEqual(res.code, 2)
         self.assertIn("pushed", res.message)  # the branch is up; only the PR is missing
+
+
+ZWJ = "‍"
+# A reader's approximation of what GitHub treats as a closing reference (not the wrapper's own regex).
+GITHUB_CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*(?:[\w.-]+/[\w.-]+)?#\d+"
+                           r"|\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[\s:]*https://github\.com/\S+",
+                           re.I)
+
+
+class PrText(Base):
+    """The body (and title) are the agent's words in a PR the maintainers' notifications and issue links
+    will act on: they must not ping people or close issues the agent was not given."""
+
+    def clean(self, text, repo="o/r", issue=5):
+        return push_wrapper.neutralize_text(text, repo, issue)
+
+    def test_mentions_are_broken_with_a_zero_width_joiner(self):
+        self.assertEqual(self.clean("cc @octocat and @org/team, mail a@b.example"),
+                         "cc @%soctocat and @%sorg/team, mail a@%sb.example" % (ZWJ, ZWJ, ZWJ))
+        self.assertEqual(self.clean("no mention @ here, or @ "), "no mention @ here, or @ ")
+        self.assertNotRegex(self.clean("@a @b_c @1x @-x"), r"@[A-Za-z0-9_]")
+
+    def test_closing_keywords_for_other_issues_are_broken(self):
+        for text in ("Fixes #7", "fix #7", "Fixed #7", "close #7", "Closes #7", "closed #7", "Resolve #7",
+                     "resolves #7", "RESOLVED #7", "FIXES: #7", "Closes:#7", "closes\n#7", "Fixes #55",
+                     "Fixes o/r#6", "Fixes other/r#5", "fixes OTHER/Repo#9", "Closes x/y.z#10",
+                     "Closes https://github.com/x/y/issues/3", "Resolves https://github.com/o/r/pull/6",
+                     "Fixes  #7"):
+            out = self.clean(text)
+            self.assertIsNone(GITHUB_CLOSES.search(out), (text, out))
+            self.assertIn(ZWJ, out, text)
+            self.assertEqual(out.replace(ZWJ, ""), text, "only a joiner is added")
+
+    def test_a_reference_to_the_prs_own_issue_is_left_alone(self):
+        for text in ("Fixes #5", "closes #5.", "Resolves: #5", "Fixes o/r#5", "fixes O/R#5",
+                     "Closes https://github.com/o/r/issues/5"):
+            self.assertEqual(self.clean(text), text)
+
+    def test_words_that_only_contain_a_keyword_are_untouched(self):
+        for text in ("prefix #7", "closest #7", "a fix for #7", "Fixes nothing", "see #7", "Refs #7",
+                     "the fixes list: #7"):
+            self.assertEqual(self.clean(text), text, text)
+
+    def test_the_pull_request_carries_neutralized_text_and_the_wrappers_own_footer(self):
+        self.start()
+        res = self.go(title="Fixes #7 for @bob", agent_model="claude-opus-5-5",
+                      body=b"Please look, @maintainer.\nFixes #7\nCloses #5\nResolves other/repo#5\n")
+        self.assertEqual(res.code, 0, res)
+        pr = json.loads([r for r in self.srv.requests if r["path"] == "/repos/o/r/pulls"][0]["body"])
+        self.assertNotIn("@maintainer", pr["body"])
+        self.assertIn("@%smaintainer" % ZWJ, pr["body"])
+        self.assertIn("Closes #5", pr["body"])  # its own issue
+        self.assertIsNone(GITHUB_CLOSES.search(pr["body"].replace("Closes #5", "")), pr["body"])
+        self.assertIsNone(GITHUB_CLOSES.search(pr["title"]), pr["title"])
+        self.assertNotIn("@bob", pr["title"])
+        self.assertTrue(pr["body"].endswith("\n\nRefs #5\nAgent-Model: claude-opus-5-5\n"), repr(pr["body"]))
 
 
 class Rejections(Base):
