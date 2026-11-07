@@ -12,7 +12,7 @@ enum TokenScope {
     /// `open` and `form` are the seam for the creation flow the Fix starts: tests pass their own and never open the
     /// real form. The default form is the vault's (`VaultPrompt.open`), the one the issues-token step opens too.
     static func step(for machine: Machine, job: SDWorkerSettings,
-                     open: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) },
+                     open: @escaping @Sendable (URL) -> Void = SecretSteps.openPage,
                      form: @escaping @Sendable (VaultRequest) -> Void = SecretSteps.openVaultForm) -> SetupStep {
         let repos = job.repos.map(\.github)
         let display = "Open GitHub's token page for \(repos.joined(separator: ", ")) (Issues: read and write, Metadata: read, nothing else) "

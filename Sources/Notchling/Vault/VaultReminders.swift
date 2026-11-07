@@ -79,7 +79,8 @@ enum VaultRenew {
 
     /// Opens the page in the browser, if the secret has an http(s) URL.
     static func openPage(for entry: VaultEntry) {
-        if let url = url(for: entry) { NSWorkspace.shared.open(url) }
+        guard !TestRun.active, let url = url(for: entry) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// A reminder's Renew… button: the page, then the secret's form with the value empty (its own panel).
