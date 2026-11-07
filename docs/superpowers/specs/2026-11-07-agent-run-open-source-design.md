@@ -252,12 +252,32 @@ What macOS gives the Swift app for free and the GPUI app must build or reuse:
   depends on it.
 - Pointer cursor on everything clickable.
 
+### Phone app (Flutter)
+
+Today: `mobile/`, ~15.6k lines (sessions, chat, pairing by QR, connection, Macs list, visualize, voice
+with on-device Whisper, settings), 25 test files, English and Vietnamese. It knows the computer only
+through the protocol, so it keeps working through the engine port as long as the protocol holds.
+
+| # | Part | What it covers | When |
+| --- | --- | --- | --- |
+| P0 | Phone guard rails | `flutter analyze` and `flutter test` as required checks (CI tests none of it today), golden tests (screens to PNG) as the phone's rendering for agents, an `AGENTS.md` for the folder | Phase 2 |
+| P1 | Generated protocol types | Dart and Rust types generated from the protocol's JSON Schema, checked by the shared fixtures; no Rust inside the phone (`flutter_rust_bridge` would complicate iOS and Android builds) *(my call)* | Phase 3 |
+| P2 | Many computers | "Macs" becomes "computers": one phone paired with several engines on macOS, Linux and Windows | Milestone 3 |
+| P3 | Rename and docs | "Agent Console" / `agent_console` becomes Notchling; a real README in place of Flutter's template | Any time, agents can take it |
+
+Later, when people ask: a simpler way to reach a computer from outside home than one's own Cloudflare
+tunnel and Access setup; the visualize tab, images, Stop and new sessions for Codex and Antigravity
+sessions on the phone.
+
+Open question (maintainer's): how someone who finds Notchling on GitHub gets the phone app: App Store
+and Google Play, a TestFlight or APK link, or building it themselves.
+
 ### Milestones (each one a usable app)
 
 1. **Read-only viewer**: E1, E2, E12, E14, U0, U10, Chat read-only. Lists sessions and shows
    conversations on Mac, Linux and Windows; only reads files. Agents can take most of it.
 2. **Reply**: E3, E4, E11, U2, U7, U8. Answer and drive sessions. Maintainer reviews.
-3. **Phone**: E5, E15, E16's hostd service, U6. `notchlingd` serves the phone; the Swift bridge is
+3. **Phone**: E5, E15, E16's hostd service, U6, P2. `notchlingd` serves the phone; the Swift bridge is
    switched off. Maintainer reviews.
 4. **The rest that's safe**: E6, E7, U3, U4. Agents can take most of it.
 5. **Logins and secrets**: E8, E9, E10, E13, U5, U9, U11. Then the Swift app is retired. Maintainer
@@ -271,9 +291,11 @@ Linux and Windows apps can show sessions but not drive them.
 
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
    `sd:queued`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
-2. Quality checks: build job, architecture lint with its fixtures, cross-model review job.
+2. Quality checks: build job, architecture lint with its fixtures, cross-model review job, and the
+   phone's guard rails (P0).
 3. Repo layout and protocol: move into the layout above (Swift to `legacy/macos/`, Flutter to
-   `apps/flutter/`), write the protocol spec and its conformance fixtures.
+   `apps/flutter/`), write the protocol spec and its conformance fixtures, and generate the Dart types
+   from it (P1).
 4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per folder; feature map.
 5. Turn on the worker for `sd:queued` issues in the auto-merge zone only; watch a week of sampling.
 6. GPUI spike (throwaway): the notch overlay, a web view in a GPUI window, Vietnamese input in a text
