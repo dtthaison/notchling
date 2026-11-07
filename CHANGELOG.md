@@ -4,6 +4,8 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-07
+
 What each new feature is for and how to use it: [docs/features.md](docs/features.md).
 
 ### Added
@@ -77,5 +79,6 @@ First public release.
 
 - The menu bar menu no longer lags or skips items when moving between them.
 
-[Unreleased]: https://github.com/dtthaison/notchling/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dtthaison/notchling/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/dtthaison/notchling/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dtthaison/notchling/releases/tag/v1.1.0
