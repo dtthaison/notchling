@@ -176,6 +176,8 @@ struct JobDraft: Identifiable, Equatable {
     var healthURL = ""
     /// Shown, never edited: Token scope sets it.
     var tokenExpires: String?
+    /// One issues token for all repositories: Token scope accepts a token that reaches other private repos.
+    var tokenAllRepos = false
     /// Whether the machine has no sd worker job yet.
     var isNew = true
     /// What the sheet edits; kept so Save keeps python, sdPath and the vault name.
@@ -199,6 +201,7 @@ struct JobDraft: Identifiable, Equatable {
         kinds = job.kinds
         healthURL = job.healthURL ?? ""
         tokenExpires = job.tokenExpires
+        tokenAllRepos = job.tokenAllRepos == true
     }
 }
 
@@ -248,7 +251,8 @@ enum JobForm {
         let secret = (base?.issuesSecret).flatMap { $0.isEmpty ? nil : $0 } ?? "\(draft.machine)-github-issues"
         return SDWorkerSettings(python: base?.python ?? "python3", sdPath: base?.sdPath ?? "", repos: repos,
                                 kinds: draft.kinds, healthURL: health.isEmpty ? nil : health,
-                                tokenExpires: base?.tokenExpires, issuesSecret: secret)
+                                tokenExpires: base?.tokenExpires, issuesSecret: secret,
+                                tokenAllRepos: draft.tokenAllRepos ? true : nil)
     }
 
     /// `owner/name`, GitHub's alphabet.
@@ -644,6 +648,9 @@ struct JobCardView: View {
             Text(verbatim: "kinds: " + (job.kinds.isEmpty ? "none" : job.kinds.joined(separator: ", "))
                  + (job.healthURL.map { " · health \($0)" } ?? ""))
                 .kitType(.meta).foregroundColor(KitInk.textMuted)
+            if job.tokenAllRepos == true {
+                Text(verbatim: "token may reach all repositories").kitType(.meta).foregroundColor(KitInk.textMuted)
+            }
             if let day = job.tokenExpires {
                 Text(verbatim: "token expires \(day)").kitType(.meta).foregroundColor(KitInk.textMuted)
             }
@@ -838,6 +845,11 @@ private struct JobSheet: View {
                         }
                     }
                     labeled("Health URL", text: $draft.healthURL, prompt: "https://example.com/health (optional)")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle("Token may reach all repositories", isOn: $draft.tokenAllRepos)
+                        Text("Token scope then accepts other private repos. The token still needs Issues read/write only and no code access.")
+                            .kitType(.meta).foregroundColor(KitInk.textMuted)
+                    }
                     if let day = draft.tokenExpires {
                         Text(verbatim: "Token expires \(day) (set by the token check)").kitType(.meta).foregroundColor(KitInk.textMuted)
                     }

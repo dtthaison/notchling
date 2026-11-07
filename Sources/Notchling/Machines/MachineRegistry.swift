@@ -60,6 +60,9 @@ struct SDWorkerSettings: Codable, Equatable {
     var tokenExpires: String? = nil
     /// The vault name of the issues token: `<machine>-github-issues`.
     var issuesSecret: String
+    /// The user chose one issues token for all repositories: Token scope then accepts a token that reaches other
+    /// private repos. nil or false is the strict check. Written to machines.json only when true.
+    var tokenAllRepos: Bool? = nil
 }
 
 extension SDWorkerSettings {
@@ -73,6 +76,7 @@ extension SDWorkerSettings {
         healthURL = try c.decodeIfPresent(String.self, forKey: .healthURL)
         tokenExpires = try c.decodeIfPresent(String.self, forKey: .tokenExpires)
         issuesSecret = try c.decodeIfPresent(String.self, forKey: .issuesSecret) ?? ""
+        tokenAllRepos = try c.decodeIfPresent(Bool.self, forKey: .tokenAllRepos)
     }
 }
 
