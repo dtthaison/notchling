@@ -253,7 +253,9 @@ final class AgentMonitor {
                      group: group, label: label, detail: detail, since: since,
                      target: .job(shortID),
                      suggestedReply: job["suggestedReply"] as? String,
-                     transcriptPath: job["linkScanPath"] as? String,
+                     transcriptPath: TranscriptReader.jobTranscript(linkScanPath: job["linkScanPath"] as? String,
+                                                                    sessionID: job["sessionId"] as? String,
+                                                                    worktreePath: job["worktreePath"] as? String),
                      host: "Background",
                      command: (job["template"] as? String) == "exec" ? (job["intent"] as? String ?? "") : nil)
     }

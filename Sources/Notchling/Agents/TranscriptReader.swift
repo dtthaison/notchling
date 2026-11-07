@@ -102,6 +102,27 @@ enum TranscriptReader {
 
     private static var missedAt: [String: Date] = [:]
 
+    /// A background job's transcript. A session that enters a git worktree (EnterWorktree) goes on in that
+    /// worktree's project folder, while `state.json` keeps naming the file in the folder it started in, which
+    /// Claude Code has moved away. So the worktree's folder (in the same projects folder, which is the lane's
+    /// for a lane job) is tried too, and the newer of the two files wins. With neither on disk it returns
+    /// `linkScanPath` as before.
+    static func jobTranscript(linkScanPath: String?, sessionID: String?, worktreePath: String?,
+                              modified: (String) -> Date? = modificationDate) -> String? {
+        guard let linkScanPath else { return nil }
+        var candidates = [linkScanPath]
+        if let sessionID, !sessionID.isEmpty, let worktreePath, !worktreePath.isEmpty {
+            let projects = ((linkScanPath as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
+            candidates.append(projects + "/" + projectFolder(for: worktreePath) + "/" + sessionID + ".jsonl")
+        }
+        let existing = candidates.compactMap { path in modified(path).map { (path, $0) } }
+        return existing.max { $0.1 < $1.1 }?.0 ?? linkScanPath
+    }
+
+    private static func modificationDate(_ path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    }
+
     /// Claude Code's folder name for a working directory: every character other than a letter or digit
     /// becomes "-" ("/Users/me/.claude" → "-Users-me--claude").
     static func projectFolder(for cwd: String) -> String {
