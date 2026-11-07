@@ -172,18 +172,40 @@ extension ChatModel {
         return out
     }
 
+    /// Runs `p` with its output in a temporary file rather than a pipe, and waits for it to exit (at most
+    /// `timeout`). The first `claude --bg` in a lane starts a background host that inherits the output, so
+    /// reading a pipe to its end would wait as long as that host lives.
+    static func runCapturing(_ p: Process, timeout: TimeInterval) -> Result<Data, Error> {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("notchling-\(UUID().uuidString).out")
+        guard FileManager.default.createFile(atPath: url.path, contents: nil),
+              let handle = try? FileHandle(forWritingTo: url) else {
+            return .failure(AccountError("Couldn't make a file for claude's output."))
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+        p.standardOutput = handle
+        p.standardError = handle
+        p.standardInput = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in exited.signal() }
+        do { try p.run() } catch { try? handle.close(); return .failure(error) }
+        try? handle.close()
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            p.terminate()
+            return .failure(AccountError("claude \(p.arguments?.first ?? "") didn't finish in \(Int(timeout)) s."))
+        }
+        return .success((try? Data(contentsOf: url)) ?? Data())
+    }
+
     static func stopJob(_ shortID: String) -> Result<Void, Error> {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ReplySender.claudePath)
         p.arguments = ["stop", shortID]
         p.environment = AgentMonitor.environment(forJob: shortID)
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = out
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return .failure(error) }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
+        let data: Data
+        switch runCapturing(p, timeout: 60) {
+        case .success(let d): data = d
+        case .failure(let e): return .failure(e)
+        }
         guard p.terminationStatus == 0 else {
             let message = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             return .failure(AccountError(message.isEmpty ? "claude stop exited with code \(p.terminationStatus)." : message))
@@ -202,13 +224,11 @@ extension ChatModel {
         var env = ProcessInfo.processInfo.environment
         env[LaneStore.variable] = configDir
         p.environment = env
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = out
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return .failure(error) }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
+        let data: Data
+        switch runCapturing(p, timeout: 60) {
+        case .success(let d): data = d
+        case .failure(let e): return .failure(e)
+        }
         let text = String(decoding: data, as: UTF8.self)
         if let id = jobID(inLaunchOutput: text) { return .success(id) }
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)

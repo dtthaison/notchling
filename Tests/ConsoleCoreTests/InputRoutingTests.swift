@@ -44,6 +44,13 @@ final class InputRoutingTests: XCTestCase {
         XCTAssertEqual(TerminalKeys.replyChunks("a\r\nb"), ["\u{1b}[200~a\nb\u{1b}[201~", "\r"])
     }
 
+    func testPastedTextCantEndThePasteEarly() {
+        // An end-of-paste marker inside the text would make the rest typed keys; ESC and CSI are dropped.
+        let pasted = TerminalKeys.bracketed("hi\u{1b}[201~1\rmore\u{9b}201~x")
+        XCTAssertEqual(pasted, "\u{1b}[200~hi[201~1\rmore201~x\u{1b}[201~")
+        XCTAssertEqual(pasted.components(separatedBy: "\u{1b}[201~").count, 2)
+    }
+
     func testPTYSenderWritesIntoTheOwnedPty() async throws {
         let pty = try PTYSession.spawn(executable: URL(fileURLWithPath: "/bin/cat"), arguments: [],
                                        cwd: FileManager.default.temporaryDirectory, model: nil,

@@ -22,7 +22,8 @@ final class VaultStore {
     /// Where the list and the values live. The defaults are the real index file and the Keychain item; tests pass
     /// their own, so they never touch either.
     struct Backend {
-        var readIndex: () -> [VaultEntry] = { SecretVault.all() }
+        /// Throws when the index exists but can't be read, so a write-back never replaces it with an empty list.
+        var readIndex: () throws -> [VaultEntry] = { try SecretVault.readIndex() }
         var writeIndex: ([VaultEntry]) throws -> Void = { try SecretVault.write($0) }
         /// nil: the Keychain item.
         var loadValues: (() throws -> [String: VaultValue])?
@@ -43,7 +44,7 @@ final class VaultStore {
     /// Renaming moves the stored value to the new name.
     func save(_ entry: VaultEntry, value: VaultValue?, replacing old: VaultEntry? = nil) throws {
         lock.lock(); defer { lock.unlock() }
-        var list = backend.readIndex()
+        var list = try backend.readIndex()
         if let problem = SecretVault.problem(saving: entry, in: list, replacing: old) { throw AccountError(problem) }
         var values = try load()
         var stored = value
@@ -91,21 +92,23 @@ final class VaultStore {
 
     func remove(_ entry: VaultEntry) throws {
         lock.lock(); defer { lock.unlock() }
+        let list = try backend.readIndex()
         var values = try load()
         values[entry.id] = nil
         try write(values)
-        try SecretVault.write(SecretVault.all().filter { $0.id != entry.id })
+        try backend.writeIndex(list.filter { $0.id != entry.id })
     }
 
     /// Turns "ask before each use" off for these entries (the approval's Always Allow).
     func stopAsking(_ ids: Set<String>) {
         lock.lock(); defer { lock.unlock() }
-        let list = SecretVault.all().map { e -> VaultEntry in
+        guard let index = try? backend.readIndex() else { return }
+        let list = index.map { e -> VaultEntry in
             var e = e
             if ids.contains(e.id) { e.ask = false }
             return e
         }
-        try? SecretVault.write(list)
+        try? backend.writeIndex(list)
     }
 
     // MARK: Keychain

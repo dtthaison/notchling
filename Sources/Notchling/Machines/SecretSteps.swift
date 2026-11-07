@@ -24,9 +24,17 @@ struct SecretUsage: Equatable {
 /// environment, a log line, a display, a check result or a message; anything a machine says back is redacted
 /// with the value first, and only a file's mode and size are ever read from the machine.
 enum SecretSteps {
-    /// Opens the vault form (the production `form` of both steps). Called on the main thread.
+    /// Opens the vault form (the production `form` of both steps). Called on the main thread. Never inside a
+    /// test run, where a step built with the defaults would otherwise open it on the user's screen.
     static let openVaultForm: @Sendable (VaultRequest) -> Void = { request in
+        guard !TestRun.active else { return }
         VaultPrompt.open(request: request, done: { _ in })
+    }
+
+    /// Opens a page in the browser (the production `open` of the token steps); never inside a test run.
+    static let openPage: @Sendable (URL) -> Void = { url in
+        guard !TestRun.active else { return }
+        NSWorkspace.shared.open(url)
     }
 
     static func claudeUsage(for machine: Machine) -> SecretUsage {
@@ -63,7 +71,7 @@ enum SecretSteps {
     /// `open` and `form` are the seam for the creation flow the Fix starts through `TokenCreation.start` when the
     /// vault lacks the token: tests pass their own.
     static func issuesToken(for machine: Machine, job: SDWorkerSettings,
-                            open: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) },
+                            open: @escaping @Sendable (URL) -> Void = openPage,
                             form: @escaping @Sendable (VaultRequest) -> Void = openVaultForm) -> SetupStep {
         let usage = issuesUsage(for: machine, job: job)
         let repos = job.repos.map(\.github)

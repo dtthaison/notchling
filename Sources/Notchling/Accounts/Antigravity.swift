@@ -265,8 +265,7 @@ final class AntigravityStore: ObservableObject {
         }
         let dir = tokenURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try Data(login.utf8).write(to: tokenURL, options: [.atomic])
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+        try PrivateFile.write(Data(login.utf8), to: tokenURL)
     }
 
     private static func hasIDToken(_ login: String) -> Bool {

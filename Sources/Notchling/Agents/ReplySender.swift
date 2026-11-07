@@ -1,3 +1,4 @@
+import ConsoleCore
 import Foundation
 
 /// Sends a reply to a background agent by running `claude attach <id>` in a hidden pseudo-terminal,
@@ -53,8 +54,7 @@ enum ReplySender {
         // A "!" command copied from a terminal is put back together first (wrapped lines, prompts, quotes).
         let text = ShellCommand.normalize(text)
         // Bracketed paste keeps newlines in the reply from submitting early.
-        let flat = text.replacingOccurrences(of: "\r\n", with: "\n")
-        try type([clearInput, "\u{1b}[200~" + flat + "\u{1b}[201~", "\r"], toJob: jobID, refuseDialog: true)
+        try type([clearInput, ConsoleCore.TerminalKeys.bracketed(text), "\r"], toJob: jobID, refuseDialog: true)
     }
 
     /// Empties the session's input box first. It keeps a draft across attaches, so text left there
@@ -198,7 +198,7 @@ enum ReplySender {
             // The queue had already gone (the turn ended): what Up brought back was history, now cleared.
             guard taken else { return }
             for text in keep {
-                write(master, "\u{1b}[200~" + text + "\u{1b}[201~")
+                write(master, ConsoleCore.TerminalKeys.bracketed(text))
                 Thread.sleep(forTimeInterval: 0.3)
                 write(master, "\r")
                 Thread.sleep(forTimeInterval: 0.3)
