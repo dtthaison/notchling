@@ -203,19 +203,23 @@ It runs a Codex `exec` turn or an `agy acp` session, blocks until it ends, print
 
 ## Machines
 
-**What it is.** One window (Chat sidebar > **Machines**) to set up and watch the Macs and Linux servers that run the overnight `sd` worker. **Machines** shows each one as a card of setup steps; **Jobs** shows what the workers did.
+**What it is.** Turn your other Macs and Linux servers into agent workers, and manage them from one window (Chat sidebar > **Machines**). A worker machine picks up GitHub issues from the repositories you give it and works on them with Claude Code while you're away. It can read the code and comment on issues, but never push. In the morning, **Jobs** lists what the workers left for you: a branch to merge, a question to answer, or a job to retry. **Machines** shows each machine as a card of setup steps.
 
 **How it works.**
 
-- Each step (reachable, worker user, stays awake, FileVault, base tools, Claude Code, Claude login, Xcode, deploy key, token scope, sd worker…) has a **Check**, which only reads, and a **Set up**, which runs only when you click it, after showing you the exact commands.
+- Each step (reachable, worker user, stays awake, FileVault, base tools, Claude Code, Claude login, Xcode, deploy key, token scope, the worker job…) has a **Check**, which only reads, and a **Set up**, which runs only when you click it, after showing you the exact commands.
 - **Check** re-runs the checks. Cheap ones refresh every minute; slow ones (Xcode, GitHub) run when the window opens, on Check, and every 10 minutes. **Set up all** runs every step that isn't ✓ yet.
 - Secrets reach the machine only over ssh's standard input, into mode-600 files, and show everywhere as `[secret:<name>]`. When a vault value changes, a banner offers to update the machines that use it.
 - An admin step asks for the admin password in a secure field for that one step and keeps it nowhere. On Linux the worker account must not be able to use sudo, so admin steps run as root over SSH instead.
 - **Replace key…** rotates a machine's read-only deploy key. The old key keeps working until the new one is proven.
 
-**Why.** Setting up a worker by hand is twenty steps across ssh, GitHub and Keychain, and it's easy to get one wrong (a token with too much scope, a worker that can push).
+**Why.** A spare Mac mini or a cheap server can keep agents working through the night, so issues are done when you wake up. Setting one up by hand is twenty steps across ssh, GitHub and Keychain, and it's easy to get one wrong: a token with too much scope, a worker that can push, a login in the wrong account.
 
-**Use it when** you add a new worker machine, or want to see at a glance why one stopped working.
+**Use it when:**
+
+- you have a backlog of small, well-described issues (bug fixes, tests, refactors) and want them worked on overnight, ready for review in the morning;
+- you add a new worker machine, or rotate its keys and tokens;
+- a worker stopped making progress and you want to see at a glance which step broke.
 
 ---
 
