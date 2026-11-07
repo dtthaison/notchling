@@ -88,9 +88,12 @@ class Base(unittest.TestCase):
              ("POST", "/app/installations/77/access_tokens"): (201, {"token": TOKEN,
                                                                       "expires_at": "2026-11-08T13:00:00Z"}),
              ("GET", "/repos/o/r"): (200, {"default_branch": "main"}),
-             ("POST", "/repos/o/r/pulls"): (201, {"number": 9, "html_url": "https://github.com/o/r/pull/9"})}
+             ("POST", "/repos/o/r/pulls"): (201, {"number": 9, "html_url": "https://github.com/o/r/pull/9"}),
+             ("DELETE", "/installation/token"): (204, None)}
         r.update(routes or {})
         self.srv = FakeGitHub(r)
+        # The shared fake answers GET and POST only; the wrapper also revokes its token with a DELETE.
+        self.srv.server.RequestHandlerClass.do_DELETE = lambda h: h._serve("DELETE")
         self.addCleanup(self.srv.close)
         self.cfg = push_wrapper.Config(app_id="12345", key_path=str(self.key), repo="o/r",
                                        api_url=self.srv.url, remote_url=str(self.bare))
@@ -472,6 +475,57 @@ class PrText(Base):
         self.assertIsNone(GITHUB_CLOSES.search(pr["title"]), pr["title"])
         self.assertNotIn("@bob", pr["title"])
         self.assertTrue(pr["body"].endswith("\n\nRefs #5\nAgent-Model: claude-opus-5-5\n"), repr(pr["body"]))
+
+
+class Revocation(Base):
+    """The installation token is good for an hour; once the wrapper is done with it, it is revoked."""
+
+    def revokes(self):
+        return [r for r in self.srv.requests if (r["method"], r["path"]) == ("DELETE", "/installation/token")]
+
+    def test_the_token_is_revoked_after_the_pull_request(self):
+        self.start()
+        self.assertEqual(self.go().code, 0)
+        self.assertEqual([r["auth"] for r in self.revokes()], ["Bearer " + TOKEN])
+        paths = self.api_paths()
+        self.assertEqual(paths[-1], ("DELETE", "/installation/token"))
+        self.assertLess(paths.index(("POST", "/repos/o/r/pulls")), paths.index(("DELETE", "/installation/token")))
+
+    def test_the_token_is_revoked_when_the_push_is_rejected(self):
+        self.start()
+        hook = self.bare / "hooks" / "pre-receive"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text("#!/bin/sh\necho nope >&2\nexit 1\n")
+        hook.chmod(0o755)
+        self.assertEqual(self.go().code, 1)
+        self.assertEqual(len(self.revokes()), 1)
+
+    def test_the_token_is_revoked_when_the_pull_request_fails(self):
+        self.start({("POST", "/repos/o/r/pulls"): (403, {"message": "no"})})
+        self.assertEqual(self.go().code, 2)
+        self.assertEqual(len(self.revokes()), 1)
+
+    def test_the_token_is_revoked_when_the_body_turns_out_to_hold_it(self):
+        self.start()
+        self.assertEqual(self.go(body=TOKEN.encode()).code, 1)
+        self.assertEqual(len(self.revokes()), 1)
+
+    def test_nothing_is_revoked_when_no_token_was_minted(self):
+        self.start()
+        git(self.wt, "checkout", "-q", "main")
+        self.assertEqual(self.go().code, 1)
+        self.assertEqual(self.revokes(), [])
+        git(self.wt, "checkout", "-q", "agent/5-fix-thing")
+        self.start({("POST", "/app/installations/77/access_tokens"): (401, {"message": "Bad credentials"})})
+        self.assertEqual(self.go().code, 2)
+        self.assertEqual(self.revokes(), [])
+
+    def test_a_failed_revoke_changes_nothing(self):
+        for status in (401, 404, 500):
+            self.start({("DELETE", "/installation/token"): (status, {"message": "x"})})
+            res = self.go()
+            self.assertEqual((res.code, res.message), (0, "https://github.com/o/r/pull/9"), status)
+            self.assertEqual(len(self.revokes()), 1)
 
 
 class Rejections(Base):

@@ -424,6 +424,7 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
     runner = runner or Runner()
     scratch = None
     token = ""
+    api: Optional[Api] = None
     try:
         if req.issue < 1:
             raise Refused("the issue number must be positive")
@@ -457,8 +458,19 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
     except (Failed, ApiError) as e:
         return Result(2, _scrub(str(e), token))
     finally:
+        if token and api is not None:
+            revoke_token(api, token)
         if scratch:
             shutil.rmtree(scratch, ignore_errors=True)
+
+
+def revoke_token(api: Api, token: str) -> None:
+    """Best effort: the token dies at once instead of in an hour. Whatever goes wrong here, the job's
+    result is already decided, so nothing is raised."""
+    try:
+        api.request("DELETE", "/installation/token", token=token)
+    except Exception:  # noqa: BLE001  (a failed revoke must never change or mask the result)
+        pass
 
 
 def _scrub(text: str, token: str) -> str:
