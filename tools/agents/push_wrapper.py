@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The push wrapper: takes an agent's finished branch, pushes it as the GitHub App and opens the PR.
 
-    push_wrapper.py --worktree PATH --issue N --title TEXT --body-file FILE [--agent-model ID] [--config FILE]
+    push_wrapper.py --worktree PATH --issue N --title TEXT [--agent-model ID] [--config FILE] < body
+
+The pull request body is read from stdin; no body path is ever opened.
 
 Run by sd as the wrapper user, never by the agent. The agent's OS user has no GitHub credential; the App's
 key lives in a file only the wrapper user can read. What this script promises:
@@ -35,7 +37,7 @@ import tempfile
 import time
 import unicodedata
 import urllib.parse
-from typing import Any, Callable, List, Mapping, NamedTuple, Optional, TextIO
+from typing import Any, BinaryIO, Callable, List, Mapping, NamedTuple, Optional, TextIO, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from preflight import API_URL, REPO_RE, Api, ApiError  # noqa: E402
@@ -47,6 +49,8 @@ BRANCH_NAME_RE = re.compile(r"[A-Za-z0-9._/-]{1,100}")
 SLUG_MAX = 60
 TITLE_MAX = 256
 BODY_MAX = 60000
+INDEX_MAX = 512 * 1024 * 1024
+PRIVATE_KEY_MARK = "PRIVATE KEY-----"
 GIT_TIMEOUT = 300
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 DEFAULT_CONFIG = "~/.config/notchling/push-wrapper.json"
@@ -79,7 +83,7 @@ class Request(NamedTuple):
     worktree: str
     issue: int
     title: str
-    body_file: str
+    body: bytes  # as read from stdin; validate_body checks it
     agent_model: Optional[str] = None
 
 
@@ -134,18 +138,92 @@ def validate_model(model: Optional[str]) -> Optional[str]:
     return model
 
 
-def read_body(path: str) -> str:
+def read_stdin_body(stream: BinaryIO) -> bytes:
+    """The PR body arrives on stdin, never by a path. A path would be opened with this user's rights, and
+    the file at it can be swapped for a link to the App key; a pipe is read as the caller's data."""
     try:
-        with open(path, "rb") as f:
-            raw = f.read(BODY_MAX + 1)
-        if len(raw) > BODY_MAX:
-            raise Refused("the body file is over %d bytes" % BODY_MAX)
+        if stream.isatty():
+            raise Refused("pipe the pull request body on stdin")
+        return stream.read(BODY_MAX + 1)
+    except (OSError, ValueError):
+        raise Refused("the body could not be read from stdin")
+
+
+def validate_body(raw: bytes) -> str:
+    if len(raw) > BODY_MAX:
+        raise Refused("the body is over %d bytes" % BODY_MAX)
+    try:
         text = raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        raise Refused("the body file could not be read as text")
+    except UnicodeDecodeError:
+        raise Refused("the body is not UTF-8 text")
     if "\x00" in text:
-        raise Refused("the body file is not text")
+        raise Refused("the body is not text")
+    if PRIVATE_KEY_MARK in text:
+        raise Refused("the body holds a private key, so nothing was sent")
     return text
+
+
+def holds_secret(text: str, token: str) -> bool:
+    """True if `text` carries the installation token, bare or as git's Basic header value."""
+    basic = base64.b64encode(("x-access-token:" + token).encode()).decode()
+    return bool(token) and (token in text or basic in text)
+
+
+def open_regular(path: str, what: str, limit: int) -> Tuple[int, os.stat_result]:
+    """Open `path` read-only as a plain file or refuse: not a symlink (O_NOFOLLOW), not a pipe or device
+    (O_NONBLOCK so opening one cannot hang; fstat says what it is), no other hard link to it, within
+    `limit` bytes. Returns the descriptor, which the caller closes, and its stat."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        raise Refused("%s is missing or is not a plain file" % what)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused("%s is not a regular file" % what)
+        if st.st_nlink != 1:
+            raise Refused("%s has more than one hard link" % what)
+        if st.st_size > limit:
+            raise Refused("%s is over %d bytes" % (what, limit))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, st
+
+
+def copy_regular(src: str, dst: str, what: str, limit: int) -> None:
+    """Copy a plain file (see open_regular), counting bytes as they come so a file that grows is cut off."""
+    fd, _ = open_regular(src, what, limit)
+    try:
+        total = 0
+        with open(dst, "wb") as out:
+            while True:
+                chunk = os.read(fd, 1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise Refused("%s is over %d bytes" % (what, limit))
+                out.write(chunk)
+    except OSError:
+        raise Refused("%s could not be read" % what)
+    finally:
+        os.close(fd)
+
+
+def check_object_store(common: str) -> str:
+    """The agent's objects folder, if it stands alone. Git follows `objects/info/alternates` (and
+    http-alternates) from any object store it opens, so an agent repository could point our scratch
+    repository at any folder on the machine. Such a repository is refused: use a full clone."""
+    objects = os.path.join(common, "objects")
+    if os.path.islink(objects) or not os.path.isdir(objects):
+        raise Refused("the worktree's repository has no plain objects folder")
+    for name in ("alternates", "http-alternates"):
+        if os.path.lexists(os.path.join(objects, "info", name)):
+            raise Refused("the worktree's repository borrows objects from elsewhere (objects/info/%s); "
+                          "give the agent a full clone, not --shared or --reference" % name)
+    return objects
 
 
 def check_key(path: str) -> None:
@@ -247,20 +325,19 @@ def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) ->
     validate_branch(branch, issue)
     sha = _git(runner, safe + ["rev-parse", "--verify", "-q", "HEAD^{commit}"], env,
                "reading the commit").decode().strip()
-    if not SHA_RE.fullmatch(sha) or "\n" in common or not os.path.isdir(os.path.join(common, "objects")):
+    if not SHA_RE.fullmatch(sha) or "\n" in common:
         raise Refused("the worktree's commit could not be read")
+    objects = check_object_store(common)
 
     sgit = os.path.join(scratch, "s.git")
     _git(runner, ["init", "-q", "--bare", "--template=", sgit], env, "preparing the scratch repository")
     with open(os.path.join(sgit, "objects", "info", "alternates"), "w") as f:
-        f.write(os.path.join(common, "objects") + "\n")
+        f.write(objects + "\n")
     base = ["--git-dir", sgit]
     _git(runner, base + ["update-ref", validate_ref("refs/heads/" + branch), sha], env, "staging the commit")
     _git(runner, base + ["symbolic-ref", "HEAD", "refs/heads/" + branch], env, "staging the commit")
-    try:
-        shutil.copyfile(os.path.join(git_dir, "index"), os.path.join(sgit, "index"))
-    except OSError:
-        raise Refused("the worktree has no index, so it is not clean")
+    copy_regular(os.path.join(git_dir, "index"), os.path.join(sgit, "index"), "the worktree's index",
+                 INDEX_MAX)
     status = _git(runner, base + ["--work-tree", wt, "status", "--porcelain",
                                                               "--untracked-files=all", "--ignore-submodules=all"],
                   env, "checking the worktree")
@@ -281,7 +358,7 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
             raise Refused("the issue number must be positive")
         title = validate_title(req.title)
         model = validate_model(req.agent_model)
-        body = read_body(req.body_file)
+        body = validate_body(req.body)
         check_key(cfg.key_path)
         scratch = tempfile.mkdtemp(prefix="push-wrapper-", dir=tmp_root)
         branch, sha, sgit = inspect_worktree(runner, req.worktree, req.issue, scratch)
@@ -290,6 +367,8 @@ def push_and_open_pr(req: Request, cfg: Config, runner: Optional[Runner] = None,
         api = Api(cfg.api_url)
         jwt = make_jwt(cfg.app_id, cfg.key_path, int(clock()), runner)
         token = installation_token(api, cfg.repo, jwt)
+        if holds_secret(body, token):
+            raise Refused("the body holds the installation token, so nothing was sent")
         info = api.request("GET", "/repos/%s" % cfg.repo, token=token)
         base = info.get("default_branch") if isinstance(info, dict) else None
         if not isinstance(base, str) or not BRANCH_NAME_RE.fullmatch(base):
@@ -365,24 +444,23 @@ def load_config(path: str) -> Config:
     return Config(app_id, key_path, repo, api_url, remote)
 
 
-def main(argv: List[str], env: Mapping[str, str], out: TextIO, err: TextIO) -> int:
+def main(argv: List[str], env: Mapping[str, str], out: TextIO, err: TextIO,
+         stdin: Optional[BinaryIO] = None) -> int:
     parser = argparse.ArgumentParser(prog="push_wrapper.py", add_help=False)
     parser.add_argument("--worktree", required=True)
     parser.add_argument("--issue", required=True, type=int)
     parser.add_argument("--title", required=True)
-    parser.add_argument("--body-file", required=True)
     parser.add_argument("--agent-model")
     parser.add_argument("--config")
     try:
         args = parser.parse_args(argv)
     except SystemExit:
         return 2
-    path = args.config or env.get("NOTCHLING_PUSH_WRAPPER_CONFIG") or os.path.expanduser(
-        DEFAULT_CONFIG.replace("~", env.get("HOME", "~"), 1))
+    path = args.config or os.path.expanduser(DEFAULT_CONFIG.replace("~", env.get("HOME", "~"), 1))
     try:
         cfg = load_config(path)
-        res = push_and_open_pr(Request(args.worktree, args.issue, args.title, args.body_file,
-                                       args.agent_model), cfg)
+        body = read_stdin_body(stdin if stdin is not None else sys.stdin.buffer)
+        res = push_and_open_pr(Request(args.worktree, args.issue, args.title, body, args.agent_model), cfg)
     except Refused as e:
         res = Result(1, str(e))
     except Failed as e:

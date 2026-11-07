@@ -80,8 +80,7 @@ class Base(unittest.TestCase):
         (self.wt / "a.txt").write_text("two\n")
         git(self.wt, "commit", "-q", "-am", "work")
         self.sha = git(self.wt, "rev-parse", "HEAD")
-        self.body = self.root / "body.md"
-        self.body.write_text("What changed and why.\n")
+        self.body = b"What changed and why.\n"  # the PR body, as sd pipes it on stdin
 
     def start(self, routes=None):
         r = {("GET", "/repos/o/r/installation"): (200, {"id": 77}),
@@ -97,7 +96,7 @@ class Base(unittest.TestCase):
         self.runner = Recording()
 
     def request(self, **over):
-        kw = dict(worktree=str(self.wt), issue=5, title="Fix the thing", body_file=str(self.body),
+        kw = dict(worktree=str(self.wt), issue=5, title="Fix the thing", body=self.body,
                   agent_model=None)
         kw.update(over)
         return push_wrapper.Request(**kw)
@@ -108,6 +107,13 @@ class Base(unittest.TestCase):
 
     def api_paths(self):
         return [(r["method"], r["path"]) for r in self.srv.requests]
+
+    def assertRefused(self, res, fragment, code=1):
+        self.assertEqual(res.code, code, res)
+        self.assertIn(fragment, res.message)
+        self.assertEqual(self.api_paths(), [], "refusals happen before any network call")
+        self.assertEqual(self.remote_branches(), {})
+        self.assertEqual(list(self.tmp.iterdir()), [], "scratch directory left behind")
 
     def remote_branches(self):
         out = subprocess.run(["git", "-C", str(self.bare), "for-each-ref", "--format=%(refname) %(objectname)"],
@@ -325,12 +331,6 @@ class SuccessPath(Base):
 
 
 class Refusals(Base):
-    def assertRefused(self, res, fragment, code=1):
-        self.assertEqual(res.code, code, res)
-        self.assertIn(fragment, res.message)
-        self.assertEqual(self.api_paths(), [], "refusals happen before any network call")
-        self.assertEqual(self.remote_branches(), {})
-
     def test_main_branch(self):
         self.start()
         git(self.wt, "checkout", "-q", "main")
@@ -372,10 +372,9 @@ class Refusals(Base):
         self.start()
         self.assertRefused(self.go(title="a\nb"), "title")
         self.assertRefused(self.go(agent_model="x\ny"), "model")
-        self.assertRefused(self.go(body_file=str(self.root / "nope.md")), "body")
-        big = self.root / "big.md"
-        big.write_text("x" * 70000)
-        self.assertRefused(self.go(body_file=str(big)), "body")
+        self.assertRefused(self.go(body=b"x" * 70000), "body")
+        self.assertRefused(self.go(body=b"\xff\xfe not utf-8"), "body")
+        self.assertRefused(self.go(body=b"a\x00b"), "body")
 
     def test_loose_key_is_refused_before_any_call(self):
         self.start()
@@ -450,18 +449,169 @@ class HostileWorktree(Base):
         self.assertEqual(self.remote_branches(), {"refs/heads/agent/5-fix-thing": self.sha})
 
 
+class UntrustedFiles(Base):
+    """What the wrapper reads by a path the agent can influence: the index of its worktree and the
+    object store of its repository. And what it will not put in a pull request."""
+
+    def make_plain_file(self, content=b"data"):
+        p = self.root / "plain"
+        p.write_bytes(content)
+        return str(p)
+
+    def test_open_regular_takes_a_plain_file(self):
+        fd, st = push_wrapper.open_regular(self.make_plain_file(), "the file", 100)
+        os.close(fd)
+        self.assertEqual(st.st_nlink, 1)
+
+    def test_open_regular_refuses_a_symlink(self):
+        link = self.root / "link"
+        link.symlink_to(self.key)
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.open_regular(str(link), "the file", 10_000)
+
+    def test_open_regular_refuses_a_hard_link(self):
+        plain = self.make_plain_file()
+        os.link(plain, str(self.root / "second-name"))
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.open_regular(plain, "the file", 100)
+
+    def test_open_regular_refuses_a_pipe_a_device_and_a_folder_without_blocking(self):
+        fifo = self.root / "fifo"
+        os.mkfifo(str(fifo))
+        for path in (str(fifo), "/dev/zero", str(self.root)):
+            with self.assertRaises(push_wrapper.Refused, msg=path):
+                push_wrapper.open_regular(path, "the file", 100)
+
+    def test_open_regular_refuses_a_big_file_and_a_missing_one(self):
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.open_regular(self.make_plain_file(b"x" * 101), "the file", 100)
+        with self.assertRaises(push_wrapper.Refused):
+            push_wrapper.open_regular(str(self.root / "nope"), "the file", 100)
+
+    def test_a_symlinked_index_is_refused_and_the_key_is_not_copied(self):
+        self.start()
+        index = self.wt / ".git" / "index"
+        index.unlink()
+        index.symlink_to(self.key)
+        self.assertRefused(self.go(), "index")
+
+    def test_a_hard_linked_index_is_refused(self):
+        self.start()
+        os.link(str(self.wt / ".git" / "index"), str(self.root / "elsewhere"))
+        self.assertRefused(self.go(), "index")
+
+    def test_an_index_over_the_cap_is_refused(self):
+        self.start()
+        old = push_wrapper.INDEX_MAX
+        push_wrapper.INDEX_MAX = 10
+        self.addCleanup(setattr, push_wrapper, "INDEX_MAX", old)
+        self.assertRefused(self.go(), "index")
+
+    def test_an_index_that_is_a_device_is_refused_without_reading_it(self):
+        self.start()
+        index = self.wt / ".git" / "index"
+        index.unlink()
+        index.symlink_to("/dev/zero")  # a plain copyfile of this would fill the disk
+        self.assertRefused(self.go(), "index")
+
+    def test_nested_alternates_are_refused(self):
+        for name in ("alternates", "http-alternates"):
+            with self.subTest(name):
+                self.start()
+                info = self.wt / ".git" / "objects" / "info"
+                info.mkdir(exist_ok=True)
+                (info / name).write_text(str(self.root) + "\n")
+                self.assertRefused(self.go(), "borrows objects")
+                (info / name).unlink()
+
+    def test_an_objects_folder_that_is_a_link_is_refused(self):
+        self.start()
+        objects = self.wt / ".git" / "objects"
+        real = self.root / "real-objects"
+        objects.rename(real)
+        objects.symlink_to(real)
+        self.assertRefused(self.go(), "objects")
+
+    def test_a_clean_repository_with_no_alternates_still_passes(self):
+        self.start()
+        self.assertEqual(self.go().code, 0)
+
+    def pr_bodies(self):
+        return [json.loads(r["body"])["body"] for r in self.srv.requests if r["path"] == "/repos/o/r/pulls"]
+
+    def test_a_body_with_a_private_key_is_refused_before_any_call(self):
+        self.start()
+        for marker in ("-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----",
+                       "-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----"):
+            self.assertRefused(self.go(body=("notes\n%s\nabc\n" % marker).encode()), "private key")
+        self.assertRefused(self.go(body=b"notes\n" + self.key.read_bytes()), "private key")
+        self.assertEqual(self.pr_bodies(), [])
+
+    def test_a_body_with_the_installation_token_is_refused_before_the_push(self):
+        self.start()
+        for text in (TOKEN, base64.b64encode(("x-access-token:" + TOKEN).encode()).decode()):
+            res = self.go(body=("see %s here" % text).encode())
+            self.assertEqual(res.code, 1, res)
+            self.assertIn("token", res.message)
+            self.assertNotIn(TOKEN, res.message)
+            self.assertEqual(self.remote_branches(), {})
+        self.assertNotIn(("POST", "/repos/o/r/pulls"), self.api_paths())
+
+
 class Cli(Base):
-    def run_main(self, argv, env=None):
+    def run_main(self, argv, env=None, stdin=None):
         out, err = io.StringIO(), io.StringIO()
-        code = push_wrapper.main(argv, env or {}, out, err)
+        code = push_wrapper.main(argv, env or {}, out, err,
+                                 stdin=io.BytesIO(self.body) if stdin is None else stdin)
         return code, out.getvalue(), err.getvalue()
 
     def test_usage_and_missing_config(self):
         self.assertEqual(self.run_main([])[0], 2)
         code, _, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "t",
-                                      "--body-file", str(self.body), "--config", str(self.root / "no.json")])
+                                      "--config", str(self.root / "no.json")])
         self.assertEqual(code, 2)
         self.assertIn("config", err)
+
+    def test_the_body_is_read_from_stdin(self):
+        self.start()
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
+                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
+        code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
+                                        "--config", str(path)], stdin=io.BytesIO(b"piped words\n"))
+        self.assertEqual(code, 0, err)
+        pr = [r for r in self.srv.requests if r["path"] == "/repos/o/r/pulls"][0]
+        self.assertIn("piped words", json.loads(pr["body"])["body"])
+
+    def test_no_option_names_a_body_path(self):
+        """The App key is a file this user can read; a `--body-file` that follows a link to it would post it.
+        So there is no such option: the parser refuses it (exit 2) before anything is read or sent."""
+        self.start()
+        link = self.root / "body.md"
+        link.symlink_to(self.key)
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
+                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
+        code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
+                                        "--body-file", str(link), "--config", str(path)])
+        self.assertEqual(code, 2)
+        self.assertEqual(self.api_paths(), [])
+        self.assertNotIn("PRIVATE KEY", out + err)
+
+    def test_a_terminal_on_stdin_is_refused_not_waited_on(self):
+        class Tty(io.BytesIO):
+            def isatty(self):
+                return True
+
+        self.start()
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
+                                    "api_url": self.srv.url, "remote_url": str(self.bare)}))
+        code, _, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
+                                      "--config", str(path)], stdin=Tty(b"x"))
+        self.assertEqual(code, 1)
+        self.assertIn("stdin", err)
+        self.assertEqual(self.api_paths(), [])
 
     def test_config_loading(self):
         self.start()
@@ -489,8 +639,7 @@ class Cli(Base):
         path.write_text(json.dumps({"app_id": 12345, "key_path": str(self.key), "repo": "o/r",
                                     "api_url": self.srv.url, "remote_url": str(self.bare)}))
         code, out, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                        "--body-file", str(self.body), "--agent-model", "m1",
-                                        "--config", str(path)])
+                                        "--agent-model", "m1", "--config", str(path)])
         self.assertEqual((code, out.strip()), (0, "https://github.com/o/r/pull/9"), err)
         self.assertNotIn(TOKEN, out + err)
 
@@ -501,7 +650,7 @@ class Cli(Base):
                                     "api_url": self.srv.url, "remote_url": str(self.bare)}))
         git(self.wt, "checkout", "-q", "main")
         code, _, err = self.run_main(["--worktree", str(self.wt), "--issue", "5", "--title", "Fix",
-                                      "--body-file", str(self.body), "--config", str(path)])
+                                      "--config", str(path)])
         self.assertEqual(code, 1)
         self.assertIn("refused", err)
 
