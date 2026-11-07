@@ -132,7 +132,7 @@ RULES: List[Rule] = [
          ("Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n"),
          ("Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n    .pointerCursor()\n")),
     Rule("LINT-NO-APPLESCRIPT", "No NSAppleScript or osascript (notifications show Script Editor's name)",
-         ("Sources/**", "crates/**"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
+         ("Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
          ("Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
          ("Sources/Notchling/A.swift", "// never osascript\n")),
     Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
