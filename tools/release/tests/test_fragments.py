@@ -379,6 +379,159 @@ class CheckTests(Repo):
         self.assertEqual(code, 0)
 
 
+class NamesAtTests(Repo):
+    """Which fragment files a commit's tree holds: what version.py and fold --only-at rely on."""
+
+    def test_lists_fragment_files_only(self):
+        self.write("changes/a.md", frag("fix"))
+        self.write("changes/b.md", frag("feature"))
+        self.write("changes/notes.txt", "x")
+        self.write("changes/sub/c.md", frag("fix"))
+        rev = self.commit("frags")
+        self.assertEqual(fragments.names_at(self.root, rev, "changes"), {"a.md", "b.md"})
+
+    def test_reads_the_tree_at_that_commit_not_the_folder(self):
+        self.write("changes/a.md", frag("fix"))
+        old = self.commit("a")
+        (self.root / "changes/a.md").unlink()
+        self.write("changes/b.md", frag("fix"))
+        self.commit("swap")
+        self.assertEqual(fragments.names_at(self.root, old, "changes"), {"a.md"})
+
+    def test_a_folder_missing_at_that_commit_has_none(self):
+        self.assertEqual(fragments.names_at(self.root, self.base, "nothing-here"), set())
+
+    def test_tags_and_refs_work_and_an_unknown_one_names_itself(self):
+        self.write("changes/a.md", frag("fix"))
+        self.commit("a")
+        self.git("tag", "-a", "-m", "m", "v1.4.0")
+        self.assertEqual(fragments.names_at(self.root, "refs/tags/v1.4.0", "changes"), {"a.md"})
+        with self.assertRaises(fragments.FragmentError) as cm:
+            fragments.names_at(self.root, "refs/tags/v9.9.9", "changes")
+        self.assertIn("v9.9.9", str(cm.exception))
+
+    def test_an_absolute_folder_inside_the_repo_is_made_relative(self):
+        self.write("other/a.md", frag("fix"))
+        rev = self.commit("a")
+        self.assertEqual(fragments.names_at(self.root, rev, str(self.root / "other")), {"a.md"})
+
+    def test_a_folder_outside_the_repo_is_refused(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with self.assertRaises(fragments.FragmentError) as cm:
+                fragments.names_at(self.root, self.base, elsewhere)
+        self.assertIn("not inside", str(cm.exception))
+
+
+class LoadSkipTests(Dir):
+    def test_skipped_names_are_not_even_parsed(self):
+        self.put("old.md", "this is broken but released")
+        self.put("new.md", frag("fix"))
+        self.assertEqual([f.name for f in fragments.load(self.changes, skip={"old.md"})], ["new.md"])
+        with self.assertRaises(fragments.FragmentError):
+            fragments.load(self.changes)
+
+
+class FoldOnlyAtTests(Repo):
+    def setUp(self):
+        super().setUp()
+        self.write("CHANGELOG.md", CHANGELOG)
+        self.base = self.commit("changelog")
+
+    def fold(self, only_at, version="1.3.0", *extra):
+        return run_cli(["fold", version, "--repo", str(self.root), "--changelog", "CHANGELOG.md",
+                        "--changes-dir", "changes", "--date", "2026-11-09", "--only-at", only_at, *extra])
+
+    def changes_left(self):
+        return sorted(p.name for p in (self.root / "changes").iterdir())
+
+    def test_folds_and_deletes_only_the_fragments_the_commit_holds(self):
+        self.write("changes/in-release.md", frag("feature", "Shipped thing."))
+        self.write("changes/also-in.md", frag("fix", "Shipped fix."))
+        released = self.commit("released")
+        self.write("changes/later.md", frag("feature", "Merged after the tag."))
+        self.commit("later")
+        code, _, err = self.fold(released)
+        self.assertEqual(code, 0, err)
+        log = (self.root / "CHANGELOG.md").read_text()
+        self.assertIn("- Shipped thing.", log)
+        self.assertIn("- Shipped fix.", log)
+        self.assertNotIn("Merged after the tag.", log)
+        self.assertEqual(self.changes_left(), ["README.md", "later.md"])
+
+    def test_the_readme_is_never_folded_or_deleted(self):
+        code, _, err = self.fold(self.git("rev-parse", "HEAD"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.changes_left(), ["README.md"])
+        self.assertIn("## [1.3.0] - 2026-11-09\n\nNo user-facing changes.\n", (self.root / "CHANGELOG.md").read_text())
+
+    def test_a_fragment_already_gone_from_the_folder_is_skipped(self):
+        self.write("changes/a.md", frag("fix", "Fix A."))
+        self.write("changes/b.md", frag("fix", "Fix B."))
+        released = self.commit("released")
+        (self.root / "changes/a.md").unlink()
+        code, _, err = self.fold(released)
+        self.assertEqual(code, 0, err)
+        log = (self.root / "CHANGELOG.md").read_text()
+        self.assertIn("- Fix B.", log)
+        self.assertNotIn("Fix A.", log)
+
+    def test_a_broken_fragment_outside_the_release_does_not_block(self):
+        self.write("changes/a.md", frag("fix", "Fix A."))
+        released = self.commit("released")
+        self.write("changes/later.md", "no front matter")
+        code, _, err = self.fold(released)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.changes_left(), ["README.md", "later.md"])
+
+    def test_a_broken_fragment_in_the_release_changes_nothing(self):
+        self.write("changes/a.md", frag("fix", "Fix A."))
+        self.write("changes/bad.md", "no front matter")
+        released = self.commit("released")
+        code, _, err = self.fold(released)
+        self.assertEqual(code, 1)
+        self.assertIn("bad.md", err)
+        self.assertEqual((self.root / "CHANGELOG.md").read_text(), CHANGELOG)
+        self.assertEqual(self.changes_left(), ["README.md", "a.md", "bad.md"])
+
+    def test_an_unknown_commit_changes_nothing(self):
+        self.write("changes/a.md", frag("fix"))
+        self.commit("a")
+        code, _, err = self.fold("0" * 40)
+        self.assertEqual(code, 1)
+        self.assertTrue(err)
+        self.assertEqual((self.root / "CHANGELOG.md").read_text(), CHANGELOG)
+        self.assertEqual(self.changes_left(), ["README.md", "a.md"])
+
+    def test_nothing_in_the_release_still_cuts_the_section_and_keeps_every_fragment(self):
+        released = self.git("rev-parse", "HEAD")
+        self.write("changes/later.md", frag("feature", "Later."))
+        self.commit("later")
+        code, _, err = self.fold(released)
+        self.assertEqual(code, 0, err)
+        self.assertIn("## [1.3.0] - 2026-11-09\n\nNo user-facing changes.\n\n## [1.2.0]",
+                      (self.root / "CHANGELOG.md").read_text())
+        self.assertEqual(self.changes_left(), ["README.md", "later.md"])
+
+    def test_without_the_flag_every_fragment_is_folded(self):
+        self.write("changes/a.md", frag("fix", "Fix A."))
+        self.commit("a")
+        code, _, err = run_cli(["fold", "1.3.0", "--repo", str(self.root), "--changelog", "CHANGELOG.md",
+                                "--changes-dir", "changes", "--date", "2026-11-09"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.changes_left(), ["README.md"])
+
+    def test_with_a_custom_changes_dir(self):
+        self.write("notes/a.md", frag("fix", "Fix A."))
+        self.write("notes/b.md", frag("fix", "Fix B."))
+        released = self.commit("released")
+        self.write("notes/c.md", frag("fix", "Fix C."))
+        self.commit("later")
+        code, _, err = run_cli(["fold", "1.3.0", "--repo", str(self.root), "--changelog", "CHANGELOG.md",
+                                "--changes-dir", "notes", "--date", "2026-11-09", "--only-at", released])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(p.name for p in (self.root / "notes").iterdir()), ["c.md"])
+
+
 class NotesSinceTests(Repo):
     def test_since_tag_leaves_out_fragments_already_there(self):
         self.write("changes/old.md", frag("fix", "Old fix."))
@@ -397,6 +550,36 @@ class NotesSinceTests(Repo):
         code, _, err = run_cli(["notes", "--since", "v9.9.9", "--repo", str(self.root)])
         self.assertEqual(code, 1)
         self.assertIn("v9.9.9", err)
+
+    def test_since_honours_a_custom_changes_dir(self):
+        # The tree is listed under the same folder the working copy is read from, not always changes/.
+        self.write("notes/old.md", frag("fix", "Old fix."))
+        self.commit("old")
+        self.git("tag", "v1.4.1-beta.1")
+        self.write("notes/new.md", frag("feature", "New feature."))
+        self.commit("new")
+        code, out, err = run_cli(["notes", "--since", "v1.4.1-beta.1", "--repo", str(self.root),
+                                  "--changes-dir", "notes"])
+        self.assertEqual((code, out), (0, "### Added\n\n- New feature.\n"), err)
+
+    def test_since_with_an_absolute_changes_dir(self):
+        self.write("changes/old.md", frag("fix", "Old fix."))
+        self.commit("old")
+        self.git("tag", "v1.4.1-beta.1")
+        self.write("changes/new.md", frag("feature", "New feature."))
+        self.commit("new")
+        code, out, err = run_cli(["notes", "--since", "v1.4.1-beta.1", "--repo", str(self.root),
+                                  "--changes-dir", str(self.root / "changes")])
+        self.assertEqual((code, out), (0, "### Added\n\n- New feature.\n"), err)
+
+    def test_since_does_not_parse_what_the_tag_already_held(self):
+        self.write("changes/old.md", "no front matter")
+        self.commit("old")
+        self.git("tag", "v1.4.1-beta.1")
+        self.write("changes/new.md", frag("feature", "New feature."))
+        self.commit("new")
+        code, out, err = run_cli(["notes", "--since", "v1.4.1-beta.1", "--repo", str(self.root)])
+        self.assertEqual((code, out), (0, "### Added\n\n- New feature.\n"), err)
 
 
 if __name__ == "__main__":

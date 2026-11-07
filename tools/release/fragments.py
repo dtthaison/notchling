@@ -3,7 +3,9 @@
 
     fragments.py check --base <sha> --head <sha> [--label no-changelog]...
     fragments.py notes [--since <tag>]          Markdown release notes, grouped, on stdout
-    fragments.py fold <version>                 move the fragments into CHANGELOG.md, delete them
+    fragments.py fold <version> [--only-at <sha>]
+                                                move the fragments into CHANGELOG.md, delete them; with
+                                                --only-at, only those the commit's changes/ tree holds
 
 A fragment is changes/<name>.md: front matter between `---` lines with `kind: fix|feature|breaking|internal`,
 then one short paragraph. changes/README.md explains it and is not a fragment.
@@ -19,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence
+from typing import Iterable, List, NamedTuple, Optional, Sequence, Set
 
 KINDS = ("fix", "feature", "breaking", "internal")
 CHANGES_DIR = "changes"
@@ -92,14 +94,18 @@ def is_fragment_name(name: str) -> bool:
     return name.endswith(".md") and name != "README.md"
 
 
-def load(changes_dir) -> List[Fragment]:
-    """Every fragment in the folder, by file name. A missing folder has none."""
+def load(changes_dir, skip: Iterable[str] = (), only: Optional[Iterable[str]] = None) -> List[Fragment]:
+    """The fragments in the folder, by file name. A missing folder has none. `skip` names are left out and
+    `only` (when given) names all that is wanted; a file left out is not even parsed, so a broken one that
+    does not matter cannot stop the run."""
     d = Path(changes_dir)
     if not d.is_dir():
         return []
+    skip = set(skip)
+    only = None if only is None else set(only)
     found = []
     for p in sorted(d.iterdir()):
-        if p.is_file() and is_fragment_name(p.name):
+        if p.is_file() and is_fragment_name(p.name) and p.name not in skip and (only is None or p.name in only):
             found.append(parse(p.name, p.read_text(encoding="utf-8")))
     return found
 
@@ -129,6 +135,32 @@ def git(repo, *args) -> str:
     return r.stdout
 
 
+def tree_prefix(repo, changes_dir) -> str:
+    """The changes folder as a path inside the repo ('' for the root), however --changes-dir was spelled."""
+    d = Path(changes_dir)
+    if d.is_absolute():
+        try:
+            d = d.resolve().relative_to(Path(repo).resolve())
+        except ValueError:
+            raise FragmentError(f"{changes_dir} is not inside the repo {repo}") from None
+    return "/".join(part for part in d.as_posix().split("/") if part not in ("", "."))
+
+
+def names_at(repo, rev, changes_dir) -> Set[str]:
+    """File names of the fragments in the changes folder of the tree at `rev` (README and other files left
+    out). A folder that does not exist there has none; a `rev` git cannot find is an error."""
+    prefix = tree_prefix(repo, changes_dir)
+    out = git(repo, "ls-tree", "-r", "--name-only", "-z", rev, "--", prefix or ".")
+    lead = prefix + "/" if prefix else ""
+    names = set()
+    for path in out.split("\0"):
+        if path.startswith(lead):
+            name = path[len(lead):]
+            if "/" not in name and is_fragment_name(name):
+                names.add(name)
+    return names
+
+
 def is_app_code(path: str) -> bool:
     return any(rx.search(path) for rx in APP_CODE)
 
@@ -155,13 +187,11 @@ def cmd_check(args) -> int:
 
 
 def cmd_notes(args) -> int:
-    frags = load(Path(args.repo) / args.changes_dir)
+    already = set()
     if args.since:
         git(args.repo, "rev-parse", "--verify", "--quiet", f"{args.since}^{{commit}}")
-        listed = git(args.repo, "ls-tree", "-r", "--name-only", args.since, "--", CHANGES_DIR + "/")
-        already = {line.rsplit("/", 1)[1] for line in listed.split("\n") if line}
-        frags = [f for f in frags if f.name not in already]
-    sys.stdout.write(render_notes(frags))
+        already = names_at(args.repo, args.since, args.changes_dir)
+    sys.stdout.write(render_notes(load(Path(args.repo) / args.changes_dir, skip=already)))
     return 0
 
 
@@ -252,7 +282,8 @@ def cmd_fold(args) -> int:
     repo = Path(args.repo)
     changelog = repo / args.changelog
     changes = repo / args.changes_dir
-    frags = load(changes)
+    only = names_at(args.repo, args.only_at, args.changes_dir) if args.only_at else None
+    frags = load(changes, only=only)
     try:
         text = changelog.read_text(encoding="utf-8")
     except OSError as e:
@@ -287,6 +318,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     f.add_argument("--repo", default=".")
     f.add_argument("--changelog", default="CHANGELOG.md")
     f.add_argument("--changes-dir", default=CHANGES_DIR)
+    f.add_argument("--only-at", metavar="SHA",
+                   help="fold and delete only the fragments this commit's changes/ tree holds; the rest stay")
     f.set_defaults(fn=cmd_fold)
 
     args = ap.parse_args(argv)
