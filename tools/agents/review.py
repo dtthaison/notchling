@@ -22,6 +22,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -44,7 +45,12 @@ MAX_CHECKS = 80
 ANTHROPIC_VERSION = "2023-06-01"
 VERDICTS = ("merge", "changes", "not_right")
 POINTER_RE = re.compile(r"[A-Za-z0-9_./+@-]{1,200}:[1-9][0-9]{0,6}")
-CONTROL = re.compile(r"[\x00-\x1f\x7f  ]+")
+ZWSP = "\u200b"
+WWW_RE = re.compile(r"(?i)\bwww\.")  # GitHub links `www.example.com` with no scheme
+# `#N`, `GH-N` and `owner/repo#N` become links and leave a back-reference in the issue they name.
+REF_RE = re.compile(r"(?i)(?P<repo>[a-z0-9_.-]+/[a-z0-9_.-]+)?(?P<kind>#|(?<![a-z0-9_])GH-)(?P<n>[0-9]+)")
+LEADING_NUMBER_RE = re.compile(r"\A([0-9]{1,9})([.)])")  # "1." starts an ordered list
+LEADING_MARK_RE = re.compile(r"\A[#*+=_~-]")  # heading, bullet, rule or setext underline
 
 SYSTEM = """You review one pull request for the Notchling project. You are advisory: a person decides.
 
@@ -141,12 +147,40 @@ def parse_verdict(text: str) -> Dict[str, Any]:
     return {"verdict": verdict, "reasons": reasons, "pointers": pointers}
 
 
-def clean(text: str, limit: int = 500) -> str:
-    """Plain, single-line text that can't mention people, make links or open markup in a comment."""
-    s = CONTROL.sub(" ", str(text))
-    s = s.replace("@", "@​").replace("<", "&lt;").replace(">", "&gt;")
-    s = s.replace("[", "(").replace("]", ")").replace("`", "'").replace("://", ":​//")
-    return re.sub(r" {2,}", " ", s).strip()[:limit]
+def _plain(text: str) -> str:
+    """No control, separator or invisible format characters. Controls and the Zl/Zp/Zs separators
+    become a space; format characters (Cf: bidi marks and overrides, zero-width joiners, soft hyphens,
+    the BOM), surrogates and private-use characters go, so none can hide a mention, a link or the order
+    the text is read in."""
+    out = []
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat in ("Cf", "Cs", "Co"):
+            continue
+        out.append(" " if cat in ("Cc", "Zl", "Zp", "Zs") else ch)
+    return "".join(out)
+
+
+def clean(text: str, limit: int = 500, own: Optional[int] = None) -> str:
+    """Plain, single-line text that can't mention people, make links, cross-reference other issues,
+    spell markup with entities or open a heading or list in a comment. `own` is the pull request's
+    number, the one `#N` / `GH-N` reference left alone."""
+    s = _plain(str(text)).replace("&", "&amp;").replace("@", "@" + ZWSP)
+    s = s.replace("<", "&lt;").replace(">", "&gt;")
+    s = s.replace("[", "(").replace("]", ")").replace("`", "'").replace("://", ":" + ZWSP + "//")
+    s = WWW_RE.sub(lambda m: m.group(0)[:-1] + ZWSP + ".", s)
+
+    def ref(m: "re.Match[str]") -> str:
+        if m.group("repo") is None and own is not None and m.group("n") == str(own):
+            return m.group(0)
+        return (m.group("repo") or "") + m.group("kind") + ZWSP + m.group("n")
+
+    s = REF_RE.sub(ref, s)
+    s = re.sub(r" {2,}", " ", s).strip()
+    s = LEADING_NUMBER_RE.sub(lambda m: m.group(1) + "\\" + m.group(2), s, count=1)
+    if LEADING_MARK_RE.match(s):
+        s = "\\" + s  # a backslash keeps the first character from starting a heading, rule or list
+    return s[:limit]
 
 
 # ---- GitHub and the model --------------------------------------------------------------------
@@ -324,11 +358,11 @@ def load_context(root: Path) -> Dict[str, str]:
     return out
 
 
-def render_comment(verdict: str, sha: str, model: str, v: Mapping[str, Any]) -> str:
+def render_comment(verdict: str, sha: str, model: str, v: Mapping[str, Any], number: Optional[int] = None) -> str:
     title = {"merge": "Recommend merge", "changes": "Changes requested", "not_right": "Not right for this project"}[verdict]
     lines = [MARKER % (verdict, sha), f"**Review agent** ({model}). Recommendation only: it does not approve or merge.", "",
              f"**{title}**", ""]
-    lines += [f"- {clean(r)}" for r in v["reasons"]]
+    lines += [f"- {clean(r, own=number)}" for r in v["reasons"]]
     if v["pointers"]:
         lines += ["", "Where:"] + [f"- `{p}`" for p in v["pointers"]]
     lines += ["", "The maintainer decides. To appeal this review, ask for the maintainer on the pull request."]
@@ -366,7 +400,7 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
         return missing("unreadable answer")
     desc = {"merge": f"merge recommended by {model} (a recommendation, not an approval)",
             "changes": f"changes requested by {model}", "not_right": f"not right for this project, per {model}"}[v["verdict"]]
-    return Outcome("success" if v["verdict"] == "merge" else "failure", desc, render_comment(v["verdict"], head, model, v))
+    return Outcome("success" if v["verdict"] == "merge" else "failure", desc, render_comment(v["verdict"], head, model, v, int(cfg.number)))
 
 
 def main(env: Mapping[str, str], root: Path) -> int:

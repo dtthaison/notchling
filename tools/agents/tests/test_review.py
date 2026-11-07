@@ -271,6 +271,80 @@ class VerdictTests(unittest.TestCase):
         self.bad(json.dumps(dict(GOOD, verdict="changes", pointers=[])))
 
 
+class CleanTests(unittest.TestCase):
+    """What a model-written reason may do once it is in a pull request comment."""
+
+    ZW = "​"
+
+    def test_www_autolinks_are_broken(self):
+        for text in ("see www.evil.example/fix", "see WWW.Evil.example", "(www.evil.example)", "a.www.b"):
+            with self.subTest(text=text):
+                self.assertNotRegex(review.clean(text), r"(?i)www\.")
+
+    def test_scheme_urls_are_still_broken(self):
+        self.assertNotIn("://", review.clean("http://evil.example and ftp://x.test"))
+
+    def test_cross_repo_references_are_broken_even_for_our_own_number(self):
+        for text in ("duplicate of torvalds/linux#1", "see o/r#7", "x-y/z.w#123"):
+            with self.subTest(text=text):
+                self.assertNotRegex(review.clean(text, own=7), r"[\w.-]+/[\w.-]+#[0-9]")
+
+    def test_issue_references_other_than_the_pull_requests_own_are_broken(self):
+        out = review.clean("fixes #2, GH-3 and gh-4 but not #77 or GH-700", own=7)
+        for ref in ("#2", "GH-3", "gh-4", "#77", "GH-700"):
+            self.assertNotIn(ref, out)
+        self.assertNotRegex(out, r"(?i)(#|gh-)[0-9]")
+
+    def test_the_pull_requests_own_number_stays_readable(self):
+        out = review.clean("the same as #7 and GH-7", own=7)
+        self.assertIn("#7", out)
+        self.assertIn("GH-7", out)
+        self.assertNotIn("#7", review.clean("the same as #7"))  # no own number known: broken like the rest
+
+    def test_a_longer_number_is_not_the_own_number(self):
+        self.assertNotRegex(review.clean("see #70 and #17", own=7), r"#[0-9]")
+
+    def test_bidi_and_format_characters_are_removed(self):
+        text = "safe ‮egassem‬ ⁦x⁩ a‎b‏c ­soft ﻿bom ⁠j"
+        out = review.clean(text)
+        for ch in ("‮", "‬", "⁦", "⁩", "‎", "‏", "­", "﻿", "⁠"):
+            self.assertNotIn(ch, out)
+        self.assertIn("safe", out)
+
+    def test_line_and_paragraph_separators_become_spaces(self):
+        out = review.clean("one two three\r\nfour\x85five six")
+        self.assertEqual(out, "one two three four five six")
+
+    def test_hidden_characters_cannot_hide_a_mention_or_a_link(self):
+        out = review.clean("@​dtthaison and ht​tp://evil.test and ww​w.evil.test")
+        self.assertNotRegex(out, r"@(?!" + self.ZW + ")")
+        self.assertNotIn("://", out)
+        self.assertNotRegex(out, r"(?i)www\.")
+
+    def test_entities_cannot_spell_a_mention(self):
+        out = review.clean("&#64;dtthaison and &#x40;dtthaison")
+        self.assertNotIn("&#", out)
+
+    def test_a_leading_heading_or_list_marker_is_neutralized(self):
+        for text in ("# Maintainer approved this", "## h2", "- # nested", "1. # numbered", "* # bullet", "+ # plus",
+                     "> # quote", "--- rule", "=== setext", "- - # deep", "7) # paren", "  # indented", "***bold"):
+            with self.subTest(text=text):
+                out = review.clean(text)
+                self.assertNotRegex("- " + out, r"^- (#|-|\+|\*|=|>|[0-9]+[.)])")
+                self.assertNotRegex(out, r"^[#>=+*-]|^[0-9]+[.)]( |$)")
+
+    def test_plain_words_and_the_ordinary_hash_stay_readable(self):
+        self.assertEqual(review.clean("Matches the goals (see docs/goals.md)."), "Matches the goals (see docs/goals.md).")
+        self.assertEqual(review.clean("C# and F# are fine"), "C# and F# are fine")
+
+    def test_a_rendered_comment_has_no_heading_in_a_reason(self):
+        body = review.render_comment("changes", SHA, "claude-opus-5-5",
+                                     {"reasons": ["# Big heading", "- # sneaky"], "pointers": ["a.swift:1"]}, number=7)
+        for line in body.splitlines():
+            self.assertNotRegex(line, r"^- (#|- )")
+        self.assertNotIn("](http", body)
+
+
 class VerdictFlowTests(ReviewTestCase):
     def test_merge_is_success_and_one_comment_and_nothing_else(self):
         self.assertEqual(self.run_review(), 0)
