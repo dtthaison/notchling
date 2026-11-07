@@ -276,6 +276,72 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
+    // MARK: A run that vanishes
+
+    func testARunThatLosesItsProcessWithoutAFinishEndsWithoutAResult() {
+        writeLog("compiling\nlinking...\n")
+        appendStart()
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertTrue(w.hasActive)
+        alive = false
+        clock = clock.addingTimeInterval(300)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertFalse(w.hasActive)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].kind, .finished)
+        XCTAssertNil(items[0].rc)
+        XCTAssertEqual(items[0].detail, "ended without a result; last line: linking...")
+        XCTAssertEqual(items[0].trailing, "ran 5m · now")
+
+        XCTAssertTrue(sent.isEmpty, "the grace applies to it too")
+        clock = clock.addingTimeInterval(RunWaker.grace + 1)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertTrue(sent[0].text.contains("ended without a result; last line: linking..."), sent[0].text)
+        XCTAssertTrue(sent[0].text.contains(log))
+        w.tick(agents: [agent("s1", .completed)])
+        w.runsFileChanged()
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertEqual(items.count, 1)
+    }
+
+    func testALostRunOfATerminalSessionNotifies() {
+        appendStart(session: "terminal")
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        alive = false
+        clock = clock.addingTimeInterval(30)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(notices.count, 1)
+        XCTAssertTrue(notices[0].body.contains("ended without a result"), notices[0].body)
+    }
+
+    func testAFinishThatLandedBeforeTheProcessWasMissedIsTheRunsResult() {
+        appendStart()
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        // sd wrote its finish line and exited; no event has reached us yet
+        clock = clock.addingTimeInterval(30)
+        appendFinish(rc: 0, at: clock)
+        alive = false
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].rc, 0)
+        XCTAssertTrue(items[0].detail.hasPrefix("ok"))
+    }
+
+    func testARunWhosePidWasNeverSeenAliveIsNotAnnounced() {
+        appendStart()
+        alive = false
+        let w = makeWatcher()
+        w.tick(agents: [agent("s1", .completed)])
+        clock = clock.addingTimeInterval(300)
+        w.tick(agents: [agent("s1", .completed)])
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertTrue(sent.isEmpty && notices.isEmpty)
+    }
+
     // MARK: Finishes without a start
 
     func testPrecheckFinishesAreNotShownWokenOrAnnounced() {

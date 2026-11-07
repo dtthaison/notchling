@@ -189,12 +189,27 @@ final class RunWatcher {
     // MARK: Deriving
 
     private func refresh() {
+        reconcile()
         let active = activeRuns()
         hasActive = !active.isEmpty
         for run in active where lastLines[run.log] == nil { lastLines[run.log] = RunLog.lastLine(of: run.log) }
         watchLogs(of: active)
         wake()
         publish()
+    }
+
+    /// A run seen alive whose process is gone (or isn't that run any more) and whose finish line hasn't come:
+    /// read the file again, since sd may just have written it, and if it still isn't there the run ended
+    /// without a result.
+    private func reconcile() {
+        for dir in Array(repos.keys) {
+            guard var repo = repos[dir] else { continue }
+            let lost = repo.ledger.disappeared(now: now(), pidAlive: pidAlive)
+            repos[dir] = repo
+            guard !lost.isEmpty else { continue }
+            read(dir)
+            repos[dir]?.ledger.markLost(lost, at: now())
+        }
     }
 
     /// One stream over the parent folders of the active logs; latency 1 s is the throttle.
@@ -262,13 +277,11 @@ final class RunWatcher {
         }
         for end in recentEnds() where !dismissed.contains(end.id) && !end.isPrecheck {
             let ago = at.timeIntervalSince(end.finish.at)
-            let how = RunFormat.exit(end.finish.rc)
             let cached = lastLines[end.id] ?? RunLog.lastLine(of: end.finish.log) ?? ""
             lastLines[end.id] = cached
-            let line = cached.isEmpty ? nil : cached
             next.append(RunItem(id: end.id, kind: .finished, name: RunFormat.shortName(end.key),
                                 trailing: "ran \(RunFormat.duration(end.finish.seconds)) · \(ago < 60 ? "now" : RunFormat.duration(ago))",
-                                detail: [how, line].compactMap { $0 }.joined(separator: " · "), log: end.finish.log, rc: end.finish.rc))
+                                detail: RunFormat.outcome(rc: end.finish.rc, lastLine: cached), log: end.finish.log, rc: end.finish.rc))
         }
         let keep = Set(next.map(\.id)).union(activeRuns().map(\.log))
         lastLines = lastLines.filter { keep.contains($0.key) }

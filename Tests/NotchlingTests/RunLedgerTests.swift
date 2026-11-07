@@ -100,6 +100,73 @@ final class RunLedgerTests: XCTestCase {
         XCTAssertEqual(seen.map(\.startedAt), [t0.addingTimeInterval(5)])
     }
 
+    // MARK: Runs that vanish
+
+    func testARunSeenAliveThatLosesItsProcessHasEndedWithoutAResult() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log", pid: 77, session: "s-a")])
+        XCTAssertTrue(ledger.disappeared(now: t0.addingTimeInterval(10), pidAlive: { _ in true }).isEmpty)
+        let gone = ledger.disappeared(now: t0.addingTimeInterval(20), pidAlive: { _ in false })
+        XCTAssertEqual(gone.map(\.log), ["/l/a.log"])
+        XCTAssertTrue(ledger.disappeared(now: t0.addingTimeInterval(30), pidAlive: { _ in false }).isEmpty, "reported once")
+        ledger.markLost(gone, at: t0.addingTimeInterval(20))
+        let ends = ledger.finished(since: t0)
+        XCTAssertEqual(ends.count, 1)
+        XCTAssertNil(ends[0].finish.rc)
+        XCTAssertEqual(ends[0].start?.session, "s-a")
+        XCTAssertEqual(ends[0].finish.at, t0.addingTimeInterval(20))
+        XCTAssertEqual(ends[0].finish.seconds, 20)
+        XCTAssertTrue(ends[0].id.hasPrefix("lost:"), "its own dedupe id: \(ends[0].id)")
+        XCTAssertTrue(ledger.active(now: t0.addingTimeInterval(30), pidAlive: { _ in true }).isEmpty, "and the run is over")
+    }
+
+    func testARunNeverSeenAliveIsNotReportedLost() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log")])
+        XCTAssertTrue(ledger.disappeared(now: t0, pidAlive: { _ in false }).isEmpty)
+        XCTAssertTrue(ledger.disappeared(now: t0, pidAlive: { _ in false }).isEmpty)
+    }
+
+    func testARunThatFinishedIsNotLost() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log")])
+        _ = ledger.disappeared(now: t0, pidAlive: { _ in true })
+        ledger.apply(lines: [finish("/l/a.log", at: t0.addingTimeInterval(5))])
+        XCTAssertTrue(ledger.disappeared(now: t0.addingTimeInterval(6), pidAlive: { _ in false }).isEmpty)
+    }
+
+    func testAFinishThatArrivesAfterTheRunWasMarkedLostReplacesIt() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log")])
+        _ = ledger.disappeared(now: t0, pidAlive: { _ in true })
+        ledger.markLost(ledger.disappeared(now: t0.addingTimeInterval(10), pidAlive: { _ in false }), at: t0.addingTimeInterval(10))
+        XCTAssertEqual(ledger.finished(since: t0).count, 1)
+        ledger.apply(lines: [finish("/l/a.log", at: t0.addingTimeInterval(11), rc: 3)])
+        let ends = ledger.finished(since: t0)
+        XCTAssertEqual(ends.count, 1)
+        XCTAssertEqual(ends[0].finish.rc, 3)
+    }
+
+    func testMarkLostSkipsARunWhoseFinishHasArrived() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log")])
+        _ = ledger.disappeared(now: t0, pidAlive: { _ in true })
+        let gone = ledger.disappeared(now: t0.addingTimeInterval(10), pidAlive: { _ in false })
+        ledger.apply(lines: [finish("/l/a.log", at: t0.addingTimeInterval(9))])   // read again just before
+        ledger.markLost(gone, at: t0.addingTimeInterval(10))
+        XCTAssertEqual(ledger.finished(since: t0).map(\.finish.rc), [0])
+    }
+
+    func testARunPastItsLimitIsNotLostWhileItsProcessLives() {
+        var ledger = RunLedger()
+        ledger.apply(lines: [start("/l/a.log", limit: "60")])
+        _ = ledger.disappeared(now: t0, pidAlive: { _ in true })
+        let past = t0.addingTimeInterval(60 + RunLedger.limitSlack + 1)
+        XCTAssertTrue(ledger.active(now: past, pidAlive: { _ in true }).isEmpty, "no longer shown or holding the Mac awake")
+        XCTAssertTrue(ledger.disappeared(now: past, pidAlive: { _ in true }).isEmpty, "but nothing says it ended")
+        XCTAssertEqual(ledger.disappeared(now: past.addingTimeInterval(5), pidAlive: { _ in false }).map(\.log), ["/l/a.log"])
+    }
+
     func testFinishMatchesItsStartByLog() {
         var ledger = RunLedger()
         ledger.apply(lines: [start("/l/a.log", session: "s-a"), start("/l/b.log", session: "s-b"),

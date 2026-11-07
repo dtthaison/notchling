@@ -17,7 +17,8 @@ struct RunStart: Equatable {
 struct RunFinish: Equatable {
     var key: String
     var seconds: TimeInterval
-    var rc: Int
+    /// nil for the end Notchling makes up when a run's process is gone and sd wrote no finish line.
+    var rc: Int?
     var log: String
     var at: Date
 }
@@ -129,13 +130,21 @@ enum RunFormat {
         return "\(duration(elapsed)) / \(duration(limit))"
     }
 
-    /// 124 is `timeout`'s code for a run stopped at its limit.
-    static func exit(_ rc: Int) -> String {
+    /// 124 is `timeout`'s code for a run stopped at its limit; nil is a run that vanished with no finish line.
+    static func exit(_ rc: Int?) -> String {
         switch rc {
-        case 0: return "ok"
-        case 124: return "stopped at limit"
-        default: return "exit \(rc)"
+        case nil: return "ended without a result"
+        case 0?: return "ok"
+        case 124?: return "stopped at limit"
+        case let code?: return "exit \(code)"
         }
+    }
+
+    /// How a finished run reads under its name: "exit 2 · FAIL …", or "ended without a result; last line: …".
+    static func outcome(rc: Int?, lastLine: String?) -> String {
+        let line = lastLine.flatMap { $0.isEmpty ? nil : $0 }
+        if rc == nil { return line.map { "\(exit(nil)); last line: \($0)" } ?? exit(nil) }
+        return [exit(rc), line].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The recipe or command out of sd's key, which holds the whole command line:

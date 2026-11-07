@@ -106,8 +106,14 @@ struct RunWaker {
     }
 
     static func message(_ end: RunEnd, lastLine: String?) -> String {
-        var text = "Run finished: \(oneLine(RunFormat.truncated(end.key, to: 160))) — exit \(end.finish.rc) after \(RunFormat.duration(end.finish.seconds)). Log: \(end.finish.log)."
-        if let lastLine, !lastLine.isEmpty { text += " Last line: \(oneLine(lastLine))." }
+        let key = oneLine(RunFormat.truncated(end.key, to: 160))
+        let line = lastLine.flatMap { $0.isEmpty ? nil : oneLine($0) }
+        let after = RunFormat.duration(end.finish.seconds)
+        guard let rc = end.finish.rc else {
+            return "Run finished: \(key) after \(after) — \(RunFormat.outcome(rc: nil, lastLine: line)). Log: \(end.finish.log)."
+        }
+        var text = "Run finished: \(key) — exit \(rc) after \(after). Log: \(end.finish.log)."
+        if let line { text += " Last line: \(line)." }
         return text
     }
 
