@@ -42,7 +42,10 @@ enum OwnerPublish {
         }
 
         let slug = uuid(fromShortID: id)
-        let perm = request("GET", "/api/frame/perm/\(slug)?org=\(owner.org)", token: owner.token)
+        // Both calls share one budget inside the hook's 60 s, so Claude Code never kills the hook mid-publish.
+        let deadline = Date().addingTimeInterval(budget)
+        let perm = request("GET", "/api/frame/perm/\(slug)?org=\(owner.org)", token: owner.token,
+                           timeout: min(20, deadline.timeIntervalSinceNow))
         guard perm.status == 200, let live = perm.json?["live"] as? String else {
             return .failed("Notchling couldn't publish this as \(page.account), the page's owner: reading the page failed (HTTP \(perm.status)\(perm.message)).")
         }
@@ -57,7 +60,16 @@ enum OwnerPublish {
                                    "title": PageLibrary.pageTitle(Data(text.utf8), ext: "html", fallback: page.title)]
         for key in ["description", "label"] { if let v = input[key] as? String { body[key] = v } }
         if input["force"] as? Bool == true { body["force"] = true }
-        let result = request("POST", "/api/frame/deploy/direct", token: owner.token, body: body)
+        let left = deadline.timeIntervalSinceNow
+        guard left >= minimumPost else {
+            return .failed("Notchling couldn't publish this as \(page.account), the page's owner: claude.ai answered too slowly "
+                + "to finish within the hook's time limit. Nothing was published; try again.")
+        }
+        let result = request("POST", "/api/frame/deploy/direct", token: owner.token, body: body, timeout: left)
+        if result.status == 0 {
+            return .failed("Notchling couldn't confirm the publish as \(page.account), the page's owner\(result.message). It may "
+                + "still have gone through: read the page before publishing again.")
+        }
         guard result.status == 200, let version = result.json?["version"] as? String else {
             return .failed("Notchling couldn't publish this as \(page.account), the page's owner (HTTP \(result.status)\(result.message)).")
         }
@@ -100,13 +112,18 @@ enum OwnerPublish {
         return (HookBridge.readJSON(claude)?["oauthAccount"] as? [String: Any])?["emailAddress"] as? String ?? ""
     }
 
-    /// One call to Claude's artifact API (the host Claude Code's Artifact tool uses), waiting up to 50 s.
-    private static func request(_ method: String, _ path: String, token: String,
-                                body: [String: Any]? = nil) -> (status: Int, json: [String: Any]?, message: String) {
+    /// The whole publish's time, under the PreToolUse hook's 60 s timeout with room to start and to save the copy.
+    private static let budget: TimeInterval = 50
+    /// Not worth starting the POST with less than this left.
+    private static let minimumPost: TimeInterval = 8
+
+    /// One call to Claude's artifact API (the host Claude Code's Artifact tool uses), waiting up to `timeout`.
+    private static func request(_ method: String, _ path: String, token: String, body: [String: Any]? = nil,
+                                timeout: TimeInterval) -> (status: Int, json: [String: Any]?, message: String) {
         guard let url = URL(string: "https://api.anthropic.com" + path) else { return (0, nil, "") }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 50
+        request.timeoutInterval = max(1, timeout)
         for (k, v) in ["Authorization": "Bearer \(token)", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json",
                        "X-Frame-CP": "go", "X-Frame-Surface": "code", "X-Frame-Platform": "cli", "User-Agent": "Notchling"] {
             request.setValue(v, forHTTPHeaderField: k)
@@ -117,15 +134,19 @@ enum OwnerPublish {
         }
         let done = DispatchSemaphore(value: 0)
         var result: (Int, [String: Any]?, String) = (0, nil, ": no answer")
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             var text = data.map { String(decoding: $0.prefix(300), as: UTF8.self) } ?? error?.localizedDescription ?? ""
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             result = (status, json, text.isEmpty || status == 200 ? "" : ": \(text)")
             done.signal()
-        }.resume()
-        done.wait()
+        }
+        task.resume()
+        if done.wait(timeout: .now() + max(1, timeout) + 1) == .timedOut {
+            task.cancel()
+            return (0, nil, ": no answer in time")
+        }
         return result
     }
 }

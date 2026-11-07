@@ -86,6 +86,8 @@ class ACPRunner: ObservableObject {
         var config: [ACPConfigOption] = []
         var commands: [SlashCommand] = []
         var lastUsed = Date()
+        /// When loading failed; a later open retries after `retryAfter`.
+        var failedAt: Date?
         /// Work waiting for the load to finish.
         var whenLoaded: [() -> Void] = []
         var loadError: String?
@@ -127,9 +129,20 @@ class ACPRunner: ObservableObject {
 
     func isLoading(_ id: String) -> Bool { live[id].map { !$0.loaded && $0.loadError == nil } ?? false }
 
-    /// Starts a process for the session and loads it, unless one is open already.
-    func open(_ id: String, folder: String) {
-        if let l = live[id] { l.lastUsed = Date(); return }
+    /// How long a failed load is shown before opening the session tries again.
+    private static let retryAfter: TimeInterval = 15
+
+    /// Starts a process for the session and loads it, unless one is open already. A load that failed is
+    /// tried again once `retryAfter` has passed (Chat opens the selected session on every refresh).
+    func open(_ id: String, folder: String, retryNow: Bool = false) {
+        if let l = live[id] {
+            guard let at = l.failedAt, retryNow || Date().timeIntervalSince(at) > Self.retryAfter else {
+                l.lastUsed = Date()
+                return
+            }
+            live[id] = nil
+            l.connection.close()
+        }
         guard let binary = tool.binary else { return }
         let connection = ACPConnection(binary: binary, arguments: tool.arguments, folder: folder, toolName: tool.name)
         let l = Live(connection: connection, folder: folder)
@@ -137,8 +150,7 @@ class ACPRunner: ObservableObject {
         live[id] = l
         wire(l)
         do { try connection.start() } catch {
-            l.loadError = "Couldn't start \(tool.name): \(error.localizedDescription)"
-            bump()
+            failLoad(l, "Couldn't start \(tool.name): \(error.localizedDescription)")
             return
         }
         initialize(l) { [weak self] ok in
@@ -149,8 +161,7 @@ class ACPRunner: ObservableObject {
                 case .success(let r):
                     self.loaded(l, r)
                 case .failure(let e):
-                    l.loadError = e.localizedDescription
-                    self.bump()
+                    self.failLoad(l, e.localizedDescription)
                 }
             }
         }
@@ -169,7 +180,11 @@ class ACPRunner: ObservableObject {
         do { try connection.start() } catch { done(.failure(error)); return }
         initialize(l) { [weak self] ok in
             guard let self else { return }
-            guard ok else { done(.failure(AccountError(l.loadError ?? "\(self.tool.name) didn't start."))); return }
+            guard ok else {
+                connection.close()
+                done(.failure(AccountError(l.loadError ?? "\(self.tool.name) didn't start.")))
+                return
+            }
             connection.request("session/new", ["cwd": folder, "mcpServers": []]) { [weak self] result in
                 guard let self else { return }
                 switch result {
@@ -194,7 +209,8 @@ class ACPRunner: ObservableObject {
 
     /// Sends a prompt; `ended` runs when the turn ends, with an error message if it failed.
     func prompt(_ id: String, text: String, folder: String, ended: @escaping (String?) -> Void) {
-        open(id, folder: folder)
+        // Sending is a clear request to try again after a failed load.
+        open(id, folder: folder, retryNow: live[id]?.failedAt != nil)
         guard let l = live[id] else { ended("Couldn't find the \(tool.command) command. Install \(tool.product) first."); return }
         let send = { [weak self] in
             guard let self else { return }
@@ -311,9 +327,12 @@ class ACPRunner: ObservableObject {
         }
         l.connection.onExit = { [weak self, weak l] message in
             guard let self, let l else { return }
-            if !l.loaded { l.loadError = message ?? "\(self.tool.name) stopped." }
-            if let id = l.sessionID, self.live[id] === l { self.live[id] = nil }
-            self.bump()
+            if !l.loaded {
+                self.failLoad(l, message ?? "\(self.tool.name) stopped.")
+            } else {
+                if let id = l.sessionID, self.live[id] === l { self.live[id] = nil }
+                self.bump()
+            }
         }
     }
 
@@ -325,13 +344,25 @@ class ACPRunner: ObservableObject {
         ]
         l.connection.request("initialize", params) { [weak self] result in
             if case .failure(let e) = result {
-                l.loadError = e.localizedDescription
-                self?.bump()
+                if l.sessionID != nil { self?.failLoad(l, e.localizedDescription) } else { l.loadError = e.localizedDescription }
                 then(false)
             } else {
                 then(true)
             }
         }
+    }
+
+    /// Loading failed: the error stays on show, sends that waited for the load end with it (they would
+    /// otherwise wait forever), and the process is closed so a later open starts a fresh one.
+    private func failLoad(_ l: Live, _ message: String) {
+        guard !l.loaded, l.failedAt == nil else { return }
+        l.loadError = message
+        l.failedAt = Date()
+        let waiting = l.whenLoaded
+        l.whenLoaded = []
+        waiting.forEach { $0() }
+        l.connection.close()
+        bump()
     }
 
     private func loaded(_ l: Live, _ result: [String: Any]) {

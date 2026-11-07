@@ -244,6 +244,24 @@ enum SecretVault {
         return decode(data)
     }
 
+    /// The list for a read-modify-write: empty only when there is no index yet. An index that exists but
+    /// can't be read or decoded throws, where `all()` would say empty and a write-back would wipe it.
+    static func readIndex(at url: URL = indexURL) throws -> [VaultEntry] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            return try decoder.decode([VaultEntry].self, from: data).sorted { $0.id < $1.id }
+        } catch {
+            throw AccountError("The vault list (vault.json) can't be read, so it was left as it is.")
+        }
+    }
+
     /// The list as `vault.json` holds it.
     static func decode(_ data: Data) -> [VaultEntry] {
         let decoder = JSONDecoder()
@@ -268,8 +286,7 @@ enum SecretVault {
     /// The list as the index file at `url`, written atomically with mode 600.
     static func writeIndex(_ list: [VaultEntry], to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try encode(list).write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try PrivateFile.write(encode(list), to: url)
     }
 
     /// Sets or clears the expiry day (`YYYY-MM-DD`) of a saved secret in the index at `url`. Only that index is

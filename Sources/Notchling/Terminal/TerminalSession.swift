@@ -1,3 +1,4 @@
+import ConsoleCore
 import Foundation
 
 /// A live `claude attach <job>` in a pseudo-terminal, drawn by `TerminalScreen`. Closing it detaches;
@@ -175,7 +176,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         // the paste ("Removed 22 invisible characters") and Enter didn't run it.
         send(ReplySender.clearInput)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.send("\u{1b}[200~" + input + "\u{1b}[201~")
+            self?.send(ConsoleCore.TerminalKeys.bracketed(input))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self?.send("\r") }
         }
     }
@@ -194,7 +195,7 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     /// Text from the clipboard, wrapped as a paste when the program asked for that.
     func paste(_ text: String) {
-        send(screen.bracketedPaste ? "\u{1b}[200~" + text + "\u{1b}[201~" : text)
+        send(screen.bracketedPaste ? ConsoleCore.TerminalKeys.bracketed(text) : text)
     }
 
     func resize(rows: Int, cols: Int) {

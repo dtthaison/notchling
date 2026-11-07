@@ -375,8 +375,7 @@ final class CodexStore: ObservableObject {
         let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
         if fd >= 0 { flock(fd, LOCK_EX) }
         defer { if fd >= 0 { flock(fd, LOCK_UN); close(fd) } }
-        try login.write(to: authURL, options: [.atomic])
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authURL.path)
+        try PrivateFile.write(login, to: authURL)
     }
 
     private static func fetchUsage(token: String, workspace: String) -> Data? {

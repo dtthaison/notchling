@@ -41,8 +41,16 @@ public struct InputRouter: Sendable {
 /// then Enter submits.
 public enum TerminalKeys {
     public static func replyChunks(_ text: String) -> [String] {
+        [bracketed(text), "\r"]
+    }
+
+    /// `text` as one bracketed paste. ESC (and its one-byte C1 form, CSI) is dropped from the text first: a
+    /// pasted `ESC[201~` would end the paste early and the rest would be typed as keys (Enter submits, digits
+    /// answer a dialog, Esc interrupts).
+    public static func bracketed(_ text: String) -> String {
         let flat = text.replacingOccurrences(of: "\r\n", with: "\n")
-        return ["\u{1b}[200~" + flat + "\u{1b}[201~", "\r"]
+        let safe = String(String.UnicodeScalarView(flat.unicodeScalars.filter { $0 != "\u{1b}" && $0 != "\u{9b}" }))
+        return "\u{1b}[200~" + safe + "\u{1b}[201~"
     }
 }
 

@@ -11,7 +11,7 @@ enum Delegate {
         init?(name: String) {
             switch name.lowercased() {
             case "codex": self = .codex
-            case "agy", "antigravity", "gemini": self = .agy
+            case "agy", "antigravity": self = .agy
             default: return nil
             }
         }

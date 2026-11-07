@@ -123,15 +123,30 @@ enum LaneStore {
 
     private static func writeConfig(_ obj: [String: Any], to url: URL) throws {
         let data = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .withoutEscapingSlashes])
-        try data.write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try PrivateFile.write(data, to: url)
     }
 
-    /// Removes the lane's own folder. Links are removed as links; what they point to stays.
+    /// Where a closed lane's `.lane-old-*` copies go, since `relink` promised never to delete them.
+    static let keptDir = lanesDir.appendingPathComponent(".kept")
+
+    /// Removes the lane's own folder. Links are removed as links; what they point to stays. The copies
+    /// `relink` set aside (`<name>.lane-old-<time>`) are moved to `keptDir/<lane>-<time>/` first, and if
+    /// one can't be moved the folder stays.
     static func removeFolder(_ lane: Lane) {
+        let fm = FileManager.default
         let dir = URL(fileURLWithPath: lane.path).standardizedFileURL
         guard dir.path.hasPrefix(lanesDir.standardizedFileURL.path + "/") else { return }
-        try? FileManager.default.removeItem(at: dir)
+        let old = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.contains(".lane-old-") }
+        if !old.isEmpty {
+            let kept = keptDir.appendingPathComponent("\(dir.lastPathComponent)-\(Int(Date().timeIntervalSince1970))")
+            do {
+                try fm.createDirectory(at: kept, withIntermediateDirectories: true)
+                for name in old { try fm.moveItem(at: dir.appendingPathComponent(name), to: kept.appendingPathComponent(name)) }
+            } catch {
+                return
+            }
+        }
+        try? fm.removeItem(at: dir)
     }
 
     /// The lane's `claudeAiOauth`, as Claude Code last wrote it (it renews the login in place).

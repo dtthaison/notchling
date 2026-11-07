@@ -80,6 +80,10 @@ final class SessionIndex {
         var tool: SessionTool
     }
 
+    /// Files that gave no text when last read, by key, with the mtime and size they had then: skipped until
+    /// they change, so a session with only tool calls or huge lines isn't re-read on every refresh.
+    private var empty: [String: (modified: Double, size: Int64)] = [:]
+
     private func run() {
         let now = Date()
         var candidates = claudeCandidates(now: now) + codexCandidates(now: now)
@@ -93,7 +97,12 @@ final class SessionIndex {
             let existing = sessions[candidate.meta.key]?.meta
             lock.unlock()
             if let existing, existing.modified == candidate.meta.modified, existing.size == candidate.meta.size { continue }
-            guard let built = autoreleasepool(invoking: { Self.read(candidate.meta, tool: candidate.tool) }) else { continue }
+            if let seen = empty[candidate.meta.key], seen.modified == candidate.meta.modified, seen.size == candidate.meta.size { continue }
+            guard let built = autoreleasepool(invoking: { Self.read(candidate.meta, tool: candidate.tool) }) else {
+                empty[candidate.meta.key] = (candidate.meta.modified, candidate.meta.size)
+                continue
+            }
+            empty[candidate.meta.key] = nil
             lock.lock(); sessions[built.meta.key] = built; lock.unlock()
             changed = true
             batch += 1
@@ -123,7 +132,7 @@ final class SessionIndex {
     private func claudeCandidates(now: Date) -> [Candidate] {
         let fm = FileManager.default
         var seenFiles = Set<String>()
-        var out: [Candidate] = []
+        var out: [String: Candidate] = [:]
         for (dir, lane) in LaneStore.configDirs() {
             let projects = dir.appendingPathComponent("projects")
             guard let folders = try? fm.contentsOfDirectory(atPath: projects.path) else { continue }
@@ -140,18 +149,15 @@ final class SessionIndex {
                     let id = String(name.dropLast(".jsonl".count))
                     let key = "claude:" + id
                     // The same session can sit in two lane folders (moved between accounts); the newer wins.
-                    if let at = out.firstIndex(where: { $0.meta.key == key }) {
-                        if out[at].meta.modified >= modified.timeIntervalSince1970 { continue }
-                        out.remove(at: at)
-                    }
-                    out.append(Candidate(meta: SessionMeta(
+                    if let other = out[key], other.meta.modified >= modified.timeIntervalSince1970 { continue }
+                    out[key] = Candidate(meta: SessionMeta(
                         key: key, toolKey: SessionTool.claude.key, sessionID: id, title: "", folder: "", path: url.path,
                         configDir: lane?.path, modified: modified.timeIntervalSince1970,
-                        size: (attrs[.size] as? NSNumber)?.int64Value ?? 0), tool: .claude))
+                        size: (attrs[.size] as? NSNumber)?.int64Value ?? 0), tool: .claude)
                 }
             }
         }
-        return out
+        return Array(out.values)
     }
 
     private func codexCandidates(now: Date) -> [Candidate] {
