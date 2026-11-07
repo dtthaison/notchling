@@ -62,22 +62,30 @@ ConsoleCore, docs, tests, fixtures) is the auto-merge zone.
 2. **Approval to work.** Only the maintainer adds `sd:queued`, the label the sd worker already takes
    (its other labels: `sd:ready`, `sd:needs-you`, `sd:stuck`; this design adds no new work labels). Issue text from
    anyone else is treated as data, not instructions: the worker's prompt quotes it and says so.
-3. **Work.** The sd worker takes `agent-ready` issues, branches `agent/<issue>-<slug>`, implements with
-   tests, runs `swift test` and the probe renders locally, and opens a PR that links the issue and
-   lists what it verified.
+3. **Work.** The sd worker takes `sd:queued` issues, branches `agent/<issue>-<slug>`, implements with
+   tests, runs the checks and renders locally, pushes the branch and opens a GitHub pull request that
+   links the issue and lists what it verified. *(Maintainer's decision: work lands through GitHub pull
+   requests.)* This replaces the worker's read-only key and the MacBook merge: the worker may push
+   `agent/*` branches only, never `main` (branch protection enforces it), and the Machines setup's
+   "Push is refused" step becomes "Push only to agent/*". Morning Actions' `MergePlan` merge is
+   retired; Morning Actions keeps showing what landed, for sampling.
 4. **Gates (all required checks on `main`):**
    - `swift test` (exists today).
    - Build both architectures with `./build.sh` (the app, not just tests).
    - Architecture rules (see below) as a lint step.
-   - Cross-model review: a reviewer on a different model than the author. *(Where it runs depends on
-     open question 1; it never needs a real Codex/Antigravity login in CI. In CI it is an API call with a
-     key in Actions secrets; on the MacBook it is `notchling-delegate`.)* The author model is named in a
-     PR trailer `Agent-Model:`. Blocking findings fail the check.
+   - Cross-model review: a reviewer on a different model than the author, as a GitHub Action calling a
+     model API with a key in Actions secrets (never a real Codex/Antigravity login in CI). The author model
+     is named in a PR trailer `Agent-Model:`. Blocking findings fail the check.
    - Protected-path check: if the diff touches a protected path, the PR is labeled
      `needs-maintainer` and auto-merge is refused. CODEOWNERS makes the maintainer a required reviewer
      for those paths, so this holds even if the label step is bypassed.
-5. **Merge.** Auto-merge (squash) when every required check is green and no protected path is touched.
-   Otherwise it waits for the maintainer.
+5. **Merge.** GitHub auto-merge (squash) for the agent's own PRs when every required check is green and
+   no protected path is touched. Otherwise it waits for the maintainer.
+   **Pull requests from other people** *(maintainer's decision)* are welcome and get the same checks and
+   the same agent review, but never merge on their own: the maintainer reviews each one against the
+   agent setup (AGENTS.md, the lint, the protected paths) and merges it. Fork PRs get no secrets, so the
+   agent review of a fork PR runs from a trusted workflow that reads the diff and never checks out or
+   runs the fork's code *(my call)*.
 6. **Sample and sharpen.** Each morning the maintainer samples merged PRs. Anything bad becomes a new
    check, test, lint rule or skill change (pstack `reflect`/`recall`), never just a review comment.
 
@@ -163,7 +171,10 @@ the Mac included.** The Swift app is replaced, not kept beside it.
   `notchlingd`.
 - **Protocol** is the contract between engine and phone: a written spec (JSON Schema) plus conformance
   fixtures. It stays additive, as today.
-- *(My call, still to confirm: on Linux and Windows the app watches and controls the sessions on that same
+- **On Linux and Windows the app controls that computer's own sessions** *(maintainer's decision)*,
+  and **computers sync with each other** the way the phone and the Mac do today: each `notchlingd` can
+  pair with others over the same protocol, so any desktop app or phone shows and drives the sessions of
+  every paired computer. *(Was: my call, still to confirm: on Linux and Windows the app watches and controls the sessions on that same
   computer.)*
 
 GPUI facts that shape the plan:
@@ -337,13 +348,11 @@ gets fixes only).
 
 ## Open questions (the maintainer's)
 
-1. **Where the work lands.** Today the worker has a read-only deploy key ("Push is refused" must pass)
-   and the MacBook merges in Morning Actions (`MergePlan` pushes `main` itself). Either keep that and
-   add the gates to `MergePlan`, or give the worker push rights to `agent/*` branches and merge through
-   GitHub PRs and auto-merge. Phases 1, 2 and 4 depend on this.
-2. **Whose GitHub identity** opens and merges agent PRs: the maintainer's or a bot account. A PR by the
-   maintainer's own account can't satisfy a CODEOWNERS review.
-3. **Stranger PRs.** Whether a fork PR that stays in the safe zone may auto-merge, or only the agent's own.
+1. **Which GitHub account the agents use.** Agent PRs need an author. With the maintainer's own account,
+   GitHub never lets that account approve its own PR, so CODEOWNERS can't hold protected PRs, and every
+   agent action looks like the maintainer's. A separate bot account (or a GitHub App) is the usual
+   answer: agent PRs come from it, the maintainer approves them. *(My recommendation: a GitHub App or a
+   bot account.)*
 
 ## Left to the builder
 
