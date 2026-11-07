@@ -25,7 +25,7 @@ Existing violations sit in `tools/guard/lint-baseline.json`, which can only shri
 | LINT-DEFAULTS-MIGRATED | Every UserDefaults key is in `AppDelegate.migrateFromAwake`'s list | A key missing there is lost for users coming from the old app | `python3 -m guard lint` |
 | LINT-POINTER-CURSOR | Clickable views show the pointing hand | A clickable view with the arrow cursor looks broken | `python3 -m guard lint` |
 | LINT-NO-APPLESCRIPT | No NSAppleScript or osascript | Its notifications show Script Editor's name and icon | `python3 -m guard lint` |
-| LINT-FILE-SIZE | Files stay under 1,000 lines (a generated file, marked `@generated` or `GENERATED CODE` in its first lines, is exempt) | Big files are hard to review and for an agent to hold whole; nobody reads or splits what a generator writes | `python3 -m guard lint` |
+| LINT-FILE-SIZE | Files stay under 1,000 lines (the two generated protocol files, `crates/protocol/src/generated.rs` and `apps/flutter/lib/core/protocol/generated.dart`, are exempt by exact path; a mark inside a file exempts nothing) | Big files are hard to review and for an agent to hold whole; nobody reads or splits what a generator writes, and a mark any file could carry would be a bypass | `python3 -m guard lint` |
 | LINT-FILE-SIZE-WARN | Files over 600 lines should be split (a warning, not a failure; generated files are exempt) | A nudge before a file reaches the hard limit | `python3 -m guard lint --warnings` |
 
 ## Capabilities
