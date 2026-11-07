@@ -41,3 +41,10 @@
 /docs/rules.md @dtthaison
 /docs/decisions/ @dtthaison
 /mobile/lib/features/pairing/ @dtthaison
+**/AGENTS.md @dtthaison
+**/CLAUDE.md @dtthaison
+**/.claude/ @dtthaison
+**/.gitattributes @dtthaison
+**/CODEOWNERS @dtthaison
+/mobile/**/flutter_test_config.dart @dtthaison
+/mobile/**/dart_test.yaml @dtthaison

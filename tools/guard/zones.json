@@ -1,5 +1,5 @@
 {
-  "_comment": "The auto-merge zone from the design's 'The line'. Everything else waits for the maintainer. Later entries win; '!' takes a path back out. Changing this file is a protected change.",
+  "_comment": "The auto-merge zone from the design's 'The line'. Everything else waits for the maintainer. Later entries win; '!' takes a path back out. The five '!**/' lines close each list: AGENTS.md, CLAUDE.md, .claude/, .gitattributes and CODEOWNERS are protected wherever they sit, new or not. Changing this file is a protected change.",
   "auto": [
     "Sources/Notchling/Chat/Views/**",
     "Sources/Notchling/Notch/NotchView.swift",
@@ -28,11 +28,23 @@
     "crates/app/**",
     "crates/kit/**",
     "crates/engine/src/transcript/**",
-    "crates/engine/src/search/**"
+    "crates/engine/src/search/**",
+    "!**/AGENTS.md",
+    "!**/CLAUDE.md",
+    "!**/.claude/**",
+    "!**/.gitattributes",
+    "!**/CODEOWNERS"
   ],
   "new_files_only": [
     "Tests/**",
     "Fixtures/**",
-    "mobile/test/**"
+    "mobile/test/**",
+    "!mobile/**/flutter_test_config.dart",
+    "!mobile/**/dart_test.yaml",
+    "!**/AGENTS.md",
+    "!**/CLAUDE.md",
+    "!**/.claude/**",
+    "!**/.gitattributes",
+    "!**/CODEOWNERS"
   ]
 }

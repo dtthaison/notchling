@@ -63,6 +63,73 @@ class WeakeningTests(unittest.TestCase):
     def test_source_edit_ok(self):
         self.assertEqual(rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1"])), [])
 
+    # I3: hooks that rewrite how every existing test runs count as skips.
+    def test_swift_test_run_hooks_trip(self):
+        for line in ["    override func invokeTest() {}", "override class var defaultTestSuite: XCTestSuite { XCTestSuite() }",
+                     "override class var testInvocations: [NSInvocation] { [] }"]:
+            self.assertEqual(rules(chg("Tests/X/New.swift", "A", added=[line])), ["WEAK-SKIP"], line)
+
+    def test_dart_golden_comparator_trips(self):
+        self.assertEqual(rules(chg("mobile/test/flutter_test_config.dart", "A",
+                                   added=["  goldenFileComparator = AlwaysPass();"])), ["WEAK-SKIP"])
+
+    def test_skip_lookalikes_ok(self):
+        self.assertEqual(rules(chg("Tests/X/New.swift", "A", added=["let invokeTestCount = 1", "var testInvocationsLog = 2"])), [])
+
+    # I6: anything invisible or control-like in an added line goes to the maintainer.
+    def test_invisible_characters_rejected(self):
+        bad = {
+            "U+061C arabic letter mark": "let a = 1 \u061c",
+            "tag characters": "docs note \U000e0049\U000e0047\U000e004e",
+            "tag begin": "x\U000e0001",
+            "variation selector 16": "x\ufe0f",
+            "variation selector 1": "x\ufe00",
+            "variation selector text": "x\ufe0e",
+            "variation selector supplement first": "x\U000e0100",
+            "variation selector supplement last": "x\U000e01ef",
+            "mongolian variation selector": "x\u180b",
+            "hangul filler": "let \u3164 = 1",
+            "halfwidth hangul filler": "let \uffa0 = 1",
+            "hangul choseong filler": "let \u115f = 1",
+            "hangul jungseong filler": "let \u1160 = 1",
+            "khmer inherent vowel": "let a\u17b4 = 1",
+            "soft hyphen": "ad\u00admin",
+            "mongolian vowel separator": "a\u180eb",
+            "line separator": "a\u2028b",
+            "paragraph separator": "a\u2029b",
+            "bare carriage return": "// note\rlet p = Process()",
+            "trailing carriage return": "let a = 1\r",
+            "nul": "a\x00b",
+            "escape": "\x1b[31mred",
+            "vertical tab": "a\x0bb",
+            "form feed": "a\x0cb",
+            "next line": "a\x85b",
+            "delete": "a\x7fb",
+            "right to left override": "a\u202eb",
+            "zero width joiner": "a\u200db",
+            "zero width non joiner": "a\u200cb",
+            "word joiner": "a\u2060b",
+            "bom": "\ufeffa",
+            "interlinear annotation": "a\ufff9b",
+        }
+        for name, line in bad.items():
+            for path in ("Sources/Notchling/Search/S.swift", "docs/a.md"):
+                self.assertEqual(rules(chg(path, "M", added=[line])), ["WEAK-UNICODE"], f"{name} in {path}")
+
+    def test_ordinary_text_still_ok(self):
+        for line in ["\tlet a = 1", "Vi\u1ec7t Nam", "Vie\u0323\u0302t Nam (decomposed)", "caf\u00e9", "\u65e5\u672c\u8a9e",
+                     "emoji \u2705 done", "no\u00a0break space", "arrow \u2192 here", "quote \u201cx\u201d"]:
+            self.assertEqual(rules(chg("docs/a.md", "M", added=[line])), [], repr(line))
+
+    def test_the_lines_own_newline_is_not_a_trip(self):
+        self.assertEqual(rules(chg("docs/a.md", "M", added=["let a = 1\n"])), [])
+        self.assertEqual(rules(chg("docs/a.md", "M", added=["let a = 1\nlet b = 2"])), ["WEAK-UNICODE"])
+
+    def test_unicode_trip_shows_codepoints_not_the_characters(self):
+        trips = scan([chg("docs/a.md", "M", added=["a\u061c\U000e0049\rb"])])
+        self.assertEqual(len(trips), 1)
+        self.assertEqual(trips[0].text, "a<U+061C><U+E0049><U+000D>b")
+
 
 if __name__ == "__main__":
     unittest.main()
