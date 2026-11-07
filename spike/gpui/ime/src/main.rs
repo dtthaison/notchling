@@ -752,13 +752,140 @@ fn main() {
         })
         .detach();
 
-        window
+        let ns_view = window
             .update(cx, |view, window, cx| {
                 window.focus(&view.text_input.focus_handle(cx));
                 cx.activate(true);
+                ime_auto::view_of(window)
             })
             .unwrap();
+        if std::env::args().any(|a| a == "--auto") {
+            cx.spawn(async move |cx| ime_auto::run(window, ns_view, cx).await).detach();
+        }
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     });
+}
+
+/// `ime --auto`: drives the text field through the same NSTextInputClient calls an
+/// input method makes (setMarkedText, insertText, unmarkText), in the order macOS's
+/// Vietnamese Telex sends them for each word, and prints what the field committed.
+/// It checks GPUI's side of composition; the real input source still needs a person.
+mod ime_auto {
+    use super::*;
+    use objc2::{msg_send, Message};
+    use gpui::{AsyncApp, WindowHandle};
+    use objc2::rc::Retained;
+    use objc2_app_kit::NSView;
+    use objc2::Encode;
+    use objc2_foundation::{NSNotFound, NSString};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::time::Duration;
+
+    pub fn view_of(window: &Window) -> Option<Retained<NSView>> {
+        let handle = HasWindowHandle::window_handle(window).ok()?;
+        let RawWindowHandle::AppKit(h) = handle.as_raw() else { return None };
+        let view: &NSView = unsafe { h.ns_view.cast::<NSView>().as_ref() };
+        Some(view.retain())
+    }
+
+    /// NSRange as GPUI registers it (`NSRange`, not objc2-foundation's `_NSRange`); objc2's debug check wants the names to match.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Range(usize, usize);
+    unsafe impl objc2::Encode for Range {
+        const ENCODING: objc2::Encoding =
+            objc2::Encoding::Struct("NSRange", &[usize::ENCODING, usize::ENCODING]);
+    }
+
+    fn none() -> Range {
+        Range(NSNotFound as usize, 0)
+    }
+
+    fn mark(v: &NSView, text: &str) {
+        let ns = NSString::from_str(text);
+        let sel = Range(text.encode_utf16().count(), 0);
+        let _: () = unsafe { msg_send![v, setMarkedText: &*ns, selectedRange: sel, replacementRange: none()] };
+    }
+
+    fn insert(v: &NSView, text: &str) {
+        let ns = NSString::from_str(text);
+        let _: () = unsafe { msg_send![v, insertText: &*ns, replacementRange: none()] };
+    }
+
+    fn unmark(v: &NSView) {
+        let _: () = unsafe { msg_send![v, unmarkText] };
+    }
+
+    /// One Telex word: the marked text after each key, then the word committed.
+    fn word(v: &NSView, steps: &[&str]) {
+        for s in steps {
+            mark(v, s);
+        }
+        insert(v, steps.last().unwrap());
+    }
+
+    enum Step<'a> {
+        Word(&'a [&'a str]),
+        Mark(&'a str),
+        Insert(&'a str),
+        Unmark,
+    }
+
+    fn content(window: &WindowHandle<InputExample>, cx: &mut AsyncApp) -> String {
+        window
+            .update(cx, |view, _, cx| view.text_input.read(cx).content.to_string())
+            .unwrap_or_default()
+    }
+
+    pub async fn run(window: WindowHandle<InputExample>, view: Option<Retained<NSView>>, cx: &mut AsyncApp) {
+        let Some(view) = view else {
+            println!("S3 auto: no NSView");
+            let _ = cx.update(|cx| cx.quit());
+            return;
+        };
+        let viet: &[&str] = &["V", "Vi", "Vie", "Viê", "Việ", "Việt"];
+        let cases: Vec<(&str, Vec<Step>, &[&str])> = vec![
+            ("Telex Vieejt Nam", vec![Step::Word(viet), Step::Insert(" "), Step::Word(&["N", "Na", "Nam"])], &["Việt Nam"]),
+            (
+                "Telex ddaay laf tieesng Vieejt",
+                vec![
+                    Step::Word(&["d", "đ", "đa", "đâ", "đây"]),
+                    Step::Insert(" "),
+                    Step::Word(&["l", "la", "là"]),
+                    Step::Insert(" "),
+                    Step::Word(&["t", "ti", "tie", "tiê", "tiế", "tiến", "tiếng"]),
+                    Step::Insert(" "),
+                    Step::Word(viet),
+                ],
+                &["đây là tiếng Việt"],
+            ),
+            ("VNI Vie65t Nam", vec![Step::Word(&["V", "Vi", "Vie", "Viê", "Việ", "Việt"]), Step::Insert(" "), Step::Word(&["N", "Na", "Nam"])], &["Việt Nam"]),
+            ("Esc mid-word (IME unmarks)", vec![Step::Mark("V"), Step::Mark("Vi"), Step::Mark("Vie"), Step::Mark("Viê"), Step::Unmark], &["Viê", ""]),
+            ("Esc mid-word (IME clears)", vec![Step::Mark("Viê"), Step::Mark(""), Step::Unmark], &["Viê", ""]),
+            ("Click mid-word", vec![Step::Mark("Viê"), Step::Unmark], &["Viê"]),
+        ];
+        let mut passed = 0;
+        let total = cases.len();
+        cx.background_executor().timer(Duration::from_millis(600)).await;
+        for (name, steps, expected) in cases {
+            window.update(cx, |view, _, cx| view.text_input.update(cx, |t, _| t.reset())).ok();
+            cx.background_executor().timer(Duration::from_millis(100)).await;
+            for step in steps {
+                match step {
+                    Step::Word(w) => word(&view, w),
+                    Step::Mark(t) => mark(&view, t),
+                    Step::Insert(t) => insert(&view, t),
+                    Step::Unmark => unmark(&view),
+                }
+                cx.background_executor().timer(Duration::from_millis(30)).await;
+            }
+            let got = content(&window, cx);
+            let ok = expected.contains(&got.as_str());
+            passed += ok as usize;
+            println!("S3 auto {} {name}: got {got:?}, want one of {expected:?}", if ok { "ok  " } else { "FAIL" });
+        }
+        println!("S3 auto: {passed}/{total} through GPUI's input handler");
+        let _ = cx.update(|cx| cx.quit());
+    }
 }

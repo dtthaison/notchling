@@ -2,6 +2,7 @@
 //! in the same process and run loop.
 
 use std::ptr::NonNull;
+use std::time::{Duration, Instant};
 
 use gpui::{
     div, point, prelude::*, px, size, App, Application, Bounds, Context, FocusHandle,
@@ -27,7 +28,7 @@ impl HasWindowHandle for ViewHandle {
 }
 
 struct Page {
-    _window: Retained<NSWindow>,
+    window: Retained<NSWindow>,
     _view: wry::WebView,
 }
 
@@ -58,7 +59,7 @@ fn open_page(url: String, n: usize) -> Result<Page, String> {
         .build(&ViewHandle(content))
         .map_err(|e| e.to_string())?;
     window.makeKeyAndOrderFront(None);
-    Ok(Page { _window: window, _view: view })
+    Ok(Page { window, _view: view })
 }
 
 struct Main {
@@ -66,6 +67,56 @@ struct Main {
     pages: Vec<Page>,
     typed: String,
     status: String,
+}
+
+impl Main {
+    fn open_next(&mut self) {
+        let n = self.pages.len();
+        let url = if n % 2 == 0 {
+            "https://example.com".to_string()
+        } else {
+            format!("file://{}/test.html", env!("CARGO_MANIFEST_DIR"))
+        };
+        self.status = match open_page(url.clone(), n) {
+            Ok(p) => {
+                self.pages.push(p);
+                format!("opened {url}")
+            }
+            Err(e) => format!("failed {url}: {e}"),
+        };
+        eprintln!("{}", self.status);
+    }
+
+    fn titles(&self) -> Vec<String> {
+        self.pages.iter().map(|p| p.window.title().to_string()).collect()
+    }
+}
+
+/// `web --auto`: opens both pages, ticks the GPUI view every 20 ms while they load
+/// (the longest gap says whether GPUI stayed responsive), closes the first page
+/// window, and prints what it saw.
+fn auto(this: gpui::WeakEntity<Main>, cx: &mut gpui::AsyncApp) -> impl std::future::Future<Output = ()> + '_ {
+    async move {
+        let tick = Duration::from_millis(20);
+        this.update(cx, |m, cx| { m.open_next(); m.open_next(); cx.notify(); }).ok();
+        let start = Instant::now();
+        let mut last = Instant::now();
+        let mut worst = Duration::ZERO;
+        while start.elapsed() < Duration::from_secs(6) {
+            cx.background_executor().timer(tick).await;
+            if this.update(cx, |_, cx| cx.notify()).is_err() { break; }
+            worst = worst.max(last.elapsed());
+            last = Instant::now();
+        }
+        let titles = this.update(cx, |m, _| m.titles()).unwrap_or_default();
+        println!("S2 titles after load: {titles:?}");
+        println!("S2 longest GPUI tick gap while loading: {} ms (tick {} ms)", worst.as_millis(), tick.as_millis());
+        this.update(cx, |m, _| m.pages[0].window.close()).ok();
+        cx.background_executor().timer(Duration::from_secs(1)).await;
+        let alive = this.update(cx, |m, _| m.pages[1].window.isVisible()).unwrap_or(false);
+        println!("S2 after closing page 1: app running, page 2 visible = {alive}");
+        let _ = cx.update(|cx| cx.quit());
+    }
 }
 
 impl Render for Main {
@@ -95,20 +146,7 @@ impl Render for Main {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, _, cx| {
-                            let n = this.pages.len();
-                            let url = if n % 2 == 0 {
-                                "https://example.com".to_string()
-                            } else {
-                                format!("file://{}/test.html", env!("CARGO_MANIFEST_DIR"))
-                            };
-                            this.status = match open_page(url.clone(), n) {
-                                Ok(p) => {
-                                    this.pages.push(p);
-                                    format!("opened {url}")
-                                }
-                                Err(e) => format!("failed {url}: {e}"),
-                            };
-                            eprintln!("{}", this.status);
+                            this.open_next();
                             cx.notify();
                         }),
                     ),
@@ -126,6 +164,9 @@ fn main() {
             cx.new(|cx| {
                 let focus = cx.focus_handle();
                 window.focus(&focus);
+                if std::env::args().any(|a| a == "--auto") {
+                    cx.spawn(async move |this, cx| auto(this, cx).await).detach();
+                }
                 Main { focus, pages: Vec::new(), typed: String::new(), status: String::new() }
             })
         })
