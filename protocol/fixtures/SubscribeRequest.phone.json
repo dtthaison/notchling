@@ -1,0 +1,12 @@
+{
+  "id": 21,
+  "op": "subscribe",
+  "phone": {
+    "deviceWindowId": 1234,
+    "fps": 10,
+    "width": 400
+  },
+  "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11",
+  "sessions": true,
+  "subagentId": "agent-a1b2c3"
+}

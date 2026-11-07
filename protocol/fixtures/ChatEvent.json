@@ -1,0 +1,59 @@
+{
+  "event": "chat",
+  "messages": [
+    {
+      "id": "0A000000-0000-4000-8000-000000000003",
+      "images": [],
+      "queued": false,
+      "role": "tools",
+      "steps": [
+        {
+          "name": "Read",
+          "output": "import AppKit\n",
+          "path": "/Users/example/src/app/main.swift",
+          "summary": "main.swift"
+        },
+        {
+          "diff": [
+            " let a = 1",
+            "-let b = a!",
+            "+let b = a ?? 0"
+          ],
+          "name": "Edit",
+          "path": "/Users/example/src/app/main.swift",
+          "summary": "main.swift"
+        }
+      ],
+      "text": "",
+      "time": 1793541195000,
+      "toolSummary": "Read 1 file, edited 1 file"
+    },
+    {
+      "id": "0A000000-0000-4000-8000-000000000004",
+      "images": [],
+      "kind": "shell",
+      "output": " M main.swift\n",
+      "queued": false,
+      "role": "user",
+      "text": "!git status --short",
+      "time": 1793541265000
+    },
+    {
+      "id": "0A000000-0000-4000-8000-000000000005",
+      "images": [],
+      "queued": true,
+      "role": "user",
+      "text": "Also add a test",
+      "time": 1793541365000
+    },
+    {
+      "id": "0A000000-0000-4000-8000-000000000006",
+      "images": [],
+      "queued": false,
+      "role": "assistant",
+      "text": "The crash was a nil optional in main.swift.",
+      "time": 1793541455000
+    }
+  ],
+  "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"
+}

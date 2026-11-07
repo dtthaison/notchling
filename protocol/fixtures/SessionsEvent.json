@@ -1,0 +1,146 @@
+{
+  "data": [
+    {
+      "activity": "Editing main.swift",
+      "control": "console",
+      "cwd": "/Users/example/src/app",
+      "entrypoint": "cli",
+      "facts": {
+        "contextTokens": 52000,
+        "contextWindow": 400000,
+        "limits": [
+          {
+            "label": "5h",
+            "percent": 42,
+            "resetsAt": 1793548665000
+          },
+          {
+            "label": "Week",
+            "percent": 12.5
+          }
+        ],
+        "model": "claude-opus-5-5"
+      },
+      "id": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11",
+      "lastActivity": 1793541465000,
+      "lastMessage": {
+        "id": "0A000000-0000-4000-8000-000000000006",
+        "text": "The crash was a nil optional in main.swift."
+      },
+      "name": "Fix the launch crash",
+      "pending": {
+        "created": 1793541465000,
+        "kind": "permission",
+        "questions": [],
+        "requestId": "req-0001",
+        "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11",
+        "summary": "rm -rf build",
+        "toolName": "Bash"
+      },
+      "project": "app",
+      "startedAt": 1793537865000,
+      "state": "needsInput",
+      "statusUpdatedAt": 1793541465000,
+      "subagents": [
+        {
+          "depth": 1,
+          "description": "Find the crash site",
+          "finished": false,
+          "id": "agent-a1b2c3",
+          "lastActivity": 1793541460000,
+          "model": "haiku",
+          "state": "running",
+          "type": "Explore"
+        }
+      ],
+      "tool": "claude"
+    },
+    {
+      "control": "viewOnly",
+      "cwd": "/Users/example/src/notes",
+      "entrypoint": "desktop",
+      "id": "c3a1e5f2-0b4d-4f6e-8a7c-2d9e1b0f4a65",
+      "lastActivity": 1793541465000,
+      "name": "Review the diff",
+      "project": "notes",
+      "startedAt": 1793534265000,
+      "state": "running",
+      "statusUpdatedAt": 1793541465000,
+      "subagents": [],
+      "takeover": {
+        "available": false,
+        "busy": true,
+        "reason": "Đóng session ở nơi đang mở (Claude desktop / VS Code) rồi tiếp quản",
+        "stoppable": true
+      },
+      "tool": "claude"
+    },
+    {
+      "control": "job",
+      "cwd": "/Users/example/src/app",
+      "entrypoint": "claude-vscode",
+      "id": "e8f0a7b4-3c2d-4a19-b6e5-7f1d0c9a2b38",
+      "lastActivity": 1793541465000,
+      "name": "Pick a database",
+      "pending": {
+        "created": 1793541465000,
+        "kind": "question",
+        "questions": [
+          {
+            "header": "Database",
+            "multiSelect": false,
+            "options": [
+              "SQLite",
+              "Postgres"
+            ],
+            "question": "Which database should the service use?"
+          }
+        ],
+        "requestId": "req-0002",
+        "sessionId": "e8f0a7b4-3c2d-4a19-b6e5-7f1d0c9a2b38",
+        "summary": "Which database should the service use?",
+        "toolName": "AskUserQuestion"
+      },
+      "project": "app",
+      "startedAt": 1793540865000,
+      "state": "needsInput",
+      "statusUpdatedAt": 1793541465000,
+      "subagents": [],
+      "tool": "claude"
+    },
+    {
+      "control": "job",
+      "cwd": "/Users/example/src/parser",
+      "entrypoint": "codex",
+      "id": "codex:0199e0c5-7a31-7c52-9d4e-5b8a1f2c3d60",
+      "lastActivity": 1793541375000,
+      "name": "Port the parser",
+      "project": "parser",
+      "startedAt": 1793539665000,
+      "state": "done",
+      "statusUpdatedAt": 1793541375000,
+      "subagents": [],
+      "tool": "codex"
+    },
+    {
+      "control": "viewOnly",
+      "cwd": "/Users/example/src/lab",
+      "entrypoint": "sdk",
+      "id": "1f4b8c27-9d3e-4a60-8b15-6c0e2a7d9f43",
+      "lastActivity": 1793455065000,
+      "name": "Old experiment",
+      "project": "lab",
+      "startedAt": 1793451465000,
+      "state": "exited",
+      "statusUpdatedAt": 1793455065000,
+      "subagents": [],
+      "takeover": {
+        "available": true,
+        "busy": false,
+        "stoppable": false
+      },
+      "tool": "claude"
+    }
+  ],
+  "event": "sessions"
+}

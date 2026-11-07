@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "Không có session này."
+  },
+  "id": 4,
+  "ok": false
+}
