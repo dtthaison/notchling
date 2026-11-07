@@ -1,22 +1,27 @@
 name: Beta
 
-# Cuts a Beta: a daily run (or a click) builds the app from the default branch, signs and notarizes it,
-# attests it, publishes the prerelease `vX.Y.Z-beta.N` and adds it to the update feed. Stable is
-# promote.yml: the same files, never a rebuild. OFF until the maintainer sets the repository variable
-# NOTCHLING_RELEASES to `on` (a missing variable counts as off) and the `release` environment holds
-# the signing secrets; the old flow (legacy/macos/release.sh -> release.yml) keeps working until then.
+# Cuts a Beta: a daily run (or a click) builds the app from the commit the run started at (the tip of the
+# default branch), signs and notarizes it, attests it, publishes the prerelease `vX.Y.Z-beta.N` and adds it
+# to the update feed. Stable is promote.yml: the same files, never a rebuild. OFF until the maintainer sets
+# the repository variable NOTCHLING_RELEASES to `on` (a missing variable counts as off) and the `release`
+# environment holds the signing secrets; the old flow (legacy/macos/release.sh -> release.yml) keeps working
+# until then.
 #
 # Build, then sign apart. Four jobs, each with only what it needs:
-#   gate     reads the default branch (no secrets, contents: read): kill switch, the next tag.
+#   gate     reads the commit this run started at (no secrets, contents: read): kill switch, the next tag.
+#            Every later job checks out that exact commit, never the branch by name, which may have moved.
 #   build    runs the repository's code with no secrets and no write token; uploads the unsigned app,
 #            its SHA-256 and the release notes. Its hash also goes to the next job as a job output,
 #            which travels apart from the artifact, so a changed artifact is caught.
 #   sign     runs NO repository code: no checkout, only pinned actions and the shell in this file. It has
 #            the signing secrets and no write token on the repository. It checks the hash, signs with
 #            Developer ID, notarizes, staples, signs the update with Sparkle's sign_update (downloaded
-#            by a pinned URL and SHA-256), attests the files and uploads them.
-#   publish  has the write token and the default branch's tools/release/appcast.py but no signing
-#            secrets: it creates the prerelease with the signed files and updates the feed.
+#            by a pinned URL and SHA-256), attests the files and uploads them. The disk image's and the
+#            zip's SHA-256 and the update signature also leave as job outputs, apart from the artifact.
+#   publish  has the write token and that commit's tools/release/appcast.py but no signing secrets and
+#            no `environment:` (an environment would hand its secrets to the repository code it runs):
+#            it checks the signed files against the sign job's outputs, creates the prerelease and
+#            updates the feed.
 #
 # The feed is the asset `appcast.xml` of the release tagged `appcast` (a prerelease, never "latest").
 # The app's feed URL is https://github.com/<owner>/<repo>/releases/download/appcast/appcast.xml.
@@ -61,31 +66,38 @@ jobs:
           NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
         run: |
           [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
+      - name: Only the default branch
+        env:
+          RUN_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # A click on another branch would run that branch's copy of this file; only the default branch counts.
+          [ "$RUN_REF" = "refs/heads/$DEFAULT_BRANCH" ] || { echo "Betas are cut from $DEFAULT_BRANCH only."; exit 1; }
+      # The commit this run started at, not the branch by name: the branch may move while the run waits.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Decide
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
-          RUN_REF: ${{ github.ref }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_SHA: ${{ github.sha }}
           ACTOR: ${{ github.triggering_actor }}
           ALLOW_BREAKING: ${{ inputs.allow_breaking }}
           PYTHONPATH: tools/guard
         run: |
           set -euo pipefail
-          # A click on another branch would run that branch's copy of this file; only the default branch counts.
-          [ "$RUN_REF" = "refs/heads/$DEFAULT_BRANCH" ] || { echo "Betas are cut from $DEFAULT_BRANCH only."; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$RUN_SHA" ] || { echo "The checkout is not the commit this run started at."; exit 1; }
           flag=""
           if [ "$ALLOW_BREAKING" = "true" ]; then
             python3 -c 'import os, sys; from guard.gate import MAINTAINERS; sys.exit(0 if os.environ["ACTOR"] in MAINTAINERS else 1)' \
               || { echo "Only a maintainer may allow a breaking change."; exit 1; }
             flag="--allow-breaking"
           fi
-          sha="$(git rev-parse HEAD)"
+          sha="$RUN_SHA"
+          [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
           last="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
           if [ "$EVENT_NAME" = "schedule" ] && [ -n "$last" ] && [ "$(git rev-list --count "$last..HEAD")" = "0" ]; then
             echo "No merges since $last: no Beta today."
@@ -94,8 +106,7 @@ jobs:
           fi
           # Refuses (non-zero) a breaking fragment without --allow-breaking.
           tag="$(python3 tools/release/version.py next --channel beta $flag)"
-          printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' || { echo "Bad Beta tag: $tag"; exit 1; }
-          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' || { echo "Bad commit"; exit 1; }
+          [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad Beta tag: $tag"; exit 1; }
           { echo "run=true"; echo "tag=$tag"; echo "sha=$sha"; echo "last=$last"; } >> "$GITHUB_OUTPUT"
           echo "Next Beta: $tag at $sha (last tag: ${last:-none})"
 
@@ -154,6 +165,10 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     environment: release
+    outputs:
+      dmg_sha256: ${{ steps.update.outputs.dmg_sha256 }}
+      zip_sha256: ${{ steps.update.outputs.zip_sha256 }}
+      ed_signature: ${{ steps.update.outputs.ed_signature }}
     # No checkout in this job and no write token on the repository: only the attestation's own rights.
     permissions:
       contents: read
@@ -189,8 +204,8 @@ jobs:
           EXPECTED_ZIP_SHA256: ${{ needs.build.outputs.zip_sha256 }}
         run: |
           set -euo pipefail
-          printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' || { echo "Bad tag"; exit 1; }
-          printf '%s' "$EXPECTED_ZIP_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "Bad hash from the build job"; exit 1; }
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad tag"; exit 1; }
+          [[ $EXPECTED_ZIP_SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo "Bad hash from the build job"; exit 1; }
           cd in
           shasum -a 256 -c SHA256SUMS
           got="$(shasum -a 256 Notchling-unsigned.zip | cut -d' ' -f1)"
@@ -213,24 +228,50 @@ jobs:
           ditto -x -k in/Notchling-unsigned.zip "$WORK"
           APP="$WORK/Notchling.app"
           [ -d "$APP" ] || { echo "No Notchling.app in the archive."; exit 1; }
+          # What the app says about itself must be the tag, and what goes into release-info.env must be well formed.
           SHORT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-          case "$VERSION" in "$SHORT"*) ;; *) echo "The app says $SHORT, the tag says $VERSION."; exit 1;; esac
+          BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+          MINSYS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+          [ "$VERSION" = "$SHORT" ] || { echo "The app says $SHORT, the tag says $VERSION."; exit 1; }
+          [[ $BUNDLE =~ ^[0-9]+$ ]] || { echo "Bad CFBundleVersion in the app: $BUNDLE"; exit 1; }
+          [[ $MINSYS =~ ^[0-9]+\.[0-9]+$ ]] || { echo "Bad LSMinimumSystemVersion in the app: $MINSYS"; exit 1; }
 
-          # A temporary keychain for the certificate; the cleanup step deletes it.
+          # A temporary keychain for the certificate; the cleanup step deletes it. The key is usable by codesign
+          # alone (-T), not by every program (-A).
           printf '%s' "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           IDENT="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ { print $2; exit }')"
           [ -n "$IDENT" ] || { echo "No Developer ID Application identity in the certificate."; exit 1; }
 
+          # The hardened runtime blocks Apple events unless the app is signed with this entitlement, and
+          # Notchling sends them to Terminal and iTerm2 (NSAppleScript in AgentActions.swift). That is the only
+          # exception it needs: no JIT, no unsigned memory, no library-validation exception, because the app and
+          # its helper link their code statically. The helper sends no Apple events and gets none.
+          # Sending Apple events also needs NSAppleEventsUsageDescription in Info.plist, which the app does not
+          # have yet: add it in legacy/macos/Info.plist (a protected app change that waits for the maintainer; the
+          # turn-on steps in docs/policies/automation.md list it).
+          ENTITLEMENTS="$RUNNER_TEMP/app.entitlements"
+          cat > "$ENTITLEMENTS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.automation.apple-events</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
           # Inside out: the helper, then the app. Sparkle's own nested code gets its step in the PR that adds Sparkle.
           codesign --force --timestamp --options runtime --keychain "$KEYCHAIN" --sign "$IDENT" "$APP/Contents/Helpers/agent-console-hostd"
-          codesign --force --timestamp --options runtime --keychain "$KEYCHAIN" --sign "$IDENT" "$APP"
+          codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --keychain "$KEYCHAIN" --sign "$IDENT" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --entitlements - "$APP"
 
           # The disk image holds the signed app; Apple notarizes the image, which covers the app inside it.
           DMG="out/Notchling-$VERSION.dmg"
@@ -243,9 +284,9 @@ jobs:
           xcrun notarytool store-credentials notchling-release --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN" > /dev/null
           xcrun notarytool submit "$DMG" --keychain-profile notchling-release --keychain "$KEYCHAIN" --wait --output-format json > "$RUNNER_TEMP/notary.json"
           cat "$RUNNER_TEMP/notary.json"
-          status="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$RUNNER_TEMP/notary.json")"
+          status="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$RUNNER_TEMP/notary.json")"
           if [ "$status" != "Accepted" ]; then
-            id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("id", ""))' "$RUNNER_TEMP/notary.json")"
+            id="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("id", ""))' "$RUNNER_TEMP/notary.json")"
             [ -z "$id" ] || xcrun notarytool log "$id" --keychain-profile notchling-release --keychain "$KEYCHAIN" || true
             echo "Notarization status: $status"
             exit 1
@@ -256,11 +297,10 @@ jobs:
           xcrun stapler validate "$APP"
           spctl --assess --type execute --verbose=2 "$APP"
           ditto -c -k --keepParent "$APP" "out/Notchling-$VERSION.zip"
-          cp "$APP/Contents/Info.plist" "$WORK/Info.plist"
           {
-            echo "BUNDLE_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$WORK/Info.plist")"
+            echo "BUNDLE_VERSION=$BUNDLE"
             echo "SHORT_VERSION=$SHORT"
-            echo "MIN_SYSTEM=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$WORK/Info.plist")"
+            echo "MIN_SYSTEM=$MINSYS"
           } > "$RUNNER_TEMP/info.env"
       - name: Remove the signing keychain
         if: always()
@@ -281,6 +321,7 @@ jobs:
           tar -xJf "$dir/sparkle.tar.xz" -C "$dir" ./bin/sign_update
           test -x "$dir/bin/sign_update"
       - name: Sign the update
+        id: update
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           TAG: ${{ needs.gate.outputs.tag }}
@@ -288,10 +329,11 @@ jobs:
           set -euo pipefail
           VERSION="${TAG#v}"
           DMG="out/Notchling-$VERSION.dmg"
+          ZIP="out/Notchling-$VERSION.zip"
           # The feed's enclosure is the disk image (appcast.py's contract), signed after stapling.
           # The key goes to sign_update's standard input only.
           SIG="$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - -p "$DMG")"
-          printf '%s' "$SIG" | grep -Eq '^[A-Za-z0-9+/]{86}==$' || { echo "sign_update gave no EdDSA signature."; exit 1; }
+          [[ $SIG =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "sign_update gave no EdDSA signature."; exit 1; }
           {
             cat "$RUNNER_TEMP/info.env"
             echo "TAG=$TAG"
@@ -301,6 +343,12 @@ jobs:
           } > out/release-info.env
           cp in/notes.md out/notes.md
           (cd out && shasum -a 256 "Notchling-$VERSION.dmg" "Notchling-$VERSION.zip" release-info.env notes.md > SHA256SUMS)
+          # The publish job compares what it downloads with these, which travel apart from the artifact.
+          {
+            echo "ed_signature=$SIG"
+            echo "dmg_sha256=$(shasum -a 256 "$DMG" | cut -d' ' -f1)"
+            echo "zip_sha256=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
           cat out/release-info.env
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
@@ -318,8 +366,8 @@ jobs:
     needs: [gate, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Environment `release` brings the deployment-branch rule; this job reads no secret.
-    environment: release
+    # No `environment:`: this job checks out repository code, and an environment would hand its secrets to that
+    # code. It reads no secret. The sign job, which runs none of the repository's code, is the one in `release`.
     permissions:
       contents: write
     env:
@@ -331,34 +379,87 @@ jobs:
           NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
         run: |
           [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
-      # Only the default branch's tools/release/appcast.py runs here, and no signing secret is in reach.
+      # Only tools/release/appcast.py of the commit the gate pinned runs here, and no signing secret is in reach.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ needs.gate.outputs.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: signed
           path: signed
-      - name: Verify and read the release info
+      - name: Verify the signed files
+        env:
+          TAG: ${{ needs.gate.outputs.tag }}
+          EXPECTED_DMG_SHA256: ${{ needs.sign.outputs.dmg_sha256 }}
+          EXPECTED_ZIP_SHA256: ${{ needs.sign.outputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad tag"; exit 1; }
+          [[ $EXPECTED_DMG_SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo "Bad disk image hash from the sign job"; exit 1; }
+          [[ $EXPECTED_ZIP_SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo "Bad zip hash from the sign job"; exit 1; }
+          v="${TAG#v}"
+          cd signed
+          # The list must name exactly the files the sign job makes, and every one must match.
+          [ "$(awk '{ print $2 }' SHA256SUMS | sort | tr '\n' ' ')" = "Notchling-$v.dmg Notchling-$v.zip notes.md release-info.env " ] \
+            || { echo "SHA256SUMS lists unexpected files."; exit 1; }
+          sha256sum -c SHA256SUMS
+          # The artifact and its list travel together; the sign job's outputs travel apart.
+          [ "$(sha256sum "Notchling-$v.dmg" | cut -d' ' -f1)" = "$EXPECTED_DMG_SHA256" ] \
+            || { echo "The disk image is not the one the sign job made."; exit 1; }
+          [ "$(sha256sum "Notchling-$v.zip" | cut -d' ' -f1)" = "$EXPECTED_ZIP_SHA256" ] \
+            || { echo "The zip is not the one the sign job made."; exit 1; }
+      - name: Work out the build number
+        id: build
         env:
           TAG: ${{ needs.gate.outputs.tag }}
         run: |
           set -euo pipefail
-          printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' || { echo "Bad tag"; exit 1; }
+          # The same formula as version.py's build_number for a Beta: X*1000000 + Y*10000 + Z*100 + N.
+          re='^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)-beta\.([1-9][0-9]?)$'
+          [[ $TAG =~ $re ]] || { echo "Bad tag"; exit 1; }
+          n=$((10#${BASH_REMATCH[4]}))
+          [ "$n" -le 98 ] || { echo "A Beta number stops at 98."; exit 1; }
+          echo "number=$((10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 10000 + 10#${BASH_REMATCH[3]} * 100 + n))" >> "$GITHUB_OUTPUT"
+      - name: Read the release info
+        env:
+          TAG: ${{ needs.gate.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.build.outputs.number }}
+          EXPECTED_ED_SIGNATURE: ${{ needs.sign.outputs.ed_signature }}
+        run: |
+          set -euo pipefail
           cd signed
-          sha256sum -c SHA256SUMS
-          get() { grep -E "^$1=" release-info.env | head -1 | cut -d= -f2-; }
-          bundle="$(get BUNDLE_VERSION)"; short="$(get SHORT_VERSION)"; minsys="$(get MIN_SYSTEM)"
-          sig="$(get ED_SIGNATURE)"; length="$(get DMG_LENGTH)"; dmg="$(get DMG_NAME)"; itag="$(get TAG)"
-          printf '%s' "$bundle" | grep -Eq '^[0-9]+$' || { echo "Bad BUNDLE_VERSION"; exit 1; }
-          printf '%s' "$short" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$' || { echo "Bad SHORT_VERSION"; exit 1; }
-          printf '%s' "$minsys" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || { echo "Bad MIN_SYSTEM"; exit 1; }
-          printf '%s' "$sig" | grep -Eq '^[A-Za-z0-9+/]{86}==$' || { echo "Bad ED_SIGNATURE"; exit 1; }
-          printf '%s' "$length" | grep -Eq '^[0-9]+$' || { echo "Bad DMG_LENGTH"; exit 1; }
+          # Parsed, never sourced: exactly the seven keys the sign job writes, each once, as KEY=value lines.
+          bundle=""; short=""; minsys=""; sig=""; length=""; dmg=""; itag=""
+          seen=" "
+          line_re='^([A-Z_]+)=(.*)$'
+          while IFS= read -r line || [ -n "$line" ]; do
+            [[ $line =~ $line_re ]] || { echo "release-info.env has a line that is not KEY=value."; exit 1; }
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+            case "$seen" in *" $key "*) echo "release-info.env repeats $key."; exit 1;; esac
+            seen="$seen$key "
+            case "$key" in
+              BUNDLE_VERSION) bundle="$val";;
+              SHORT_VERSION) short="$val";;
+              MIN_SYSTEM) minsys="$val";;
+              ED_SIGNATURE) sig="$val";;
+              DMG_LENGTH) length="$val";;
+              DMG_NAME) dmg="$val";;
+              TAG) itag="$val";;
+              *) echo "release-info.env has an unexpected key: $key"; exit 1;;
+            esac
+          done < release-info.env
+          [[ $bundle =~ ^[0-9]+$ ]] || { echo "Bad BUNDLE_VERSION"; exit 1; }
+          [ "$bundle" = "$BUILD_NUMBER" ] || { echo "Bad BUNDLE_VERSION: $bundle is not the build number $BUILD_NUMBER for $TAG."; exit 1; }
+          [ "$short" = "${TAG#v}" ] || { echo "Bad SHORT_VERSION: $short is not ${TAG#v}."; exit 1; }
+          [[ $minsys =~ ^[0-9]+\.[0-9]+$ ]] || { echo "Bad MIN_SYSTEM"; exit 1; }
+          [[ $sig =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "Bad ED_SIGNATURE"; exit 1; }
+          [ "$sig" = "$EXPECTED_ED_SIGNATURE" ] || { echo "Bad ED_SIGNATURE: it is not the one the sign job made."; exit 1; }
+          [[ $length =~ ^[1-9][0-9]*$ ]] || { echo "Bad DMG_LENGTH"; exit 1; }
           [ "$dmg" = "Notchling-${TAG#v}.dmg" ] || { echo "Bad DMG_NAME"; exit 1; }
           [ "$itag" = "$TAG" ] || { echo "The signed files are for $itag, not $TAG."; exit 1; }
-          [ "$(stat -c%s "$dmg")" = "$length" ] || { echo "The disk image is not $length bytes."; exit 1; }
+          [ "$(wc -c < "$dmg" | tr -d ' ')" = "$length" ] || { echo "The disk image is not $length bytes."; exit 1; }
           {
             echo "BUNDLE_VERSION=$bundle"; echo "SHORT_VERSION=$short"; echo "MIN_SYSTEM=$minsys"
             echo "ED_SIGNATURE=$sig"; echo "DMG_LENGTH=$length"; echo "DMG_NAME=$dmg"
@@ -369,7 +470,7 @@ jobs:
           SHA: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
-          printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$' || { echo "Bad commit"; exit 1; }
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
           VERSION="${TAG#v}"
           if gh release view "$TAG" > /dev/null 2>&1; then
             # A re-run after a later step failed: carry on only if the release holds the same disk image.
@@ -394,12 +495,14 @@ jobs:
             have_feed=1
             gh release download appcast --pattern appcast.xml --dir feed
           fi
-          # appcast.py add starts a new feed when the file is missing.
+          # appcast.py add starts a new feed when the file is missing. A Beta goes to every Beta tester at once
+          # (--rollout 0 leaves out the phased rollout); the phased rollout is for the Stable item.
           python3 tools/release/appcast.py add --feed feed/appcast.xml \
             --version "$BUNDLE_VERSION" --short "$SHORT_VERSION" \
             --url "https://github.com/$GH_REPO/releases/download/$TAG/$DMG_NAME" \
             --length "$DMG_LENGTH" --ed-signature "$ED_SIGNATURE" --min-system "$MIN_SYSTEM" \
-            --notes-url "https://github.com/$GH_REPO/releases/tag/$TAG" --channel beta
+            --notes-url "https://github.com/$GH_REPO/releases/tag/$TAG" --channel beta \
+            --pub-date now --rollout 0
           python3 tools/release/appcast.py verify --feed feed/appcast.xml
           if [ "$have_feed" = "1" ]; then
             gh release upload appcast feed/appcast.xml --clobber
