@@ -30,10 +30,6 @@ extension ChatModel {
             agent = Agent(id: AntigravitySessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
                           group: .completed, label: "Antigravity", detail: nil, since: ref.date,
                           target: .antigravity(sessionID: ref.sessionID), host: "Antigravity")
-        case .gemini:
-            agent = Agent(id: GeminiSessions.agentID(ref.sessionID), name: name, project: project, cwd: ref.folder,
-                          group: .completed, label: "Gemini", detail: nil, since: ref.date,
-                          target: .gemini(sessionID: ref.sessionID), host: "Gemini")
         }
         if closedSessions[agent.id] != nil {
             closedSessions[agent.id] = nil
@@ -41,11 +37,11 @@ extension ChatModel {
         }
         if allAgents.first(where: { $0.id == agent.id }) == nil { seen[agent.id] = agent }
         if ref.tool == .codex { refreshCodex(force: true) }
-        if ref.tool == .antigravity || ref.tool == .gemini { refreshACP(force: true) }
+        if ref.tool == .antigravity { refreshACP(force: true) }
         return agent.id
     }
 
-    /// Claude Code's sessions (the notch's), then Codex's, Antigravity CLI's and Gemini CLI's. The notch lists Codex and Antigravity apart (`NotchModel.foreignAgents`); Gemini only shows here.
+    /// Claude Code's sessions (the notch's), then Codex's and Antigravity CLI's. The notch lists Codex and Antigravity apart (`NotchModel.foreignAgents`).
     var allAgents: [Agent] {
         notch.agents + codexDrafts + (codexAgents + acpAgents).filter { !isClosed($0) } + acpDrafts
     }
@@ -55,7 +51,7 @@ extension ChatModel {
         return agent.since.timeIntervalSince1970 <= at
     }
 
-    /// Takes a Codex, Antigravity or Gemini session off the list (its history stays with the tool), and ends
+    /// Takes a Codex or Antigravity session off the list (its history stays with the tool), and ends
     /// its process.
     func closeSession(_ agent: Agent) {
         if let (tool, session) = agent.target.acp {

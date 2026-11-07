@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A permission an Antigravity or Gemini CLI session asks for mid-turn: what the tool would do (with the
+/// A permission an Antigravity CLI session asks for mid-turn: what the tool would do (with the
 /// edit's diff when there is one) and the tool's own options. Stopping the turn answers it as cancelled.
 struct AntigravityPermissionCard: View {
     let session: String
@@ -63,7 +63,7 @@ struct AntigravityPermissionCard: View {
     }
 }
 
-/// An Antigravity or Gemini CLI session's options (Model, Thinking Level, Mode), as the tool lists them for
+/// An Antigravity CLI session's options (Model, Thinking Level, Mode), as the tool lists them for
 /// the session; picking one applies from the next turn. A session not started yet shows its tool name.
 struct ACPOptionsPicker: View {
     @ObservedObject var model: ChatModel

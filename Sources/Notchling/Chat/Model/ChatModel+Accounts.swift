@@ -45,7 +45,6 @@ extension ChatModel {
     func account(for agent: Agent) -> SessionAccount? {
         if case .codex = agent.target { return nil }
         if case .antigravity = agent.target { return nil }
-        if case .gemini = agent.target { return nil }
         if let lane = lanes[agent.id] { return SessionAccount(email: lane.email, lane: lane) }
         // In a lane folder the lanes list doesn't name (yet): don't guess.
         if agent.configDir != nil { return nil }
@@ -57,7 +56,6 @@ extension ChatModel {
         guard let accounts else { return nil }
         if case .codex = agent.target { return nil }
         if case .antigravity = agent.target { return nil }
-        if case .gemini = agent.target { return nil }
         if let lane = lanes[agent.id] { return accounts.usage[lane.accountID] }
         if agent.configDir != nil { return nil }
         return accounts.activeID.flatMap { accounts.usage[$0] }

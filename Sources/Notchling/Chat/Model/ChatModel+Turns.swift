@@ -12,7 +12,6 @@ extension ChatModel {
         case .job: return agent.command == nil
         case .codex(let session): return !session.isEmpty && CodexRunner.shared.isRunning(session)
         case .antigravity(let session): return !session.isEmpty && AntigravityRunner.shared.isWorking(session)
-        case .gemini(let session): return !session.isEmpty && GeminiRunner.shared.isWorking(session)
         default: return false
         }
     }
@@ -79,8 +78,6 @@ extension ChatModel {
             CodexRunner.shared.stop(session)
         case .antigravity(let session):
             AntigravityRunner.shared.cancel(session)
-        case .gemini(let session):
-            GeminiRunner.shared.cancel(session)
         case .job(let jobID):
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 var failure: Error?

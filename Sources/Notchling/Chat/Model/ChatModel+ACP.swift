@@ -4,9 +4,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension ChatModel {
-    // MARK: Antigravity CLI and Gemini CLI sessions (Agent Client Protocol)
+    // MARK: Antigravity CLI sessions (Agent Client Protocol)
 
-    private var installedACPTools: [ACPTool] { [ACPTool.antigravity, .gemini].filter { $0.binary != nil } }
+    private var installedACPTools: [ACPTool] { [ACPTool.antigravity].filter { $0.binary != nil } }
 
     func refreshACP(force: Bool = false) {
         let tools = installedACPTools
@@ -68,7 +68,6 @@ extension ChatModel {
     }
 
     func newAntigravitySession(in folder: String) { newACPSession(.antigravity, in: folder) }
-    func newGeminiSession(in folder: String) { newACPSession(.gemini, in: folder) }
 
     /// Closes a draft, or the session's process (the conversation stays with the tool).
     func closeACP(_ agent: Agent) {

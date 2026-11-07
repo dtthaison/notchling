@@ -40,7 +40,7 @@ struct MoveAllPlan: Equatable {
                 plan.jobs.append(Job(agentID: agent.id, jobID: jobID, name: agent.name, cwd: agent.cwd, transcript: transcript))
             case .process:
                 if dir == closing?.path { plan.signedOut.append(agent.name) }
-            case .resume, .codex, .antigravity, .gemini:
+            case .resume, .codex, .antigravity:
                 break
             }
         }

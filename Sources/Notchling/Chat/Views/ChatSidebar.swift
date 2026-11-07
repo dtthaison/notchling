@@ -147,7 +147,7 @@ struct SessionSidebar: View {
         }
         Divider()
         switch agent.target {
-        case .codex, .antigravity, .gemini:
+        case .codex, .antigravity:
             Button(agent.target.isDraft ? "Discard New Session" : "Close Session") { model.closeSession(agent) }
         default:
             Button("Hide") { notch.onHide?(agent) }

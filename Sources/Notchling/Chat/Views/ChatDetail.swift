@@ -164,7 +164,7 @@ struct SessionDetail: View {
                 case .job where agent.command != nil:
                     Notice(text: "This background job runs a command, not a conversation, so it can't take replies.")
                         .part("Read-Only Notice", .trailing)
-                case .job, .codex, .antigravity, .gemini:
+                case .job, .codex, .antigravity:
                     Composer(model: model, agent: agent, dropping: dropping)
                 case .process where agent.repliesViaHost:
                     Composer(model: model, agent: agent, dropping: dropping)
