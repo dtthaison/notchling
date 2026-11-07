@@ -40,6 +40,10 @@ REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 class ApiError(Exception):
     """The API could not be read or answered something unusable. The text is ours, never the server's."""
 
+    def __init__(self, message: str, status: int = 0):
+        super().__init__(message)
+        self.status = status
+
 
 class Result(NamedTuple):
     code: int
@@ -68,7 +72,8 @@ class Api:
                 raw = resp.read()
         except urllib.error.HTTPError as e:
             e.close()
-            raise ApiError("GitHub API answered %d for %s %s" % (e.code, method, path.split("?")[0]))
+            raise ApiError("GitHub API answered %d for %s %s" % (e.code, method, path.split("?")[0]),
+                           e.code)
         except (urllib.error.URLError, OSError, ValueError) as e:
             raise ApiError("GitHub API not reachable (%s)" % type(e).__name__)
         try:
