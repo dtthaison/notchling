@@ -23,6 +23,7 @@ Why now: the repo just went public, so issues will come from strangers, and the 
 ## Non-goals
 
 - Notarization, App Store, or a website.
+- Shipping Linux or Windows apps in this plan's first phases; the layout only makes room for them.
 - Replacing the sd worker or the Machines window; this design uses them.
 - A full rewrite. The re-architecture is incremental and every step ships green.
 
@@ -128,15 +129,60 @@ Target:
 5. **Verification skill.** `render-notch-view` plus `swift test` is the agent's "eyes"; extend it to
    render the Chat parts a PR touched and attach the PNGs to the PR.
 
+## Multi-platform architecture
+
+Today: the macOS app (Swift, ~55k lines), its engine `ConsoleCore` + `hostd` (Swift, ~7.4k lines), and a
+Flutter app for iOS and Android (`mobile/`, ~15.6k lines) that knows the Mac only through the
+`agentconsole.v1` protocol. Linux and Windows may come later.
+
+Shape: **one engine per computer, many apps talking to it.**
+
+- **Engine** (`notchlingd`): finds Claude Code (and Codex, Antigravity) sessions, reads transcripts,
+  hosts terminals, keeps the vault and logins, serves the protocol to local and remote apps. Rust, so
+  one engine runs on macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`,
+  `sysinfo`, `keepawake`, `tray-icon`).
+- **Apps**: the native macOS app stays Swift (the notch is Mac-only) and calls the engine through
+  UniFFI or the protocol; one Flutter app covers iOS, Android, and later Linux and Windows desktops.
+- **Protocol** is the contract between them: a written spec (JSON Schema) plus conformance fixtures
+  every engine and app must pass. It stays additive (older apps ignore new fields), as today.
+
+*(My call, not yet confirmed: on Linux and Windows the app watches and controls the sessions running on
+that same computer, which is why the engine moves to Rust. If those desktops only need to view the
+Mac's sessions, the Flutter desktop app needs no engine there and the Rust port can wait.)*
+
+Repo layout (one repo):
+
+```
+apps/macos/        Swift app: notch, menu bar, Chat (today's Sources/Notchling)
+apps/flutter/      one Flutter app: iOS, Android, then Linux and Windows (today's mobile/)
+engine/            Rust workspace: crates per job (sessions, transcripts, pty, bridge, vault,
+                   accounts) and the notchlingd binary
+engine-swift/      today's ConsoleCore + hostd, kept until the Rust engine replaces each part
+protocol/          agentconsole spec, JSON Schema, conformance fixtures
+docs/  tools/  viz/
+```
+
+The Rust port goes piece by piece behind the protocol and never as one switch: first a headless
+`notchlingd` on Linux (sessions, transcripts, bridge), which the Mac doesn't depend on; then the Mac app
+moves one piece at a time, with the Swift piece deleted once its Rust replacement passes the same
+fixtures. Vault and account code is ported last and stays a protected path in both languages.
+
+Protected paths gain: `protocol/` (a careless change breaks paired phones), and `engine/` crates for
+vault, accounts and pty.
+
 ## Phases
 
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
-   `agent-ready`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
+   `sd:queued`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
 2. Quality checks: build job, architecture lint with its fixtures, cross-model review job.
-3. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per feature folder; feature map.
-4. Turn on the worker for `agent-ready` issues in the auto-merge zone only; watch a week of sampling.
-5. Re-architecture into modules, one folder at a time, each its own PR (protected ones need the
-   maintainer).
+3. Repo layout: move into `apps/`, `engine-swift/`, `protocol/`; write the protocol spec and its
+   conformance fixtures from today's Swift and Dart code. Done before the AGENTS.md split, since folders
+   move.
+4. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per feature folder; feature map.
+5. Turn on the worker for `sd:queued` issues in the auto-merge zone only; watch a week of sampling.
+6. macOS app into Swift modules, one folder at a time (protected ones need the maintainer).
+7. Rust engine: headless `notchlingd` on Linux first, then piece by piece on the Mac.
+8. Flutter desktop builds for Linux and Windows against `notchlingd`.
 
 ## Constraints
 
