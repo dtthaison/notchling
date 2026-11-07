@@ -41,6 +41,28 @@ add() { METHODS+=("$1"); PATHS+=("$2"); BODIES+=("${3:-}"); NOTES+=("${4:-}"); }
 
 compact() { python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))'; }
 
+# Sends one planned request (method, path, JSON body or ""). A 404 on the DELETE of the classic
+# branch protection means there is none to remove, which is what this script wants, so it counts as
+# done: every re-run after the first meets it, and failing there would skip the steps after it.
+send() {
+  local method="$1" path="$2" body="${3:-}" out rc=0
+  if [ -n "$body" ]; then
+    out="$(printf '%s' "$body" | gh api -X "$method" "${path#/}" --input - 2>&1)" || rc=$?
+  else
+    out="$(gh api -X "$method" "${path#/}" 2>&1)" || rc=$?
+  fi
+  [ -z "$out" ] || printf '%s\n' "$out"
+  if [ "$rc" != 0 ] && [ "$method" = DELETE ]; then
+    case "$path" in
+      */branches/*/protection)
+        case "$out" in
+          *"HTTP 404"*) echo "  no classic branch protection (404): nothing to remove"; return 0 ;;
+        esac ;;
+    esac
+  fi
+  return "$rc"
+}
+
 # Id of the ruleset with this name (empty when none), from the "id<TAB>name" lines in $EXISTING.
 EXISTING=""
 if [ "$DRY" = 1 ]; then
@@ -101,6 +123,21 @@ for i in "${!METHODS[@]}"; do
   [ -n "${NOTES[$i]}" ] && echo "  ${NOTES[$i]}"
 done
 
+# Who may skip a ruleset, read from the files that are about to be sent.
+echo
+echo "Bypass actors these rulesets set:"
+for f in "$RULESETS"/*.json; do
+  python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+a = ", ".join("%s %s (%s)" % (x["actor_type"], x["actor_id"], x["bypass_mode"]) for x in d.get("bypass_actors") or [])
+print("  %s: %s" % (d["name"], a or "nobody"))' "$f"
+done
+echo "  main: repository admins may merge a pull request without the review (pull request mode only,"
+echo "    never a push), because the maintainer is the only code owner and can't approve his own."
+echo "  release-tags: the GitHub Actions app (15368) may create v* tags, because release.yml's"
+echo "    gh release create makes the tag with GITHUB_TOKEN. Only a workflow holding contents: write"
+echo "    can use it, and release.yml is the only one (a guard test pins that)."
+
 # 7. Not something a script can do.
 echo
 echo "Manual step: set a hard monthly spend limit at the model provider's console (a spend limit"
@@ -117,10 +154,6 @@ esac
 
 for i in "${!METHODS[@]}"; do
   echo "${METHODS[$i]} ${PATHS[$i]}"
-  if [ -n "${BODIES[$i]}" ]; then
-    printf '%s' "${BODIES[$i]}" | gh api -X "${METHODS[$i]}" "${PATHS[$i]#/}" --input -
-  else
-    gh api -X "${METHODS[$i]}" "${PATHS[$i]#/}"
-  fi
+  send "${METHODS[$i]}" "${PATHS[$i]}" "${BODIES[$i]}"
 done
 echo "Done."

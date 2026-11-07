@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 GITHUB_ACTIONS_APP = 15368
+# The maintainer can't approve his own pull request and is the only code owner, so repository admins
+# (role 5) may merge a pull request without the review. Only through a pull request, never a push.
+ADMIN_BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]
+# release.yml's `gh release create` makes the v* tag with GITHUB_TOKEN, which is the GitHub Actions app.
+# Only a workflow holding contents: write can use this (test_workflows pins that to release.yml).
+ACTIONS_BYPASS = [{"actor_id": GITHUB_ACTIONS_APP, "actor_type": "Integration", "bypass_mode": "always"}]
 CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test"]
 POSTED_STATUSES = {"maintainer-gate"}
 PULL_REQUEST = {
@@ -57,14 +63,15 @@ def _rules(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _common(name: str, data: Dict[str, Any], target: str, include: str, types: List[str],
-            problems: List[str]) -> Dict[str, Dict[str, Any]]:
+            problems: List[str], bypass: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     if data.get("target") != target:
         problems.append(f"GUARD-RULESETS: {name} must target a {target}")
     ref = (data.get("conditions") or {}).get("ref_name") or {}
     if ref.get("include") != [include]:
         problems.append(f"GUARD-RULESETS: {name} must include exactly {include}")
-    if data.get("bypass_actors") != []:
-        problems.append(f"GUARD-RULESETS: {name} bypass_actors must be empty")
+    if data.get("bypass_actors") != bypass:
+        want = json.dumps(bypass, separators=(",", ":")) if bypass else "empty"
+        problems.append(f"GUARD-RULESETS: {name} bypass_actors must be exactly {want}")
     if data.get("enforcement") != "active":
         problems.append(f"GUARD-RULESETS: {name} enforcement must be active")
     rules = _rules(data)
@@ -77,7 +84,8 @@ def _common(name: str, data: Dict[str, Any], target: str, include: str, types: L
 def _check_main(data: Dict[str, Any], problems: List[str]) -> List[str]:
     """Checks main.json; returns the required status contexts it names."""
     rules = _common("main.json", data, "branch", "~DEFAULT_BRANCH",
-                    ["deletion", "non_fast_forward", "pull_request", "required_status_checks"], problems)
+                    ["deletion", "non_fast_forward", "pull_request", "required_status_checks"], problems,
+                    ADMIN_BYPASS)
     if "pull_request" in rules:
         for key, want in PULL_REQUEST.items():
             if rules["pull_request"].get(key) != want:
@@ -101,9 +109,9 @@ def validate(rulesets_dir: Path, workflows_dir: Path) -> List[str]:
     problems: List[str] = []
     contexts = _check_main(_load(rulesets_dir, "main.json", problems), problems)
     _common("agent-branches.json", _load(rulesets_dir, "agent-branches.json", problems), "branch",
-            "refs/heads/agent/**", ["creation", "update", "deletion"], problems)
+            "refs/heads/agent/**", ["creation", "update", "deletion"], problems, [])
     _common("release-tags.json", _load(rulesets_dir, "release-tags.json", problems), "tag",
-            "refs/tags/v*", ["creation", "update", "deletion"], problems)
+            "refs/tags/v*", ["creation", "update", "deletion"], problems, ACTIONS_BYPASS)
 
     jobs: Set[str] = set()
     texts: List[str] = []

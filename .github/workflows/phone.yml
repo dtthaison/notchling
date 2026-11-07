@@ -1,11 +1,11 @@
 name: phone
 
+# No `paths:` filter: phone-analyze and phone-test are required checks on main, and a filtered
+# workflow never reports on a pull request that touches nothing under mobile/, so it would wait forever.
 on:
   pull_request:
-    paths: ["mobile/**", ".github/workflows/phone.yml"]
   push:
     branches: [main]
-    paths: ["mobile/**", ".github/workflows/phone.yml"]
 
 permissions:
   contents: read
