@@ -37,6 +37,8 @@ sudo -u notchling-agent -H git ls-remote https://github.com/OWNER/REPO.git agent
 
 The worktrees it works in are readable by `notchling-push` (the wrapper only reads them): mode 0750 on the worktree root, with `notchling-push` in a shared group, or 0755. The wrapper also reads the worktree's index and the clone's objects, so the clone's `.git` folder (which a linked worktree shares) must be readable by `notchling-push` too.
 
+The agent's clone must hold its own objects. Make it with a plain `git clone` (or `git worktree add` from such a clone), never `--shared` or `--reference`: git follows `objects/info/alternates` to any folder, so the wrapper refuses a repository that has one (or `http-alternates`), and one whose `objects` folder is a symlink.
+
 ## 2. The wrapper user
 
 macOS:
@@ -65,7 +67,7 @@ sudo chown -R root:wheel /opt/notchling && sudo chmod -R go-w /opt/notchling
 
 `push_wrapper.py` imports `preflight.py` from its own folder, and `preflight.py` finds `guard` at `../guard` from that folder, so keep the two scripts together and `/opt/notchling/agents` and `/opt/notchling/guard` side by side. Update both from a merged `main` after a change, and never from an agent branch.
 
-The wrapper needs Python 3.9 or newer, git 2.31 or newer (it uses `rev-parse --path-format`) and `openssl`, all on the `PATH` sudo gives it.
+The wrapper needs Python 3.9 or newer, git 2.31 or newer (it uses `rev-parse --path-format`) and `openssl`. It never searches the caller's `PATH`: it takes `git` and `openssl` from the first of `/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin` that has them, by absolute path, and says "not found" (exit 2) if none does. On macOS `/usr/bin/python3` and `/usr/bin/git` are Command Line Tools stubs; check that they run as `notchling-push` (`sudo -u notchling-push /usr/bin/python3 -I -c pass`). If they don't, use a root-owned Python and git in one of those folders and change the sudoers line to match.
 
 ## 3. The App key and the wrapper's config
 
@@ -82,36 +84,51 @@ sudo chmod 0600 /var/lib/notchling-push/app.pem
 
 The wrapper refuses a key that isn't a regular file (a symlink is refused too), isn't owned by the user running it, or gives group or others any access (0600 and 0400 pass).
 
-The config, `~notchling-push/.config/notchling/push-wrapper.json` (mode 0600):
+The config, `.config/notchling/push-wrapper.json` in `notchling-push`'s home (mode 0600, owned by `notchling-push`):
 
 ```json
 {"app_id": 123456, "key_path": "/var/lib/notchling-push/app.pem", "repo": "OWNER/REPO"}
 ```
 
-`key_path` is used as written (`~` isn't expanded), so give the full path. `api_url` and `remote_url` default to GitHub's (`https://api.github.com`, `https://github.com/OWNER/REPO.git`) and are there for tests. The App key is never in CI, never in a repository secret and never in the agent's home.
+`key_path` is used as written (`~` isn't expanded), so give the full path. The App key is never in CI, never in a repository secret and never in the agent's home.
 
-The wrapper reads its config from `--config`, else the file named by `NOTCHLING_PUSH_WRAPPER_CONFIG`, else `$HOME/.config/notchling/push-wrapper.json`. sudo doesn't always set `HOME` to the target user's, so sd passes `--config` (step 4).
+Where the config is read from: `--config FILE` if given, else `.config/notchling/push-wrapper.json` in the home folder the account database lists for the user running the wrapper (not `$HOME`, which sudo may leave as the caller's, and not an environment variable). The file must be a plain file (a symlink or a second hard link is refused), owned by the user running the wrapper, and writable by neither group nor others (0600, 0640 and 0644 pass, 0660 and 0666 don't). So sd can't aim `--config` at a file of its own. sd passes no `--config`.
+
+`api_url` and `remote_url` are not for production: the wrapper refuses any `api_url` but `https://api.github.com` and any `remote_url` but `https://github.com/OWNER/REPO.git` (or without `.git`), because the App's JWT and token are sent there. Leave them out. Only the wrapper's own tests set `NOTCHLING_PUSH_WRAPPER_TESTING=1` to point them at a local fake; the script scrubs its environment when it starts, so a command line can't turn that on.
 
 ## 4. The sudoers line
 
 Let sd (user `sd`; use your own account name) run the wrapper as `notchling-push`, and nothing else. `visudo -f /etc/sudoers.d/notchling-push`:
 
 ```
-sd ALL=(notchling-push) NOPASSWD: /usr/bin/python3 /opt/notchling/agents/push_wrapper.py *
+Defaults:sd env_reset, !setenv
+sd ALL=(notchling-push) NOPASSWD: /usr/bin/python3 -I /opt/notchling/agents/push_wrapper.py *
 ```
 
-sd then calls:
+`env_reset` hands the wrapper a clean environment and `!setenv` stops sd from adding variables on the command line. `-I` is Python's isolated mode (no `PYTHON*` variables, no user site folder); it is part of the line, so sd can't drop it. The script path is pinned too, and it sits in a folder neither sd nor the agent can write.
+
+sd then calls it with the body on stdin:
 
 ```sh
-sudo -u notchling-push /usr/bin/python3 /opt/notchling/agents/push_wrapper.py \
-  --config /Users/notchling-push/.config/notchling/push-wrapper.json \
+sudo -u notchling-push /usr/bin/python3 -I /opt/notchling/agents/push_wrapper.py \
   --worktree /Users/notchling-agent/work/issue-42 --issue 42 \
-  --title "Fix the thing" --body-file /tmp/body-42.md --agent-model claude-opus-5-5
+  --title "Fix the thing" --agent-model claude-opus-5-5 < "$BODY"
 ```
 
-On Linux the config is under `/home/notchling-push`. The body file must be readable by `notchling-push`.
+There is no `--config` (the default path in step 3 is used) and no body file option: a path would be opened with `notchling-push`'s rights, and an agent could swap the file at it for a link to the App key. On Linux the config is under `/home/notchling-push`.
 
-The `*` is safe only because the script checks everything it's given: the branch it reads from the worktree (`agent/<issue>-<slug>`, matching `--issue`), the title (one plain line), the model id, and the body (text, at most 60,000 bytes). It adds `Refs #<issue>` and, with `--agent-model`, an `Agent-Model:` line to the body. It prints the PR URL on exit 0; exit 1 is a refusal, exit 2 an error (including "the branch is pushed, but the pull request failed").
+What sd must do for `$BODY`: write it itself, from the agent's final message that sd captured, into a folder only sd can write (for example mode 0700 under sd's home). Never point `<` at a path inside the agent's worktree, `/tmp` or any other place the agent can write: sd's shell would follow a link there with sd's rights, and sd's own files would end up in the pull request.
+
+The `*` lets the caller pass any arguments, and sudoers can't narrow them further, so the wrapper treats every one as untrusted:
+
+- The worktree's branch (`agent/<issue>-<slug>`, matching `--issue`), a clean tree, a repository with no alternates, and no change under `.github/workflows/` (the App has no `workflows` permission; when the agent's clone has `origin/HEAD`, `origin/main`, `origin/master`, `main` or `master` to compare with, the wrapper says so and exits 1 before it mints a token; if not, GitHub refuses the push). A push the remote rejects is also exit 1, with the remote's reason.
+- The title (one plain line), the model id, and the body (UTF-8 text, at most 60,000 bytes). A body with `PRIVATE KEY-----` or the installation token is refused. `@name` mentions and `closes/fixes/resolves #N` references to other issues are broken with a zero-width joiner, except a reference to the PR's own issue. The wrapper appends `Refs #<issue>` and, with `--agent-model`, an `Agent-Model:` line.
+- Which `git` and `openssl` run (fixed folders, absolute paths), the working directory (its own scratch folder), the environment (rebuilt), the config file (owned by `notchling-push`) and the URLs (GitHub's), as described above.
+- The installation token is revoked when the wrapper is done, best effort, so a leaked one is not good for an hour.
+
+What this does not stop: anything running as `sd` can still ask the wrapper to push a clean `agent/<n>-<slug>` branch from any repository `notchling-push` can read, and to open a PR for it. The rulesets (only the App writes `agent/**`, `main` takes no direct pushes) and the maintainer's merge decide what that is worth. It also cannot tell whether a title or body is honest, only make it inert.
+
+It prints the PR URL on exit 0; exit 1 is a refusal, exit 2 an error (including "the branch is pushed, but the pull request failed").
 
 ## 5. The pre-start check
 
@@ -135,6 +152,7 @@ The agent's builds and tests may reach package registries and nothing else. On t
 2. As `notchling-agent`, make a branch `agent/<issue>-test` with one commit in a scratch clone. Try `git push`: it must fail.
 3. Run the wrapper on it: a PR opens, authored by the App, and `agent/<issue>-test` exists on GitHub. Once the rulesets are applied, this needs the App in the `agent-branches` ruleset's bypass list.
 4. Run the wrapper on a branch called `main`, then on one with uncommitted files: both refuse with exit 1 before any network call.
+   Then on a branch that adds `.github/workflows/x.yml`: exit 1, naming the missing `workflows` permission, with no token minted. And with a body that holds `-----BEGIN PRIVATE KEY-----`: exit 1, nothing sent.
 5. `ps auxww | grep -E 'ghs_|x-access-token'` while a push runs: nothing. The token is in no argument list; it reaches git only through the environment of the one `git push` (`GIT_CONFIG_*`).
 
 ## 8. What changes in Machines later
