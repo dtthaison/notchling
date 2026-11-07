@@ -142,8 +142,21 @@ the Mac included.** The Swift app is replaced, not kept beside it.
   transcripts, hosts terminals, keeps the vault and logins, serves the protocol to the phone. Same code on
   macOS, Linux and Windows (`portable-pty`, `keyring`, `notify`, `tokio`/`rustls`, `sysinfo`,
   `keepawake`).
-- **Desktop app**: one GPUI app for macOS, Linux and Windows, in the same Cargo workspace as the engine,
-  calling it directly (no bridge). Platform pieces live behind small traits with one implementation per
+- **The engine is a background service on every computer** *(maintainer's decision)*. `notchlingd`
+  runs always (LaunchAgent on macOS, systemd user service on Linux, a startup task on Windows) and owns
+  everything that acts or lives long: terminals and replies, session control, the phone bridge, the
+  vault, accounts and lanes, limit watching, keep awake. The desktop app, the phone, the hook and the
+  command line are all its clients. So the phone and running terminals survive the app quitting,
+  updating or crashing (which matters while the GPUI app is young), and a server runs the same binary as
+  a laptop. It absorbs today's hostd.
+- **How the desktop app talks to it**: a local API over a Unix socket (a named pipe on Windows), only
+  for this user (peer check, as the vault socket does today), with the same Rust types on both ends.
+  It is richer than the phone protocol (accounts, vault, Machines, settings) and versioned the same way.
+  For speed, the app reads transcripts and session files itself with the engine library, read-only; it
+  never writes or acts except through `notchlingd`. *(My call: read-only direct, everything else over the
+  socket.)* If `notchlingd` isn't running, the app starts it and says so.
+- **Desktop app**: one GPUI app for macOS, Linux and Windows, in the same Cargo workspace as the engine.
+  Platform pieces live behind small traits with one implementation per
   OS: the notch overlay and menu bar on macOS (through `objc2`), a tray and a top-of-screen panel on Linux
   and Windows *(my call: no notch there, so the notch views become a small always-on-top panel)*.
 - **Phone app**: stays Flutter (GPUI has no iOS or Android). It keeps speaking the protocol to
@@ -177,7 +190,8 @@ Repo layout (one repo, one Cargo workspace):
 
 ```
 crates/engine/      sessions, transcripts, accounts, lanes, vault, pty, bridge (library)
-crates/notchlingd/  the headless engine binary (Linux servers, phone bridge)
+crates/notchlingd/  the engine service, on every computer (absorbs hostd)
+crates/local-api/   the app ↔ notchlingd API types and client
 crates/app/         the GPUI desktop app (macOS, Linux, Windows)
 crates/platform/    per-OS pieces: notch and menu bar (macOS), tray and panel (Linux, Windows)
 crates/kit/         our widget layer over GPUI (today's ChatKit)
@@ -221,7 +235,8 @@ today's Swift lines. "Protected" parts wait for the maintainer.
 | E13 | Installing into other tools | Our hooks in `~/.claude/settings.json` (backup, others' hooks kept), skills for Claude Code, Codex and Antigravity | ~1k | yes |
 | E14 | Settings and data | One settings store for all OSes, moving today's UserDefaults (and the old Awake keys), data folders per OS, the AgentConsole folder kept so paired phones survive | ~0.5k | yes |
 | E15 | Phone extras | Visualize tab (`viz/`), photos from the phone, web snapshots, screen and window streaming | ~2k | |
-| E16 | Command line and services | One binary with all its modes (`--hook`, `--page`, `--secret`, `--delegate`); hostd as LaunchAgent, systemd user service or Windows startup task; installers and updates | ~1k | yes |
+| E16 | Command line and services | One binary with all its modes (`--hook`, `--page`, `--secret`, `--delegate`), as clients of `notchlingd`; `notchlingd` as LaunchAgent, systemd user service or Windows startup task (absorbs hostd); installers and updates | ~1k | yes |
+| E17 | Local API | The app ↔ `notchlingd` socket: per-user peer check, versioned messages, events streamed to the app, starting the service when it isn't running | new | yes |
 
 ### Desktop app (GPUI)
 
@@ -278,9 +293,11 @@ or Cloudflare setup.
 ### Milestones (each one a usable app)
 
 1. **Read-only viewer**: E1, E2, E12, E14, U0, U10, Chat read-only. Lists sessions and shows
-   conversations on Mac, Linux and Windows; only reads files. Agents can take most of it.
-2. **Reply**: E3, E4, E11, U2, U7, U8. Answer and drive sessions. Maintainer reviews.
-3. **Phone**: E5, E15, E16's hostd service, U6, P2. `notchlingd` serves the phone; the Swift bridge is
+   conversations on Mac, Linux and Windows; only reads files, through the engine library, so no service
+   is needed yet. Agents can take most of it.
+2. **Reply**: E3, E4, E11, E16's service, E17, U2, U7, U8. `notchlingd` runs as a service; answer and
+   drive sessions through it. Maintainer reviews.
+3. **Phone**: E5, E15, U6, P2. `notchlingd` serves the phone; the Swift bridge is
    switched off. Maintainer reviews.
 4. **The rest that's safe**: E6, E7, U3, U4. Agents can take most of it.
 5. **Logins and secrets**: E8, E9, E10, E13, U5, U9, U11. Then the Swift app is retired. Maintainer
