@@ -1,0 +1,2486 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notchling.dev/protocol/agentconsole.v1.schema.json",
+  "title": "agentconsole.v1",
+  "version": "agentconsole.v1",
+  "description": "The bridge protocol between the Mac and the phone: JSON text frames over a WebSocket. A request is {id, op, ...}; the answer is {id, ok: true, data} or {id, ok: false, error}; the Mac also pushes {event, ...}. Binary frames (PHN1, IMG1, WEB1) are described in protocol/README.md. Additive only: every object allows extra fields, and a new field is optional.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    },
+    {
+      "$ref": "#/$defs/ErrorResponse"
+    }
+  ],
+  "$defs": {
+    "Id": {
+      "description": "The request id. The phone sends an integer; the Mac echoes whatever it got, so a string works too. A reply without an id answers a frame the Mac could not read.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "ErrorCode": {
+      "type": "string",
+      "description": "Why the Mac refused a request.",
+      "enum": [
+        "unauthorized",
+        "not_found",
+        "view_only",
+        "invalid",
+        "busy",
+        "not_reachable",
+        "internal"
+      ]
+    },
+    "SessionState": {
+      "type": "string",
+      "description": "What the session is doing.",
+      "enum": [
+        "needsInput",
+        "running",
+        "done",
+        "exited"
+      ]
+    },
+    "SessionControl": {
+      "type": "string",
+      "description": "How the Mac can reach a session: its own pty (console), a background job (job), or not at all (viewOnly).",
+      "enum": [
+        "console",
+        "job",
+        "viewOnly"
+      ]
+    },
+    "ChatRole": {
+      "type": "string",
+      "description": "Who wrote a chat message. Tool calls of one step arrive as one tools message.",
+      "enum": [
+        "user",
+        "assistant",
+        "tools"
+      ]
+    },
+    "ChatKind": {
+      "type": "string",
+      "description": "A `!` shell command (text is the command, output what it printed) or the notice that the conversation was compacted. Absent for a normal message.",
+      "enum": [
+        "shell",
+        "compaction"
+      ]
+    },
+    "PromptKind": {
+      "type": "string",
+      "description": "A permission (allow or deny) or a question with options.",
+      "enum": [
+        "permission",
+        "question"
+      ]
+    },
+    "SubagentState": {
+      "type": "string",
+      "description": "Whether the subagent is still working.",
+      "enum": [
+        "running",
+        "done"
+      ]
+    },
+    "ImageOrigin": {
+      "type": "string",
+      "description": "Where a chat picture came from.",
+      "enum": [
+        "user",
+        "toolResult",
+        "file"
+      ]
+    },
+    "VizKind": {
+      "type": "string",
+      "description": "Which tab of the viz bundle a spec fills.",
+      "enum": [
+        "flow",
+        "diagram",
+        "entity",
+        "chart"
+      ]
+    },
+    "Subagent": {
+      "type": "object",
+      "description": "A subagent a session started.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "The agent type, for example Explore."
+        },
+        "description": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "description": "1 for a subagent of the session, 2 for one of its subagents."
+        },
+        "finished": {
+          "type": "boolean",
+          "default": false
+        },
+        "state": {
+          "$ref": "#/$defs/SubagentState"
+        },
+        "lastActivity": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "description",
+        "model",
+        "depth",
+        "state",
+        "lastActivity"
+      ],
+      "additionalProperties": true
+    },
+    "PromptQuestion": {
+      "type": "object",
+      "description": "One question of an AskUserQuestion prompt.",
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "multiSelect": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "header",
+        "question",
+        "options",
+        "multiSelect"
+      ],
+      "additionalProperties": true
+    },
+    "Prompt": {
+      "type": "object",
+      "description": "A question or permission a hook on the Mac is waiting on.",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PromptKind"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PromptQuestion"
+          },
+          "description": "Empty for a permission."
+        },
+        "created": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        }
+      },
+      "required": [
+        "requestId",
+        "sessionId",
+        "kind",
+        "toolName",
+        "summary",
+        "questions",
+        "created"
+      ],
+      "additionalProperties": true
+    },
+    "Takeover": {
+      "type": "object",
+      "description": "Whether the Mac can take a view-only session over. Only on view-only sessions.",
+      "properties": {
+        "available": {
+          "type": "boolean",
+          "description": "Can be resumed right now."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why not, when it can't."
+        },
+        "stoppable": {
+          "type": "boolean",
+          "description": "The original is still running but the Mac can stop it (session.takeover with stopOriginal) and resume.",
+          "default": false
+        },
+        "busy": {
+          "type": "boolean",
+          "description": "The original is mid-turn: stopping it interrupts the turn.",
+          "default": false
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "additionalProperties": true
+    },
+    "LastMessage": {
+      "type": "object",
+      "description": "A cheap marker of Claude's newest reply. A new id means a new reply.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "The first lines of the reply."
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "additionalProperties": true
+    },
+    "Limit": {
+      "type": "object",
+      "description": "One limit of the account a session runs on, as a percentage used.",
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "For example 5h or Week."
+        },
+        "percent": {
+          "type": "number"
+        },
+        "resetsAt": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        }
+      },
+      "required": [
+        "label",
+        "percent"
+      ],
+      "additionalProperties": true
+    },
+    "Facts": {
+      "type": "object",
+      "description": "What the chat header shows: the context in use, the model's window and the account's limits.",
+      "properties": {
+        "contextTokens": {
+          "type": "integer"
+        },
+        "contextWindow": {
+          "type": "integer",
+          "description": "Absent when the window is unknown."
+        },
+        "model": {
+          "type": "string"
+        },
+        "limits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Limit"
+          }
+        }
+      },
+      "required": [
+        "limits"
+      ],
+      "additionalProperties": true
+    },
+    "Session": {
+      "type": "object",
+      "description": "One session the Mac knows about.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string",
+          "description": "Last path component of cwd."
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "entrypoint": {
+          "type": "string",
+          "description": "cli, desktop, job, sdk, or the raw entrypoint the session reported."
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "control": {
+          "$ref": "#/$defs/SessionControl"
+        },
+        "statusUpdatedAt": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        },
+        "startedAt": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        },
+        "lastActivity": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        },
+        "subagents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Subagent"
+          },
+          "default": []
+        },
+        "pending": {
+          "$ref": "#/$defs/Prompt"
+        },
+        "takeover": {
+          "$ref": "#/$defs/Takeover"
+        },
+        "activity": {
+          "type": "string",
+          "description": "What a working session is doing, for example Editing main.swift."
+        },
+        "facts": {
+          "$ref": "#/$defs/Facts"
+        },
+        "lastMessage": {
+          "$ref": "#/$defs/LastMessage"
+        },
+        "tool": {
+          "type": "string",
+          "description": "claude, codex or agy. Additive: an older Mac sends none, an older phone ignores it.",
+          "default": "claude"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "project",
+        "cwd",
+        "entrypoint",
+        "state",
+        "control",
+        "statusUpdatedAt",
+        "startedAt",
+        "lastActivity"
+      ],
+      "additionalProperties": true
+    },
+    "Image": {
+      "type": "object",
+      "description": "A picture a chat message refers to. Only this description travels in the chat; the bytes come from chat.image.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "origin": {
+          "$ref": "#/$defs/ImageOrigin"
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "Size of the original.",
+          "default": 0
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "origin"
+      ],
+      "additionalProperties": true
+    },
+    "ToolStep": {
+      "type": "object",
+      "description": "One tool call inside a tools message.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "One string per row: \"+added\", \"-removed\", \" context\". Absent when there is no diff."
+        }
+      },
+      "required": [
+        "name",
+        "summary"
+      ],
+      "additionalProperties": true
+    },
+    "ChatMessage": {
+      "type": "object",
+      "description": "One message of a conversation.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ChatRole"
+        },
+        "text": {
+          "type": "string"
+        },
+        "time": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        },
+        "toolSummary": {
+          "type": "string",
+          "description": "On tools messages: for example Read 2 files, ran 1 shell command."
+        },
+        "queued": {
+          "type": "boolean",
+          "description": "Sent while the agent was working and not yet taken by it.",
+          "default": false
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Image"
+          },
+          "default": []
+        },
+        "kind": {
+          "$ref": "#/$defs/ChatKind"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolStep"
+          },
+          "description": "On tools messages: the calls with input, output and diff. Absent when there are none."
+        },
+        "output": {
+          "type": "string",
+          "description": "On shell messages: what the command printed."
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "text",
+        "time"
+      ],
+      "additionalProperties": true
+    },
+    "Command": {
+      "type": "object",
+      "description": "A slash command a session can run.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Without the leading slash."
+        },
+        "description": {
+          "type": "string"
+        },
+        "argumentHint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "additionalProperties": true
+    },
+    "VizMessage": {
+      "type": "object",
+      "description": "An empty-state message.",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": true
+    },
+    "VizFailure": {
+      "type": "object",
+      "description": "Why a spec could not be built.",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "message"
+      ],
+      "additionalProperties": true
+    },
+    "FlowCall": {
+      "type": "object",
+      "description": "One tool call in a flow.",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "subagent": {
+          "type": "boolean"
+        },
+        "edit": {
+          "type": "boolean"
+        },
+        "time": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        }
+      },
+      "required": [
+        "tool",
+        "target",
+        "subagent",
+        "edit"
+      ],
+      "additionalProperties": true
+    },
+    "FlowTurn": {
+      "type": "object",
+      "description": "One user turn with its calls.",
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowCall"
+          }
+        }
+      },
+      "required": [
+        "index",
+        "prompt",
+        "calls"
+      ],
+      "additionalProperties": true
+    },
+    "FlowFile": {
+      "type": "object",
+      "description": "A file the session touched.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "count"
+      ],
+      "additionalProperties": true
+    },
+    "FlowSpec": {
+      "type": "object",
+      "description": "The flow tab: what the session did.",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "diffStat": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowFile"
+          }
+        },
+        "turns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowTurn"
+          }
+        },
+        "totalCalls": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "files",
+        "turns",
+        "totalCalls"
+      ],
+      "additionalProperties": true
+    },
+    "DiagramBlock": {
+      "type": "object",
+      "description": "A diagram the conversation produced.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "description": "Mermaid source."
+        },
+        "origin": {
+          "type": "string"
+        },
+        "time": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "source",
+        "origin"
+      ],
+      "additionalProperties": true
+    },
+    "DiagramSpec": {
+      "type": "object",
+      "description": "The diagram tab.",
+      "properties": {
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiagramBlock"
+          },
+          "description": "Newest first."
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "additionalProperties": true
+    },
+    "EntityFile": {
+      "type": "object",
+      "description": "A schema file.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "tables": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "tables"
+      ],
+      "additionalProperties": true
+    },
+    "EntityTable": {
+      "type": "object",
+      "description": "A table of the entity diagram.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifier as drawn in the diagram."
+        },
+        "name": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "columns"
+      ],
+      "additionalProperties": true
+    },
+    "EntityLink": {
+      "type": "object",
+      "description": "A relation between tables, in the order of the diagram's lines.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "inferred": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "inferred"
+      ],
+      "additionalProperties": true
+    },
+    "EntitySpec": {
+      "type": "object",
+      "description": "The entity tab: a database schema as a Mermaid ER diagram.",
+      "properties": {
+        "mermaid": {
+          "type": "string"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EntityTable"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EntityLink"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EntityFile"
+          }
+        },
+        "tableCount": {
+          "type": "integer"
+        },
+        "relationCount": {
+          "type": "integer"
+        },
+        "inferredCount": {
+          "type": "integer"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "mermaid",
+        "tables",
+        "links",
+        "files",
+        "tableCount",
+        "relationCount",
+        "inferredCount",
+        "warnings"
+      ],
+      "additionalProperties": true
+    },
+    "UsagePoint": {
+      "type": "object",
+      "description": "Token use at one moment.",
+      "properties": {
+        "time": {
+          "type": "number",
+          "description": "Milliseconds since 1970-01-01 UTC."
+        },
+        "input": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "cacheCreation": {
+          "type": "integer"
+        },
+        "cacheRead": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "time",
+        "input",
+        "output",
+        "cacheCreation",
+        "cacheRead"
+      ],
+      "additionalProperties": true
+    },
+    "UsageTotals": {
+      "type": "object",
+      "description": "Token use over the session.",
+      "properties": {
+        "input": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "cacheCreation": {
+          "type": "integer"
+        },
+        "cacheRead": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cacheCreation",
+        "cacheRead"
+      ],
+      "additionalProperties": true
+    },
+    "ChartCount": {
+      "type": "object",
+      "description": "How often a tool ran.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "count"
+      ],
+      "additionalProperties": true
+    },
+    "ModelCount": {
+      "type": "object",
+      "description": "How many requests a model served.",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "count"
+      ],
+      "additionalProperties": true
+    },
+    "ChartSpec": {
+      "type": "object",
+      "description": "The chart tab.",
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsagePoint"
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/UsageTotals"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChartCount"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelCount"
+          }
+        }
+      },
+      "required": [
+        "tokens",
+        "totals",
+        "tools",
+        "models"
+      ],
+      "additionalProperties": true
+    },
+    "VizSpec": {
+      "type": "object",
+      "description": "What the shared viz bundle renders for one tab. Only the field named by kind is filled, unless empty or error says why not.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/VizKind"
+        },
+        "empty": {
+          "$ref": "#/$defs/VizMessage"
+        },
+        "error": {
+          "$ref": "#/$defs/VizFailure"
+        },
+        "flow": {
+          "$ref": "#/$defs/FlowSpec"
+        },
+        "diagram": {
+          "$ref": "#/$defs/DiagramSpec"
+        },
+        "entity": {
+          "$ref": "#/$defs/EntitySpec"
+        },
+        "chart": {
+          "$ref": "#/$defs/ChartSpec"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": true
+    },
+    "HelloRequest": {
+      "type": "object",
+      "description": "First message on a connection from a paired phone.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "hello"
+        },
+        "token": {
+          "type": "string",
+          "description": "The device token pair returned."
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": true
+    },
+    "PairRequest": {
+      "type": "object",
+      "description": "First message from a phone that is pairing with the one-time code; the Mac shows its approval sheet.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "pair"
+        },
+        "code": {
+          "type": "string",
+          "description": "The 8-character one-time code."
+        },
+        "device": {
+          "type": "object",
+          "description": "The phone.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "description": "ios, android; defaults to unknown."
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "op",
+        "code",
+        "device"
+      ],
+      "additionalProperties": true
+    },
+    "PingRequest": {
+      "type": "object",
+      "description": "Keep-alive; answered with the Mac's clock.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "ping"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "SessionsListRequest": {
+      "type": "object",
+      "description": "All sessions.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "sessions.list"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "ChatGetRequest": {
+      "type": "object",
+      "description": "One page of a conversation: the newest limit messages, or the ones before or after a message.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "chat.get"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "subagentId": {
+          "type": "string",
+          "description": "Read a subagent's conversation instead."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "1 to 200, default 50."
+        },
+        "before": {
+          "type": "string",
+          "description": "Id of the oldest message the phone has."
+        },
+        "after": {
+          "type": "string",
+          "description": "Id of the newest message the phone has."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "VizGetRequest": {
+      "type": "object",
+      "description": "The viz specs of a session.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "viz.get"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "entity": {
+          "type": "boolean",
+          "description": "Also build the entity spec."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "WebSnapshotRequest": {
+      "type": "object",
+      "description": "A JPEG of a localhost page. The Mac answers with JSON, then a binary WEB1 frame.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "web.snapshot"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "width": {
+          "type": "integer",
+          "description": "100 to 1200, default 400."
+        },
+        "url": {
+          "type": "string",
+          "description": "An http(s) URL on localhost or 127.0.0.1; absent: the session's own web URL."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "SessionMessageRequest": {
+      "type": "object",
+      "description": "Types a message into a session.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.message"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "text": {
+          "type": "string",
+          "description": "1 to 20000 characters."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId",
+        "text"
+      ],
+      "additionalProperties": true
+    },
+    "SessionSendNowRequest": {
+      "type": "object",
+      "description": "Interrupts the running turn so the queued message runs next.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.sendNow"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "SessionImageBeginRequest": {
+      "type": "object",
+      "description": "Starts a photo upload.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.image.begin"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "Size of the photo, at most 6 MiB."
+        },
+        "caption": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "sessionId",
+        "bytes"
+      ],
+      "additionalProperties": true
+    },
+    "SessionImageChunkRequest": {
+      "type": "object",
+      "description": "One piece of a photo, in order.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.image.chunk"
+        },
+        "uploadId": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "0, 1, 2, ..."
+        },
+        "data": {
+          "type": "string",
+          "description": "Base64 of at most 96 KiB."
+        }
+      },
+      "required": [
+        "op",
+        "uploadId",
+        "seq",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionImageEndRequest": {
+      "type": "object",
+      "description": "Finishes a photo upload; its path goes to the session with the caption.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.image.end"
+        },
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "uploadId"
+      ],
+      "additionalProperties": true
+    },
+    "CommandsListRequest": {
+      "type": "object",
+      "description": "The slash commands of a session.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "commands.list"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "PromptAnswerRequest": {
+      "type": "object",
+      "description": "Answers a permission (allow) or a question (choice or text).",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "prompt.answer"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "allow": {
+          "type": "boolean",
+          "description": "For a permission."
+        },
+        "choice": {
+          "description": "For a question: a 1-based option number or an option label; an array with one entry per question.",
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "description": "A free-text answer to a single question, at most 500 characters."
+        }
+      },
+      "required": [
+        "op",
+        "requestId"
+      ],
+      "additionalProperties": true
+    },
+    "SessionNewRequest": {
+      "type": "object",
+      "description": "Starts a Claude Code session in a folder inside the Mac's home.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.new"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "An absolute path."
+        },
+        "model": {
+          "type": "string",
+          "description": "default, opus, sonnet or haiku.",
+          "enum": [
+            "default",
+            "opus",
+            "sonnet",
+            "haiku"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "cwd"
+      ],
+      "additionalProperties": true
+    },
+    "ChatImageRequest": {
+      "type": "object",
+      "description": "A JPEG of a picture in the chat. The Mac answers with JSON, then a binary IMG1 frame.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "chat.image"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "imageId": {
+          "type": "string"
+        },
+        "maxWidth": {
+          "type": "integer",
+          "description": "64 to 1600, default 800."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId",
+        "imageId"
+      ],
+      "additionalProperties": true
+    },
+    "SessionTakeoverRequest": {
+      "type": "object",
+      "description": "Resumes a view-only session in a terminal the Mac owns.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "session.takeover"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The session's id."
+        },
+        "stopOriginal": {
+          "type": "boolean",
+          "description": "Stop the original claude process first."
+        }
+      },
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "additionalProperties": true
+    },
+    "ProjectsRecentRequest": {
+      "type": "object",
+      "description": "Folders sessions ran in recently.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "projects.recent"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "SubscribeRequest": {
+      "type": "object",
+      "description": "Replaces what the Mac pushes to this connection.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "subscribe"
+        },
+        "sessions": {
+          "type": "boolean",
+          "description": "Push the session list and prompts."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Push new chat messages of this session."
+        },
+        "subagentId": {
+          "type": "string"
+        },
+        "lastMessageId": {
+          "type": "string",
+          "description": "The newest message the phone already has, so the ones after it are pushed."
+        },
+        "phone": {
+          "type": "object",
+          "description": "Stream the Mac's device window as PHN1 frames.",
+          "properties": {
+            "deviceWindowId": {
+              "type": "integer"
+            },
+            "fps": {
+              "type": "integer",
+              "description": "1 to 15, default 10."
+            },
+            "width": {
+              "type": "integer",
+              "description": "100 to 600, default 400."
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "UnsubscribeRequest": {
+      "type": "object",
+      "description": "Stops every push.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "unsubscribe"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "HelloResponse": {
+      "type": "object",
+      "description": "The connection is authenticated.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "device": {
+              "type": "object",
+              "description": "The paired phone.",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "additionalProperties": true
+            },
+            "version": {
+              "type": "integer",
+              "description": "The bridge wire version, 1."
+            }
+          },
+          "required": [
+            "device",
+            "version"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "PairResponse": {
+      "type": "object",
+      "description": "Paired: the token is shown once.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "token",
+            "deviceId",
+            "version"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "PingResponse": {
+      "type": "object",
+      "description": "The Mac's clock.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "time": {
+              "type": "integer",
+              "description": "Milliseconds since 1970."
+            }
+          },
+          "required": [
+            "time"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionsListResponse": {
+      "type": "object",
+      "description": "All sessions.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Session"
+              }
+            }
+          },
+          "required": [
+            "sessions"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "ChatGetResponse": {
+      "type": "object",
+      "description": "A page of messages, oldest first.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChatMessage"
+              }
+            },
+            "hasMore": {
+              "type": "boolean",
+              "description": "There are older messages (before) or newer ones (after)."
+            },
+            "reset": {
+              "type": "boolean",
+              "description": "The after message is gone; replace what the phone has with this page."
+            }
+          },
+          "required": [
+            "messages",
+            "hasMore"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "VizGetResponse": {
+      "type": "object",
+      "description": "The viz specs.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "suggested": {
+              "type": "string",
+              "description": "The tab to open first: flow, diagram, entity, chart or web."
+            },
+            "webURL": {
+              "type": "string"
+            },
+            "webCandidates": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "flow": {
+              "$ref": "#/$defs/VizSpec"
+            },
+            "diagram": {
+              "$ref": "#/$defs/VizSpec"
+            },
+            "chart": {
+              "$ref": "#/$defs/VizSpec"
+            },
+            "entity": {
+              "$ref": "#/$defs/VizSpec"
+            }
+          },
+          "required": [
+            "suggested"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "WebSnapshotResponse": {
+      "type": "object",
+      "description": "A WEB1 binary frame follows with the same request id; then a second answer, SentResponse.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "binary": {
+              "type": "boolean",
+              "const": true
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "format": {
+              "type": "string",
+              "const": "jpeg"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "binary",
+            "bytes",
+            "format",
+            "url"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "ChatImageResponse": {
+      "type": "object",
+      "description": "An IMG1 binary frame follows with the same request id; then a second answer, SentResponse.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "binary": {
+              "type": "boolean",
+              "const": true
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "format": {
+              "type": "string",
+              "const": "jpeg"
+            },
+            "imageId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "binary",
+            "bytes",
+            "format",
+            "imageId"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SentResponse": {
+      "type": "object",
+      "description": "Done.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "sent": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "sent"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionMessageResponse": {
+      "description": "Done.",
+      "$ref": "#/$defs/SentResponse"
+    },
+    "SessionSendNowResponse": {
+      "description": "Done.",
+      "$ref": "#/$defs/SentResponse"
+    },
+    "SessionImageEndResponse": {
+      "description": "Done.",
+      "$ref": "#/$defs/SentResponse"
+    },
+    "SessionImageBeginResponse": {
+      "type": "object",
+      "description": "The upload id and the piece size to use.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "uploadId": {
+              "type": "string"
+            },
+            "chunkBytes": {
+              "type": "integer",
+              "description": "Send pieces of at most this many bytes."
+            }
+          },
+          "required": [
+            "uploadId",
+            "chunkBytes"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionImageChunkResponse": {
+      "type": "object",
+      "description": "The piece was stored.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "received": {
+              "type": "integer",
+              "description": "The sequence number."
+            }
+          },
+          "required": [
+            "received"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "CommandsListResponse": {
+      "type": "object",
+      "description": "The slash commands.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Command"
+              }
+            }
+          },
+          "required": [
+            "commands"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "PromptAnswerResponse": {
+      "type": "object",
+      "description": "The prompt was answered.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "answered": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "answered"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionNewResponse": {
+      "type": "object",
+      "description": "The session is starting.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "started": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "started"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SessionTakeoverResponse": {
+      "type": "object",
+      "description": "The session to switch to.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "The new session's id; a pty: id while it is still starting."
+            },
+            "resumed": {
+              "type": "boolean",
+              "const": true
+            },
+            "stoppedPid": {
+              "type": "integer",
+              "description": "The pid of the original claude process that was stopped."
+            }
+          },
+          "required": [
+            "sessionId",
+            "resumed"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "ProjectsRecentResponse": {
+      "type": "object",
+      "description": "Recent folders.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "projects"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "SubscribeResponse": {
+      "type": "object",
+      "description": "Subscribed.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "subscribed": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "subscribed"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "UnsubscribeResponse": {
+      "type": "object",
+      "description": "Unsubscribed.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "subscribed": {
+              "type": "boolean",
+              "const": false
+            }
+          },
+          "required": [
+            "subscribed"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "description": "The Mac refused a request, or could not read the frame (then there is no id).",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "description": "What went wrong.",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "description": "Text for the person; the Mac writes Vietnamese."
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "additionalProperties": true
+    },
+    "SessionsEvent": {
+      "type": "object",
+      "description": "The session list changed (also sent once on subscribe).",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "sessions"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          }
+        }
+      },
+      "required": [
+        "event",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "PromptEvent": {
+      "type": "object",
+      "description": "A new question or permission.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "prompt"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "prompt": {
+          "$ref": "#/$defs/Prompt"
+        }
+      },
+      "required": [
+        "event",
+        "sessionId",
+        "prompt"
+      ],
+      "additionalProperties": true
+    },
+    "PromptResolvedEvent": {
+      "type": "object",
+      "description": "A prompt was answered elsewhere or timed out.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "prompt"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "resolved": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "event",
+        "requestId",
+        "resolved"
+      ],
+      "additionalProperties": true
+    },
+    "ChatEvent": {
+      "type": "object",
+      "description": "New messages in the subscribed session.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "chat"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChatMessage"
+          }
+        }
+      },
+      "required": [
+        "event",
+        "sessionId",
+        "messages"
+      ],
+      "additionalProperties": true
+    },
+    "OpenEvent": {
+      "type": "object",
+      "description": "The person chose Open on the Mac: the phone should come to the front.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "open"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "additionalProperties": true
+    },
+    "Request": {
+      "description": "A frame the phone sends; the op says which.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloRequest"
+        },
+        {
+          "$ref": "#/$defs/PairRequest"
+        },
+        {
+          "$ref": "#/$defs/PingRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionsListRequest"
+        },
+        {
+          "$ref": "#/$defs/ChatGetRequest"
+        },
+        {
+          "$ref": "#/$defs/VizGetRequest"
+        },
+        {
+          "$ref": "#/$defs/WebSnapshotRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionMessageRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionSendNowRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionImageBeginRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionImageChunkRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionImageEndRequest"
+        },
+        {
+          "$ref": "#/$defs/CommandsListRequest"
+        },
+        {
+          "$ref": "#/$defs/PromptAnswerRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionNewRequest"
+        },
+        {
+          "$ref": "#/$defs/ChatImageRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionTakeoverRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectsRecentRequest"
+        },
+        {
+          "$ref": "#/$defs/SubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/UnsubscribeRequest"
+        }
+      ]
+    },
+    "Event": {
+      "description": "A frame the Mac pushes without being asked; the event says which.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SessionsEvent"
+        },
+        {
+          "$ref": "#/$defs/PromptEvent"
+        },
+        {
+          "$ref": "#/$defs/PromptResolvedEvent"
+        },
+        {
+          "$ref": "#/$defs/ChatEvent"
+        },
+        {
+          "$ref": "#/$defs/OpenEvent"
+        }
+      ]
+    }
+  }
+}
