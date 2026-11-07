@@ -31,7 +31,7 @@ jobs:
 
 
 def fixtures():
-    """A copy of the real rulesets, with phone.yml's jobs and a stub for the guard, build and gate ones.
+    """A copy of the real rulesets, with phone.yml's and rust.yml's jobs and a stub for the guard, build and gate ones.
 
     The stub keeps these tests independent of the other workflows being edited."""
     tmp = Path(tempfile.mkdtemp())
@@ -39,6 +39,7 @@ def fixtures():
     shutil.copytree(REAL_RULESETS, rs)
     wf.mkdir()
     shutil.copy(REAL_WORKFLOWS / "phone.yml", wf / "phone.yml")
+    shutil.copy(REAL_WORKFLOWS / "rust.yml", wf / "rust.yml")
     (wf / "stub.yml").write_text(STUB)
     return rs, wf
 
