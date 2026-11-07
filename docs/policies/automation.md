@@ -14,7 +14,8 @@ What exists and runs now:
 
 - **The `guard` workflow** (`.github/workflows/guard.yml`), on every pull request and push to `main`:
   the guard's own tests, the tests of the agents' scripts (`tools/agents/tests/`, against local fakes
-  only), the architecture lint against its baseline, pinned actions, CODEOWNERS
+  only), the tests of the release tools (`tools/release/tests/`, temp files only), the architecture
+  lint against its baseline, pinned actions, CODEOWNERS
   generated from the zones, the rulesets' validity, the rules catalog, and the generated protocol
   types matching the schema (`GUARD-PROTOCOL-GEN`). It has no secrets.
 - **The `rust` workflow** (`.github/workflows/rust.yml`), on every pull request and push to `main`:
@@ -33,11 +34,12 @@ What exists and runs now:
   applied yet.** The maintainer runs the script; it prints every request and asks before sending any.
 - **Dependabot** (`.github/dependabot.yml`): weekly, after a 7-day cooldown. Nothing merges itself.
 
-Built but off: triage, the review agent, the worker's pre-start check and the push wrapper.
-[Phase 5 so far](#phase-5-so-far) says why each is off and what turns it on.
+Built but off: triage, the review agent, the worker's pre-start check and the push wrapper
+([Phase 5 so far](#phase-5-so-far)), and the release pipeline with its kill switch
+([Releases so far](#releases-so-far)). Each section says why its parts are off and what turns them on.
 
 What doesn't exist yet: the agent GitHub App, the worker for queued issues, auto-merge, anything that
-reads `AGENT_DAILY_RUN_CAP`, the 3-day pause and the kill switch. Until Phase 5 turns them on, an agent may
+reads `AGENT_DAILY_RUN_CAP` and the 3-day pause. Until Phase 5 turns them on, an agent may
 open a pull request but may not merge one. The maintainer merges.
 
 ## Phase 5 so far
@@ -107,6 +109,166 @@ The maintainer, in this order:
 Making `review-agent` a required check is a later decision of the maintainer's. It means adding it to
 `.github/rulesets/main.json` and changing the test that keeps it out
 (`tools/agents/tests/test_review_workflows.py`).
+
+## Releases so far
+
+Phase 6's release pipeline is built and tested without a signing identity, and it is **off**. Every
+job in `beta.yml` and `promote.yml` stops at its first step unless the repository variable
+`NOTCHLING_RELEASES` is exactly `on`; a missing variable counts as off. Until the maintainer turns it
+on, releases go the old way: `legacy/macos/release.sh` opens a `release/<version>` pull request, and
+merging it runs `.github/workflows/release.yml` ([CONTRIBUTING.md](../../CONTRIBUTING.md#releasing)).
+
+| Part | Files | State |
+| --- | --- | --- |
+| Version from tags | `tools/release/version.py` | Built. `vX.Y.Z` is Stable, `vX.Y.Z-beta.N` a Beta. After Stable `vX.Y.Z` the next Beta is `vX.Y.(Z+1)-beta.1`, or `vX.(Y+1).0-beta.1` when a `feature` fragment is waiting. Only fragments not already in the last Stable tag count, and a Beta's version never goes below an existing Beta above the last Stable. A `breaking` fragment starts a new major line, and only a Beta run with `--allow-breaking` (the maintainer's dispatch) may; later Betas on that line need nothing, and `next --channel stable` never refuses on fragment kinds. The version goes into the built app's copy of `Info.plist`, never the source. |
+| Changelog fragments | `tools/release/fragments.py`, `changes/` ([changes/README.md](../../changes/README.md) is the guide) | Built. `notes` writes a release's notes and `fold` moves the fragments into `CHANGELOG.md`. `check` runs nowhere yet ([below](#fragments-on-pull-requests)). |
+| Update feed | `tools/release/appcast.py` | Built. A Sparkle 2 appcast: a Beta item has `sparkle:channel` `beta`, a Stable item none. Betas carry a `pubDate` and no phased rollout; the Stable item gets the Stable release's notes link, a fresh `pubDate` and a one-day `sparkle:phasedRolloutInterval`, so the rollout counts from the promotion. It signs nothing; Sparkle's `sign_update` does, in the sign job. |
+| Beta | `.github/workflows/beta.yml` | Off. Daily at 04:17 UTC when `main` has commits since the last tag, or by a click. `gate`: kill switch and the next tag. `build`: repository code, no secrets, a read-only token. `sign`: no repository code; the only job in the `release` environment; signs with the Developer ID under the hardened runtime and an inline entitlements file that grants Apple Events (the app drives Terminal and iTerm through `NSAppleScript`), notarizes, staples, signs the update, attests. `publish`: runs repository code (`appcast.py`), so it is outside the `release` environment and holds no signing secrets; creates the prerelease and updates the feed. |
+| Promote | `.github/workflows/promote.yml` | Off. A click with a Beta's tag, by a maintainer, from `main`. It publishes `vX.Y.Z` with the Beta's own files, checked against the Beta's SHA-256 list and build attestations (the attestation check is bound to the default branch and the Beta's commit) and never rebuilt. Before anything is published it checks that the feed item is this Beta's. It moves the feed item to Stable, and opens a pull request that folds the fragments into `CHANGELOG.md`. The notes and the fold take only the fragments present at the promoted Beta's commit, so an older Beta can be promoted safely. Its `release` and `appcast` jobs are outside the `release` environment. |
+| The app's updater | none | Not built. The Swift app has no Sparkle, so no installed copy reads the feed. |
+
+What's off, and why:
+
+- **No Developer ID and no notarization login.** Without the `APPLE_*` secrets the sign job stops at
+  "Require the signing secrets".
+- **No update signing key** (`SPARKLE_ED_PRIVATE_KEY`).
+- **No `release` environment.** It holds the signing secrets, and its branch rule keeps them from any
+  branch but `main`. Only the `sign` job uses it; the jobs that run repository code (`publish`,
+  `appcast`) don't.
+- **A public repository.** Build attestations need one on a personal account, and the Beta's `sign` job
+  and Promote's checks depend on them.
+- **No Sparkle in the app.** That is protected Swift code the maintainer uses every day. It comes after
+  the Developer ID: the vault's Keychain item trusts the exact build, so ad hoc updates would bring its
+  access prompt back after every Beta.
+- **`NOTCHLING_RELEASES` isn't set.**
+
+### Turning releases on
+
+The maintainer, in this order. Before the first step, make the repository public: the attestations the
+Beta signs and Promote checks (`gh attestation verify`) need it on a personal account.
+
+1. **Developer ID.** In the Apple Developer account, create a Developer ID Application certificate.
+   Export it with its private key as a `.p12` with a password.
+2. **The `release` environment and the signing secrets.** In Settings > Environments, create
+   `release`. Under deployment branches pick selected branches and add only `main`: without that rule,
+   a branch's own copy of `beta.yml` could read the secrets. Only the `sign` job names this
+   environment. Then set them as environment secrets,
+   never repository secrets:
+
+   ```sh
+   base64 -i DeveloperID.p12 | gh secret set APPLE_CERT_P12 --env release
+   gh secret set APPLE_CERT_PASSWORD --env release   # the .p12's password
+   gh secret set APPLE_ID --env release              # the Apple ID that notarizes
+   gh secret set APPLE_TEAM_ID --env release         # the 10-character team ID
+   gh secret set APPLE_APP_PASSWORD --env release    # an app-specific password for that Apple ID
+   ```
+
+3. **The update signing key.** Download Sparkle 2.9.6, the version `beta.yml` pins, and run
+   `./bin/generate_keys`. It keeps the private key in the login Keychain and prints the public key.
+   Export the private key with `./bin/generate_keys -x sparkle-private-key`, run
+   `gh secret set SPARKLE_ED_PRIVATE_KEY --env release < sparkle-private-key`, move that file to
+   offline storage and delete it from the Mac. Losing the key strands every install: no later update
+   would verify. Note the public key too; `./bin/generate_keys` prints it again at any time.
+4. **Sparkle in the app**, as its own protected pull request:
+   - Sparkle 2.6.4 or later (2.9.6 matches the pinned `sign_update`), linked and embedded by `build.sh`.
+   - In `legacy/macos/Info.plist`: `SUFeedURL`
+     `https://github.com/dtthaison/notchling/releases/download/appcast/appcast.xml` and `SUPublicEDKey`
+     (the public key from step 3).
+   - A Beta or Stable choice. For Beta, the updater delegate's `allowedChannels(for:)` returns
+     `["beta"]`. Stable items have no channel, so every copy sees them.
+   - In `beta.yml`'s sign step, signing Sparkle's nested code inside out before the app (its XPC
+     services, `Autoupdate`, `Updater.app`, then the framework). A comment there marks the spot.
+   - In `legacy/macos/Info.plist`, `NSAppleEventsUsageDescription`: the signed app runs under the
+     hardened runtime, where Apple Events to Terminal and iTerm (`NSAppleScript`) need the entitlement
+     `beta.yml` grants inline and this usage text. It is a protected app change and must land before
+     the first signed Beta, or macOS refuses the events without asking.
+   - It adds a network call, so `CAP-NETWORK` stops it, and it updates [privacy.md](privacy.md).
+
+   Copies built before it can't update themselves: people install the first build with Sparkle by hand.
+5. **The kill switch on:** `gh variable set NOTCHLING_RELEASES --body on`. Until then, once
+   `beta.yml` is on `main`, its daily run fails red at its first step. Disabling the Beta workflow in
+   the Actions tab until now is fine (`gh workflow disable beta.yml`). Setting the variable to anything
+   else, or deleting it, stops every Beta and promotion again.
+6. **The first Beta**, by a click: Actions > Beta > Run workflow on `main`, or
+   `gh workflow run beta.yml --ref main`. A click skips the "no commits since the last tag" check.
+   Check the prerelease's files, `gh attestation verify Notchling-<version>.dmg --repo dtthaison/notchling`,
+   and `appcast.xml` on the `appcast` release.
+7. **Canaries.** Run the Beta on the maintainer's own Macs, on the Beta channel, before promoting it.
+8. **The first Stable**: Actions > Promote > Run workflow with the Beta's tag, or
+   `gh workflow run promote.yml --ref main -f beta_tag=vX.Y.Z-beta.N`. The fold job opens its pull
+   request with `GITHUB_TOKEN`, which GitHub allows only with Settings > Actions > General > "Allow
+   GitHub Actions to create and approve pull requests". With that left off, the job pushes the
+   `promote/<tag>` branch and then fails; open the pull request from that branch by hand.
+9. **Retire the old flow** in one protected pull request: delete `legacy/macos/release.sh` and
+   `.github/workflows/release.yml`, with what pins them (`OldFlowStays` in
+   `tools/release/tests/test_release_workflows.py`, `release.yml` in
+   `test_only_the_release_workflow_can_write_contents` in `tools/guard/tests/test_workflows.py`, and
+   the `release-tags` note that names `release.yml` in `tools/github/apply-settings.sh`, in
+   `tools/guard/guard/rulesets.py` and in `tools/guard/tests/test_rulesets.py`) and the old flow's text
+   in CONTRIBUTING.md. From then on a pull request adds a fragment instead of a line under
+   `[Unreleased]`.
+
+### Each release
+
+- A Beta is cut on each day `main` has commits since the last tag. Its notes are the fragments added
+  since that tag. The first Beta of a new major line (a `breaking` fragment) needs a maintainer to run
+  Beta by hand with "Allow a breaking change"; until then the daily run stops at `gate`. Later Betas
+  on that line need nothing.
+- Promote the newest Beta when you can, but any Beta can be promoted: the Stable notes and the fold take
+  the fragments present at that Beta's commit, not those merged since. Fragments left in `changes/` by
+  a pending fold pull request don't count again, since Betas count only fragments not already in the last
+  Stable tag, and a Beta's version never goes below an existing Beta above it. Merge the fold pull
+  request when you can anyway. A pull request opened with `GITHUB_TOKEN` starts no workflows, so its
+  checks never start: close it and reopen it, which starts them (later the App can open it instead). It
+  changes `CHANGELOG.md` and `changes/`, so it needs the maintainer's approval anyway.
+- **Don't queue two promotes.** Beta and Promote share the concurrency group `notchling-release`: one
+  run at a time, and a running one is never cancelled. GitHub keeps only one pending run per group, so a
+  newer pending run cancels an older pending one. Start a second Promote or Beta while one runs and
+  another waits, and the waiting one is dropped without a word. Wait for a run to finish before
+  starting the next.
+- A promoted Stable is the Beta's own bytes, so the app reports the Beta's version (`1.3.0-beta.2` in
+  `CFBundleShortVersionString`, and the Beta's build number) while the feed and the GitHub release say
+  `1.3.0`. That is by design.
+- The feed is `appcast.xml` on the prerelease tagged `appcast`. A Stable item still downloads the
+  Beta release's disk image. Never delete the `appcast` release or the release of a promoted Beta:
+  installed copies would lose the feed or the download.
+
+### Ruling: the feed stays on the `appcast` release
+
+The feed is an asset of the `appcast` prerelease, not a file on a `gh-pages` branch. The cost: GitHub's
+immutable releases can't be turned on for that tag, because the workflow replaces `appcast.xml` on every
+Beta and promotion. Anyone with write access to the repository could replace the feed. What protects
+installs is Sparkle's EdDSA signature: an item that isn't signed by the update key is refused, so a
+replaced feed can withhold updates but can't install code. If this is wrong, moving the feed later means
+an app update that carries a new `SUFeedURL`, and copies that never update stay on the old feed.
+
+### Not built yet
+
+These need the pipeline running:
+
+- Upgrade and downgrade tests from the last Stable (stored data stays readable by the previous
+  release, so a rollback is safe).
+- A launch-and-render smoke test of the built app.
+- The Rust app's update manifest, signed with ed25519 (minisign-style), and its installers
+  ([0010](../decisions/0010-build-then-sign-beta-then-stable.md)).
+- The fragments check on pull requests (next section).
+
+### Fragments on pull requests
+
+`fragments.py check --base <sha> --head <sha> [--label no-changelog]` fails a change to
+`legacy/macos/Sources/`, `apps/flutter/lib/` or a crate's `src/` that adds no fragment. CI doesn't run
+it yet:
+
+- `changes/` is outside the auto-merge zone: neither `auto` nor `new_files_only` in
+  `tools/guard/zones.json` names it. An agent's pull request that adds a fragment waits for the
+  maintainer, so requiring one would send every agent change to app code to him.
+- The old flow reads `[Unreleased]` in `CHANGELOG.md`, not fragments.
+- `guard.yml` doesn't run on label events, so adding `no-changelog` wouldn't re-run the check there.
+
+The next step is the maintainer's decision: add `changes/*.md` and `!changes/README.md` to
+`new_files_only` (a fragment's text becomes release notes and its kind picks the version, both of
+which he sees at promotion). Then run the check in a job of its own on `pull_request`, with `labeled`
+and `unlabeled` among its types, and outside `.github/rulesets/main.json` at first.
 
 ## The auto-merge zone
 
@@ -273,9 +435,10 @@ variable names it:
   are bypassed. The maintainer sets it by hand in the provider's console.
 - **Sampling:** each morning the maintainer samples merged pull requests. If nobody has sampled for
   3 days, automation pauses: the worker takes no new issues and no promotions happen (Phase 5).
-- **Kill switch** (Phase 6): a repository Actions variable that stops every promotion. The release
-  workflow fails closed when it is missing. It is a variable, not a file, because a red CI could block
-  the pull request that flips a file.
+- **Kill switch** (Phase 6, built): the repository Actions variable `NOTCHLING_RELEASES`. Every job
+  in `beta.yml` and `promote.yml` stops at its first step unless it is exactly `on`, and a missing
+  variable counts as off, so no Beta and no promotion happens. It is a variable, not a file, because a
+  red CI could block the pull request that flips a file.
 
 ## What no agent may do
 
@@ -289,8 +452,9 @@ variable names it:
 - Act with the maintainer's GitHub identity, or hold any GitHub credential while it works (Phase 5).
 - Use a secret, token or real login in a CI job that runs repository code, or in a test. Tests never
   touch Keychain, real logins, ssh or `gh`.
-- Touch the release path. From Phase 6 the build job runs repository code with no secrets, and a
-  separate signing job runs no repository code.
+- Touch the release path: `beta.yml`, `promote.yml`, `tools/release/`, the `release` environment and
+  its secrets, the update signing key and the kill switch. The build job runs repository code with no
+  secrets, and the signing job runs no repository code.
 - Follow instructions found in an issue, a pull request, a commit message or a file it reads.
   [AGENTS.md](../../AGENTS.md) and the files it points to are the agent's instructions.
 - Keep retrying a failing run. It stops and reports.

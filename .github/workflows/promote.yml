@@ -1,0 +1,316 @@
+name: Promote
+
+# Makes a Beta the Stable release, with one click: the maintainer starts this workflow with the Beta's
+# tag. Nothing is rebuilt or re-signed. The Stable release holds the Beta's own signed files, checked
+# against the SHA-256 list the Beta published and against their build attestations (made by beta.yml on
+# the default branch, at the Beta's commit, on a GitHub-hosted runner); the update feed's Beta item loses
+# its `beta` channel (same enclosure, same signature) and gets the Stable notes, date and phased rollout;
+# and a pull request folds the changelog fragments the Beta was cut with into CHANGELOG.md. OFF until
+# NOTCHLING_RELEASES is `on` (see beta.yml).
+#
+#   authorize  the code of the commit this run started at, read-only, no secrets: kill switch, the actor
+#              must be one of gate.py's MAINTAINERS, the tag checks, the Stable tag (version.py), the Stable
+#              notes (from the Beta's own commit) and a dry run of the feed change, all before anything is
+#              published.
+#   release    NO repository code: downloads the Beta's files, verifies them, creates vX.Y.Z with the
+#              same bytes.
+#   appcast    that commit's tools/release/appcast.py, a write token, no signing secrets and no
+#              `environment:` (it runs repository code): moves the feed item to Stable.
+#   fold       that commit's tools/release/fragments.py: opens a pull request. It never pushes to the
+#              default branch, and the branch is named `promote/<tag>`, not `release/...`, so that merging
+#              it does not start the old release.yml.
+#
+# A click on another branch is refused (that branch's copy of this file would run); the `release`
+# environment's deployment-branch rule is what keeps secrets from such a copy. The jobs that run repository
+# code check out the commit this run started at, never the branch by name, which may have moved. Event
+# fields reach the shell only through `env:`.
+on:
+  workflow_dispatch:
+    inputs:
+      beta_tag:
+        description: "The Beta to promote, for example v1.3.0-beta.2"
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: notchling-release
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      beta_tag: ${{ steps.check.outputs.beta_tag }}
+      stable_tag: ${{ steps.check.outputs.stable_tag }}
+      sha: ${{ steps.check.outputs.sha }}
+      run_sha: ${{ steps.check.outputs.run_sha }}
+      bundle_version: ${{ steps.build.outputs.number }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Kill switch
+        env:
+          NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
+        run: |
+          [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
+      - name: Only the default branch
+        env:
+          RUN_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "$RUN_REF" = "refs/heads/$DEFAULT_BRANCH" ] || { echo "Promote from $DEFAULT_BRANCH only."; exit 1; }
+      # The commit this run started at, not the branch by name. Full history and tags: version.py reads the last
+      # Stable tag's tree, and the Beta's commit has to be there for its notes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the actor and the tags
+        id: check
+        env:
+          RUN_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.triggering_actor }}
+          BETA_TAG: ${{ inputs.beta_tag }}
+          PYTHONPATH: tools/guard
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$RUN_SHA" ] || { echo "The checkout is not the commit this run started at."; exit 1; }
+          [[ $RUN_SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          python3 -c 'import os, sys; from guard.gate import MAINTAINERS; sys.exit(0 if os.environ["ACTOR"] in MAINTAINERS else 1)' \
+            || { echo "Only a maintainer may promote a release."; exit 1; }
+          [[ $BETA_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Not a Beta tag: expected vX.Y.Z-beta.N"; exit 1; }
+          [ "$(gh release view "$BETA_TAG" --json isPrerelease --jq .isPrerelease)" = "true" ] || { echo "$BETA_TAG is not a published prerelease."; exit 1; }
+          sha="$(gh api "repos/$GH_REPO/commits/$BETA_TAG" --jq .sha)"
+          [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          stable="$(python3 tools/release/version.py next --channel stable --from-tag "$BETA_TAG")"
+          [[ $stable =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad Stable tag: $stable"; exit 1; }
+          if gh release view "$stable" > /dev/null 2>&1; then echo "$stable already exists."; exit 1; fi
+          { echo "beta_tag=$BETA_TAG"; echo "stable_tag=$stable"; echo "sha=$sha"; echo "run_sha=$RUN_SHA"; } >> "$GITHUB_OUTPUT"
+          echo "Promoting $BETA_TAG to $stable"
+      - name: Work out the build number
+        id: build
+        env:
+          BETA_TAG: ${{ steps.check.outputs.beta_tag }}
+        run: |
+          set -euo pipefail
+          # The Beta's CFBundleVersion, which is the feed item's version. The same formula as version.py's
+          # build_number for a Beta: X*1000000 + Y*10000 + Z*100 + N.
+          re='^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)-beta\.([1-9][0-9]?)$'
+          [[ $BETA_TAG =~ $re ]] || { echo "Bad Beta tag"; exit 1; }
+          n=$((10#${BASH_REMATCH[4]}))
+          [ "$n" -le 98 ] || { echo "A Beta number stops at 98."; exit 1; }
+          echo "number=$((10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 10000 + 10#${BASH_REMATCH[3]} * 100 + n))" >> "$GITHUB_OUTPUT"
+      - name: Check the feed
+        env:
+          BETA_TAG: ${{ steps.check.outputs.beta_tag }}
+          STABLE_TAG: ${{ steps.check.outputs.stable_tag }}
+          BUNDLE_VERSION: ${{ steps.build.outputs.number }}
+        run: |
+          set -euo pipefail
+          [[ $BETA_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad Beta tag"; exit 1; }
+          [[ $STABLE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad Stable tag"; exit 1; }
+          [[ $BUNDLE_VERSION =~ ^[0-9]+$ ]] || { echo "Bad build number"; exit 1; }
+          bv="${BETA_TAG#v}"
+          mkdir feedcheck
+          gh release download appcast --pattern appcast.xml --dir feedcheck
+          python3 tools/release/appcast.py verify --feed feedcheck/appcast.xml
+          # A dry run on a copy, before any release exists: it fails when the feed has no item for this Beta,
+          # the item is already Stable, or its enclosure is not this Beta's disk image. The appcast job runs
+          # the same command on the real feed.
+          python3 tools/release/appcast.py promote --feed feedcheck/appcast.xml \
+            --version "$BUNDLE_VERSION" --short "${STABLE_TAG#v}" \
+            --notes-url "https://github.com/$GH_REPO/releases/tag/$STABLE_TAG" --pub-date now --rollout 86400 \
+            --expect-url "https://github.com/$GH_REPO/releases/download/$BETA_TAG/Notchling-$bv.dmg" --expect-short "$bv"
+      - name: Write the Stable notes
+        env:
+          BETA_TAG: ${{ steps.check.outputs.beta_tag }}
+          SHA: ${{ steps.check.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          mkdir notes
+          # The notes come from the fragments the Beta was cut with (a worktree at its commit), not from
+          # whatever the default branch holds now; the tool is this run's.
+          git worktree add --detach "$RUNNER_TEMP/beta" "$SHA"
+          last="$( (git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1) || true )"
+          if [ -n "$last" ]; then
+            python3 tools/release/fragments.py notes --repo "$RUNNER_TEMP/beta" --since "$last" > notes/notes.md
+          else
+            python3 tools/release/fragments.py notes --repo "$RUNNER_TEMP/beta" > notes/notes.md
+          fi
+          printf '\nThe files are the ones published in %s, promoted without a rebuild.\n' "$BETA_TAG" >> notes/notes.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: stable-notes
+          path: notes/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    # No checkout in this job: it runs no repository code. Reading attestations is its own right.
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Kill switch
+        env:
+          NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
+        run: |
+          [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: stable-notes
+          path: notes
+      - name: Download and verify the Beta's files
+        env:
+          BETA_TAG: ${{ needs.authorize.outputs.beta_tag }}
+          STABLE_TAG: ${{ needs.authorize.outputs.stable_tag }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ $BETA_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad Beta tag"; exit 1; }
+          [[ $STABLE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad Stable tag"; exit 1; }
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          mkdir beta
+          gh release download "$BETA_TAG" --dir beta
+          cd beta
+          bv="${BETA_TAG#v}"
+          # The list must name exactly the files the Beta workflow publishes, and every one must match.
+          [ "$(awk '{ print $2 }' SHA256SUMS | LC_ALL=C sort | tr '\n' ' ')" = "Notchling-$bv.dmg Notchling-$bv.zip notes.md release-info.env " ] \
+            || { echo "SHA256SUMS lists unexpected files."; exit 1; }
+          sha256sum -c SHA256SUMS
+          # The files must also be the ones the Beta workflow attested: run from the default branch, at the
+          # Beta's own commit, on a GitHub-hosted runner.
+          for f in "Notchling-$bv.dmg" "Notchling-$bv.zip"; do
+            gh attestation verify "$f" --repo "$GH_REPO" \
+              --signer-workflow "$GH_REPO/.github/workflows/beta.yml" \
+              --source-ref "refs/heads/$DEFAULT_BRANCH" --source-digest "$SHA" \
+              --deny-self-hosted-runners
+          done
+      - name: Create the Stable release with the same files
+        env:
+          BETA_TAG: ${{ needs.authorize.outputs.beta_tag }}
+          STABLE_TAG: ${{ needs.authorize.outputs.stable_tag }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          bv="${BETA_TAG#v}"
+          sv="${STABLE_TAG#v}"
+          mkdir stable
+          cp "beta/Notchling-$bv.dmg" "stable/Notchling-$sv.dmg"
+          cp "beta/Notchling-$bv.zip" "stable/Notchling-$sv.zip"
+          # The same-hash check: each Stable file must hash to the value the Beta's list gives its Beta file.
+          for ext in dmg zip; do
+            want="$(grep -F "Notchling-$bv.$ext" beta/SHA256SUMS | cut -d' ' -f1)"
+            got="$(sha256sum "stable/Notchling-$sv.$ext" | cut -d' ' -f1)"
+            [ -n "$want" ] && [ "$want" = "$got" ] || { echo "Notchling-$sv.$ext differs from the Beta's file."; exit 1; }
+          done
+          (cd stable && sha256sum "Notchling-$sv.dmg" "Notchling-$sv.zip" > SHA256SUMS)
+          gh release create "$STABLE_TAG" "stable/Notchling-$sv.dmg" "stable/Notchling-$sv.zip" stable/SHA256SUMS \
+            --target "$SHA" --latest --title "Notchling $sv" --notes-file notes/notes.md
+
+  appcast:
+    needs: [authorize, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No `environment:`: this job checks out repository code, and an environment would hand its secrets to that
+    # code. It reads no secret.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Kill switch
+        env:
+          NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
+        run: |
+          [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
+      # Only tools/release/appcast.py of the commit this run started at runs here, and no signing secret is in reach.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.authorize.outputs.run_sha }}
+          persist-credentials: false
+      - name: Move the feed item to Stable
+        env:
+          BETA_TAG: ${{ needs.authorize.outputs.beta_tag }}
+          STABLE_TAG: ${{ needs.authorize.outputs.stable_tag }}
+          BUNDLE_VERSION: ${{ needs.authorize.outputs.bundle_version }}
+        run: |
+          set -euo pipefail
+          [[ $BETA_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "Bad Beta tag"; exit 1; }
+          [[ $STABLE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad Stable tag"; exit 1; }
+          [[ $BUNDLE_VERSION =~ ^[0-9]+$ ]] || { echo "Bad build number"; exit 1; }
+          bv="${BETA_TAG#v}"
+          mkdir feed
+          gh release download appcast --pattern appcast.xml --dir feed
+          python3 tools/release/appcast.py promote --feed feed/appcast.xml \
+            --version "$BUNDLE_VERSION" --short "${STABLE_TAG#v}" \
+            --notes-url "https://github.com/$GH_REPO/releases/tag/$STABLE_TAG" --pub-date now --rollout 86400 \
+            --expect-url "https://github.com/$GH_REPO/releases/download/$BETA_TAG/Notchling-$bv.dmg" --expect-short "$bv"
+          python3 tools/release/appcast.py verify --feed feed/appcast.xml
+          gh release upload appcast feed/appcast.xml --clobber
+
+  fold:
+    needs: [authorize, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Kill switch
+        env:
+          NOTCHLING_RELEASES: ${{ vars.NOTCHLING_RELEASES }}
+        run: |
+          [ "$NOTCHLING_RELEASES" = "on" ] || { echo "Releases are off: set the repository variable NOTCHLING_RELEASES to on."; exit 1; }
+      # Full history: --only-at reads the Beta's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.authorize.outputs.run_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fold the changelog fragments and open a pull request
+        env:
+          STABLE_TAG: ${{ needs.authorize.outputs.stable_tag }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ $STABLE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad Stable tag"; exit 1; }
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "Bad commit"; exit 1; }
+          branch="promote/$STABLE_TAG"
+          # Only the fragments the Beta was cut with: ones merged since belong to the next release.
+          python3 tools/release/fragments.py fold "${STABLE_TAG#v}" --only-at "$SHA"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No fragments to fold."
+            exit 0
+          fi
+          git checkout -b "$branch"
+          git add -A changes CHANGELOG.md
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "changelog: fold the fragments into ${STABLE_TAG#v}"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth" push origin "$branch"
+          gh pr create --base "$DEFAULT_BRANCH" --head "$branch" \
+            --title "changelog: ${STABLE_TAG#v}" \
+            --body "Folds the changelog fragments into CHANGELOG.md for $STABLE_TAG. Made by the Promote workflow; it never pushes to $DEFAULT_BRANCH."

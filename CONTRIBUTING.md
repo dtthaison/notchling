@@ -31,13 +31,13 @@ Expect a first reply within about a week.
 4. **Pull request.** One change per pull request, using the template. Sign off every commit (see [Sign-off](#sign-off-dco)).
 5. **Checks.** Every pull request runs the checks below. Each one is bound to the PR's head commit.
 6. **Merge.** Until Phase 5 the maintainer merges every pull request; agents never merge. From Phase 5, a pull request that touches only the auto-merge zone and passes every check may merge on its own. Anything else waits for the maintainer: `maintainer-gate` passes only after he approves the PR's current head commit, and a later push needs a new approval.
-7. **Beta, then Stable.** *(Phase 6.)* Merged work goes into a daily Beta; the maintainer promotes a Beta to Stable with one click. Until then, releases are cut by hand (see [Releasing](#releasing)).
+7. **Beta, then Stable.** *(Phase 6: built, off until the maintainer turns it on.)* Merged work goes into a daily Beta; the maintainer promotes a Beta to Stable with one click. Until it's on, releases are cut by hand (see [Releasing](#releasing)).
 
 ### The checks
 
 | Check | What it runs | Run it locally |
 | --- | --- | --- |
-| `guard` | The guard's own tests, the agents' scripts' tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check, then the protocol step: the generated types match the schema and the protocol tools' tests pass | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard` and `python3 -m unittest discover -s tools/agents/tests -t tools/agents`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, `claudemd` in place of `lint`); `python3 tools/protocol/gen.py --check` and `python3 -m unittest discover -s tools/protocol/tests -t tools/protocol` |
+| `guard` | The guard's own tests, the agents' scripts' tests, the release tools' tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check, then the protocol step: the generated types match the schema and the protocol tools' tests pass | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard`, `python3 -m unittest discover -s tools/agents/tests -t tools/agents` and `python3 -m unittest discover -s tools/release/tests -t tools/release`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, `claudemd` in place of `lint`); `python3 tools/protocol/gen.py --check` and `python3 -m unittest discover -s tools/protocol/tests -t tools/protocol` |
 | `build` | `swift test` | `swift test` |
 | `app-build` | `./build.sh`, arm64 and x86_64 | `./build.sh` |
 | `phone-analyze` | `flutter analyze` in `apps/flutter/` | `cd apps/flutter && flutter analyze` |
@@ -58,7 +58,8 @@ A pull request may also get a `review-agent` status from the review agent. It is
 - **Now:** the rulesets for `main`, `agent/**` and release tags, kept as code in `.github/rulesets/` (not applied yet: the maintainer runs `tools/github/apply-settings.sh`); CODEOWNERS that protects everything outside the zone; the checks above, `maintainer-gate` included; the auto-merge zone as a list (merging on its own starts in Phase 5).
 - **Built, and off until their credentials exist:** the triage Action for new issues (`.github/workflows/triage.yml`), the review agent, recommend-only (`.github/workflows/review-run.yml` and `review-post.yml`), and the worker's pre-start check and push wrapper (`tools/agents/`). Without the `ANTHROPIC_API_KEY` secret, triage does nothing and the review agent reports "review missing". [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what is still missing and how the maintainer turns each part on; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on a worker.
 - **Phase 5, still to come:** the GitHub App that agent pull requests come from, the agent user and the push wrapper on each worker, and the workers picking up `notchling:queued` issues.
-- **Phase 6:** Beta and Stable channels, updates the app installs on its own, per-PR changelog fragments, and a release build that is signed apart from the code that built it.
+- **Phase 6, built and off until the maintainer turns it on:** the daily Beta and the one-click Stable (`.github/workflows/beta.yml`, `promote.yml`), a release build signed apart from the code that built it, the update feed with Beta and Stable channels, versions from tags and per-PR changelog fragments (`tools/release/`, `changes/`). Every job stops at its first step until the `NOTCHLING_RELEASES` variable is `on`. [docs/policies/automation.md](docs/policies/automation.md#releases-so-far) has the turn-on steps.
+- **Phase 6, still to come:** updates the app installs on its own (Sparkle in the app), the fragments check on pull requests, upgrade and downgrade tests from the last Stable, and a launch-and-render smoke test.
 
 ## The auto-merge zone
 
@@ -88,11 +89,12 @@ swift test            # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests
 
 Add a test with any new logic or parser. Tests never touch Keychain, real logins, ssh or `gh`; Machines tests use the fakes in `MachineSetupFakes.swift` and `MachineWindowFakes.swift`. `ZLiveReplyTests` and `ZBenchmarkTests` skip unless you ask for them; their headers say how.
 
-The guard and the agents' scripts (Python 3.9 or later, standard library only):
+The guard, the agents' scripts and the release tools (Python 3.9 or later, standard library only):
 
 ```sh
 PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard
 python3 -m unittest discover -s tools/agents/tests -t tools/agents   # triage, preflight, push wrapper, review
+python3 -m unittest discover -s tools/release/tests -t tools/release # version, fragments, appcast, the release workflows
 PYTHONPATH=tools/guard python3 -m guard lint
 PYTHONPATH=tools/guard python3 -m guard pins
 PYTHONPATH=tools/guard python3 -m guard codeowners --check
@@ -150,7 +152,7 @@ The lint checks these where it can; [docs/rules.md](docs/rules.md) lists each ru
 
 - Keep each one to a single change, and say in the description what you ran and looked at.
 - For a bug fix, add a test that fails on `main` and passes with your change. For a UI or intermittent bug, a recorded reproduction is fine.
-- Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) if users would notice the change. *(Per-PR changelog fragments replace this in Phase 6.)*
+- Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) if users would notice the change. Once the Beta flow is on, a changelog fragment replaces it ([changes/README.md](changes/README.md)); until then the old release flow reads only `[Unreleased]`.
 - Screenshots or a short recording help a lot for anything visual.
 - Say whether the PR touches anything outside the auto-merge zone, and why.
 
@@ -167,12 +169,28 @@ Sign off every commit with `git commit -s`. It adds a `Signed-off-by:` line, whi
 
 ## Releasing
 
-For maintainers, until Phase 6 replaces it. With the changes for the release listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md):
+For maintainers. Two flows exist, and only the old one is on.
+
+### Today: by hand
+
+With the changes for the release listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md):
 
 ```sh
 legacy/macos/release.sh 1.2.0
 ```
 
-This makes branch `release/1.2.0` from `main`, sets the version in `legacy/macos/Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features.
+This makes branch `release/1.2.0` from `main`, sets the version in `legacy/macos/Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features. The builds are signed ad hoc and not notarized.
+
+### Beta and Stable (Phase 6: built, off)
+
+Every job in the new flow stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`. The maintainer turns it on in this order: a public repository (attestations need one), the Developer ID, the `release` environment and its secrets, the update signing key backed up offline, Sparkle and `NSAppleEventsUsageDescription` in the app as its own pull request, `NOTCHLING_RELEASES=on`, the first Beta, canaries, then retiring `release.sh` and `release.yml`. [docs/policies/automation.md](docs/policies/automation.md#turning-releases-on) has each step. Once it's on:
+
+- **Beta.** `.github/workflows/beta.yml` runs daily at 04:17 UTC and cuts `vX.Y.Z-beta.N` when `main` has commits since the last tag, or on a click (Actions > Beta > Run workflow). The version comes from the tags and the kinds of the fragments not yet in the last Stable (`tools/release/version.py`), the notes from the fragments ([changes/README.md](changes/README.md)). It builds with no secrets, signs (hardened runtime) and notarizes in a job that runs no repository code, publishes the prerelease and adds it to the update feed on the Beta channel. A `breaking` fragment needs a maintainer's click ("Allow a breaking change") only for the first Beta of the new major line.
+- **Stable.** Run Promote with the Beta's tag (Actions > Promote > Run workflow, or `gh workflow run promote.yml --ref main -f beta_tag=vX.Y.Z-beta.N`). Only an account in `MAINTAINERS` can. It publishes `vX.Y.Z` with the Beta's own files, never rebuilt, moves the Beta's feed item to Stable (the Stable notes link, a fresh date, a one-day phased rollout) and opens a pull request that folds the fragments present at that Beta's commit into `CHANGELOG.md`. Any Beta can be promoted; don't start two Promotes at once, since GitHub keeps only one waiting run per workflow group and drops the older.
+- **Merge that pull request.** It was opened with `GITHUB_TOKEN`, so its checks don't start on their own; close it and reopen it. Fragments it hasn't merged yet don't count twice: the next Beta's version ignores fragments already in the last Stable tag.
+- A Stable app reports the Beta's version string, since it is the same bytes; the feed and the release say `X.Y.Z`.
+- Never delete the `appcast` release, which holds the feed, or the release of a promoted Beta, whose disk image the Stable item downloads.
+
+What isn't built yet, and whether pull requests should need a fragment, are in [docs/policies/automation.md](docs/policies/automation.md#releases-so-far).
 
 By contributing you agree that your work is released under the [MIT License](LICENSE), and to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

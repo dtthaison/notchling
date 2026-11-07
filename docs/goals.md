@@ -48,7 +48,7 @@ An idea outside this list starts as a feature request. The maintainer decides.
 5. Users get updates on their own, from Beta to Stable, and no release ever touches a signing key
    from code an agent wrote.
 
-Goal 1 needs the agent setup (Phase 5) and goal 5 the release pipeline (Phase 6). Neither exists yet.
+Goal 1 needs the agent setup (Phase 5) and goal 5 the release pipeline (Phase 6). The release pipeline is built and off until the maintainer turns it on, and the app has no updater yet ([automation.md](policies/automation.md#releases-so-far)); the agent setup is described in the same policy.
 
 ## Non-goals
 

@@ -121,10 +121,11 @@ class WorkflowTests(unittest.TestCase):
                     self.assertNotIn("number=", got)
 
     def test_only_the_release_workflow_can_write_contents(self):
-        # release-tags lets the GitHub Actions app create v* tags; that is safe only while the one
-        # workflow that holds a contents: write token is release.yml.
+        # release-tags lets the GitHub Actions app create v* tags; that is safe only while the workflows
+        # that hold a contents: write token are the release ones (beta and promote write only in jobs
+        # without signing secrets).
         writers = [f.name for f in sorted(WORKFLOWS.glob("*.yml")) if re.search(r"contents:\s*write", read(f".github/workflows/{f.name}"))]
-        self.assertEqual(writers, ["release.yml"])
+        self.assertEqual(writers, ["beta.yml", "promote.yml", "release.yml"])
 
     def test_phone_checks_run_on_every_pull_request(self):
         # phone-analyze and phone-test are required on main; a paths: filter leaves them pending forever
@@ -175,7 +176,7 @@ class WorkflowTests(unittest.TestCase):
     def test_guard_job_runs_every_check(self):
         text = read(".github/workflows/guard.yml")
         for cmd in ("unittest discover -s tools/guard/tests", "unittest discover -s tools/agents/tests",
-                    "guard lint", "guard pins", "guard codeowners --check", "guard rulesets"):
+                    "unittest discover -s tools/release/tests", "guard lint", "guard pins", "guard codeowners --check", "guard rulesets"):
             self.assertIn(cmd, text)
 
     def test_pr_workflows_dont_persist_credentials(self):

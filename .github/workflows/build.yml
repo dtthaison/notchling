@@ -1,7 +1,8 @@
 name: Tests
 
-# Tests and an app build on every PR. The signed app and its disk image are built by release.yml,
-# when a release/<version> pull request is merged and v<version> is tagged.
+# Tests and an app build on every PR. The signed app and its disk image are built by release.yml
+# (when a release/<version> pull request is merged and v<version> is tagged) or, once
+# NOTCHLING_RELEASES is on, by beta.yml (built, then signed in a separate job).
 on:
   push:
     branches: [main]
