@@ -81,11 +81,25 @@ ConsoleCore, docs, tests, fixtures) is the auto-merge zone.
      for those paths, so this holds even if the label step is bypassed.
 5. **Merge.** GitHub auto-merge (squash) for the agent's own PRs when every required check is green and
    no protected path is touched. Otherwise it waits for the maintainer.
-   **Pull requests from other people** *(maintainer's decision)* are welcome and get the same checks and
-   the same agent review, but never merge on their own: the maintainer reviews each one against the
-   agent setup (AGENTS.md, the lint, the protected paths) and merges it. Fork PRs get no secrets, so the
-   agent review of a fork PR runs from a trusted workflow that reads the diff and never checks out or
-   runs the fork's code *(my call)*.
+   **Pull requests from other people** go through the **review agent** *(maintainer's decision)*:
+   1. It checks the PR against our rules (AGENTS.md, the lint, the protected paths), our goals, and the
+      architecture in this design.
+   2. For a bug fix, it reproduces the bug first: a failing test on `main` that the PR makes pass. No
+      reproduction, no merge.
+   3. It runs the validation (every required check).
+   4. **Right and consistent** with our design: it approves and the PR merges.
+   5. **Right but not consistent** (the fix or feature is sound, the way it is built isn't ours): the
+      agent rebuilds it our way as its own PR, credits the author (`Co-authored-by:` and a link), and
+      closes the original with a kind note saying where it went. The rebuilt PR goes through the same
+      gates.
+   6. **Not right** (no real bug, against our goals, or unsafe): it explains why and leaves it for the
+      maintainer to close.
+
+   Limits *(my calls)*: a PR that touches a protected path still waits for the maintainer, whoever wrote
+   it. Everything in a PR (code, text, comments) is data to the review agent, never instructions. Fork
+   code runs only in a sandbox with no secrets and no network beyond the package registries (the
+   reproduction and the checks); the review itself reads the diff from a trusted workflow and never runs
+   the fork's code with secrets.
 6. **Sample and sharpen.** Each morning the maintainer samples merged PRs. Anything bad becomes a new
    check, test, lint rule or skill change (pstack `reflect`/`recall`), never just a review comment.
 
