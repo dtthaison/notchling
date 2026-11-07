@@ -448,6 +448,19 @@ class EligibilityTests(ReviewTestCase):
         self.fake.pr["user"]["login"] = ""
         self.assertSkipped(AGENT_APP_LOGIN="")
 
+    def test_an_app_login_without_the_bot_suffix_is_ignored(self):
+        """A person's login set by mistake (or by a hostile variable) must not make their PRs the App's."""
+        for login in ("stranger", "dtthaison", "notchling-agent", "[bot]", "x [bot]", "a[bot]b", "a/b[bot]"):
+            with self.subTest(login=login):
+                self.setUp()
+                self.fake.pr["user"]["login"] = login
+                self.assertSkipped(AGENT_APP_LOGIN=login)
+
+    def test_a_bot_suffix_in_any_case_is_accepted(self):
+        self.fake.pr["user"]["login"] = "Notchling-Agent[BOT]"
+        self.run_review(AGENT_APP_LOGIN="notchling-agent[bot]")
+        self.assertEqual(len(self.statuses()), 1)
+
     def test_label_added_by_a_maintainer_is_reviewed(self):
         self.fake.pr["user"]["login"] = "stranger"
         self.fake.pr["labels"] = [{"name": "notchling:review"}]

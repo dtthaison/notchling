@@ -45,6 +45,7 @@ MAX_CHECKS = 80
 ANTHROPIC_VERSION = "2023-06-01"
 VERDICTS = ("merge", "changes", "not_right")
 POINTER_RE = re.compile(r"[A-Za-z0-9_./+@-]{1,200}:[1-9][0-9]{0,6}")
+APP_LOGIN_RE = re.compile(r"(?i)[a-z0-9][a-z0-9-]*\[bot\]")
 ZWSP = "\u200b"
 WWW_RE = re.compile(r"(?i)\bwww\.")  # GitHub links `www.example.com` with no scheme
 # `#N`, `GH-N` and `owner/repo#N` become links and leave a back-reference in the issue they name.
@@ -284,7 +285,10 @@ class Config:
         self.run_head = get("RUN_HEAD")
         self.default_branch = get("DEFAULT_BRANCH", "main")
         self.key = get("ANTHROPIC_API_KEY")
-        self.app_login = get("AGENT_APP_LOGIN")
+        login = get("AGENT_APP_LOGIN")
+        # An App's pull requests are authored by `<slug>[bot]`; a login without that suffix is a person's
+        # (or a typo), so it is ignored and no pull request takes the App path.
+        self.app_login = login if APP_LOGIN_RE.fullmatch(login) else ""
         url = get("RUN_URL")
         self.run_url = url if re.fullmatch(r"https?://\S+", url) else ""
         self.api = get("GITHUB_API_URL", "https://api.github.com")
