@@ -165,6 +165,13 @@ class WorkflowTests(unittest.TestCase):
         for name in ("build", "app-build", "guard", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"):
             self.assertIn(name, found)
 
+    def test_rust_clippy_job_checks_formatting_before_clippy(self):
+        text = read(".github/workflows/rust.yml")
+        job = text.split("\n  rust-clippy:\n", 1)[1].split("\n  rust-deny:\n", 1)[0]
+        self.assertIn("cargo fmt --all --check", job)
+        self.assertIn("cargo clippy", job)
+        self.assertLess(job.index("cargo fmt --all --check"), job.index("cargo clippy"))
+
     def test_guard_job_runs_every_check(self):
         text = read(".github/workflows/guard.yml")
         for cmd in ("unittest discover", "guard lint", "guard pins", "guard codeowners --check", "guard rulesets"):

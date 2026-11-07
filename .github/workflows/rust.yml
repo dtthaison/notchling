@@ -1,9 +1,9 @@
 name: rust
 
-# The Rust workspace (crates/): tests on three systems, clippy, and cargo-deny (licenses, advisories,
-# sources). No `paths:` filter: rust-test, rust-clippy and rust-deny are required checks on main, and
-# a filtered workflow never reports on a pull request that touches no Rust. The toolchain comes from
-# rust-toolchain.toml (rustup is on the runners); no third-party actions.
+# The Rust workspace (crates/): tests on three systems, rustfmt and clippy, and cargo-deny (licenses,
+# advisories, sources). No `paths:` filter: rust-test, rust-clippy and rust-deny are required checks
+# on main, and a filtered workflow never reports on a pull request that touches no Rust. The
+# toolchain comes from rust-toolchain.toml (rustup is on the runners); no third-party actions.
 on:
   pull_request:
   push:
@@ -54,6 +54,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   rust-deny:
