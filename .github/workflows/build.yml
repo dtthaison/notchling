@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  build:  # the job id is the check name main requires; it only runs the tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
