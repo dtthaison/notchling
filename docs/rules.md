@@ -25,8 +25,8 @@ Existing violations sit in `tools/guard/lint-baseline.json`, which can only shri
 | LINT-DEFAULTS-MIGRATED | Every UserDefaults key is in `AppDelegate.migrateFromAwake`'s list | A key missing there is lost for users coming from the old app | `python3 -m guard lint` |
 | LINT-POINTER-CURSOR | Clickable views show the pointing hand | A clickable view with the arrow cursor looks broken | `python3 -m guard lint` |
 | LINT-NO-APPLESCRIPT | No NSAppleScript or osascript | Its notifications show Script Editor's name and icon | `python3 -m guard lint` |
-| LINT-FILE-SIZE | Files stay under 1,000 lines | Big files are hard to review and for an agent to hold whole | `python3 -m guard lint` |
-| LINT-FILE-SIZE-WARN | Files over 600 lines should be split (a warning, not a failure) | A nudge before a file reaches the hard limit | `python3 -m guard lint --warnings` |
+| LINT-FILE-SIZE | Files stay under 1,000 lines (a generated file, marked `@generated` or `GENERATED CODE` in its first lines, is exempt) | Big files are hard to review and for an agent to hold whole; nobody reads or splits what a generator writes | `python3 -m guard lint` |
+| LINT-FILE-SIZE-WARN | Files over 600 lines should be split (a warning, not a failure; generated files are exempt) | A nudge before a file reaches the hard limit | `python3 -m guard lint --warnings` |
 
 ## Capabilities
 
@@ -69,4 +69,5 @@ A new use of a powerful API sends the pull request to the maintainer, wherever t
 | GUARD-RULESETS | The rulesets in `.github/rulesets/` say what the guard relies on, and every required check is a job | A loosened ruleset, or a check that never runs, would stop the guard from guarding | `python3 -m guard rulesets` |
 | GUARD-BASELINE | The lint baseline only shrinks | A baseline that grows hides new violations | `python3 -m guard gate` (a PR whose baseline grew needs the maintainer); `python3 -m guard lint` (refuses to overwrite it) |
 | GUARD-CLAUDE-MD | The only tracked `CLAUDE*.md` is the root `CLAUDE.md`, and it holds exactly `@AGENTS.md` | Agent instructions live in `AGENTS.md`; a second file is an instruction source nobody reviews | `python3 -m guard claudemd` |
+| GUARD-PROTOCOL-GEN | The Rust and Dart types in `crates/protocol/src/generated.rs` and `apps/flutter/lib/core/protocol/generated.dart` are exactly what `tools/protocol/gen.py` writes from `protocol/agentconsole.v1.schema.json` | A hand-edited or stale generated file lets the Mac, the phone and the Rust app disagree about the wire | `python3 tools/protocol/gen.py --check` |
 | GUARD-RULES | Every rule listed here has a check that fires on its bad example, and every check is listed | A rule without a working check is only a wish | `python3 -m guard rules` |
