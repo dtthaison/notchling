@@ -346,13 +346,20 @@ gets fixes only).
 - The reviewer key, if any, lives in GitHub Actions secrets, set by the maintainer.
 - Changes to the user's real config (`~/.claude/settings.json`, Keychain) stay out of scope for agents.
 
-## Open questions (the maintainer's)
+## Agent identity
 
-1. **Which GitHub account the agents use.** Agent PRs need an author. With the maintainer's own account,
-   GitHub never lets that account approve its own PR, so CODEOWNERS can't hold protected PRs, and every
-   agent action looks like the maintainer's. A separate bot account (or a GitHub App) is the usual
-   answer: agent PRs come from it, the maintainer approves them. *(My recommendation: a GitHub App or a
-   bot account.)*
+*(Maintainer's decision.)* Agents act on GitHub as a **GitHub App** installed on this repository only,
+never as the maintainer's account. Agent PRs are authored by the App, so the maintainer can approve
+them and CODEOWNERS holds protected PRs.
+
+- Permissions: contents read and write (branch protection limits pushes to `agent/*`), pull requests
+  read and write, issues read and write (labels, comments), checks read. Nothing else, no admin.
+- Each worker mints a short-lived installation token (one hour) from the App's private key; the key
+  lives in the Secret Vault on each worker machine (a new vault name, set up by the Machines window like
+  today's `*-github-issues` tokens) and never in the repo or in CI.
+- Branch protection on `main`: required checks, required review from code owners on protected paths,
+  only the App may push `agent/*`, nobody pushes `main` directly, auto-merge allowed.
+- The triage Action and the review Action use the workflow's own `GITHUB_TOKEN`, not the App.
 
 ## Left to the builder
 
