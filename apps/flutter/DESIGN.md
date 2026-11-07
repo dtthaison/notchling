@@ -164,7 +164,7 @@ components:
 
 Agent Console for a developer who runs Claude Code on a Mac and checks on it from the phone: what needs an answer, what is working, what finished. It is the same product as Notchling's Chat window, so the phone copies the Mac's kit instead of inventing a second look: warm near-black surfaces, one orange accent, status always an icon plus a word, the green pet in empty states. Dark first; the light theme is warm paper. Density is calm: a row says what the session is doing in one line, and nothing moves unless an agent does.
 
-Source of truth: `docs/chat-kit.md` and `Sources/Notchling/DesignKit/ChatKit.swift` (palette, meanings, radii). When the Mac kit changes, change the values here and in `lib/app/theme/tokens.dart` together. No palette row from the uix-skill data tables was used; the values are the kit's. Roles and the 4 pt grid are identical; sizes are phone sizes (body 15 where the Mac has 13). The linter was not run (it needs a network download); the references between tokens were checked by hand.
+Source of truth: `docs/chat-kit.md` and `legacy/macos/Sources/Notchling/DesignKit/ChatKit.swift` (palette, meanings, radii). When the Mac kit changes, change the values here and in `lib/app/theme/tokens.dart` together. No palette row from the uix-skill data tables was used; the values are the kit's. Roles and the 4 pt grid are identical; sizes are phone sizes (body 15 where the Mac has 13). The linter was not run (it needs a network download); the references between tokens were checked by hand.
 
 ## Colors
 

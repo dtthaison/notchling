@@ -189,7 +189,7 @@ It runs a Codex `exec` turn or an `agy acp` session, blocks until it ends, print
 
 ## Phone
 
-**What it is.** Your sessions on your iPhone through the mobile app (`mobile/`, named Agent Console on the phone): read conversations, reply, answer questions and permissions, take over terminal sessions, and send photos. Claude Code, Codex and Antigravity sessions are all there, with each session's context and account limits.
+**What it is.** Your sessions on your iPhone through the mobile app (`apps/flutter/`, named Agent Console on the phone): read conversations, reply, answer questions and permissions, take over terminal sessions, and send photos. Claude Code, Codex and Antigravity sessions are all there, with each session's context and account limits.
 
 **How to use.** In Chat, click the **Phone** button at the top right of the header and scan the QR code (or type the one-time code) in the phone app. Paired phones are listed there and can be removed. The bridge runs over TLS on your network, or through a Cloudflare tunnel with Access when you're away.
 

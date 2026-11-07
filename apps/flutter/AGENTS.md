@@ -13,7 +13,7 @@ Agent Console on the phone: the same product as Notchling's Chat window, talking
 ## Checks (CI runs the same)
 
 ```sh
-cd mobile
+cd apps/flutter
 mkdir -p assets/viz/vendor assets/viz/fonts assets/models   # git-ignored assets; tests only need the paths
 touch assets/models/ggml-small-q5_1.bin                     # (tool/sync_viz.sh, tool/fetch_model.sh for a real build)
 flutter analyze

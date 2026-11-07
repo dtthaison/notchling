@@ -9,7 +9,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 
 ![Notchling peeking out when an agent finishes, listing sessions by Input, Working and Done, approving a permission prompt, and replying to a background agent](docs/demo.gif)
 
-<sub>Rendered from the real views with made-up agents by `Demo/make-demo.sh`.</sub>
+<sub>Rendered from the real views with made-up agents by `legacy/macos/Demo/make-demo.sh`.</sub>
 
 ## What it does
 
@@ -31,7 +31,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 
 ![Switching Claude Code from a nearly used-up account to another in one click, then Claude Desktop the same way](docs/accounts.gif)
 
-<sub>Made-up accounts, rendered from the real Accounts window by `Demo/make-demo.sh accounts`.</sub>
+<sub>Made-up accounts, rendered from the real Accounts window by `legacy/macos/Demo/make-demo.sh accounts`.</sub>
 
 ## Requirements
 
@@ -46,7 +46,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 ./build.sh --install  # also quits the running copy, installs to /Applications and opens it
 ```
 
-`build.sh` compiles every file under `Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
+`build.sh` compiles every file under `legacy/macos/Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
 
 To start at login, turn on **Launch at Login** in Settings, or run:
 
@@ -118,7 +118,8 @@ Unlike Claude Code, switching here **restarts** Antigravity rather than being se
 
 ```
 Package.swift             SwiftPM manifest, used for `swift test` (build.sh builds the app)
-Sources/Notchling/
+build.sh                  wrapper for legacy/macos/build.sh
+legacy/macos/Sources/Notchling/
   App/        main.swift (--hook, login item flags, app start), AppDelegate (menu bar item,
               settings menu, polling loop), DockPresence, AwakeController (IOKit power
               assertion), WakeResumer (continues agents cut off by sleep)
@@ -136,10 +137,11 @@ Sources/Notchling/
   DesignKit/  ChatKit: tokens, type, icons and parts used by the windows
   Pages/      PageLibrary (local Artifact copies), PagesWindow, PageSkill, OwnerPublish
   Search/     SearchPanel (⌘⇧P)
-Tests/NotchlingTests/     unit tests (`swift test`), with transcript fixtures
-Icon/make-icon.swift      draws the app icon
-Pet/                      the pet's drawings (swing, sit, look, yawn, doze, hop poses)
-Demo/                     renders docs/demo.gif from the real views with made-up agents
+legacy/macos/Tests/NotchlingTests/     unit tests (`swift test`), with transcript fixtures
+legacy/macos/Icon/make-icon.swift      draws the app icon
+legacy/macos/Pet/         the pet's drawings (swing, sit, look, yawn, doze, hop poses)
+legacy/macos/Demo/        renders docs/demo.gif from the real views with made-up agents
+apps/flutter/             the phone app
 ```
 
 ## Uninstall

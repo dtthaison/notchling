@@ -9,7 +9,7 @@ updates:
     cooldown:
       default-days: 7
   - package-ecosystem: pub
-    directory: /mobile
+    directory: /apps/flutter
     schedule:
       interval: weekly
     cooldown:

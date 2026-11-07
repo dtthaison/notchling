@@ -44,6 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Copied from ../viz by tool/sync_viz.sh
+# Copied from ../../viz by tool/sync_viz.sh
 /assets/viz/
 /assets/models/

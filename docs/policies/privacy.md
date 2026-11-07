@@ -1,7 +1,7 @@
 # Privacy policy
 
 What data leaves a computer running Notchling: where it goes, when, and why. It was checked against the
-code on 2026-11-07: the Swift app in `Sources/` and the phone app in `mobile/`. Changing this file is a
+code on 2026-11-07: the Swift app in `legacy/macos/Sources/` and the phone app in `apps/flutter/`. Changing this file is a
 protected change: it waits for the maintainer. A pull request that adds a network call updates this
 page in the same pull request.
 
@@ -134,7 +134,7 @@ Links you click open in your browser.
 - It connects only to the Mac it paired with: on the LAN to that Mac's pinned certificate, or through
   the tunnel URL from the pairing, with the Access headers. On the LAN it never sends Access headers.
 - Voice dictation runs on the phone with a Whisper model bundled in the app.
-- None of its direct dependencies is an analytics or crash-reporting package (`mobile/pubspec.yaml`).
+- None of its direct dependencies is an analytics or crash-reporting package (`apps/flutter/pubspec.yaml`).
 
 ## What stays on the Mac
 

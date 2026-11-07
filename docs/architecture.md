@@ -6,7 +6,7 @@ November 2026. The review covered all 35 source files (about 15,000 lines). The 
 
 **Already good:**
 - A lot of logic is written as static functions with no state: `LimitLogic`, `MarkdownParser`, the transcript parsers, `PageLibrary.find`, the base58 decoding. They can be tested as they are.
-- `CLAUDE.md` (since Phase 3, `Sources/AGENTS.md`) records the hard-won rules (accounts, Keychain, lanes, hooks).
+- `CLAUDE.md` (since Phase 3, `legacy/macos/Sources/AGENTS.md`) records the hard-won rules (accounts, Keychain, lanes, hooks).
 - The design kit (`ChatKit`) depends on almost nothing else.
 
 **What makes it hard to change and test:**
@@ -60,8 +60,8 @@ The SD guidance this follows:
 ## Phases
 
 ### Phase 0: safety net (done)
-- Moved the flat folder into `Sources/Notchling/<Feature>/`: App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search. `build.sh` and `Demo/make-demo.sh` compile that tree.
-- Added `Package.swift` and `Tests/NotchlingTests`, using `@testable import Notchling`. The 30 characterization tests cover:
+- Moved the flat folder into `legacy/macos/Sources/Notchling/<Feature>/`: App, Notch, Agents, Hook, Accounts, Limits, Lanes, Chat, DesignKit, Pages, Search. `build.sh` and `Demo/make-demo.sh` compile that tree.
+- Added `Package.swift` and `legacy/macos/Tests/NotchlingTests`, using `@testable import Notchling`. The 30 characterization tests cover:
   - `LimitLogic`
   - the usage JSON mapping, including the `limits` list
   - the conversation and transcript parsers (fixtures)
@@ -114,7 +114,7 @@ Move the pure models, parsers and policies listed above into a library target wi
 | `LimitWatcher` | one switch flow for the main login and for lanes; the notifier and banner move to UI |
 
 ### Phase 4: provider registry (done for the four account providers)
-`Sources/Notchling/Providers/` holds the protocol, the registry, the generic usage type and one thin adapter per provider. The adapters wrap `AccountStore`, `ClaudeDesktopStore`, `CodexStore` and `AntigravityStore` and add no switching logic; the stores keep it, because it touches the user's real logins.
+`legacy/macos/Sources/Notchling/Providers/` holds the protocol, the registry, the generic usage type and one thin adapter per provider. The adapters wrap `AccountStore`, `ClaudeDesktopStore`, `CodexStore` and `AntigravityStore` and add no switching logic; the stores keep it, because it touches the user's real logins.
 
 ```swift
 protocol AccountProvider: AnyObject {
@@ -147,7 +147,7 @@ protocol AccountProvider: AnyObject {
 - Desktop and Antigravity still have two copies of the quit, open and watch-for-login code; the shared `RestartingAppProvider` base class is not written.
 
 #### Adding a provider
-1. Write the store that reads and switches the login (its Keychain or file login, saved copies, a usage call). It follows the rules in `Sources/AGENTS.md`: never renew a token that is in use, set every place the login lives, quit apps that read it at launch.
+1. Write the store that reads and switches the login (its Keychain or file login, saved copies, a usage call). It follows the rules in `legacy/macos/Sources/AGENTS.md`: never renew a token that is in use, set every place the login lives, quit apps that read it at launch.
 2. Add `Providers/<Name>Provider.swift`: a final class conforming to `AccountProvider` that holds the store. Map the store's accounts to `ProviderAccount`, its limits to `UsageReport`, and wrap `switchTo` with `awaitStore`. Put the confirmation texts in `switchConfirmation`/`addConfirmation`. Set `menuStyle` (title row, placeholder text, `waitsInMenu` if an app sits at a sign-in screen, `syncsOnOpen` if reading the live login is cheap).
 3. Its page: a SwiftUI view built on `AccountRow` (reuse the card, give it a `content` closure for limits) and return it from `makePage`.
 4. Register it in `AppDelegate.providers`. The tab, the menu section, the refresh and the timer follow. Add the store's UserDefaults keys to the `migrateFromAwake` list.
@@ -165,6 +165,6 @@ The review's real bugs are fixed. These turned out not to be bugs:
 
 ## Rules for new code
 - No `FileManager.default`, `UserDefaults.standard`, `Process` or `URLSession` outside the adapters. Take the dependency in `init` instead.
-- Every new parser or policy ships with a test. Parsers of Claude Code's formats get a fixture in `Tests/NotchlingTests/Fixtures`.
+- Every new parser or policy ships with a test. Parsers of Claude Code's formats get a fixture in `legacy/macos/Tests/NotchlingTests/Fixtures`.
 - A new account provider must not need an edit outside its own file and its registration.
 - Keep files under about 400 lines. Split by feature, not by layer.

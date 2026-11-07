@@ -14,19 +14,19 @@ def rules(*changes):
 
 class WeakeningTests(unittest.TestCase):
     def test_edited_test_trips(self):
-        self.assertEqual(rules(chg("Tests/NotchlingTests/ChatTests.swift", "M")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "M")), ["WEAK-TEST-EDIT"])
 
     def test_deleted_test_trips(self):
-        self.assertEqual(rules(chg("Tests/NotchlingTests/ChatTests.swift", "D")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "D")), ["WEAK-TEST-EDIT"])
 
     def test_new_test_ok(self):
-        self.assertEqual(rules(chg("Tests/NotchlingTests/New.swift", "A", added=["func testX() {}"])), [])
+        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/New.swift", "A", added=["func testX() {}"])), [])
 
     def test_renamed_test_is_weakening(self):
-        self.assertEqual(rules(chg("Tests/A/B.swift", "R", old="Tests/A/A.swift")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("legacy/macos/Tests/A/B.swift", "R", old="legacy/macos/Tests/A/A.swift")), ["WEAK-TEST-EDIT"])
 
     def test_fixture_edit_trips(self):
-        self.assertEqual(rules(chg("Fixtures/acp-agy.jsonl", "M")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("legacy/macos/Fixtures/acp-agy.jsonl", "M")), ["WEAK-TEST-EDIT"])
 
     def test_guard_tests_edit_trips(self):
         self.assertEqual(rules(chg("tools/guard/tests/test_zones.py", "M")), ["WEAK-TEST-EDIT"])
@@ -35,23 +35,23 @@ class WeakeningTests(unittest.TestCase):
         self.assertEqual(rules(chg("crates/engine/tests/parse.rs", "M")), ["WEAK-TEST-EDIT"])
 
     def test_golden_edit_trips(self):
-        self.assertEqual(rules(chg("mobile/test/goldens/kit.png", "M", binary=True)), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("apps/flutter/test/goldens/kit.png", "M", binary=True)), ["WEAK-TEST-EDIT"])
 
     def test_golden_outside_test_folder_trips(self):
         self.assertEqual(rules(chg("crates/app/goldens/notch.png", "M", binary=True)), ["WEAK-TEST-EDIT"])
 
     def test_xctskip_trips(self):
-        self.assertEqual(rules(chg("Tests/X/New.swift", "A", added=['throw XCTSkip("later")'])), ["WEAK-SKIP"])
+        self.assertEqual(rules(chg("legacy/macos/Tests/X/New.swift", "A", added=['throw XCTSkip("later")'])), ["WEAK-SKIP"])
 
     def test_rust_ignore_trips(self):
         self.assertEqual(rules(chg("crates/engine/src/a.rs", "M", added=["#[ignore]"])), ["WEAK-SKIP"])
 
     def test_dart_skip_trips(self):
-        self.assertEqual(rules(chg("mobile/test/new_test.dart", "A", added=["test('x', () {}, skip: true);"])),
+        self.assertEqual(rules(chg("apps/flutter/test/new_test.dart", "A", added=["test('x', () {}, skip: true);"])),
                          ["WEAK-SKIP"])
 
     def test_bidi_rejected(self):
-        self.assertEqual(rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1 \u202e"])),
+        self.assertEqual(rules(chg("legacy/macos/Sources/Notchling/Search/S.swift", "M", added=["let a = 1 \u202e"])),
                          ["WEAK-UNICODE"])
 
     def test_zero_width_rejected(self):
@@ -61,20 +61,20 @@ class WeakeningTests(unittest.TestCase):
         self.assertEqual(rules(chg("README.md", "M", added=["Việt Nam, đây là tiếng Việt"])), [])
 
     def test_source_edit_ok(self):
-        self.assertEqual(rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1"])), [])
+        self.assertEqual(rules(chg("legacy/macos/Sources/Notchling/Search/S.swift", "M", added=["let a = 1"])), [])
 
     # I3: hooks that rewrite how every existing test runs count as skips.
     def test_swift_test_run_hooks_trip(self):
         for line in ["    override func invokeTest() {}", "override class var defaultTestSuite: XCTestSuite { XCTestSuite() }",
                      "override class var testInvocations: [NSInvocation] { [] }"]:
-            self.assertEqual(rules(chg("Tests/X/New.swift", "A", added=[line])), ["WEAK-SKIP"], line)
+            self.assertEqual(rules(chg("legacy/macos/Tests/X/New.swift", "A", added=[line])), ["WEAK-SKIP"], line)
 
     def test_dart_golden_comparator_trips(self):
-        self.assertEqual(rules(chg("mobile/test/flutter_test_config.dart", "A",
+        self.assertEqual(rules(chg("apps/flutter/test/flutter_test_config.dart", "A",
                                    added=["  goldenFileComparator = AlwaysPass();"])), ["WEAK-SKIP"])
 
     def test_skip_lookalikes_ok(self):
-        self.assertEqual(rules(chg("Tests/X/New.swift", "A", added=["let invokeTestCount = 1", "var testInvocationsLog = 2"])), [])
+        self.assertEqual(rules(chg("legacy/macos/Tests/X/New.swift", "A", added=["let invokeTestCount = 1", "var testInvocationsLog = 2"])), [])
 
     # I6: anything invisible or control-like in an added line goes to the maintainer.
     def test_invisible_characters_rejected(self):
@@ -113,7 +113,7 @@ class WeakeningTests(unittest.TestCase):
             "interlinear annotation": "a\ufff9b",
         }
         for name, line in bad.items():
-            for path in ("Sources/Notchling/Search/S.swift", "docs/a.md"):
+            for path in ("legacy/macos/Sources/Notchling/Search/S.swift", "docs/a.md"):
                 self.assertEqual(rules(chg(path, "M", added=[line])), ["WEAK-UNICODE"], f"{name} in {path}")
 
     def test_ordinary_text_still_ok(self):

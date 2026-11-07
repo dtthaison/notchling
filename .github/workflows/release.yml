@@ -1,6 +1,6 @@
 name: Release
 
-# Merging a release/<version> pull request (made by ./release.sh) tags v<version> on the merge
+# Merging a release/<version> pull request (made by legacy/macos/release.sh) tags v<version> on the merge
 # commit and publishes the GitHub release with the disk image and a zip.
 on:
   pull_request:
@@ -22,7 +22,7 @@ jobs:
         run: ./build.sh --dmg
       - name: Write release notes
         run: |
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" legacy/macos/Info.plist)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           ditto -c -k --keepParent build/Notchling.app "build/Notchling-$VERSION.zip"
           {

@@ -17,11 +17,11 @@ from typing import Callable, Dict, List, Optional, Tuple
 from guard.source import strip_code, strip_comments
 from guard.zones import glob_regex
 
-EXCLUDE = ("Tests/**", "Demo/**", "tools/**", "mobile/test/**")
+EXCLUDE = ("legacy/macos/Tests/**", "legacy/macos/Demo/**", "tools/**", "apps/flutter/test/**")
 BASELINE = Path("tools/guard/lint-baseline.json")
-NOTCH_VIEWS = tuple(f"Sources/Notchling/Notch/{n}.swift" for n in
+NOTCH_VIEWS = tuple(f"legacy/macos/Sources/Notchling/Notch/{n}.swift" for n in
                     ("NotchView", "NotchRows", "NotchPeek", "NotchDetail", "NotchCardParts", "TabPerch")) + \
-              ("Sources/Notchling/Notch/Pet/**",)
+              ("legacy/macos/Sources/Notchling/Notch/Pet/**",)
 
 Found = List[Tuple[int, str]]
 Check = Callable[[str, List[str], Path], Found]
@@ -78,7 +78,7 @@ DEFAULTS_KEY = [re.compile(r"(?i)defaults[^\n]*forKey:\s*\"([^\"]+)\""), re.comp
 
 def migrated_keys(repo: Path) -> frozenset:
     """The keys in `AppDelegate.migrateFromAwake`'s `for key in [...]` list."""
-    path = Path(repo) / "Sources/Notchling/App/AppDelegate.swift"
+    path = Path(repo) / "legacy/macos/Sources/Notchling/App/AppDelegate.swift"
     cache_key = str(path)
     if cache_key not in _MIGRATED_CACHE:
         text = path.read_text() if path.exists() else ""
@@ -108,39 +108,39 @@ def _file_size(limit: int) -> Check:
 
 RULES: List[Rule] = [
     Rule("LINT-CORE-NO-NOTCHLING", "ConsoleCore must stay free of Notchling types (it's shared with hostd)",
-         ("Sources/ConsoleCore/**",), _code_matches(r"^\s*(@testable\s+)?import\s+Notchling\b"),
-         ("Sources/ConsoleCore/A.swift", "import Notchling\n"), ("Sources/ConsoleCore/A.swift", "import Foundation\n")),
+         ("legacy/macos/Sources/ConsoleCore/**",), _code_matches(r"^\s*(@testable\s+)?import\s+Notchling\b"),
+         ("legacy/macos/Sources/ConsoleCore/A.swift", "import Notchling\n"), ("legacy/macos/Sources/ConsoleCore/A.swift", "import Foundation\n")),
     Rule("LINT-CORE-MACOS13", "ConsoleCore targets macOS 13: no @Observable or macOS 14+ checks",
-         ("Sources/ConsoleCore/**",), _code_matches(r"@Observable\b", r"[#@]available\(macOS 1[4-9]"),
-         ("Sources/ConsoleCore/A.swift", "@Observable final class Store {}\n"),
-         ("Sources/ConsoleCore/A.swift", "final class Store: ObservableObject {}\n")),
+         ("legacy/macos/Sources/ConsoleCore/**",), _code_matches(r"@Observable\b", r"[#@]available\(macOS 1[4-9]"),
+         ("legacy/macos/Sources/ConsoleCore/A.swift", "@Observable final class Store {}\n"),
+         ("legacy/macos/Sources/ConsoleCore/A.swift", "final class Store: ObservableObject {}\n")),
     Rule("LINT-NO-FORCE-UNWRAP", "No force-unwraps, try! or as! outside probes and tests",
-         ("Sources/**/*.swift",), _code_matches(r"[\w\)\]]!(?!=)", r"\b(try|as)!"),
-         ("Sources/Notchling/A.swift", "let a = b!\n"), ("Sources/Notchling/A.swift", "guard let a = b else { return }\n")),
+         ("legacy/macos/Sources/**/*.swift",), _code_matches(r"[\w\)\]]!(?!=)", r"\b(try|as)!"),
+         ("legacy/macos/Sources/Notchling/A.swift", "let a = b!\n"), ("legacy/macos/Sources/Notchling/A.swift", "guard let a = b else { return }\n")),
     Rule("LINT-KIT-TOKENS", "Views use the design kit's Kit* tokens, not raw colors or font sizes",
-         ("Sources/Notchling/Chat/Views/**",) + NOTCH_VIEWS,
+         ("legacy/macos/Sources/Notchling/Chat/Views/**",) + NOTCH_VIEWS,
          _code_matches(r"Color\((red|white|hue|\.sRGB)", r"\.font\(\.system\(size:",
                        r"Color\.(red|green|blue|orange|yellow|purple|pink|gray|black|white)\b"),
-         ("Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(Color.red)\n"),
-         ("Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(KitInk.danger)\n")),
+         ("legacy/macos/Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(Color.red)\n"),
+         ("legacy/macos/Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(KitInk.danger)\n")),
     Rule("LINT-DEFAULTS-MIGRATED", "Every UserDefaults key is in AppDelegate.migrateFromAwake's list",
-         ("Sources/Notchling/**",), _defaults_migrated,
-         ("Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "newSetting")\n'),
-         ("Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "mode")\n')),
+         ("legacy/macos/Sources/Notchling/**",), _defaults_migrated,
+         ("legacy/macos/Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "newSetting")\n'),
+         ("legacy/macos/Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "mode")\n')),
     Rule("LINT-POINTER-CURSOR", "Clickable views show the pointing hand (.pointerCursor() or a kit style)",
-         ("Sources/Notchling/**",), _pointer_cursor,
-         ("Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n"),
-         ("Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n    .pointerCursor()\n")),
+         ("legacy/macos/Sources/Notchling/**",), _pointer_cursor,
+         ("legacy/macos/Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n"),
+         ("legacy/macos/Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n    .pointerCursor()\n")),
     Rule("LINT-NO-APPLESCRIPT", "No NSAppleScript or osascript (notifications show Script Editor's name)",
-         ("Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
-         ("Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
-         ("Sources/Notchling/A.swift", "// never osascript\n")),
+         ("legacy/macos/Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
+         ("legacy/macos/Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
+         ("legacy/macos/Sources/Notchling/A.swift", "// never osascript\n")),
     Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
-         ("Sources/**", "crates/**", "mobile/lib/**"), _file_size(1000),
-         ("Sources/Notchling/A.swift", "x\n" * 1001), ("Sources/Notchling/A.swift", "x\n" * 1000)),
+         ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(1000),
+         ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1001), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1000)),
     Rule("LINT-FILE-SIZE-WARN", "Files over 600 lines should be split",
-         ("Sources/**", "crates/**", "mobile/lib/**"), _file_size(600),
-         ("Sources/Notchling/A.swift", "x\n" * 601), ("Sources/Notchling/A.swift", "x\n" * 600), warn=True),
+         ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(600),
+         ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 601), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 600), warn=True),
 ]
 
 

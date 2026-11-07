@@ -17,7 +17,7 @@ APP_DELEGATE = """final class AppDelegate {
     }
 }
 """
-FIXTURE_REPO = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE})
+FIXTURE_REPO = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE})
 
 
 def in_repo(repo, argv):
@@ -51,39 +51,39 @@ class RuleTests(unittest.TestCase):
             self.assertTrue(r.applies(r.bad[0]), r.id)
 
     def test_force_unwrap_not_inequality_or_not(self):
-        self.assertEqual(rule("LINT-NO-FORCE-UNWRAP").check("Sources/A.swift", ["if a != b {}", "if !ok {}", "f(!x)"],
+        self.assertEqual(rule("LINT-NO-FORCE-UNWRAP").check("legacy/macos/Sources/A.swift", ["if a != b {}", "if !ok {}", "f(!x)"],
                                                             FIXTURE_REPO), [])
 
     def test_force_unwrap_not_in_string(self):
-        self.assertEqual(rule("LINT-NO-FORCE-UNWRAP").check("Sources/A.swift", ['Text("Done!")'], FIXTURE_REPO), [])
+        self.assertEqual(rule("LINT-NO-FORCE-UNWRAP").check("legacy/macos/Sources/A.swift", ['Text("Done!")'], FIXTURE_REPO), [])
 
     def test_force_try_and_cast(self):
-        self.assertEqual(len(rule("LINT-NO-FORCE-UNWRAP").check("Sources/A.swift", ["let a = try! f()", "b as! C"],
+        self.assertEqual(len(rule("LINT-NO-FORCE-UNWRAP").check("legacy/macos/Sources/A.swift", ["let a = try! f()", "b as! C"],
                                                                 FIXTURE_REPO)), 2)
 
     def test_defaults_key_migrated_ok(self):
         self.assertEqual(rule("LINT-DEFAULTS-MIGRATED").check(
-            "Sources/Notchling/A.swift", ['UserDefaults.standard.bool(forKey: "showPet")'], FIXTURE_REPO), [])
+            "legacy/macos/Sources/Notchling/A.swift", ['UserDefaults.standard.bool(forKey: "showPet")'], FIXTURE_REPO), [])
 
     def test_defaults_ignores_other_forkey(self):
         self.assertEqual(rule("LINT-DEFAULTS-MIGRATED").check(
-            "Sources/Notchling/A.swift", ['coder.encode(x, forKey: "nope")'], FIXTURE_REPO), [])
+            "legacy/macos/Sources/Notchling/A.swift", ['coder.encode(x, forKey: "nope")'], FIXTURE_REPO), [])
 
     def test_applescript_rule_reads_only_code(self):
         r = rule("LINT-NO-APPLESCRIPT")
-        self.assertFalse(r.applies("Sources/AGENTS.md"))
-        self.assertTrue(r.applies("Sources/Notchling/Agents/AgentActions.swift"))
+        self.assertFalse(r.applies("legacy/macos/Sources/AGENTS.md"))
+        self.assertTrue(r.applies("legacy/macos/Sources/Notchling/Agents/AgentActions.swift"))
         self.assertTrue(r.applies("crates/engine/src/lib.rs"))
 
     def test_tests_and_demo_excluded(self):
         r = rule("LINT-NO-FORCE-UNWRAP")
-        self.assertFalse(r.applies("Tests/NotchlingTests/A.swift"))
-        self.assertFalse(r.applies("Demo/Render.swift"))
+        self.assertFalse(r.applies("legacy/macos/Tests/NotchlingTests/A.swift"))
+        self.assertFalse(r.applies("legacy/macos/Demo/Render.swift"))
 
 
 class BaselineTests(unittest.TestCase):
     def test_baseline_absorbs_existing(self):
-        v = Violation("LINT-NO-APPLESCRIPT", "Sources/Notchling/Agents/AgentActions.swift", 98, "NSAppleScript(source: s)")
+        v = Violation("LINT-NO-APPLESCRIPT", "legacy/macos/Sources/Notchling/Agents/AgentActions.swift", 98, "NSAppleScript(source: s)")
         self.assertEqual(new_violations([v], [fingerprint(v)]), [])
 
     def test_fingerprint_ignores_line_number_and_spacing(self):
@@ -92,43 +92,43 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(fingerprint(a), fingerprint(b))
 
     def test_baseline_counts_duplicates(self):
-        v = Violation("LINT-NO-FORCE-UNWRAP", "Sources/A.swift", 1, "x!")
+        v = Violation("LINT-NO-FORCE-UNWRAP", "legacy/macos/Sources/A.swift", 1, "x!")
         self.assertEqual(len(new_violations([v, v], [fingerprint(v)])), 1)
 
     def test_run_finds_violations_in_tracked_files(self):
-        repo = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
-                          "Sources/Notchling/Search/S.swift": "let a = b!\n"})
+        repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
+                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         self.assertEqual([(v.rule, v.path, v.line) for v in run(repo)],
-                         [("LINT-NO-FORCE-UNWRAP", "Sources/Notchling/Search/S.swift", 1)])
+                         [("LINT-NO-FORCE-UNWRAP", "legacy/macos/Sources/Notchling/Search/S.swift", 1)])
 
     def test_lint_cli_fails_on_new_and_names_rule(self):
-        repo = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
+        repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
                           "tools/guard/lint-baseline.json": json.dumps({"entries": []}),
-                          "Sources/Notchling/Search/S.swift": "let a = b!\n"})
+                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         code, out = in_repo(repo, ["lint"])
         self.assertEqual(code, 1)
-        self.assertIn("Sources/Notchling/Search/S.swift:1: LINT-NO-FORCE-UNWRAP", out)
+        self.assertIn("legacy/macos/Sources/Notchling/Search/S.swift:1: LINT-NO-FORCE-UNWRAP", out)
 
     def test_write_baseline_then_clean(self):
-        repo = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
-                          "Sources/Notchling/Search/S.swift": "let a = b!\n"})
+        repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
+                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         self.assertEqual(in_repo(repo, ["lint", "--write-baseline"])[0], 0)
         self.assertEqual(in_repo(repo, ["lint"])[0], 0)
         self.assertEqual(in_repo(repo, ["lint", "--write-baseline"])[0], 1)  # never overwrites
 
     def test_baseline_cannot_grow(self):
-        repo = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
+        repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
                           "tools/guard/lint-baseline.json": json.dumps({"entries": []}),
-                          "Sources/Notchling/Search/S.swift": "let a = b!\n"})
+                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         code, out = in_repo(repo, ["lint", "--update-baseline"])
         self.assertEqual(code, 1)
         self.assertIn("GUARD-BASELINE", out)
 
     def test_update_baseline_shrinks(self):
-        repo = make_repo({"Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
-                          "Sources/Notchling/Search/S.swift": "let a = b!\n"})
+        repo = make_repo({"legacy/macos/Sources/Notchling/App/AppDelegate.swift": APP_DELEGATE,
+                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = b!\n"})
         in_repo(repo, ["lint", "--write-baseline"])
-        commit(repo, {"Sources/Notchling/Search/S.swift": "let a = b\n"})
+        commit(repo, {"legacy/macos/Sources/Notchling/Search/S.swift": "let a = b\n"})
         self.assertEqual(in_repo(repo, ["lint", "--update-baseline"])[0], 0)
         data = json.loads((repo / "tools/guard/lint-baseline.json").read_text())
         self.assertEqual(data["entries"], [])

@@ -6,7 +6,7 @@ The rest of the manual, in layers:
 
 | What | Where |
 | --- | --- |
-| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [Sources/AGENTS.md](Sources/AGENTS.md), [mobile/AGENTS.md](mobile/AGENTS.md) |
+| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md), [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) |
 | What Notchling is and won't be | [docs/goals.md](docs/goals.md) |
 | How the parts fit, and why | [ARCHITECTURE.md](ARCHITECTURE.md), [docs/decisions/](docs/decisions/) |
 | Rules, each with its check | [docs/rules.md](docs/rules.md) |
@@ -40,8 +40,8 @@ Expect a first reply within about a week.
 | `guard` | The guard's own tests, the architecture lint, pinned actions, CODEOWNERS, the rulesets and the rules check | `PYTHONPATH=tools/guard python3 -m unittest discover -s tools/guard/tests -t tools/guard`, then `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules` in place of `lint`) |
 | `build` | `swift test` | `swift test` |
 | `app-build` | `./build.sh`, arm64 and x86_64 | `./build.sh` |
-| `phone-analyze` | `flutter analyze` in `mobile/` | `cd mobile && flutter analyze` |
-| `phone-test` | `flutter test` in `mobile/`, goldens included | `cd mobile && flutter test` |
+| `phone-analyze` | `flutter analyze` in `apps/flutter/` | `cd apps/flutter && flutter analyze` |
+| `phone-test` | `flutter test` in `apps/flutter/`, goldens included | `cd apps/flutter && flutter test` |
 | `maintainer-gate` | Passes when the PR touches nothing protected, trips no capability and weakens no test, or when the maintainer approved its head commit | `PYTHONPATH=tools/guard python3 -m guard gate --base main --head HEAD` lists what would wait |
 
 Each rule a check enforces has an id (`LINT-…`, `CAP-…`, `WEAK-…`, `ZONE`, `GUARD-…`), and the failure names it. [docs/rules.md](docs/rules.md) says why each rule exists.
@@ -58,11 +58,11 @@ Rust checks (`cargo test`, `cargo clippy`, `cargo-deny`) join once Rust code lan
 
 [`tools/guard/zones.json`](tools/guard/zones.json) is the source of truth; `.github/CODEOWNERS` is generated from it. Today the zone is:
 
-- Chat's views (`Sources/Notchling/Chat/Views/`), the notch's views (`NotchView`, `NotchRows`, `NotchPeek`, `NotchDetail`, `NotchCardParts`, `TabPerch`, `Notch/Pet/`), Search, the design kit and `Pages/PagesWindow.swift`.
+- Chat's views (`legacy/macos/Sources/Notchling/Chat/Views/`), the notch's views (`NotchView`, `NotchRows`, `NotchPeek`, `NotchDetail`, `NotchCardParts`, `TabPerch`, `Notch/Pet/`), Search, the design kit and `Pages/PagesWindow.swift`.
 - The transcript readers: `Chat/ConversationReader.swift`, `Agents/TranscriptReader.swift`, `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, and ConsoleCore's `ChatTranscript.swift`, `SubagentReader.swift` and `TranscriptFacts.swift`.
 - `docs/`, except the manual's layers (`docs/goals.md`, `docs/rules.md`, `docs/decisions/`, `docs/policies/`).
-- The phone's `mobile/lib/features/`, except `pairing/`.
-- New files under `Tests/`, `Fixtures/` and `mobile/test/`. Changing an existing test or golden is protected.
+- The phone's `apps/flutter/lib/features/`, except `pairing/`.
+- New files under `legacy/macos/Tests/`, `legacy/macos/Fixtures/` and `apps/flutter/test/`. Changing an existing test or golden is protected.
 - Later, in the Rust tree: `crates/app/`, `crates/kit/`, and the engine's transcript and search modules.
 
 Everything else waits for the maintainer: logins, Keychain, the vault, lanes, Machines, the hook, replies and terminals, the phone bridge and pairing, `.github/`, `tools/`, the build and release scripts, every `AGENTS.md` and `CLAUDE.md`, and `.claude/`.
@@ -77,7 +77,7 @@ You need macOS 13 or later and the Xcode Command Line Tools (`xcode-select --ins
 ./build.sh            # builds build/Notchling.app (arm64 + x86_64, signed ad hoc)
 ./build.sh --install  # replaces /Applications/Notchling.app and relaunches it (people only; agents never)
 ./build.sh --dmg      # also makes build/Notchling-<version>.dmg
-swift test            # Tests/NotchlingTests and Tests/ConsoleCoreTests
+swift test            # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 ```
 
 Add a test with any new logic or parser. Tests never touch Keychain, real logins, ssh or `gh`; Machines tests use the fakes in `MachineSetupFakes.swift` and `MachineWindowFakes.swift`. `ZLiveReplyTests` and `ZBenchmarkTests` skip unless you ask for them; their headers say how.
@@ -93,7 +93,7 @@ PYTHONPATH=tools/guard python3 -m guard rulesets
 PYTHONPATH=tools/guard python3 -m guard rules
 ```
 
-The phone app, from `mobile/` (the placeholder asset steps are in [mobile/AGENTS.md](mobile/AGENTS.md)):
+The phone app, from `apps/flutter/` (the placeholder asset steps are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md)):
 
 ```sh
 flutter analyze
@@ -113,7 +113,7 @@ Notchling works on your actual Claude Code, Claude Desktop, Codex and Antigravit
 - Never paste real tokens, cookies or `~/.claude.json` contents into issues or pull requests.
 - Use the [dev profile](docs/dev-profile.md) so a dev build doesn't write hooks and skills into your real `~/.claude`. It can't isolate Keychain.
 
-[Sources/AGENTS.md](Sources/AGENTS.md) has the architecture in one pass and a list of things that bit before. It's written for agents but reads fine for people too.
+[legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) has the architecture in one pass and a list of things that bit before. It's written for agents but reads fine for people too.
 
 ## Code style
 
@@ -148,9 +148,9 @@ Sign off every commit with `git commit -s`. It adds a `Signed-off-by:` line, whi
 For maintainers, until Phase 6 replaces it. With the changes for the release listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md):
 
 ```sh
-./release.sh 1.2.0
+legacy/macos/release.sh 1.2.0
 ```
 
-This makes branch `release/1.2.0` from `main`, sets the version in `Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features.
+This makes branch `release/1.2.0` from `main`, sets the version in `legacy/macos/Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features.
 
 By contributing you agree that your work is released under the [MIT License](LICENSE), and to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

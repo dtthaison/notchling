@@ -5,7 +5,7 @@ iOS needs a full-bleed square with no transparency, so the rounded square is fla
 background. Android gets legacy icons (the rounded square as is), plus an adaptive icon: a background
 layer (the icon's own gradient) and a foreground layer (the cup and steam, inside the 66% safe zone).
 
-Needs Pillow:  python3 -m pip install pillow     Run from mobile/:  python3 tool/make_icons.py
+Needs Pillow:  python3 -m pip install pillow     Run from apps/flutter/:  python3 tool/make_icons.py
 """
 from __future__ import annotations
 

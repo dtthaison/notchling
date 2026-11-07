@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// The Notchling Chat kit (docs/chat-kit.md, Sources/Notchling/DesignKit/ChatKit.swift) on the phone: same palette,
 /// same meanings, same radii, so the Mac and the phone read as one product. Sizes are phone sizes (the roles are the
-/// same; body is 15 here, 13 on the Mac). Names follow mobile/DESIGN.md.
+/// same; body is 15 here, 13 on the Mac). Names follow DESIGN.md.
 /// Widgets read colors and text styles from `Kit.of(context)`, never a hex, font name or radius of their own.
 
 abstract final class _Palette {
@@ -35,7 +35,7 @@ abstract final class _Palette {
 }
 
 /// Radii of the kit: sm controls, md rows and chips, card messages and cards, composer the input.
-/// One documented scale (mobile/DESIGN.md). Chips, pills, badges and avatars are fully round (use 999).
+/// One documented scale (DESIGN.md). Chips, pills, badges and avatars are fully round (use 999).
 /// sm: small controls (buttons, fields, code boxes). md: cards, rows, capsules. bubble: chat bubbles, with the corner
 /// nearest the sender at bubbleTail. composer: the input. sheet: bottom sheets and dialogs, top corners only.
 abstract final class Radii {

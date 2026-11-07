@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 
-/// Motion tier: calm (mobile/DESIGN.md). Fades and color changes use short timing with an ease-out curve; moves are
+/// Motion tier: calm (DESIGN.md). Fades and color changes use short timing with an ease-out curve; moves are
 /// a few dp with no overshoot; nothing starts at scale 0. Everything here honours Reduce Motion by dropping to zero
 /// duration, so a state change is still visible (color, shape, text) without movement.
 abstract final class Motion {

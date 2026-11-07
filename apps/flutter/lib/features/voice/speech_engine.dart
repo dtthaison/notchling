@@ -57,7 +57,7 @@ class WhisperSpeechEngine implements SpeechEngine {
     try {
       asset = await rootBundle.load(bundledModelAsset);
     } on Object catch (error) {
-      throw SpeechEngineException('Thiếu model giọng nói trong app ($error). Chạy mobile/tool/fetch_model.sh rồi build lại.');
+      throw SpeechEngineException('Thiếu model giọng nói trong app ($error). Chạy apps/flutter/tool/fetch_model.sh rồi build lại.');
     }
     final Stopwatch watch = Stopwatch()..start();
     await dir.create(recursive: true);

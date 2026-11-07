@@ -178,7 +178,7 @@ class DependabotTests(unittest.TestCase):
         text = (ROOT / ".github" / "dependabot.yml").read_text()
         for eco in ("github-actions", "pub", "swift"):
             self.assertIn(f"package-ecosystem: {eco}", text)
-        self.assertIn("directory: /mobile", text)
+        self.assertIn("directory: /apps/flutter", text)
         self.assertEqual(text.count("interval: weekly"), 3)
         self.assertEqual(text.count("default-days: 7"), 3)
         self.assertNotIn("auto-merge", text)

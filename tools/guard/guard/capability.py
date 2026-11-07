@@ -22,23 +22,23 @@ MAX_COMMENT_ENDS = 8
 # Each protected type, with every file that may name it: exact paths, never a name prefix and never
 # a path in the auto-merge zone. Found with `grep -rnE "(class|struct|enum|actor|protocol|extension) Type"`.
 OWN_FILES: Dict[str, Tuple[str, ...]] = {
-    "VaultStore": ("Sources/Notchling/Vault/VaultStore.swift",),
-    "AccountStore": ("Sources/Notchling/Accounts/Accounts.swift",),
-    "LaneStore": ("Sources/Notchling/Lanes/Lanes.swift",),
-    "ReplySender": ("Sources/Notchling/Agents/ReplySender.swift", "Sources/Notchling/Agents/ReplySender+Dialog.swift"),
-    "HookBridge": ("Sources/Notchling/Hook/HookBridge.swift",),
-    "OwnerPublish": ("Sources/Notchling/Pages/OwnerPublish.swift",),
+    "VaultStore": ("legacy/macos/Sources/Notchling/Vault/VaultStore.swift",),
+    "AccountStore": ("legacy/macos/Sources/Notchling/Accounts/Accounts.swift",),
+    "LaneStore": ("legacy/macos/Sources/Notchling/Lanes/Lanes.swift",),
+    "ReplySender": ("legacy/macos/Sources/Notchling/Agents/ReplySender.swift", "legacy/macos/Sources/Notchling/Agents/ReplySender+Dialog.swift"),
+    "HookBridge": ("legacy/macos/Sources/Notchling/Hook/HookBridge.swift",),
+    "OwnerPublish": ("legacy/macos/Sources/Notchling/Pages/OwnerPublish.swift",),
     # The app's wrappers around processes, ptys and credentials: using one is using the API.
-    "TerminalSession": ("Sources/Notchling/Terminal/TerminalSession.swift",),
-    "AgentActions": ("Sources/Notchling/Agents/AgentActions.swift",),
-    "CodexRunner": ("Sources/Notchling/Agents/CodexRunner.swift",),
-    "AntigravityRunner": ("Sources/Notchling/Agents/AntigravityCLI.swift",),
-    "ACPRunner": ("Sources/Notchling/Agents/ACPRunner.swift",),
-    "ACPConnection": ("Sources/Notchling/Agents/ACPConnection.swift",),
-    "HostTerminals": ("Sources/Notchling/Agents/ReplySender.swift",),
-    "SecretRunner": ("Sources/Notchling/Vault/SecretVault.swift",),
-    "SecretVault": ("Sources/Notchling/Vault/SecretVault.swift",),
-    "VaultServer": ("Sources/Notchling/Vault/VaultServer.swift",),
+    "TerminalSession": ("legacy/macos/Sources/Notchling/Terminal/TerminalSession.swift",),
+    "AgentActions": ("legacy/macos/Sources/Notchling/Agents/AgentActions.swift",),
+    "CodexRunner": ("legacy/macos/Sources/Notchling/Agents/CodexRunner.swift",),
+    "AntigravityRunner": ("legacy/macos/Sources/Notchling/Agents/AntigravityCLI.swift",),
+    "ACPRunner": ("legacy/macos/Sources/Notchling/Agents/ACPRunner.swift",),
+    "ACPConnection": ("legacy/macos/Sources/Notchling/Agents/ACPConnection.swift",),
+    "HostTerminals": ("legacy/macos/Sources/Notchling/Agents/ReplySender.swift",),
+    "SecretRunner": ("legacy/macos/Sources/Notchling/Vault/SecretVault.swift",),
+    "SecretVault": ("legacy/macos/Sources/Notchling/Vault/SecretVault.swift",),
+    "VaultServer": ("legacy/macos/Sources/Notchling/Vault/VaultServer.swift",),
 }
 PROTECTED_TYPES = list(OWN_FILES)
 

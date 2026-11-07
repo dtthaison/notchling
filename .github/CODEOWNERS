@@ -6,35 +6,35 @@
 * @dtthaison
 
 # Auto-merge zone
-/Sources/Notchling/Chat/Views/
-/Sources/Notchling/Notch/NotchView.swift
-/Sources/Notchling/Notch/NotchRows.swift
-/Sources/Notchling/Notch/NotchPeek.swift
-/Sources/Notchling/Notch/NotchDetail.swift
-/Sources/Notchling/Notch/NotchCardParts.swift
-/Sources/Notchling/Notch/TabPerch.swift
-/Sources/Notchling/Notch/Pet/
-/Sources/Notchling/Search/
-/Sources/Notchling/DesignKit/
-/Sources/Notchling/Pages/PagesWindow.swift
-/Sources/Notchling/Chat/ConversationReader.swift
-/Sources/Notchling/Agents/TranscriptReader.swift
-/Sources/Notchling/Agents/CodexSessions.swift
-/Sources/Notchling/Agents/ACPTranscript.swift
-/Sources/ConsoleCore/ChatTranscript.swift
-/Sources/ConsoleCore/SubagentReader.swift
-/Sources/ConsoleCore/TranscriptFacts.swift
+/legacy/macos/Sources/Notchling/Chat/Views/
+/legacy/macos/Sources/Notchling/Notch/NotchView.swift
+/legacy/macos/Sources/Notchling/Notch/NotchRows.swift
+/legacy/macos/Sources/Notchling/Notch/NotchPeek.swift
+/legacy/macos/Sources/Notchling/Notch/NotchDetail.swift
+/legacy/macos/Sources/Notchling/Notch/NotchCardParts.swift
+/legacy/macos/Sources/Notchling/Notch/TabPerch.swift
+/legacy/macos/Sources/Notchling/Notch/Pet/
+/legacy/macos/Sources/Notchling/Search/
+/legacy/macos/Sources/Notchling/DesignKit/
+/legacy/macos/Sources/Notchling/Pages/PagesWindow.swift
+/legacy/macos/Sources/Notchling/Chat/ConversationReader.swift
+/legacy/macos/Sources/Notchling/Agents/TranscriptReader.swift
+/legacy/macos/Sources/Notchling/Agents/CodexSessions.swift
+/legacy/macos/Sources/Notchling/Agents/ACPTranscript.swift
+/legacy/macos/Sources/ConsoleCore/ChatTranscript.swift
+/legacy/macos/Sources/ConsoleCore/SubagentReader.swift
+/legacy/macos/Sources/ConsoleCore/TranscriptFacts.swift
 /docs/
-/mobile/lib/features/
+/apps/flutter/lib/features/
 /crates/app/
 /crates/kit/
 /crates/engine/src/transcript/
 /crates/engine/src/search/
 
 # New files only
-/Tests/
-/Fixtures/
-/mobile/test/
+/legacy/macos/Tests/
+/legacy/macos/Fixtures/
+/apps/flutter/test/
 
 # Taken back out of the zone
 /docs/goals.md @dtthaison
@@ -45,11 +45,11 @@
 /docs/feature-map.md @dtthaison
 /docs/architecture.md @dtthaison
 /docs/superpowers/ @dtthaison
-/mobile/lib/features/pairing/ @dtthaison
+/apps/flutter/lib/features/pairing/ @dtthaison
 **/AGENTS.md @dtthaison
 **/CLAUDE.md @dtthaison
 **/.claude/ @dtthaison
 **/.gitattributes @dtthaison
 **/CODEOWNERS @dtthaison
-/mobile/**/flutter_test_config.dart @dtthaison
-/mobile/**/dart_test.yaml @dtthaison
+/apps/flutter/**/flutter_test_config.dart @dtthaison
+/apps/flutter/**/dart_test.yaml @dtthaison

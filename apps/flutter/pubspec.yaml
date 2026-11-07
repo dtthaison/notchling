@@ -76,7 +76,7 @@ flutter:
     - assets/pet/
     # Whisper model, git-ignored: run tool/fetch_model.sh. The build fails naming this file when it is missing.
     - assets/models/ggml-small-q5_1.bin
-    # Copied from ../viz by tool/sync_viz.sh (git-ignored). The build fails clearly when it is missing.
+    # Copied from ../../viz by tool/sync_viz.sh (git-ignored). The build fails clearly when it is missing.
     - assets/viz/
     - assets/viz/vendor/
     - assets/viz/fonts/

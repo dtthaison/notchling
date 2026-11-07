@@ -1,14 +1,15 @@
 #!/bin/bash
-# Starts a release: ./release.sh 1.2.0
+# Starts a release: legacy/macos/release.sh 1.2.0
 # Makes branch release/<version> from main with the version bumped in Info.plist and the
 # [Unreleased] changelog entries moved under the new version, pushes it and opens a pull request.
 # Merging that pull request tags v<version> and publishes the GitHub release (.github/workflows/release.yml).
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/../.."
+PLIST=legacy/macos/Info.plist
 
 VERSION=${1:-}
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Usage: ./release.sh <major.minor.patch>" >&2
+    echo "Usage: legacy/macos/release.sh <major.minor.patch>" >&2
     exit 1
 fi
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -24,15 +25,15 @@ fi
 
 git switch -q -c "release/$VERSION" origin/main
 
-CURRENT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
-BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Info.plist)
+CURRENT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
+BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
 if [[ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" != "$VERSION" || "$CURRENT" == "$VERSION" ]]; then
     echo "$VERSION isn't newer than $CURRENT." >&2
     git switch -q - && git branch -q -D "release/$VERSION"
     exit 1
 fi
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((BUILD + 1))" Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((BUILD + 1))" "$PLIST"
 
 # Keep an empty [Unreleased] on top, and point the compare links at the new tag.
 REPO=https://github.com/dtthaison/notchling

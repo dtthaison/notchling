@@ -1,6 +1,6 @@
 # Chat design kit
 
-Built with BAMA's `design-kit` method. Code: `Sources/Notchling/DesignKit/ChatKit.swift` (tokens, type, icons, parts, gallery). Screens: `Sources/Notchling/Chat/Views/`.
+Built with BAMA's `design-kit` method. Code: `legacy/macos/Sources/Notchling/DesignKit/ChatKit.swift` (tokens, type, icons, parts, gallery). Screens: `legacy/macos/Sources/Notchling/Chat/Views/`.
 
 ## Feel
 

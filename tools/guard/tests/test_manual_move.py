@@ -1,5 +1,5 @@
 """Phase 3 moved the notes in CLAUDE.md into AGENTS.md files. Claude Code still loads them through
-`@` imports (CLAUDE.md is `@AGENTS.md`, which ends with `@Sources/AGENTS.md`); Codex and Antigravity
+`@` imports (CLAUDE.md is `@AGENTS.md`, which ends with `@legacy/macos/Sources/AGENTS.md`); Codex and Antigravity
 read AGENTS.md themselves. These tests prove the move lost nothing an agent relies on and that the
 import chain holds.
 
@@ -19,10 +19,14 @@ ROOT = Path(__file__).resolve().parents[3]
 # The old CLAUDE.md, byte for byte. Not named *.md: GUARD-CLAUDE-MD rejects any tracked `claude*.md`,
 # and nothing should mistake it for live instructions.
 OLD = Path(__file__).resolve().parent / "fixtures" / "notes-before-phase3.txt"
-DOCS = ["AGENTS.md", "Sources/AGENTS.md"]
+DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md"]
 LATER_DOCS = ["ARCHITECTURE.md"]  # written by another task; counted once it exists
 # A fact the docs drop on purpose goes here, with the reason. Editing this file needs the maintainer.
 RETIRED: Dict[str, str] = {}
+# Phase 4 moved the phone from mobile/ to apps/flutter/. The old notes name the old folder, so a token
+# is looked for under its new name. (Nothing else moved in a way the old notes name: the Swift app's
+# paths are written relative to legacy/macos/, so they still match as substrings.)
+RENAMED = {"mobile/": "apps/flutter/"}
 ROOT_MAX_LINES = 80
 ROOT_CLAUDE_MD = b"@AGENTS.md\n"
 
@@ -37,6 +41,13 @@ BARE_AT = re.compile(r"(?:^|\s)@\S")
 def squash(text: str) -> str:
     """One space for any run of whitespace, so a wrapped line still matches."""
     return re.sub(r"\s+", " ", text)
+
+
+def renamed(token: str) -> str:
+    for old, new in RENAMED.items():
+        if token.startswith(old):
+            return new + token[len(old):]
+    return token
 
 
 def unique(items: List[str]) -> List[str]:
@@ -79,7 +90,7 @@ class ManualMoveTests(unittest.TestCase):
 
     def assert_kept(self, kind: str, items: List[str]) -> None:
         text = self.new_text()
-        missing = [i for i in unique(items) if i not in RETIRED and squash(i) not in text]
+        missing = [i for i in unique(items) if i not in RETIRED and squash(renamed(i)) not in text]
         self.assertEqual(missing, [], f"{kind} from the old CLAUDE.md missing from {DOCS + LATER_DOCS}")
 
     def test_every_backticked_token_is_kept(self):
@@ -105,8 +116,8 @@ class ManualMoveTests(unittest.TestCase):
     def test_root_ends_by_importing_the_swift_notes(self):
         text = self.read("AGENTS.md")
         lines = [line for line in text.splitlines() if line.strip()]
-        self.assertEqual(lines[-1], "@Sources/AGENTS.md")
-        self.assertIn("(mobile/AGENTS.md)", text)  # a link to the phone notes
+        self.assertEqual(lines[-1], "@legacy/macos/Sources/AGENTS.md")
+        self.assertIn("(apps/flutter/AGENTS.md)", text)  # a link to the phone notes
 
     def test_root_is_short(self):
         count = len(self.read("AGENTS.md").splitlines())

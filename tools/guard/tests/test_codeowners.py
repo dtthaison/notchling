@@ -36,8 +36,8 @@ class CodeownersTests(unittest.TestCase):
         self.assertEqual(lines[0], "* @dtthaison")
 
     def test_zone_lines_have_no_owner(self):
-        lines = [l for l in render(Z).splitlines() if l.startswith("/Sources/Notchling/Chat/Views/")]
-        self.assertEqual(lines, ["/Sources/Notchling/Chat/Views/"])
+        lines = [l for l in render(Z).splitlines() if l.startswith("/legacy/macos/Sources/Notchling/Chat/Views/")]
+        self.assertEqual(lines, ["/legacy/macos/Sources/Notchling/Chat/Views/"])
 
     def test_exclusions_reowned_after_zone(self):
         lines = render(Z).splitlines()
@@ -67,28 +67,28 @@ class CodeownersTests(unittest.TestCase):
             line = f"{pattern} @dtthaison"
             self.assertIn(line, lines)
             self.assertGreater(lines.index(line), lines.index("/docs/"), pattern)
-            self.assertGreater(lines.index(line), lines.index("/Tests/"), pattern)
+            self.assertGreater(lines.index(line), lines.index("/legacy/macos/Tests/"), pattern)
 
     def test_test_config_files_reowned_after_the_phone_tests(self):
         lines = render(Z).splitlines()
-        for line in ["/mobile/**/flutter_test_config.dart @dtthaison", "/mobile/**/dart_test.yaml @dtthaison"]:
+        for line in ["/apps/flutter/**/flutter_test_config.dart @dtthaison", "/apps/flutter/**/dart_test.yaml @dtthaison"]:
             self.assertIn(line, lines)
-            self.assertGreater(lines.index(line), lines.index("/mobile/test/"))
+            self.assertGreater(lines.index(line), lines.index("/apps/flutter/test/"))
 
     def test_no_negation_left_in_the_file(self):
         self.assertNotIn("!", render(Z))
 
     def test_owner_resolution_matches_the_zone(self):
         text = render(Z)
-        owned = ["docs/AGENTS.md", "docs/CLAUDE.md", "AGENTS.md", "Sources/Notchling/Search/CLAUDE.md",
-                 "Sources/Notchling/Search/.claude/skills/x/SKILL.md", "Sources/Notchling/Search/.gitattributes",
-                 "Tests/NotchlingTests/.gitattributes", "docs/CODEOWNERS", "docs/rules.md",
-                 "mobile/lib/features/pairing/pair.dart", "mobile/test/flutter_test_config.dart",
-                 "mobile/test/chat/dart_test.yaml", "build.sh", "Sources/Notchling/Chat/Model/ChatModel.swift"]
+        owned = ["docs/AGENTS.md", "docs/CLAUDE.md", "AGENTS.md", "legacy/macos/Sources/Notchling/Search/CLAUDE.md",
+                 "legacy/macos/Sources/Notchling/Search/.claude/skills/x/SKILL.md", "legacy/macos/Sources/Notchling/Search/.gitattributes",
+                 "legacy/macos/Tests/NotchlingTests/.gitattributes", "docs/CODEOWNERS", "docs/rules.md",
+                 "apps/flutter/lib/features/pairing/pair.dart", "apps/flutter/test/flutter_test_config.dart",
+                 "apps/flutter/test/chat/dart_test.yaml", "build.sh", "legacy/macos/Sources/Notchling/Chat/Model/ChatModel.swift"]
         for p in owned:
             self.assertEqual(owner_of(text, p), "@dtthaison", p)
-        free = ["Sources/Notchling/Search/SearchPanel.swift", "docs/chat-design.md", "Tests/NotchlingTests/ChatTests.swift",
-                "mobile/test/chat/chat_test.dart", "mobile/lib/features/chat/chat_page.dart"]
+        free = ["legacy/macos/Sources/Notchling/Search/SearchPanel.swift", "docs/chat-design.md", "legacy/macos/Tests/NotchlingTests/ChatTests.swift",
+                "apps/flutter/test/chat/chat_test.dart", "apps/flutter/lib/features/chat/chat_page.dart"]
         for p in free:
             self.assertIsNone(owner_of(text, p), p)
 

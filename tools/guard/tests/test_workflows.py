@@ -128,7 +128,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_phone_checks_run_on_every_pull_request(self):
         # phone-analyze and phone-test are required on main; a paths: filter leaves them pending forever
-        # on a pull request that touches nothing under mobile/.
+        # on a pull request that touches nothing under apps/flutter/.
         text = read(".github/workflows/phone.yml")
         self.assertNotRegex(text, r"(?m)^\s*paths(-ignore)?:")
         self.assertRegex(text, r"(?m)^  pull_request:\s*$")

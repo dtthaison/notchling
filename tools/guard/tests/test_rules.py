@@ -154,18 +154,18 @@ class ClaudeMdTests(unittest.TestCase):
         self.assertEqual(claudemd.check(repo), [])
 
     def test_stray_nested_file_fails(self):
-        repo = make_repo({"CLAUDE.md": "@AGENTS.md\n", "Sources/CLAUDE.md": "more rules\n"})
+        repo = make_repo({"CLAUDE.md": "@AGENTS.md\n", "legacy/macos/Sources/CLAUDE.md": "more rules\n"})
         problems = claudemd.check(repo)
-        self.assertTrue(any(p.startswith("GUARD-CLAUDE-MD") and "Sources/CLAUDE.md" in p for p in problems), problems)
+        self.assertTrue(any(p.startswith("GUARD-CLAUDE-MD") and "legacy/macos/Sources/CLAUDE.md" in p for p in problems), problems)
 
     def test_other_case_and_suffix_fail(self):
-        for name in ("docs/claude.md", "mobile/Claude.local.md", "CLAUDE.local.md"):
+        for name in ("docs/claude.md", "apps/flutter/Claude.local.md", "CLAUDE.local.md"):
             with self.subTest(name=name):
                 repo = make_repo({"CLAUDE.md": "@AGENTS.md\n", name: "x\n"})
                 self.assertTrue(any(name in p for p in claudemd.check(repo)))
 
     def test_root_with_other_text_fails(self):
-        for text in ("# Notes\n", "@AGENTS.md", "@AGENTS.md\n\n", "@AGENTS.md\n@Sources/AGENTS.md\n", ""):
+        for text in ("# Notes\n", "@AGENTS.md", "@AGENTS.md\n\n", "@AGENTS.md\n@legacy/macos/Sources/AGENTS.md\n", ""):
             with self.subTest(text=text):
                 repo = make_repo({"CLAUDE.md": text})
                 problems = claudemd.check(repo)
@@ -177,8 +177,8 @@ class ClaudeMdTests(unittest.TestCase):
 
     def test_untracked_file_is_ignored(self):
         repo = make_repo({"CLAUDE.md": "@AGENTS.md\n"})
-        (repo / "Sources").mkdir()
-        (repo / "Sources/CLAUDE.md").write_text("untracked\n")
+        (repo / "legacy/macos/Sources").mkdir(parents=True)
+        (repo / "legacy/macos/Sources/CLAUDE.md").write_text("untracked\n")
         self.assertEqual(claudemd.check(repo), [])
 
     def test_symlinked_root_fails(self):

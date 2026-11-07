@@ -15,7 +15,7 @@ sha_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 
 if [[ "${1:-}" == "--check" ]]; then
   if [[ ! -f "$DEST" ]]; then
-    echo "MISSING: $DEST. Run mobile/tool/fetch_model.sh before building (the voice model is bundled, not downloaded by the app)." >&2
+    echo "MISSING: $DEST. Run apps/flutter/tool/fetch_model.sh before building (the voice model is bundled, not downloaded by the app)." >&2
     exit 1
   fi
 fi
