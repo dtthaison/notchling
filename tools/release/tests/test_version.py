@@ -37,12 +37,32 @@ class Env(unittest.TestCase):
         self.info = self.root / "Info.plist"
         self.info.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.2.0", "CFBundleVersion": "3"}))
 
-    def next(self, channel, tags, *extra, fragments=()):
+    def git(self, *args):
+        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                        "-c", "commit.gpgsign=false", *args], cwd=self.root, env=env, check=True,
+                       capture_output=True)
+
+    def tag_repo(self, tags, released):
+        """The tags as real git tags on a commit that holds only the `released` fragments (by index)."""
+        if not (self.root / ".git").exists():
+            self.git("init", "-q", "-b", "main")
+        self.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", "changes")
+        if released:
+            self.git("add", "--", *[f"changes/f{i}.md" for i in released])
+        self.git("commit", "-q", "--allow-empty", "-m", "stable")
+        for t in tags:
+            self.git("tag", "-f", t)
+
+    def next(self, channel, tags, *extra, fragments=(), released=()):
+        """`released`: indexes of `fragments` that were already in the last Stable tag's tree."""
         for i, kind in enumerate(fragments):
             (self.changes / f"f{i}.md").write_text(frag(kind))
         tags_file = self.root / "tags.txt"
         tags_file.write_text("\n".join(tags) + ("\n" if tags else ""))
-        return run_cli(["next", "--channel", channel, "--tags-file", str(tags_file),
+        if channel == "beta" and any(v and v[3] is None for v in map(version.parse_tag, tags)):
+            self.tag_repo(tags, released)
+        return run_cli(["next", "--channel", channel, "--tags-file", str(tags_file), "--repo", str(self.root),
                         "--changes-dir", str(self.changes), "--info-plist", str(self.info), *extra])
 
 
@@ -149,10 +169,44 @@ class BreakingTests(Env):
         self.assertEqual(self.next("beta", ["v1.4.0"], "--allow-breaking", fragments=["feature"])[1],
                          "v1.5.0-beta.1")
 
-    def test_refused_on_further_betas_too(self):
-        code, _, _ = self.next("beta", ["v1.4.0", "v1.4.1-beta.1"], "--from-tag", "v1.4.1-beta.1",
-                               fragments=["breaking"])
+    def test_refused_on_further_betas_until_the_major_line_has_one(self):
+        # A breaking change must not ride a patch Beta in without the maintainer.
+        code, _, err = self.next("beta", ["v1.4.0", "v1.4.1-beta.1"], "--from-tag", "v1.4.1-beta.1",
+                                 fragments=["breaking"])
         self.assertEqual(code, 1)
+        self.assertIn("--allow-breaking", err)
+
+    def test_betas_on_the_major_line_need_no_flag(self):
+        # The flag only starts the new major line; once a Beta of it exists the line just goes on.
+        tags = ["v1.4.0", "v2.0.0-beta.1"]
+        self.assertEqual(self.next("beta", tags, fragments=["breaking", "fix"])[1:], ("v2.0.0-beta.2", ""))
+        tags += ["v2.0.0-beta.2"]
+        self.assertEqual(self.next("beta", tags, fragments=["breaking"])[1], "v2.0.0-beta.3")
+        self.assertEqual(self.next("beta", tags, "--from-tag", "v2.0.0-beta.2", fragments=["breaking"])[1],
+                         "v2.0.0-beta.3")
+
+    def test_a_beta_on_another_line_does_not_open_the_major_line(self):
+        tags = ["v1.4.0", "v1.5.0-beta.1"]
+        code, out, err = self.next("beta", tags, fragments=["breaking"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("--allow-breaking", err)
+
+    def test_the_major_line_is_counted_from_the_last_stable(self):
+        # v2.0.0 is out, so v2.0.0-beta.1 is old news and v3 is the next major line.
+        tags = ["v2.0.0-beta.1", "v2.0.0"]
+        code, out, err = self.next("beta", tags, fragments=["breaking"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("--allow-breaking", err)
+        self.assertEqual(self.next("beta", tags, "--allow-breaking", fragments=["breaking"])[1], "v3.0.0-beta.1")
+
+    def test_breaking_already_in_the_last_stable_does_not_count_again(self):
+        # The fold PR has not merged yet, so the fragment is still in changes/.
+        code, out, err = self.next("beta", ["v2.0.0"], fragments=["breaking"], released=[0])
+        self.assertEqual((code, out, err), (0, "v2.0.1-beta.1", ""))
+
+    def test_new_breaking_fragment_next_to_released_ones_still_needs_the_flag(self):
+        code, out, _ = self.next("beta", ["v2.0.0"], fragments=["breaking", "breaking"], released=[0])
+        self.assertEqual((code, out), (1, ""))
 
 
 class FromTagTests(Env):
@@ -205,16 +259,145 @@ class StableTests(Env):
     def test_from_tag_not_in_the_tag_list_is_refused(self):
         self.assertEqual(self.next("stable", ["v1.4.0"], "--from-tag", "v1.4.1-beta.1")[0], 1)
 
-    def test_breaking_fragment_needs_the_flag_here_too(self):
+    def test_never_refuses_because_of_fragment_kinds(self):
+        # Clicking Promote is the maintainer's approval; the Beta already shipped what the fragments say.
         tags = ["v1.4.0", "v1.4.1-beta.1"]
-        self.assertEqual(self.next("stable", tags, "--from-tag", "v1.4.1-beta.1", fragments=["breaking"])[0], 1)
+        self.assertEqual(self.next("stable", tags, "--from-tag", "v1.4.1-beta.1", fragments=["breaking"]),
+                         (0, "v1.4.1", ""))
         self.assertEqual(self.next("stable", tags, "--from-tag", "v1.4.1-beta.1", "--allow-breaking",
                                    fragments=["breaking"])[1], "v1.4.1")
+        tags = ["v1.4.0", "v2.0.0-beta.1"]
+        self.assertEqual(self.next("stable", tags, fragments=["breaking", "feature", "fix"])[1], "v2.0.0")
+
+    def test_does_not_read_the_fragments_at_all(self):
+        (self.changes / "bad.md").write_text("no front matter")
+        self.assertEqual(self.next("stable", ["v1.4.0", "v1.4.1-beta.1"])[1], "v1.4.1")
 
     def test_stable_never_needs_the_plist(self):
         self.info.unlink()
         self.assertEqual(self.next("stable", ["v1.4.0", "v1.4.1-beta.1"], "--from-tag", "v1.4.1-beta.1")[1],
                          "v1.4.1")
+
+
+class NewFragmentsTests(Env):
+    """Only fragments that were not in the last Stable tag's tree say what the next Beta is."""
+
+    def test_released_feature_fragment_does_not_bump_the_minor_again(self):
+        # v1.4.0 shipped with the fragment; the fold PR has not merged, so it is still in changes/.
+        code, out, err = self.next("beta", ["v1.4.0"], fragments=["feature"], released=[0])
+        self.assertEqual((code, out, err), (0, "v1.4.1-beta.1", ""))
+
+    def test_a_new_feature_next_to_a_released_one_does_count(self):
+        self.assertEqual(self.next("beta", ["v1.4.0"], fragments=["feature", "feature"], released=[0])[1],
+                         "v1.5.0-beta.1")
+
+    def test_only_the_new_fragments_pick_the_kind(self):
+        self.assertEqual(self.next("beta", ["v1.4.0"], fragments=["feature", "fix"], released=[0])[1],
+                         "v1.4.1-beta.1")
+
+    def test_nothing_released_means_everything_counts(self):
+        self.assertEqual(self.next("beta", ["v1.4.0"], fragments=["feature", "fix"])[1], "v1.5.0-beta.1")
+
+    def test_without_any_stable_tag_every_fragment_counts_and_git_is_not_asked(self):
+        # The folder is not a git repo here: there is no Stable tag to list.
+        self.assertEqual(self.next("beta", [], fragments=["feature"])[1:], ("v1.3.0-beta.1", ""))
+        code, out, err = self.next("beta", [], fragments=["breaking"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("--allow-breaking", err)
+
+    def test_the_last_stable_not_the_newest_tag_is_the_reference(self):
+        # A Beta tag after the Stable carries newer fragments; they still count against the Stable.
+        tags = ["v1.4.0", "v1.5.0-beta.1"]
+        self.assertEqual(self.next("beta", tags, fragments=["feature"])[1], "v1.5.0-beta.2")
+
+    def test_a_tag_the_repo_cannot_list_fails_instead_of_counting_everything(self):
+        # Counting every fragment would invent a breaking change or a minor bump.
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+            subprocess.run(["git", "init", "-q", "-b", "main", d], env=env, check=True, capture_output=True)
+            (self.changes / "f0.md").write_text(frag("feature"))
+            tags_file = self.root / "tags.txt"
+            tags_file.write_text("v1.4.0\n")
+            code, out, err = run_cli(["next", "--channel", "beta", "--tags-file", str(tags_file), "--repo", d,
+                                      "--changes-dir", str(self.changes), "--info-plist", str(self.info)])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("v1.4.0", err)
+
+    def test_a_relative_changes_dir_is_read_against_the_repo(self):
+        self.tag_repo(["v1.4.0"], [])
+        (self.changes / "f0.md").write_text(frag("feature"))
+        (self.root / "tags.txt").write_text("v1.4.0\n")
+        code, out, err = run_cli(["next", "--channel", "beta", "--tags-file", str(self.root / "tags.txt"),
+                                  "--repo", str(self.root), "--changes-dir", "changes",
+                                  "--info-plist", str(self.info)])
+        self.assertEqual((code, out, err), (0, "v1.5.0-beta.1", ""))
+
+
+class FloorTests(Env):
+    """A Beta's build number is above every Beta above the last Stable, whatever the fragments say."""
+
+    def above(self, tags, new):
+        """Build numbers of the Betas newer than the last Stable must all sit below `new`."""
+        parsed = [v for v in map(version.parse_tag, tags) if v]
+        last = max(v for v in parsed if v[3] is None)
+        for b in (v for v in parsed if v[3] is not None and v[:3] > last[:3]):
+            self.assertGreater(version.build_number(version.parse_tag(new)), version.build_number(b), (new, b))
+
+    def test_promoting_an_older_beta_while_a_newer_line_exists(self):
+        # v1.2.1 goes Stable while v1.3.0-beta.1 is out: the fragments now say v1.2.2, the floor says v1.3.0.
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.3.0-beta.1", "v1.2.1"]
+        for fragments in ((), ("fix",), ("internal",)):
+            with self.subTest(fragments):
+                code, out, err = self.next("beta", tags, fragments=fragments)
+                self.assertEqual((code, out, err), (0, "v1.3.0-beta.2", ""))
+                self.above(tags, out)
+
+    def test_the_fragment_line_wins_when_it_is_higher(self):
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.3.0-beta.1", "v1.2.1"]
+        self.assertEqual(self.next("beta", tags, fragments=["feature"], released=())[1], "v1.3.0-beta.2")
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.2.1"]
+        self.assertEqual(self.next("beta", tags, fragments=["feature"])[1], "v1.3.0-beta.1")
+
+    def test_a_reverted_feature_fragment_does_not_drop_the_line(self):
+        tags = ["v1.2.0", "v1.3.0-beta.1", "v1.3.0-beta.2"]
+        for fragments in ((), ("fix",)):
+            with self.subTest(fragments):
+                code, out, err = self.next("beta", tags, fragments=fragments)
+                self.assertEqual((code, out, err), (0, "v1.3.0-beta.3", ""))
+                self.above(tags, out)
+
+    def test_a_reverted_breaking_fragment_does_not_drop_the_major_line(self):
+        tags = ["v1.4.0", "v2.0.0-beta.1"]
+        self.assertEqual(self.next("beta", tags, fragments=["fix"])[1], "v2.0.0-beta.2")
+
+    def test_the_highest_line_is_continued_not_the_highest_number(self):
+        tags = ["v1.2.0", "v1.3.0-beta.7", "v1.2.1-beta.9"]
+        self.assertEqual(self.next("beta", tags)[1], "v1.3.0-beta.8")
+
+    def test_betas_of_released_versions_set_no_floor(self):
+        tags = ["v1.3.0-beta.4", "v1.3.0", "v1.4.0"]
+        self.assertEqual(self.next("beta", tags)[1], "v1.4.1-beta.1")
+
+    def test_without_a_stable_tag_the_plist_version_is_the_floor_base(self):
+        # plist says 1.2.0: v1.2.1-beta.1 and v1.3.0-beta.1 are above it.
+        self.assertEqual(self.next("beta", ["v1.2.1-beta.1", "v1.3.0-beta.1"])[1], "v1.3.0-beta.2")
+        self.assertEqual(self.next("beta", ["v1.1.0-beta.3"])[1], "v1.2.1-beta.1")
+
+    def test_from_tag_below_the_highest_line_is_refused(self):
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.3.0-beta.1"]
+        code, out, err = self.next("beta", tags, "--from-tag", "v1.2.1-beta.1")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("v1.3.0-beta.1", err)
+
+    def test_from_tag_of_a_released_line_is_refused(self):
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.2.1"]
+        code, out, err = self.next("beta", tags, "--from-tag", "v1.2.1-beta.1")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("v1.2.1", err)
+
+    def test_from_tag_on_the_highest_line_continues_it(self):
+        tags = ["v1.2.0", "v1.2.1-beta.1", "v1.3.0-beta.1"]
+        self.assertEqual(self.next("beta", tags, "--from-tag", "v1.3.0-beta.1")[1], "v1.3.0-beta.2")
 
 
 class LimitsTests(Env):
@@ -249,6 +432,39 @@ class GitTagsTests(unittest.TestCase):
             finally:
                 os.chdir(old)
             self.assertEqual((code, out, err), (0, "v1.4.1-beta.2", ""))
+
+
+    def test_fragments_in_the_last_stable_tags_tree_do_not_count_again(self):
+        # No --tags-file and no --changes-dir: tags, the tree at the Stable tag and the folder all come from
+        # the repo, the way the Beta workflow runs it.
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+
+            def g(*a):
+                subprocess.run([*git, *a], cwd=d, env=env, check=True, capture_output=True)
+
+            def put(name, kind):
+                (Path(d) / "changes").mkdir(exist_ok=True)
+                (Path(d) / "changes" / name).write_text(frag(kind))
+
+            g("init", "-q", "-b", "main")
+            put("old.md", "feature")
+            g("add", "-A")
+            g("commit", "-q", "-m", "shipped")
+            g("tag", "-a", "-m", "stable", "v1.4.0")  # an annotated tag, as a release makes
+            put("fix.md", "fix")
+            g("add", "-A")
+            g("commit", "-q", "-m", "after")
+            self.assertEqual(run_cli(["next", "--channel", "beta", "--repo", d])[:2], (0, "v1.4.1-beta.1"))
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                self.assertEqual(run_cli(["next", "--channel", "beta"])[:2], (0, "v1.4.1-beta.1"))
+            finally:
+                os.chdir(old)
+            put("new.md", "feature")
+            self.assertEqual(run_cli(["next", "--channel", "beta", "--repo", d])[:2], (0, "v1.5.0-beta.1"))
 
 
 class BuildNumberTests(unittest.TestCase):

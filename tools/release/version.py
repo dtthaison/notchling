@@ -2,12 +2,26 @@
 """Versions from tags, and the version written into a built app.
 
     version.py next --channel beta|stable [--from-tag vX.Y.Z-beta.N] [--allow-breaking]
-                    [--tags-file F] [--changes-dir changes] [--info-plist legacy/macos/Info.plist]
+                    [--repo .] [--tags-file F] [--changes-dir changes] [--info-plist legacy/macos/Info.plist]
     version.py plist <path/to/Notchling.app> <tag-or-version>
 
 `vX.Y.Z` is a Stable tag and `vX.Y.Z-beta.N` a Beta tag; anything else is ignored. `next` prints the tag to
 cut, or exits 1 with the reason on stderr. The source Info.plist is never edited: `plist` rewrites the copy
 inside a built bundle.
+
+The next Beta, from the last Stable tag S (or the Info.plist version while there is none):
+
+* Only fragments that were not in S's tree (`git ls-tree` of `changes/` at S) count. The fold PR runs after
+  the Stable tag, so a released fragment can still sit in changes/ and must not bump the version again.
+  With no Stable tag every fragment counts. If S's tree cannot be listed the run fails; it never falls back
+  to counting everything.
+* Their kinds pick the line: `breaking` X+1.0.0, else `feature` X.Y+1.0, else X.Y.Z+1.
+* A Beta's build number must rise: when that line is below the newest Beta above S (a feature fragment
+  reverted, an older Beta promoted), the newest Beta's line is continued instead.
+* A `breaking` fragment needs `--allow-breaking` until a Beta of line X+1.0.0 exists; after that the line
+  goes on without it.
+
+`next --channel stable` promotes a Beta and never looks at fragments: clicking Promote is the approval.
 """
 
 from __future__ import annotations
@@ -64,14 +78,14 @@ def build_number(v: Version) -> int:
     return x * 1000000 + y * 10000 + z * 100 + (99 if n is None else n)
 
 
-def read_tags(tags_file: Optional[str]) -> List[str]:
+def read_tags(tags_file: Optional[str], repo: str = ".") -> List[str]:
     if tags_file:
         try:
             text = Path(tags_file).read_text(encoding="utf-8")
         except OSError as e:
             raise VersionError(f"cannot read --tags-file {tags_file}: {e.strerror}") from None
     else:
-        r = subprocess.run(["git", "tag", "--list", "v*"], capture_output=True, text=True)
+        r = subprocess.run(["git", "-C", repo, "tag", "--list", "v*"], capture_output=True, text=True)
         if r.returncode != 0:
             raise VersionError(f"git tag --list 'v*': {r.stderr.strip() or 'failed'}")
         text = r.stdout
@@ -90,14 +104,30 @@ def plist_stable_version(info_plist: Path) -> Version:
     return v
 
 
+def last_stable(tags: Sequence[str]) -> Optional[Version]:
+    return max((v for v in map(parse_tag, tags) if v and v[3] is None), default=None)
+
+
+def new_fragment_kinds(tags: Sequence[str], repo: str, changes_dir: str) -> set:
+    """Kinds of the fragments in changes/ that the last Stable tag did not already contain."""
+    stable = last_stable(tags)
+    released = set()
+    if stable is not None:
+        tag = format_tag(stable)
+        try:
+            released = fragments.names_at(repo, f"refs/tags/{tag}", changes_dir)
+        except fragments.FragmentError as e:
+            raise VersionError(f"cannot list {changes_dir}/ at the last Stable tag {tag} "
+                               f"(are the tags fetched?): {e}") from None
+    return {f.kind for f in fragments.load(Path(repo) / changes_dir, skip=released)}
+
+
 def next_tag(channel: str, tags: Sequence[str], kinds: set, allow_breaking: bool,
              from_tag: Optional[str], info_plist: Path) -> Version:
+    """`kinds` are the kinds of the fragments the last Stable tag did not contain (new_fragment_kinds)."""
     parsed = [v for v in (parse_tag(t) for t in tags) if v]
     stables = sorted(v for v in parsed if v[3] is None)
     betas = [v for v in parsed if v[3] is not None]
-    if "breaking" in kinds and not allow_breaking:
-        raise VersionError("changes/ holds a 'breaking' fragment: that needs the maintainer; "
-                           "pass --allow-breaking once they approve")
 
     given = None
     if from_tag is not None:
@@ -120,25 +150,42 @@ def next_tag(channel: str, tags: Sequence[str], kinds: set, allow_breaking: bool
             raise VersionError(f"{format_tag(target)} is older than the last Stable {format_tag(stables[-1])}")
         return target
 
+    base = stables[-1] if stables else plist_stable_version(info_plist)
+    x, y, z, _ = base
+    major = (x + 1, 0, 0)
+    above = [b for b in betas if b[:3] > base[:3]]  # Betas still ahead of the last Stable
+    newest = max(above) if above else None
+    if "breaking" in kinds and not allow_breaking and not any(b[:3] == major for b in above):
+        raise VersionError("changes/ holds a new 'breaking' fragment and no Beta of "
+                           f"{format_tag(major + (None,))} exists yet: starting a major line needs the maintainer; "
+                           "pass --allow-breaking once they approve")
+
     if given is not None:
         line = given[:3]
+        if line <= base[:3]:
+            raise VersionError(f"--from-tag {from_tag}: {format_tag(line + (None,))} is not newer than the last Stable "
+                               f"{format_tag(base)}, so a Beta of it would reach nobody")
+        if newest is not None and line < newest[:3]:
+            raise VersionError(f"--from-tag {from_tag} would cut a Beta below {format_tag(newest)}, and a "
+                               f"Beta's build number must rise; continue from {format_tag(newest)} instead")
     else:
-        base = stables[-1] if stables else plist_stable_version(info_plist)
-        x, y, z, _ = base
         if "breaking" in kinds:
-            line = (x + 1, 0, 0)
+            line = major
         elif "feature" in kinds:
             line = (x, y + 1, 0)
         else:
             line = (x, y, z + 1)
+        if newest is not None and line < newest[:3]:
+            line = newest[:3]  # the fragments went back (reverted, or an older Beta was promoted)
     n = max([b[3] for b in betas if b[:3] == line] + [0]) + 1
     return line + (n,)
 
 
 def cmd_next(args) -> int:
-    kinds = {f.kind for f in fragments.load(args.changes_dir)}
-    v = next_tag(args.channel, read_tags(args.tags_file), kinds, args.allow_breaking, args.from_tag,
-                 Path(args.info_plist))
+    tags = read_tags(args.tags_file, args.repo)
+    # A Stable never looks at fragments: the maintainer's click on Promote is the approval.
+    kinds = new_fragment_kinds(tags, args.repo, args.changes_dir) if args.channel == "beta" else set()
+    v = next_tag(args.channel, tags, kinds, args.allow_breaking, args.from_tag, Path(args.info_plist))
     try:
         build_number(v)
     except ValueError as e:
@@ -190,6 +237,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     n.add_argument("--from-tag", help="a Beta tag: bump its N (beta) or promote it (stable)")
     n.add_argument("--allow-breaking", action="store_true", help="the maintainer approved a breaking change")
     n.add_argument("--tags-file", help="tags, one per line, instead of `git tag --list 'v*'`")
+    n.add_argument("--repo", default=".")
     n.add_argument("--changes-dir", default=fragments.CHANGES_DIR)
     n.add_argument("--info-plist", default=str(DEFAULT_INFO_PLIST),
                    help="read for the last Stable only while no Stable tag exists")
