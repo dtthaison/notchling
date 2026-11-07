@@ -2,7 +2,7 @@ import XCTest
 @testable import Notchling
 
 /// The switching rules. These decide when a real account switch happens, so they are checked here
-/// instead of by switching (see CLAUDE.md).
+/// instead of by switching (see Sources/AGENTS.md).
 final class LimitLogicTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
