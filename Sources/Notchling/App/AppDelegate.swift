@@ -155,11 +155,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .receive(on: DispatchQueue.main)
             .throttle(for: .milliseconds(600), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in self?.refresh() }
+        // before the first refresh, so the rows of runs already going show at launch
+        runs.onChange = { [weak self] in self?.notch.model.runs = $0 }
         refresh()
         if showNotch { notch.show() }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
 
-        runs.onChange = { [weak self] in self?.notch.model.runs = $0 }
         settings.apply = { [weak self] in self?.applySetting($0) }
         settings.reload = { [weak self] in self?.reloadSettings() }
         for provider in providers.providers {

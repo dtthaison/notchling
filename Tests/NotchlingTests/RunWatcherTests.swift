@@ -89,6 +89,16 @@ final class RunWatcherTests: XCTestCase {
         XCTAssertEqual(items[0].detail, "running 4/10")
     }
 
+    func testRowsReachAListenerThatAttachesAfterTheFirstTick() {
+        appendStart()
+        let w = RunWatcher(now: { self.clock }, pidAlive: { _ in true }, load: { 2.5 }, extraRepos: { [] }, enabled: { true },
+                           send: { _, _ in }, notify: { _, _ in }, dispatch: { $0() }, watchFiles: false)
+        w.tick(agents: [agent("s1", .working)])
+        XCTAssertTrue(items.isEmpty)
+        w.onChange = { self.items = $0 }
+        XCTAssertEqual(items.count, 1, "the rows found at launch are not lost because nobody listened yet")
+    }
+
     func testNoLimitShowsJustElapsed() {
         appendStart(limit: nil)
         let w = makeWatcher()

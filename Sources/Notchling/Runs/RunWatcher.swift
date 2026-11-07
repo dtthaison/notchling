@@ -67,8 +67,10 @@ final class RunWatcher {
     private var outboxOrder: [String] = []
     private var sending = Set<String>()
 
-    /// Called on the main thread when the items change.
-    var onChange: (([RunItem]) -> Void)?
+    /// Called on the main thread when the items change, and once when set if there already are some.
+    var onChange: (([RunItem]) -> Void)? {
+        didSet { if !items.isEmpty { onChange?(items) } }
+    }
     private(set) var hasActive = false
 
     init(now: @escaping () -> Date = Date.init,
