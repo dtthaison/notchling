@@ -100,8 +100,14 @@ def _defaults_migrated(path: str, lines: List[str], repo: Path) -> Found:
     return out
 
 
+GENERATED_MARK = re.compile(r"@generated|GENERATED CODE")
+
+
 def _file_size(limit: int) -> Check:
     def check(path: str, lines: List[str], repo: Path) -> Found:
+        # A generator wrote it and nobody splits it: the mark sits in the first lines, as in tools/protocol/gen.py's output.
+        if any(GENERATED_MARK.search(line) for line in lines[:5]):
+            return []
         return [(0, f"over {limit} lines")] if len(lines) > limit else []
     return check
 
