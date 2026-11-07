@@ -4,8 +4,20 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+What each new feature is for and how to use it: [docs/features.md](docs/features.md).
+
 ### Added
 
+- Codex and Antigravity CLI sessions in Chat and in the notch, beside Claude Code's. Read them (commands, edits as diffs) and continue them: Codex turns run with `codex exec` in the workspace-write sandbox, and Antigravity CLI runs over `agy acp` with live turns, Stop, permission cards and a model, thinking and mode picker. New Session starts either kind on any of their accounts.
+- Second Opinion: ask Codex or Antigravity CLI to review an edit or a reply from Chat, with the tool, model and effort you pick. The review shows under the message and is kept across launches.
+- `Notchling --delegate <codex|agy> -- <prompt>` lets one agent hand a job to another tool (an image, a second model's review) and wait for the result. Generated images are copied to `--out`. The `notchling-delegate` skill teaches the agents to use it.
+- Secret Vault (key button in Chat's sidebar): tokens and passwords agents use without seeing them. `Notchling --secret <name> -- <command>` passes the value in the environment and hides it in the output. Optional approval before each use, expiry reminders, and `--secret-request` for an agent to ask for a missing one.
+- ⌘⇧P also searches conversations: Claude Code transcripts in every lane, Codex sessions and Antigravity titles from the last 14 days. Return opens the session in Chat.
+- The phone app (Agent Console) is built into Notchling: pair a phone from the Phone button in Chat's header to read and reply to Claude Code, Codex and Antigravity sessions, answer prompts and send photos. Existing pairings and tunnel settings carry over.
+- Machines (Chat sidebar): set up and watch the Macs and Linux servers that run the overnight `sd` worker. Each step has a read-only Check and a Set up that runs only on a click, after showing its commands. Secrets reach the machine only over ssh's standard input, and Replace key… rotates a deploy key.
+- In Chat: the session's context and account limits in the header; model and effort pickers; Stop (or Esc) to stop a turn; Edit to take a queued message back; menu commands (`/plugin`, `/mcp`…) in a terminal sheet; `!` shell commands; paths that open in Finder or in a file panel with a viewer for each type; Run on shell code blocks; pretty JSON; image and video previews; subagents and background shells (with live output and Stop) in the Details panel; a git section; and a ? button that names every part on screen.
+- Codex CLI accounts: save each ChatGPT login, switch without signing in again, see Codex limits, and get notified (or switched) near the limit. Antigravity limit alerts too.
+- Token cost counts Codex and Antigravity CLI use as channels beside Claude Code and Desktop.
 - Search Artifacts from anywhere with ⌘⇧P (or menu bar > Search Artifacts…): a Spotlight-style box near the top of the screen. Type to filter by title, project, account or a pasted link; ↑↓ to pick, Return opens the page beside the chat, ⌘Return opens it on claude.ai, ⌘C copies its link, Esc closes.
 - Move Only This Session To (the account menu in a background session's header): moves one session to another account without touching the rest. It stops the session and resumes the same conversation in the background on that account (a free account gets a lane), keeping its name, model and permission mode. The first reply there re-reads the whole conversation, since the prompt cache stays with the old account.
 - Right-click a session in Chat's sidebar to Hide it, or Remove a background session (stops it and deletes it with `claude rm`, after asking).
@@ -34,9 +46,17 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 ### Changed
 
 - Accounts without a 5-hour window, such as Max 20x since October 2026, show and watch only their weekly limit.
+- The menu bar keeps only the account in use, Open Chat, Keep Mac Awake, Settings… and Quit. Accounts, lanes, limits, token cost, Artifacts, Machines and the other settings are in Chat (the sidebar's bottom bar and its Settings sheet), so menu paths named above now start there.
+- Closing a lane keeps the copies it had set aside (`.lane-old-*`) in `~/.claude-lanes/.kept` instead of deleting them.
+- Login files Notchling writes (Codex `auth.json`, the Antigravity token, a lane's `.claude.json`, `vault.json`) are readable only by you from the moment they're created.
 
 ### Fixed
 
+- Removing an account while its limits were still loading brought it back, with its saved login gone (#7).
+- A reply containing an end-of-paste escape sequence could be typed into a session as keystrokes.
+- An Antigravity session whose load failed could leave a reply stuck on "sending" and never retry.
+- Remove or Always Allow in the Secret Vault could empty the vault list if `vault.json` was briefly unreadable.
+- New Session and Move could hang on the first background session in a new lane.
 - Chat shows slash commands and what they printed (/cost, /context, /model…); Claude Code 2.1.31x logs them in a new place, so they were missing. After /clear, Chat moves to the cleared session right away instead of showing the old conversation until the job caught up.
 
 ## [1.1.0] - 2026-10-27
