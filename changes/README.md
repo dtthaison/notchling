@@ -20,7 +20,7 @@ Replies containing an end-of-paste escape sequence are no longer typed into the 
     Added.
   - `fix`: something that was wrong and now isn't. Lands under Fixed.
   - `breaking`: a change that can break stored data, the phone protocol or a setup. Lands under Changed,
-    marked **Breaking**. The daily Beta refuses to cut while one is waiting; the maintainer must approve it.
+    marked **Breaking**. It starts a new major line: the first Beta on it needs the maintainer's click ("Allow a breaking change"); later Betas on that line need nothing, and a Stable never refuses.
   - `internal`: app code changed and users won't notice (a refactor, a test-only change to code under
     `Sources/`). It is not in the notes or the changelog.
 - The text is one short paragraph in the voice of the changelog: plain, about what the user sees, no issue
@@ -44,8 +44,10 @@ Not in force yet:
 
 ## What happens to them
 
-- A Beta's notes are built from the fragments waiting here (`python3 tools/release/fragments.py notes`).
-- Promoting a Beta to Stable folds them into `CHANGELOG.md` under the new version and deletes them
-  (`python3 tools/release/fragments.py fold <version>`), in a pull request.
+- A Beta's notes are built from the fragments waiting here that are not already in the last Stable
+  (`python3 tools/release/fragments.py notes`), and only those count toward the Beta's version.
+- Promoting a Beta to Stable folds the fragments present at that Beta's commit into `CHANGELOG.md` under
+  the new version and deletes them (`python3 tools/release/fragments.py fold <version>`), in a pull
+  request. Fragments merged after that Beta stay for the next release.
 
 This file is not a fragment.

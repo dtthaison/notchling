@@ -17,8 +17,9 @@ GITHUB_ACTIONS_APP = 15368
 # The maintainer can't approve his own pull request and is the only code owner, so repository admins
 # (role 5) may merge a pull request without the review. Only through a pull request, never a push.
 ADMIN_BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]
-# release.yml's `gh release create` makes the v* tag with GITHUB_TOKEN, which is the GitHub Actions app.
-# Only a workflow holding contents: write can use this (test_workflows pins that to release.yml).
+# `gh release create` makes the v* tag with GITHUB_TOKEN, which is the GitHub Actions app. Only a
+# workflow holding contents: write can use this: release.yml, beta.yml's publish job and promote.yml's
+# release, appcast and fold jobs, none with signing secrets (test_workflows pins that).
 ACTIONS_BYPASS = [{"actor_id": GITHUB_ACTIONS_APP, "actor_type": "Integration", "bypass_mode": "always"}]
 CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test",
             "rust-test", "rust-clippy", "rust-deny"]

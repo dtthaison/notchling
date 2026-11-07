@@ -94,21 +94,22 @@ Built in Phase 2; they exist today.
 
 Releases today: `legacy/macos/release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes (`.github/workflows/release.yml`). Builds are signed ad hoc.
 
-Phase 6's pipeline replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)). It is built and **off**: every job stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`, and the signing secrets and the update key don't exist yet.
+Phase 6's pipeline replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)). It is built and **off**: every job stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`, and the signing secrets and the update key don't exist yet. Record 0010 says "None of this exists yet"; it was written before the build, and records aren't edited, so this section is where the current state is kept.
 
 | Workflow | Job | What it does | Code it runs | What it holds |
 | --- | --- | --- | --- | --- |
 | `beta.yml` (daily, or a click) | `gate` | Kill switch, the next tag | The default branch's | A read-only token |
 | | `build` | `./build.sh`, the version into the built copy, the unsigned zip and its SHA-256 | The gated commit's | A read-only token, no secrets |
-| | `sign` | Checks the hash; Developer ID, notarize, staple; `sign_update`; attests | None: no checkout | The signing secrets (`release` environment), no repository write |
-| | `publish` | The prerelease `vX.Y.Z-beta.N`, the feed item | The default branch's `appcast.py` | A write token, no secrets |
+| | `sign` | Checks the hash; Developer ID with the hardened runtime and inline entitlements (Apple Events); notarize, staple; `sign_update`; attests | None: no checkout | The signing secrets (the only job in the `release` environment), no repository write |
+| | `publish` | The prerelease `vX.Y.Z-beta.N`, the feed item | The default branch's `appcast.py` | A write token, no secrets, no environment |
 | `promote.yml` (a maintainer's click) | `authorize` | Kill switch, `MAINTAINERS`, the Stable tag, the notes | The default branch's | A read-only token |
-| | `release` | The Beta's files, same SHA-256 and attestations, published as `vX.Y.Z` | None: no checkout | A write token |
-| | `appcast` | The feed item loses its `beta` channel | The default branch's `appcast.py` | A write token |
-| | `fold` | A pull request folding `changes/` into `CHANGELOG.md` | The default branch's `fragments.py` | Contents and pull requests write |
+| | `release` | The Beta's files, same SHA-256 and attestations (bound to the default branch and the Beta's commit), published as `vX.Y.Z` | None: no checkout | A write token, no environment |
+| | `appcast` | Checks the item is this Beta's, then it loses its `beta` channel and gets the Stable notes link, a fresh `pubDate` and a one-day phased rollout | The default branch's `appcast.py` | A write token, no environment |
+| | `fold` | A pull request folding the fragments present at the Beta's commit into `CHANGELOG.md` | The default branch's `fragments.py` | Contents and pull requests write |
 
-- `tools/release/` (Python standard library, tested in `tools/release/tests/`, which the `guard` job runs): `version.py` picks the next tag from the `v*` tags and the fragments' kinds and writes it into the built app's `Info.plist` copy, never the source; `fragments.py` reads `changes/` (one fragment per pull request that changes app code; [changes/README.md](changes/README.md)) for the notes and folds them into `CHANGELOG.md`; `appcast.py` writes and checks the Sparkle 2 feed. It signs nothing: Sparkle's `sign_update`, fetched by a pinned URL and SHA-256, signs in the sign job.
-- The feed is `appcast.xml` on the prerelease tagged `appcast`. A Beta item has the `beta` channel; promotion only drops it, so a Stable item keeps the Beta's download and signature.
+- `tools/release/` (Python standard library, tested in `tools/release/tests/`, which the `guard` job runs): `version.py` picks the next tag from the `v*` tags and the fragments' kinds and writes it into the built app's `Info.plist` copy, never the source; `fragments.py` reads `changes/` (one fragment per pull request that changes app code; [changes/README.md](changes/README.md)) for the notes and folds them into `CHANGELOG.md`, counting only fragments not already in the last Stable tag; `appcast.py` writes and checks the Sparkle 2 feed. It signs nothing: Sparkle's `sign_update`, fetched by a pinned URL and SHA-256, signs in the sign job.
+- The feed is `appcast.xml` on the prerelease tagged `appcast`, not on a `gh-pages` branch, so GitHub's immutable releases can't be turned on for that tag. Any account with write access could replace the feed, but Sparkle's EdDSA signature protects what installs ([the ruling](docs/policies/automation.md#ruling-the-feed-stays-on-the-appcast-release)). A Beta item has the `beta` channel; promotion drops it and gives the item the Stable notes link and a phased rollout, so a Stable item keeps the Beta's download and signature.
+- Beta and Promote share one concurrency group, `notchling-release`; GitHub keeps one pending run per group, so a newer pending run cancels an older pending one.
 - The app doesn't read the feed yet: Sparkle 2.6.4 or later comes in its own protected pull request, after the Developer ID. [docs/policies/automation.md](docs/policies/automation.md#releases-so-far) has the turn-on steps and what isn't built.
 
 ### Agents

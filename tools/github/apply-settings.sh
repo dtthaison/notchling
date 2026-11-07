@@ -134,9 +134,10 @@ print("  %s: %s" % (d["name"], a or "nobody"))' "$f"
 done
 echo "  main: repository admins may merge a pull request without the review (pull request mode only,"
 echo "    never a push), because the maintainer is the only code owner and can't approve his own."
-echo "  release-tags: the GitHub Actions app (15368) may create v* tags, because release.yml's"
-echo "    gh release create makes the tag with GITHUB_TOKEN. Only a workflow holding contents: write"
-echo "    can use it, and release.yml is the only one (a guard test pins that)."
+echo "  release-tags: the GitHub Actions app (15368) may create v* tags, because gh release create"
+echo "    makes the tag with GITHUB_TOKEN. Only a workflow holding contents: write can use it: release.yml,"
+echo "    beta.yml's publish job and promote.yml's release, appcast and fold jobs, none of them with"
+echo "    signing secrets (a guard test pins that)."
 
 # 7. Not something a script can do.
 echo

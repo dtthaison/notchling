@@ -120,11 +120,11 @@ merging it runs `.github/workflows/release.yml` ([CONTRIBUTING.md](../../CONTRIB
 
 | Part | Files | State |
 | --- | --- | --- |
-| Version from tags | `tools/release/version.py` | Built. `vX.Y.Z` is Stable, `vX.Y.Z-beta.N` a Beta. After Stable `vX.Y.Z` the next Beta is `vX.Y.(Z+1)-beta.1`, or `vX.(Y+1).0-beta.1` when a `feature` fragment is waiting; a `breaking` one needs the maintainer. The version goes into the built app's copy of `Info.plist`, never the source. |
+| Version from tags | `tools/release/version.py` | Built. `vX.Y.Z` is Stable, `vX.Y.Z-beta.N` a Beta. After Stable `vX.Y.Z` the next Beta is `vX.Y.(Z+1)-beta.1`, or `vX.(Y+1).0-beta.1` when a `feature` fragment is waiting. Only fragments not already in the last Stable tag count, and a Beta's version never goes below an existing Beta above the last Stable. A `breaking` fragment starts a new major line, and only a Beta run with `--allow-breaking` (the maintainer's dispatch) may; later Betas on that line need nothing, and `next --channel stable` never refuses on fragment kinds. The version goes into the built app's copy of `Info.plist`, never the source. |
 | Changelog fragments | `tools/release/fragments.py`, `changes/` ([changes/README.md](../../changes/README.md) is the guide) | Built. `notes` writes a release's notes and `fold` moves the fragments into `CHANGELOG.md`. `check` runs nowhere yet ([below](#fragments-on-pull-requests)). |
-| Update feed | `tools/release/appcast.py` | Built. A Sparkle 2 appcast: a Beta item has `sparkle:channel` `beta`, a Stable item none. It signs nothing; Sparkle's `sign_update` does, in the sign job. |
-| Beta | `.github/workflows/beta.yml` | Off. Daily at 04:17 UTC when `main` has commits since the last tag, or by a click. `gate`: kill switch and the next tag. `build`: repository code, no secrets, a read-only token. `sign`: no repository code; signs with the Developer ID, notarizes, staples, signs the update, attests. `publish`: no signing secrets; creates the prerelease and updates the feed. |
-| Promote | `.github/workflows/promote.yml` | Off. A click with a Beta's tag, by a maintainer, from `main`. It publishes `vX.Y.Z` with the Beta's own files, checked against the Beta's SHA-256 list and build attestations and never rebuilt, moves the feed item to Stable, and opens a pull request that folds the fragments into `CHANGELOG.md`. |
+| Update feed | `tools/release/appcast.py` | Built. A Sparkle 2 appcast: a Beta item has `sparkle:channel` `beta`, a Stable item none. Betas carry a `pubDate` and no phased rollout; the Stable item gets the Stable release's notes link, a fresh `pubDate` and a one-day `sparkle:phasedRolloutInterval`, so the rollout counts from the promotion. It signs nothing; Sparkle's `sign_update` does, in the sign job. |
+| Beta | `.github/workflows/beta.yml` | Off. Daily at 04:17 UTC when `main` has commits since the last tag, or by a click. `gate`: kill switch and the next tag. `build`: repository code, no secrets, a read-only token. `sign`: no repository code; the only job in the `release` environment; signs with the Developer ID under the hardened runtime and an inline entitlements file that grants Apple Events (the app drives Terminal and iTerm through `NSAppleScript`), notarizes, staples, signs the update, attests. `publish`: runs repository code (`appcast.py`), so it is outside the `release` environment and holds no signing secrets; creates the prerelease and updates the feed. |
+| Promote | `.github/workflows/promote.yml` | Off. A click with a Beta's tag, by a maintainer, from `main`. It publishes `vX.Y.Z` with the Beta's own files, checked against the Beta's SHA-256 list and build attestations (the attestation check is bound to the default branch and the Beta's commit) and never rebuilt. Before anything is published it checks that the feed item is this Beta's. It moves the feed item to Stable, and opens a pull request that folds the fragments into `CHANGELOG.md`. The notes and the fold take only the fragments present at the promoted Beta's commit, so an older Beta can be promoted safely. Its `release` and `appcast` jobs are outside the `release` environment. |
 | The app's updater | none | Not built. The Swift app has no Sparkle, so no installed copy reads the feed. |
 
 What's off, and why:
@@ -132,8 +132,11 @@ What's off, and why:
 - **No Developer ID and no notarization login.** Without the `APPLE_*` secrets the sign job stops at
   "Require the signing secrets".
 - **No update signing key** (`SPARKLE_ED_PRIVATE_KEY`).
-- **No `release` environment.** It holds the secrets, and its branch rule keeps them from any branch
-  but `main`.
+- **No `release` environment.** It holds the signing secrets, and its branch rule keeps them from any
+  branch but `main`. Only the `sign` job uses it; the jobs that run repository code (`publish`,
+  `appcast`) don't.
+- **A public repository.** Build attestations need one on a personal account, and the Beta's `sign` job
+  and Promote's checks depend on them.
 - **No Sparkle in the app.** That is protected Swift code the maintainer uses every day. It comes after
   the Developer ID: the vault's Keychain item trusts the exact build, so ad hoc updates would bring its
   access prompt back after every Beta.
@@ -141,13 +144,15 @@ What's off, and why:
 
 ### Turning releases on
 
-The maintainer, in this order:
+The maintainer, in this order. Before the first step, make the repository public: the attestations the
+Beta signs and Promote checks (`gh attestation verify`) need it on a personal account.
 
 1. **Developer ID.** In the Apple Developer account, create a Developer ID Application certificate.
    Export it with its private key as a `.p12` with a password.
 2. **The `release` environment and the signing secrets.** In Settings > Environments, create
    `release`. Under deployment branches pick selected branches and add only `main`: without that rule,
-   a branch's own copy of `beta.yml` could read the secrets. Then set them as environment secrets,
+   a branch's own copy of `beta.yml` could read the secrets. Only the `sign` job names this
+   environment. Then set them as environment secrets,
    never repository secrets:
 
    ```sh
@@ -173,6 +178,10 @@ The maintainer, in this order:
      `["beta"]`. Stable items have no channel, so every copy sees them.
    - In `beta.yml`'s sign step, signing Sparkle's nested code inside out before the app (its XPC
      services, `Autoupdate`, `Updater.app`, then the framework). A comment there marks the spot.
+   - In `legacy/macos/Info.plist`, `NSAppleEventsUsageDescription`: the signed app runs under the
+     hardened runtime, where Apple Events to Terminal and iTerm (`NSAppleScript`) need the entitlement
+     `beta.yml` grants inline and this usage text. It is a protected app change and must land before
+     the first signed Beta, or macOS refuses the events without asking.
    - It adds a network call, so `CAP-NETWORK` stops it, and it updates [privacy.md](privacy.md).
 
    Copies built before it can't update themselves: people install the first build with Sparkle by hand.
@@ -202,23 +211,36 @@ The maintainer, in this order:
 ### Each release
 
 - A Beta is cut on each day `main` has commits since the last tag. Its notes are the fragments added
-  since that tag. A `breaking` fragment stops the daily Beta at `gate` until a maintainer runs Beta
-  by hand with "Allow a breaking change".
-- Promote the newest Beta when you can. A newer Beta doesn't block promoting an older one, but the
-  Stable notes and the fold take every fragment on `main` at the time of the click, so changes merged
-  after the older Beta was cut would be listed under a Stable that doesn't hold them.
-- **Merge the fold pull request before the next daily Beta.** Until it merges, the fragments stay in
-  `changes/`: the next Beta counts their kinds again (a `feature` bumps the minor version once more),
-  and the next fold would list them under a second version. A pull request opened with `GITHUB_TOKEN`
-  starts no workflows, so its checks never start: close it and reopen it, which starts them (later the
-  App can open it instead). It changes `CHANGELOG.md` and `changes/`, so it needs the maintainer's
-  approval anyway.
+  since that tag. The first Beta of a new major line (a `breaking` fragment) needs a maintainer to run
+  Beta by hand with "Allow a breaking change"; until then the daily run stops at `gate`. Later Betas
+  on that line need nothing.
+- Promote the newest Beta when you can, but any Beta can be promoted: the Stable notes and the fold take
+  the fragments present at that Beta's commit, not those merged since. Fragments left in `changes/` by
+  a pending fold pull request don't count again, since Betas count only fragments not already in the last
+  Stable tag, and a Beta's version never goes below an existing Beta above it. Merge the fold pull
+  request when you can anyway. A pull request opened with `GITHUB_TOKEN` starts no workflows, so its
+  checks never start: close it and reopen it, which starts them (later the App can open it instead). It
+  changes `CHANGELOG.md` and `changes/`, so it needs the maintainer's approval anyway.
+- **Don't queue two promotes.** Beta and Promote share the concurrency group `notchling-release`: one
+  run at a time, and a running one is never cancelled. GitHub keeps only one pending run per group, so a
+  newer pending run cancels an older pending one. Start a second Promote or Beta while one runs and
+  another waits, and the waiting one is dropped without a word. Wait for a run to finish before
+  starting the next.
 - A promoted Stable is the Beta's own bytes, so the app reports the Beta's version (`1.3.0-beta.2` in
   `CFBundleShortVersionString`, and the Beta's build number) while the feed and the GitHub release say
   `1.3.0`. That is by design.
 - The feed is `appcast.xml` on the prerelease tagged `appcast`. A Stable item still downloads the
   Beta release's disk image. Never delete the `appcast` release or the release of a promoted Beta:
   installed copies would lose the feed or the download.
+
+### Ruling: the feed stays on the `appcast` release
+
+The feed is an asset of the `appcast` prerelease, not a file on a `gh-pages` branch. The cost: GitHub's
+immutable releases can't be turned on for that tag, because the workflow replaces `appcast.xml` on every
+Beta and promotion. Anyone with write access to the repository could replace the feed. What protects
+installs is Sparkle's EdDSA signature: an item that isn't signed by the update key is refused, so a
+replaced feed can withhold updates but can't install code. If this is wrong, moving the feed later means
+an app update that carries a new `SUFeedURL`, and copies that never update stay on the old feed.
 
 ### Not built yet
 
@@ -227,10 +249,6 @@ These need the pipeline running:
 - Upgrade and downgrade tests from the last Stable (stored data stays readable by the previous
   release, so a rollback is safe).
 - A launch-and-render smoke test of the built app.
-- Phased rollout. Every feed item gets `appcast.py`'s default one-day `sparkle:phasedRolloutInterval`,
-  but Sparkle stages an update only from its item's `pubDate`, which the workflows don't pass, so
-  every copy is offered an update at once. Once they pass one, a promoted item keeps the Beta's date,
-  so its Stable rollout would count from the day the Beta came out.
 - The Rust app's update manifest, signed with ed25519 (minisign-style), and its installers
   ([0010](../decisions/0010-build-then-sign-beta-then-stable.md)).
 - The fragments check on pull requests (next section).
