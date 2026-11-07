@@ -23,7 +23,7 @@ final class SessionIndex {
     private static let headBytes = 200_000
     private static let tailBytes = 3_500_000
 
-    private static let cacheVersion = 1
+    private static let cacheVersion = 2
     private static var cacheURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Notchling/search-index.json")
@@ -100,10 +100,9 @@ final class SessionIndex {
             // Search works while the first scan is still going.
             if batch % 25 == 0 { notify() }
         }
-        // Antigravity's and Gemini's steps aren't read: their sessions are found by title.
+        // Antigravity's steps aren't read: its sessions are found by title.
         let titled: [(key: String, tool: SessionTool, id: String, title: String, folder: String, modified: Date)] =
             AntigravitySessions.rows(now: now).map { ("agy:" + $0.id, .antigravity, $0.id, $0.title, $0.folder, $0.modified) }
-            + GeminiSessions.rows(now: now).map { ("gemini:" + $0.id, .gemini, $0.id, $0.title, $0.folder, $0.modified) }
         for row in titled {
             let meta = SessionMeta(key: row.key, toolKey: row.tool.key, sessionID: row.id,
                                    title: row.title, folder: row.folder, path: "", configDir: nil,
@@ -198,7 +197,7 @@ final class SessionIndex {
             guard let info = CodexSessions.meta(candidate.path) else { return nil }
             meta.folder = info.cwd
             forEachLine(in: data) { if let line = TranscriptText.codex($0) { builder.add(line) } }
-        case .antigravity, .gemini:
+        case .antigravity:
             return nil
         }
         let text = builder.text

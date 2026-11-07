@@ -17,9 +17,6 @@ enum AgentActions {
         case .antigravity(let sessionID):
             guard !sessionID.isEmpty, let agy = AntigravityRunner.binary() else { NSSound.beep(); return }
             runInTerminal((cwd.isEmpty ? "" : "cd \(shellQuote(cwd)) && ") + "\(shellQuote(agy)) --conversation \(sessionID)")
-        case .gemini(let sessionID):
-            guard !sessionID.isEmpty, let gemini = GeminiRunner.binary() else { NSSound.beep(); return }
-            runInTerminal((cwd.isEmpty ? "" : "cd \(shellQuote(cwd)) && ") + "\(shellQuote(gemini)) --resume \(sessionID)")
         }
     }
 

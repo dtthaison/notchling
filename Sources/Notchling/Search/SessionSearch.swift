@@ -11,7 +11,6 @@ extension SessionTool {
         case .claude: return "claude"
         case .codex: return "codex"
         case .antigravity: return "agy"
-        case .gemini: return "gemini"
         }
     }
 
@@ -20,7 +19,6 @@ extension SessionTool {
         case "claude": self = .claude
         case "codex": self = .codex
         case "agy": self = .antigravity
-        case "gemini": self = .gemini
         default: return nil
         }
     }

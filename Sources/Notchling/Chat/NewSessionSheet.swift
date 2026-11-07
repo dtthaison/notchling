@@ -4,13 +4,12 @@ import SwiftUI
 /// What a new session runs on: a Claude Code account (nil is the main login; another gets a lane),
 /// a Codex account (Codex has one login, so a non-active one switches Codex first), or an Antigravity
 /// account for Antigravity CLI (the app's login, which `agy` shares; nil: whatever `agy` is signed in
-/// to, when Notchling has none saved), or Gemini CLI (one login, whatever `gemini` is signed in to).
+/// to, when Notchling has none saved).
 /// Add a case per tool.
 enum SessionChoice: Hashable {
     case claude(accountID: String?)
     case codex(accountID: String)
     case antigravity(accountID: String?)
-    case gemini
 
     /// Remembered between sheets.
     var key: String {
@@ -18,7 +17,6 @@ enum SessionChoice: Hashable {
         case .claude(let id): return "claude:" + (id ?? "")
         case .codex(let id): return "codex:" + id
         case .antigravity(let id): return "antigravity:" + (id ?? "")
-        case .gemini: return "gemini"
         }
     }
 
@@ -31,8 +29,6 @@ enum SessionChoice: Hashable {
         } else if key.hasPrefix("antigravity:") {
             let id = String(key.dropFirst(12))
             self = .antigravity(accountID: id.isEmpty ? nil : id)
-        } else if key == "gemini" {
-            self = .gemini
         } else {
             return nil
         }
@@ -155,12 +151,6 @@ struct NewSessionSheet: View {
                         if model.antigravity != nil {
                             addRow("Add Antigravity Account") { enterAdding(.antigravity) }
                         }
-                    }
-                }
-                if GeminiRunner.binary() != nil {
-                    let login = GeminiLogin.read()
-                    group("Gemini CLI", icon: "rhombus") {
-                        option(.gemini, title: login.email ?? "Gemini CLI", detail: geminiDetail(login))
                     }
                 }
             }
@@ -310,11 +300,6 @@ struct NewSessionSheet: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Notchling doesn't switch Gemini accounts: the CLI has one login, changed with gemini in a terminal.
-    private func geminiDetail(_ login: GeminiLogin.State) -> String {
-        guard login.signedIn else { return "Not signed in. Run gemini in a terminal first." }
-        return login.email == nil ? "Uses gemini's current sign-in" : "Uses gemini's sign-in"
-    }
 
     private var allFolders: [String] {
         var out = extraFolders
@@ -329,7 +314,6 @@ struct NewSessionSheet: View {
         case .claude: return "A background Claude Code session in \(name). It opens here, ready for your first message."
         case .codex: return "A Codex session in \(name). Your first message starts it."
         case .antigravity: return "An Antigravity CLI session in \(name). Your first message starts it."
-        case .gemini: return "A Gemini CLI session in \(name). Your first message starts it."
         }
     }
 
@@ -352,7 +336,6 @@ struct NewSessionSheet: View {
         case .antigravity(let id):
             guard AntigravityRunner.binary() != nil else { return false }
             return id == nil ? (model.antigravity?.accounts.isEmpty ?? true) : model.antigravity?.accounts.contains { $0.id == id } == true
-        case .gemini: return GeminiRunner.binary() != nil
         }
     }
 
@@ -443,9 +426,6 @@ struct NewSessionSheet: View {
                     }
                 }
             }
-        case .gemini:
-            model.newSessionSheet = false
-            model.newGeminiSession(in: folder)
         case .antigravity(let accountID):
             guard let store = model.antigravity, let accountID, accountID != store.activeID else {
                 model.newSessionSheet = false

@@ -14,7 +14,7 @@ enum ChatTakeover {
     /// Terminal sessions the host doesn't own, and ended ones. Jobs take replies already; `claude -p` can't be resumed live.
     static func offersTakeover(_ agent: Agent) -> Bool {
         switch agent.target {
-        case .job, .codex, .antigravity, .gemini: return false
+        case .job, .codex, .antigravity: return false
         case .process: return !agent.repliesViaHost && agent.host != "claude -p"
         case .resume: return true
         }

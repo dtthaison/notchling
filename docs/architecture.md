@@ -40,7 +40,7 @@ NotchlingSystem      adapters for the ports: lane-aware ClaudePaths, typed Setti
                      pty attach, AppLifecycle (quit/open/isRunning), file IPC for the hook
 
 Providers            AccountProvider protocol + ClaudeCode, ClaudeDesktop, Antigravity
-                     (and later Codex, Gemini), registered at launch
+                     (and later Codex), registered at launch
 
 NotchlingUI          DesignKit, SharedUI (EditingWindow, PagePreview, alerts),
                      Notch, Pet, Chat, Pages, Search, Accounts. Views draw; view models hold state
@@ -147,7 +147,7 @@ protocol AccountProvider: AnyObject {
 - Desktop and Antigravity still have two copies of the quit, open and watch-for-login code; the shared `RestartingAppProvider` base class is not written.
 
 #### Adding a provider
-1. Write the store that reads and switches the login (Gemini CLI: its Keychain or file login, saved copies, a usage call). It follows the rules in `CLAUDE.md`: never renew a token that is in use, set every place the login lives, quit apps that read it at launch.
+1. Write the store that reads and switches the login (its Keychain or file login, saved copies, a usage call). It follows the rules in `CLAUDE.md`: never renew a token that is in use, set every place the login lives, quit apps that read it at launch.
 2. Add `Providers/<Name>Provider.swift`: a final class conforming to `AccountProvider` that holds the store. Map the store's accounts to `ProviderAccount`, its limits to `UsageReport`, and wrap `switchTo` with `awaitStore`. Put the confirmation texts in `switchConfirmation`/`addConfirmation`. Set `menuStyle` (title row, placeholder text, `waitsInMenu` if an app sits at a sign-in screen, `syncsOnOpen` if reading the live login is cheap).
 3. Its page: a SwiftUI view built on `AccountRow` (reuse the card, give it a `content` closure for limits) and return it from `makePage`.
 4. Register it in `AppDelegate.providers`. The tab, the menu section, the refresh and the timer follow. Add the store's UserDefaults keys to the `migrateFromAwake` list.

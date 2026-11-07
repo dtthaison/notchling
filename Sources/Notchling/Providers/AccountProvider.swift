@@ -84,7 +84,7 @@ struct ProviderMenuTarget {
     var account: String?
 }
 
-/// One source of accounts the user can switch between. Adding one (Gemini CLI is next) means one file
+/// One source of accounts the user can switch between. Adding one means one file
 /// that conforms to this and one `ProviderRegistry.register` call at launch; the Accounts window tabs
 /// and the menu sections come from the registry.
 ///

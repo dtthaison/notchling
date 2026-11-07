@@ -159,7 +159,7 @@ Demo/                     renders docs/demo.gif from the real views with made-up
 
 ## Planned
 
-- [ ] **Codex and Gemini CLI agents in the notch.** Show their sessions next to Claude Code's, with peeks when they finish or need you, and Codex rate limits and account switching in the menu.
+- [ ] **Codex agents in the notch.** Show their sessions next to Claude Code's, with peeks when they finish or need you, and Codex rate limits and account switching in the menu.
 - [ ] **Auto Warmup.** The 5-hour limit window starts with your first message, so starting it early means it resets sooner and you get more windows in a day. At a time you pick, before you start work, Notchling sends a one-word prompt with the smallest model to each saved account to start its window. It can also send one again as soon as a window resets.
 - [ ] **Limit warnings with a switch.** When an account passes about 90% of its 5-hour or weekly limit, peek with "Switch to <account>?". It always asks first and never switches on its own.
 - [ ] **Jump to more terminals.** Go to the exact tab in Ghostty, Warp, kitty and WezTerm, not just Terminal and iTerm, and to the right window in Zed and JetBrains IDEs.

@@ -160,7 +160,7 @@ final class ChatModel: ObservableObject {
         antigravityWatch = antigravity?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.objectWillChange.send() }
         }
-        acpWatch = AntigravityRunner.shared.$version.merge(with: GeminiRunner.shared.$version).sink { [weak self] _ in
+        acpWatch = AntigravityRunner.shared.$version.sink { [weak self] _ in
             DispatchQueue.main.async { self?.acpChanged() }
         }
     }
@@ -200,9 +200,9 @@ final class ChatModel: ObservableObject {
         return saved
     }()
 
-    /// Recent Antigravity CLI and Gemini CLI conversations (`AntigravitySessions`, `GeminiSessions`), re-read every few seconds.
+    /// Recent Antigravity CLI conversations (`AntigravitySessions`), re-read every few seconds.
     @Published var acpAgents: [Agent] = []
-    /// New Antigravity and Gemini sessions picked in New Session that wait for their first message.
+    /// New Antigravity sessions picked in New Session that wait for their first message.
     @Published var acpDrafts: [Agent] = []
     var acpListedAt = Date.distantPast
     var acpListing = false

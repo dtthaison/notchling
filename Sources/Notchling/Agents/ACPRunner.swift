@@ -16,46 +16,13 @@ struct ACPPermission: Equatable {
     let options: [Option]
 }
 
-/// A choice the agent offers for the session: Antigravity's `configOptions` (Model, Thinking Level, Mode),
-/// or Gemini's older `models` and `modes` made to look the same.
+/// A choice the agent offers for the session: Antigravity's `configOptions` (Model, Thinking Level, Mode).
 struct ACPConfigOption: Equatable, Identifiable {
     struct Value: Equatable { let value: String; let name: String }
-    /// How a pick is sent: `session/set_config_option`, or Gemini's `session/set_model` and `session/set_mode`.
-    enum Source: Equatable { case configOption, model, mode }
     let id: String
     let name: String
     var current: String
     let values: [Value]
-    var source: Source = .configOption
-
-    /// The options a `session/new` or `session/load` result offers: `configOptions` when there are any,
-    /// else `models` (`availableModels`, `currentModelId`) and `modes` (`availableModes`, `currentModeId`).
-    static func parse(result: [String: Any]) -> [ACPConfigOption] {
-        let fresh = parse(result["configOptions"])
-        if !fresh.isEmpty { return fresh }
-        var out: [ACPConfigOption] = []
-        if let models = result["models"] as? [String: Any] {
-            let values = (models["availableModels"] as? [[String: Any]] ?? []).compactMap { m -> Value? in
-                guard let id = m["modelId"] as? String else { return nil }
-                return Value(value: id, name: m["name"] as? String ?? id)
-            }
-            if !values.isEmpty {
-                out.append(ACPConfigOption(id: "model", name: "Model", current: models["currentModelId"] as? String ?? "",
-                                           values: values, source: .model))
-            }
-        }
-        if let modes = result["modes"] as? [String: Any] {
-            let values = (modes["availableModes"] as? [[String: Any]] ?? []).compactMap { m -> Value? in
-                guard let id = m["id"] as? String else { return nil }
-                return Value(value: id, name: m["name"] as? String ?? id)
-            }
-            if !values.isEmpty {
-                out.append(ACPConfigOption(id: "mode", name: "Mode", current: modes["currentModeId"] as? String ?? "",
-                                           values: values, source: .mode))
-            }
-        }
-        return out
-    }
 
     static func parse(_ list: Any?) -> [ACPConfigOption] {
         (list as? [[String: Any]] ?? []).compactMap { o in
@@ -71,41 +38,32 @@ struct ACPConfigOption: Equatable, Identifiable {
     var currentName: String { values.first { $0.value == current }?.name ?? current }
 }
 
-/// The tools Chat drives over the Agent Client Protocol.
+/// The tools Chat drives over the Agent Client Protocol. Only Antigravity CLI now (it replaced Gemini CLI
+/// on 2026-06-18); the runner stays generic so another ACP tool is one case.
 enum ACPTool: Equatable {
-    case antigravity, gemini
+    case antigravity
 
-    var name: String { self == .antigravity ? "Antigravity" : "Gemini" }
+    var name: String { "Antigravity" }
     /// What the row's `host` and label show.
     var host: String { name }
     /// Chat row ids are `<prefix><session id>`; a draft is `<draftPrefix><uuid>`.
-    var idPrefix: String { self == .antigravity ? "agy:" : "gemini:" }
-    var draftPrefix: String { self == .antigravity ? "agy-new:" : "gemini-new:" }
-    var arguments: [String] { self == .antigravity ? ["acp"] : ["--acp"] }
-    var command: String { self == .antigravity ? "agy" : "gemini" }
-    var product: String { self == .antigravity ? "Antigravity CLI" : "Gemini CLI" }
+    var idPrefix: String { "agy:" }
+    var draftPrefix: String { "agy-new:" }
+    var arguments: [String] { ["acp"] }
+    var command: String { "agy" }
+    var product: String { "Antigravity CLI" }
 
-    var binary: String? { self == .antigravity ? AntigravityRunner.binary() : GeminiRunner.binary() }
-    var runner: ACPRunner { self == .antigravity ? AntigravityRunner.shared : GeminiRunner.shared }
+    var binary: String? { AntigravityRunner.binary() }
+    var runner: ACPRunner { AntigravityRunner.shared }
 
     func agentID(_ session: String) -> String { idPrefix + session }
-    func target(_ session: String) -> AgentTarget {
-        self == .antigravity ? .antigravity(sessionID: session) : .gemini(sessionID: session)
-    }
-
-    /// Gemini streams a loaded session's history after the `session/load` result, Antigravity before it.
-    var historyFollowsLoad: Bool { self == .gemini }
-
-    /// Antigravity sends the prompt back as a `user_message_chunk`; Gemini doesn't, so the runner adds it.
-    var echoesPrompt: Bool { self == .antigravity }
+    func target(_ session: String) -> AgentTarget { .antigravity(sessionID: session) }
 
     /// A title from the first message until the tool names the session.
     func title(_ text: String) -> String { AntigravitySessions.title(text) }
 
     /// The rows for Chat's sidebar.
-    func list(live: Set<String>) -> [Agent] {
-        self == .antigravity ? AntigravitySessions.list(live: live) : GeminiSessions.list(live: live)
-    }
+    func list(live: Set<String>) -> [Agent] { AntigravitySessions.list(live: live) }
 }
 
 /// Sessions Chat has open over the Agent Client Protocol: one process each, which loads the conversation
@@ -128,8 +86,6 @@ class ACPRunner: ObservableObject {
         var config: [ACPConfigOption] = []
         var commands: [SlashCommand] = []
         var lastUsed = Date()
-        /// When the last `session/update` arrived.
-        var lastUpdate = Date()
         /// Work waiting for the load to finish.
         var whenLoaded: [() -> Void] = []
         var loadError: String?
@@ -191,13 +147,9 @@ class ACPRunner: ObservableObject {
                 guard let self else { return }
                 switch result {
                 case .success(let r):
-                    if self.tool.historyFollowsLoad {
-                        self.settle(l) { self.loaded(l, r) }
-                    } else {
-                        self.loaded(l, r)
-                    }
+                    self.loaded(l, r)
                 case .failure(let e):
-                    l.loadError = Self.friendly(e.localizedDescription, tool: self.tool)
+                    l.loadError = e.localizedDescription
                     self.bump()
                 }
             }
@@ -234,32 +186,8 @@ class ACPRunner: ObservableObject {
                     done(.success(id))
                 case .failure(let e):
                     connection.close()
-                    done(.failure(AccountError(Self.friendly(e.localizedDescription, tool: self.tool))))
+                    done(.failure(AccountError(e.localizedDescription)))
                 }
-            }
-        }
-    }
-
-    /// The tool's complaint in words that say what to do. Gemini answers `session/new` with "Gemini API key
-    /// is missing or not configured." when `gemini` has never been signed in.
-    static func friendly(_ message: String, tool: ACPTool) -> String {
-        guard tool == .gemini else { return message }
-        let lower = message.lowercased()
-        if lower.contains("api key is missing") || lower.contains("authentication required") || lower.contains("not logged in") {
-            return "Gemini CLI isn't signed in. Run gemini in a terminal, choose Log in with Google, then try again."
-        }
-        return message
-    }
-
-    /// Runs `then` once no update has arrived for a moment: Gemini's `session/load` answers first and
-    /// streams the history after, so a prompt sent at once would land in the middle of it.
-    private func settle(_ l: Live, waited: TimeInterval = 0, then: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak l] in
-            guard let self, let l, !l.connection.closed else { return }
-            if Date().timeIntervalSince(l.lastUpdate) < 0.3, waited < 8 {
-                self.settle(l, waited: waited + 0.3, then: then)
-            } else {
-                then()
             }
         }
     }
@@ -274,9 +202,6 @@ class ACPRunner: ObservableObject {
             l.working = true
             l.lastUsed = Date()
             l.transcript.beginTurn()
-            if !self.tool.echoesPrompt {
-                l.transcript.apply(["sessionUpdate": "user_message_chunk", "content": ["type": "text", "text": text]], at: Date())
-            }
             self.bump()
             l.connection.request("session/prompt", ["sessionId": id, "prompt": [["type": "text", "text": text]]]) { [weak self] result in
                 l.working = false
@@ -321,14 +246,7 @@ class ACPRunner: ObservableObject {
     /// Picks a value for one of the session's options (model, thinking level, mode).
     func set(_ id: String, option: String, to value: String, failed: @escaping (String) -> Void) {
         guard let l = live[id] else { return }
-        let source = l.config.first { $0.id == option }?.source ?? .configOption
-        let method: String, params: [String: Any]
-        switch source {
-        case .configOption: (method, params) = ("session/set_config_option", ["sessionId": id, "configId": option, "value": value])
-        case .model: (method, params) = ("session/set_model", ["sessionId": id, "modelId": value])
-        case .mode: (method, params) = ("session/set_mode", ["sessionId": id, "modeId": value])
-        }
-        l.connection.request(method, params) { [weak self] result in
+        l.connection.request("session/set_config_option", ["sessionId": id, "configId": option, "value": value]) { [weak self] result in
             switch result {
             case .success(let r):
                 let fresh = ACPConfigOption.parse(r["configOptions"])
@@ -356,7 +274,6 @@ class ACPRunner: ObservableObject {
     private func wire(_ l: Live) {
         l.connection.onNotification = { [weak self, weak l] method, params in
             guard let self, let l, method == "session/update", let update = params["update"] as? [String: Any] else { return }
-            l.lastUpdate = Date()
             switch update["sessionUpdate"] as? String {
             case "available_commands_update":
                 l.commands = (update["availableCommands"] as? [[String: Any]] ?? []).compactMap { c in
@@ -419,7 +336,7 @@ class ACPRunner: ObservableObject {
 
     private func loaded(_ l: Live, _ result: [String: Any]) {
         l.loaded = true
-        l.config = tool == .gemini ? ACPConfigOption.parse(result: result) : ACPConfigOption.parse(result["configOptions"])
+        l.config = ACPConfigOption.parse(result["configOptions"])
         if let model = l.config.first(where: { $0.id == "model" })?.currentName {
             l.transcript.model = model
         } else if let models = result["models"] as? [String: Any], let current = models["currentModelId"] as? String {
