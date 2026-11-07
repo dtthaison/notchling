@@ -5,7 +5,8 @@ from pathlib import Path
 from guard.pins import check, load_allowlist, peeled_sha, pin
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
-ALLOW = {"actions/checkout", "actions/setup-python", "subosito/flutter-action"}
+ALLOW = {"actions/attest-build-provenance", "actions/checkout", "actions/download-artifact", "actions/setup-python",
+         "actions/upload-artifact", "subosito/flutter-action"}
 
 
 def wf(text):
