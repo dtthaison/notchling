@@ -51,6 +51,13 @@ TITLE_MAX = 256
 BODY_MAX = 60000
 INDEX_MAX = 512 * 1024 * 1024
 PRIVATE_KEY_MARK = "PRIVATE KEY-----"
+WORKFLOWS_DIR = ".github/workflows/"
+# The agent repository's idea of the base branch, tried in order (see workflow_changes).
+BASE_REFS = ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
+             "refs/heads/main", "refs/heads/master")
+REJECT_RE = re.compile(r"\s*!\s*\[(?:remote )?rejected\]")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+FAILURE_MAX = 600
 GIT_TIMEOUT = 300
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 DEFAULT_CONFIG = "~/.config/notchling/push-wrapper.json"
@@ -289,15 +296,66 @@ def git_env(token: Optional[str], remote_url: str, scratch: str, global_config: 
     return env
 
 
+def _tidy(line: str, secret: str) -> str:
+    """One line of git's stderr as safe text: no colour codes or control characters, no token."""
+    line = ANSI_RE.sub("", line)
+    line = "".join(c for c in line if unicodedata.category(c) not in ("Cc", "Cf", "Zl", "Zp")).strip()
+    if secret:
+        basic = base64.b64encode(("x-access-token:" + secret).encode()).decode()
+        line = line.replace(secret, "[token]").replace(basic, "[token]")
+    return line
+
+
+def push_failure(stderr: bytes, secret: str = "") -> Tuple[bool, str]:
+    """(rejected, text) from a failed git command's stderr. A rejection is the remote saying no to this
+    push (`! [rejected]` or `! [remote rejected]`: a hook, a ruleset, a missing permission, a branch that
+    exists with other history). Retrying cannot help, so it is a refusal; the reason is the remote's own
+    `remote:` lines plus the rejected line. Any other failure keeps only its last line."""
+    lines = [l for l in (_tidy(l, secret) for l in stderr.decode("utf-8", "replace").splitlines()) if l]
+    marks = [l for l in lines if REJECT_RE.match(l)]
+    if not marks:
+        return False, (lines[-1] if lines else "")[:300]
+    reasons = [l[len("remote:"):].strip() for l in lines if l.startswith("remote:")]
+    text = "; ".join([r for r in reasons if r][:6] + marks[:3])
+    return True, text[:FAILURE_MAX]
+
+
 def _git(runner: Runner, args: List[str], env: Mapping[str, str], what: str, secret: str = "") -> bytes:
     proc = runner(["git"] + args, env=env)
     if proc.returncode != 0:
-        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
-        text = tail[0][:300]
-        if secret:
-            text = text.replace(secret, "[token]")
+        rejected, text = push_failure(proc.stderr, secret)
+        if rejected:
+            raise Refused("the remote rejected the push: %s" % text)
         raise Failed("%s failed (exit %d)%s" % (what, proc.returncode, ": " + text if text else ""))
     return proc.stdout
+
+
+def workflow_changes(runner: Runner, safe: List[str], env: Mapping[str, str], sgit: str, sha: str) -> List[str]:
+    """Paths under .github/workflows/ that this branch changes against its base, found from the agent
+    repository's own copy of the base branch. The App has no `workflows` permission, so GitHub refuses
+    such a push; saying so here spares a token and an unreadable rejection. It is a courtesy, not the
+    guard (an agent can re-point its own base ref; GitHub still refuses), so a base that cannot be found
+    or compared means "no opinion", and the remote decides."""
+    base_sha = ""
+    for ref in BASE_REFS:
+        try:
+            out = _git(runner, safe + ["rev-parse", "--verify", "-q", ref + "^{commit}"], env,
+                       "reading the base").decode().strip()
+        except Failed:
+            continue
+        if SHA_RE.fullmatch(out):
+            base_sha = out
+            break
+    if not base_sha:
+        return []
+    try:
+        fork = _git(runner, ["--git-dir", sgit, "merge-base", base_sha, sha], env,
+                    "comparing with the base").decode().strip()
+        names = _git(runner, ["--git-dir", sgit, "diff-tree", "-r", "--name-only", "--no-renames", "-z",
+                              fork, sha], env, "comparing with the base").decode("utf-8", "replace")
+    except Failed:
+        return []
+    return [n for n in names.split("\0") if n.lower().startswith(WORKFLOWS_DIR)]
 
 
 def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) -> tuple:
@@ -343,6 +401,12 @@ def inspect_worktree(runner: Runner, worktree: str, issue: int, scratch: str) ->
                   env, "checking the worktree")
     if status.strip():
         raise Refused("the worktree is not clean: commit or remove what is left")
+    touched = workflow_changes(runner, safe, env, sgit, sha)
+    if touched:
+        shown = ", ".join("".join(c if c.isprintable() else "?" for c in n) for n in touched[:3])
+        raise Refused("the branch changes files under .github/workflows/ (%s). The App has no workflows "
+                      "permission, so GitHub would refuse the push; a maintainer has to make that change"
+                      % shown)
     return branch, sha, sgit
 
 

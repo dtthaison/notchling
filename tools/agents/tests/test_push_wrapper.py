@@ -316,7 +316,8 @@ class SuccessPath(Base):
         git(other, "push", "-q", "origin", "agent/5-fix-thing")
         before = self.remote_branches()
         res = self.go()
-        self.assertEqual(res.code, 2)
+        self.assertEqual(res.code, 1, "the remote rejecting the push is a refusal, not a transient error")
+        self.assertIn("rejected", res.message)
         self.assertEqual(self.remote_branches(), before, "a diverged branch must not be overwritten")
         self.assertNotIn(("POST", "/repos/o/r/pulls"), self.api_paths())
         self.assertEqual(list(self.tmp.iterdir()), [])
@@ -414,6 +415,121 @@ class ApiErrors(Base):
         res = self.go()
         self.assertEqual(res.code, 2)
         self.assertIn("pushed", res.message)  # the branch is up; only the PR is missing
+
+
+class Rejections(Base):
+    """A push the remote refuses is a refusal (exit 1) that says why; only trouble reaching it is an error."""
+
+    def hook(self, script):
+        hook = self.bare / "hooks" / "pre-receive"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text("#!/bin/sh\n" + script)
+        hook.chmod(0o755)
+
+    def test_a_rejection_with_a_reason_is_exit_1_and_keeps_the_reason(self):
+        self.start()
+        self.hook("echo 'refusing to allow a GitHub App to create or update workflow "
+                  ".github/workflows/x.yml without workflows permission' >&2\nexit 1\n")
+        res = self.go()
+        self.assertEqual(res.code, 1, res)
+        self.assertIn("rejected", res.message)
+        self.assertIn("without workflows permission", res.message)
+        self.assertNotIn(("POST", "/repos/o/r/pulls"), self.api_paths())
+        self.assertEqual(self.remote_branches(), {})
+
+    def test_trouble_reaching_the_remote_stays_an_error(self):
+        self.start()
+        self.cfg = self.cfg._replace(remote_url=str(self.root / "no-such-remote.git"))
+        res = self.go()
+        self.assertEqual(res.code, 2, res)
+        self.assertNotIn("rejected", res.message)
+
+    def test_failure_text_keeps_rejection_lines_and_drops_noise_and_secrets(self):
+        stderr = ("remote: Permission to o/r.git denied\x1b[31m to the app\n"
+                  "remote: token %s leaked\n"
+                  "To https://github.com/o/r.git\n"
+                  " ! [remote rejected] abc -> refs/heads/agent/5-x (pre-receive hook declined)\n"
+                  "error: failed to push some refs to 'https://github.com/o/r.git'\n" % TOKEN).encode()
+        rejected, text = push_wrapper.push_failure(stderr, TOKEN)
+        self.assertTrue(rejected)
+        self.assertIn("Permission to o/r.git denied", text)
+        self.assertIn("[remote rejected]", text)
+        self.assertIn("pre-receive hook declined", text)
+        self.assertNotIn(TOKEN, text)
+        self.assertNotIn("\x1b", text)
+        self.assertLessEqual(len(text), 700)
+        rejected, text = push_wrapper.push_failure(b"fatal: unable to access 'https://x/': Could not resolve host\n",
+                                                   TOKEN)
+        self.assertFalse(rejected)
+        self.assertIn("Could not resolve host", text)
+        rejected, _ = push_wrapper.push_failure(b" ! [rejected]        abc -> refs/heads/agent/5-x (fetch first)\n", "")
+        self.assertTrue(rejected)
+
+
+class WorkflowFiles(Base):
+    """The App has no `workflows` permission, so GitHub refuses any push that touches .github/workflows/.
+    The wrapper says so itself, before it mints a token."""
+
+    def commit_file(self, rel, text="on: push\n"):
+        path = self.wt / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        git(self.wt, "add", rel)
+        git(self.wt, "commit", "-q", "-m", "touch " + rel)
+
+    def assertWorkflowRefusal(self, res):
+        self.assertEqual(res.code, 1, res)
+        self.assertIn(".github/workflows", res.message)
+        self.assertIn("workflows permission", res.message)
+        self.assertNotIn(("POST", "/app/installations/77/access_tokens"), self.api_paths())
+        self.assertEqual(self.api_paths(), [])
+        self.assertEqual(self.remote_branches(), {})
+
+    def test_a_new_workflow_file_is_refused_before_any_call(self):
+        self.start()
+        self.commit_file(".github/workflows/ci.yml")
+        self.assertWorkflowRefusal(self.go())
+
+    def test_editing_deleting_and_nested_workflow_files_are_refused(self):
+        self.start()
+        git(self.wt, "checkout", "-q", "main")
+        self.commit_file(".github/workflows/old.yml")
+        git(self.wt, "checkout", "-q", "agent/5-fix-thing")
+        git(self.wt, "rebase", "-q", "main")
+        git(self.wt, "rm", "-q", ".github/workflows/old.yml")
+        git(self.wt, "commit", "-q", "-m", "delete a workflow")
+        self.assertWorkflowRefusal(self.go())
+        self.commit_file(".github/workflows/sub/deep.yml")
+        self.assertWorkflowRefusal(self.go())
+
+    def test_a_case_variant_of_the_folder_is_refused(self):
+        self.start()
+        self.commit_file(".GitHub/Workflows/ci.yml")
+        self.assertWorkflowRefusal(self.go())
+
+    def test_other_github_files_and_lookalikes_are_fine(self):
+        self.start()
+        self.commit_file(".github/ISSUE_TEMPLATE/bug.md")
+        self.commit_file(".github/workflows-notes.md")
+        self.commit_file("docs/.github/workflows/example.yml")
+        res = self.go()
+        self.assertEqual(res.code, 0, res)
+
+    def test_a_workflow_file_already_on_the_base_is_not_this_branchs_change(self):
+        self.start()
+        git(self.wt, "checkout", "-q", "main")
+        self.commit_file(".github/workflows/ci.yml")
+        git(self.wt, "checkout", "-q", "agent/5-fix-thing")
+        git(self.wt, "rebase", "-q", "main")
+        res = self.go()
+        self.assertEqual(res.code, 0, res)
+
+    def test_without_a_base_branch_to_compare_the_remote_is_left_to_decide(self):
+        self.start()
+        self.commit_file(".github/workflows/ci.yml")
+        git(self.wt, "branch", "-q", "-D", "main")
+        res = self.go()  # the local bare remote has no such rule, so this goes through
+        self.assertEqual(res.code, 0, res)
 
 
 class HostileWorktree(Base):
