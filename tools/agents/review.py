@@ -6,8 +6,15 @@ else it can be argued into: it never approves, requests reviews on or merges a P
 everything through the environment:
 
   GH_TOKEN, GH_REPO, PR_NUMBER, RUN_HEAD (the head the run saw), DEFAULT_BRANCH, ANTHROPIC_API_KEY,
-  AGENT_APP_LOGIN (optional), RUN_URL (optional); GITHUB_API_URL and ANTHROPIC_BASE_URL are overridable
-  so tests can point both at a fake server.
+  AGENT_APP_LOGIN (optional; ignored unless it ends in `[bot]`), REVIEW_DAILY_CAP (optional, default 20),
+  RUN_URL (optional); GITHUB_API_URL and ANTHROPIC_BASE_URL are overridable so tests can point both at a
+  fake server.
+
+The model is asked at most once for a pull request's head commit. A rerun of the same head (a new label,
+ready for review again, a re-run of the workflow) replays the earlier verdict's status from the bot's own
+comment and stops; only a maintainer's `notchling:review` label added after that verdict asks for a fresh
+look. A pull request gets at most 6 model calls and the repository at most REVIEW_DAILY_CAP a UTC day,
+both counted from the bot's own marker comments.
 
 Issue and PR text is data: it is fenced in the prompt, and what the model answers is validated against a
 fixed shape, scrubbed of markup and capped before it reaches a comment. Fail closed: no key, an API
@@ -18,6 +25,7 @@ refused, 2 bad environment."""
 from __future__ import annotations
 
 import ast
+import datetime
 import hashlib
 import json
 import re
@@ -37,7 +45,11 @@ COMMENT_BOT = "github-actions[bot]"  # who the workflow's token comments as; onl
 MARKER = "<!-- review-agent:v1 verdict=%s sha=%s -->"
 MARKER_RE = re.compile(r"\A<!-- review-agent:v1 verdict=([a-z_-]+) sha=([0-9a-f]{40}) -->")
 FAILED = {"changes", "not_right"}  # verdicts that count as a failed review
+MODEL_VERDICTS = ("merge", "changes", "not_right", "missing")  # a marker with one of these is a model call made
 STRIKES = 2
+MAX_REVIEWS_PER_PR = 6  # model calls (markers) on one pull request, however many heads it has
+DEFAULT_DAILY_CAP = 20  # model calls in the repository per UTC day when REVIEW_DAILY_CAP is unset or not a number
+MAX_LISTED = 2000  # GitHub.pages() reads at most this many rows; a longer day than that is not counted, it stops
 MAX_DIFF = 200_000
 CONTEXT_FILES = ["docs/goals.md", "docs/rules.md", "ARCHITECTURE.md"]
 CONTEXT_CAP = 60_000
@@ -63,6 +75,10 @@ Answer with one JSON object and nothing else, with exactly these keys:
   "verdict": "merge" (right and ours), "changes" (right, but built differently or incomplete) or "not_right" (does not belong),
   "reasons": a list of 1 to 8 short plain sentences,
   "pointers": a list of up to 10 "path:line" places in the diff (required for "changes")."""
+
+
+def utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 class Invalid(Exception):
@@ -301,6 +317,8 @@ class Config:
         self.run_head = get("RUN_HEAD")
         self.default_branch = get("DEFAULT_BRANCH", "main")
         self.key = get("ANTHROPIC_API_KEY")
+        cap = get("REVIEW_DAILY_CAP")
+        self.daily_cap = int(cap) if re.fullmatch(r"[0-9]{1,6}", cap) else DEFAULT_DAILY_CAP
         login = get("AGENT_APP_LOGIN")
         # An App's pull requests are authored by `<slug>[bot]`; a login without that suffix is a person's
         # (or a typo), so it is ignored and no pull request takes the App path.
@@ -353,8 +371,53 @@ def bot_markers(comments: List[Any]) -> List[Dict[str, Any]]:
             continue
         m = MARKER_RE.match(str(c.get("body") or ""))
         if m:
-            out.append({"id": c.get("id"), "verdict": m.group(1), "sha": m.group(2)})
+            out.append({"id": c.get("id"), "verdict": m.group(1), "sha": m.group(2), "created": c.get("created_at")})
     return out
+
+
+def _ts(value: Any) -> Optional[datetime.datetime]:
+    """A GitHub timestamp (`2026-11-08T09:00:00Z`) or None; a time that can't be read is never trusted."""
+    try:
+        return datetime.datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+
+
+def label_names(pr: Mapping[str, Any]) -> Set[str]:
+    return {str(l.get("name")) for l in pr.get("labels") or [] if isinstance(l, dict)}
+
+
+def asked_again(cfg: Config, gh: GitHub, pr: Mapping[str, Any], prior: Mapping[str, Any], root: Path) -> bool:
+    """A maintainer's `labeled notchling:review` event newer than the verdict, with the label still on."""
+    if REVIEW_LABEL not in label_names(pr):
+        return False
+    since = _ts(prior.get("created"))
+    if since is None:
+        return False
+    maintainers = {m.lower() for m in load_maintainers(root)}
+    for ev in gh.pages(f"issues/{cfg.number}/events"):
+        if (isinstance(ev, dict) and ev.get("event") == "labeled" and (ev.get("label") or {}).get("name") == REVIEW_LABEL
+                and str((ev.get("actor") or {}).get("login") or "").lower() in maintainers):
+            at = _ts(ev.get("created_at"))
+            if at is not None and at > since:
+                return True
+    return False
+
+
+def reviews_today(gh: GitHub) -> Optional[int]:
+    """Model calls made in the repository since 00:00 UTC, counted from the bot's own markers in the
+    repository's comments of today (one list call per 100 comments, not a search). None when the day has
+    more comments than can be read: the caller treats that as the cap reached."""
+    midnight = utcnow().astimezone(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    comments = gh.pages("issues/comments?since=" + midnight.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    if len(comments) >= MAX_LISTED:
+        return None
+    n = 0
+    for m in bot_markers(comments):
+        at = _ts(m["created"])
+        if m["verdict"] in MODEL_VERDICTS and (at is None or at >= midnight):
+            n += 1
+    return n
 
 
 def check_lines(gh: GitHub, head: str) -> List[str]:
@@ -382,15 +445,37 @@ def load_context(root: Path) -> Dict[str, str]:
     return out
 
 
-def render_comment(verdict: str, sha: str, model: str, v: Mapping[str, Any], number: Optional[int] = None) -> str:
+def render_comment(verdict: str, sha: str, model: str, v: Mapping[str, Any], number: Optional[int] = None,
+                   final: bool = False) -> str:
     title = {"merge": "Recommend merge", "changes": "Changes requested", "not_right": "Not right for this project"}[verdict]
     lines = [MARKER % (verdict, sha), f"**Review agent** ({model}). Recommendation only: it does not approve or merge.", "",
              f"**{title}**", ""]
     lines += [f"- {clean(r, own=number)}" for r in v["reasons"]]
     if v["pointers"]:
         lines += ["", "Where:"] + [f"- `{p}`" for p in v["pointers"]]
+    if final:
+        lines += ["", f"{STRIKES} reviews of this pull request have now failed. I have labeled it `{NEEDS_YOU_LABEL}` "
+                      "and will not review another push."]
     lines += ["", "The maintainer decides. To appeal this review, ask for the maintainer on the pull request."]
     return "\n".join(lines)
+
+
+def missing_comment(sha: str, reason: str) -> str:
+    return "\n".join([MARKER % ("missing", sha),
+                      f"**Review agent.** I could not produce a review of this commit ({clean(reason, 100)}). "
+                      "I ask the model once for each commit, so I will not try this one again by myself. "
+                      f"A maintainer can ask for a fresh review by removing `{REVIEW_LABEL}` and adding it again."])
+
+
+REPLAYS = {"merge": "merge recommended (this commit was reviewed before; a recommendation, not an approval)",
+           "changes": "changes requested (this commit was reviewed before)",
+           "not_right": "not right for this project (this commit was reviewed before)",
+           "missing": f"review missing: the earlier attempt on this commit failed; label it {REVIEW_LABEL} again to retry"}
+
+
+def replay(prior: Mapping[str, Any]) -> Outcome:
+    """The status of a verdict already given for this head, with no model call and nothing new to say."""
+    return Outcome("success" if prior["verdict"] == "merge" else "failure", REPLAYS[prior["verdict"]])
 
 
 def needs_you_comment(sha: str) -> str:
@@ -402,13 +487,28 @@ def needs_you_comment(sha: str) -> str:
 
 def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path) -> Outcome:
     markers = bot_markers(gh.pages(f"issues/{cfg.number}/comments"))
-    earlier = {m["sha"] for m in markers if m["verdict"] in FAILED and m["sha"] != head}
-    if len(earlier) >= STRIKES:
-        asked = NEEDS_YOU_LABEL in {l.get("name") for l in pr.get("labels") or [] if isinstance(l, dict)}
+    done = [m for m in markers if m["verdict"] in MODEL_VERDICTS]
+    latest: Dict[str, Dict[str, Any]] = {}
+    for m in done:
+        latest[m["sha"]] = m  # comments come oldest first, so the newest verdict for a head wins
+    failed = {sha for sha, m in latest.items() if m["verdict"] in FAILED}
+    asked = NEEDS_YOU_LABEL in label_names(pr)
+    prior = latest.get(head)
+    if prior and not asked_again(cfg, gh, pr, prior, root):
+        out = replay(prior)
+        out.label = len(failed) >= STRIKES and not asked  # in case the label from the second strike never landed
+        return out
+    if len(failed - {head}) >= STRIKES:
         return Outcome("failure", "needs-you: two reviews did not pass; waiting for the maintainer",
                        None if asked else needs_you_comment(head), label=not asked)
     if not cfg.key:
         return missing("no model key")
+    if len(done) >= MAX_REVIEWS_PER_PR:
+        return Outcome("failure", f"review missing: {MAX_REVIEWS_PER_PR} reviews already on this pull request; "
+                                  "waiting for the maintainer", None, label=not asked)
+    used = reviews_today(gh)
+    if used is None or used >= cfg.daily_cap:
+        return missing(f"daily review cap ({cfg.daily_cap}) reached")
     base = str((pr.get("base") or {}).get("sha") or "")
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         raise Unavailable("no base commit")
@@ -418,13 +518,20 @@ def decide(cfg: Config, gh: GitHub, pr: Mapping[str, Any], head: str, root: Path
     prompt = build_prompt(load_context(root), {"number": int(cfg.number), "title": str(pr.get("title") or "")[:300],
                                               "body": str(pr.get("body") or "")[:10_000]}, diff, check_lines(gh, head))
     model = pick_model(int(cfg.number), author_model(pr.get("body")) if is_app_pr(cfg, pr) else None)
+    # From here on the model has been asked for this head. Whatever happens, it leaves a marker, so the
+    # attempt counts against the caps and a rerun replays it instead of asking again.
     try:
         v = parse_verdict(ask_model(cfg.model_base, cfg.key, model, prompt))
     except Invalid:
-        return missing("unreadable answer")
+        return Outcome("failure", "review missing: unreadable answer", missing_comment(head, "unreadable answer"))
+    except Unavailable as e:
+        return Outcome("failure", "review missing: " + str(e)[:100], missing_comment(head, str(e)))
     desc = {"merge": f"merge recommended by {model} (a recommendation, not an approval)",
             "changes": f"changes requested by {model}", "not_right": f"not right for this project, per {model}"}[v["verdict"]]
-    return Outcome("success" if v["verdict"] == "merge" else "failure", desc, render_comment(v["verdict"], head, model, v, int(cfg.number)))
+    strikes = (failed - {head}) | ({head} if v["verdict"] in FAILED else set())
+    final = v["verdict"] in FAILED and len(strikes) >= STRIKES  # hand it over now, not on the next push
+    return Outcome("success" if v["verdict"] == "merge" else "failure", desc,
+                   render_comment(v["verdict"], head, model, v, int(cfg.number), final), label=final and not asked)
 
 
 def main(env: Mapping[str, str], root: Path) -> int:
@@ -442,6 +549,9 @@ def main(env: Mapping[str, str], root: Path) -> int:
         if pr.get("state") != "open" or (pr.get("base") or {}).get("ref") != cfg.default_branch:
             print("review: pull request is closed or not into the default branch: skipped")
             return 0
+        if pr.get("draft") is True:
+            print("review: pull request is a draft: skipped (ready for review starts a run)")
+            return 0
         if head != cfg.run_head:
             print("review: the head moved since this run: skipped (the newer push has its own run)")
             return 0
@@ -457,16 +567,14 @@ def main(env: Mapping[str, str], root: Path) -> int:
         print("review: " + str(e))
         out = missing(str(e)[:100])
     try:
+        # The comment is the record a rerun finds, so it goes first: if the status then fails, the rerun
+        # replays the verdict without asking the model again. It is never edited, so the count stays true.
+        if out.comment:
+            gh.send("POST", f"issues/{cfg.number}/comments", {"body": out.comment})
         status = {"state": out.state, "context": STATUS_CONTEXT, "description": out.description}
         if cfg.run_url:
             status["target_url"] = cfg.run_url
         gh.send("POST", f"statuses/{head}", status)
-        if out.comment:
-            mine = [m for m in bot_markers(gh.pages(f"issues/{cfg.number}/comments")) if m["sha"] == head]
-            if mine and mine[-1]["id"]:
-                gh.send("PATCH", f"issues/comments/{mine[-1]['id']}", {"body": out.comment})
-            else:
-                gh.send("POST", f"issues/{cfg.number}/comments", {"body": out.comment})
         if out.label:
             gh.send("POST", f"issues/{cfg.number}/labels", {"labels": [NEEDS_YOU_LABEL]})
     except Unavailable as e:

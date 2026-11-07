@@ -27,9 +27,11 @@ permissions:
   pull-requests: write
   statuses: write
 
+# Runs for one head commit queue instead of cancelling each other: a run cancelled after it asked the
+# model, before it wrote the comment that records that, would make the next one ask again.
 concurrency:
   group: review-post-${{ github.event.workflow_run.head_sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   review:
@@ -44,6 +46,7 @@ jobs:
       RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       AGENT_APP_LOGIN: ${{ vars.AGENT_APP_LOGIN }}
+      REVIEW_DAILY_CAP: ${{ vars.REVIEW_DAILY_CAP }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

@@ -7,16 +7,17 @@ name: Review run
 # only through `env:`.
 #
 # `labeled` is in the types so that labeling an outside PR `notchling:review` starts a review; any other
-# label is skipped here.
+# label is skipped here. `reopened` is not: it brings no new commit, and the model is asked at most once
+# for each head commit. Drafts are skipped; `ready_for_review` starts the run when one is marked ready.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, ready_for_review, labeled]
 
 permissions: {}
 
 jobs:
   record:
-    if: github.event.action != 'labeled' || github.event.label.name == 'notchling:review'
+    if: github.event.pull_request.draft == false && (github.event.action != 'labeled' || github.event.label.name == 'notchling:review')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

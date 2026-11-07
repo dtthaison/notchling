@@ -3,6 +3,7 @@
 Everything talks to a fake server on 127.0.0.1 that plays both GitHub and the model API; no real
 network, token or model is involved."""
 
+import datetime
 import json
 import re
 import sys
@@ -11,6 +12,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 import review
 
@@ -24,6 +26,10 @@ KEY = "sk-ant-test-key-1234"
 TOKEN = "ghs_testtoken1234"
 DIFF = "diff --git a/Sources/A.swift b/Sources/A.swift\n+let x = 1\n"
 GOOD = {"verdict": "merge", "reasons": ["Matches the goals."], "pointers": []}
+NOW = datetime.datetime(2026, 11, 8, 15, 0, 0, tzinfo=datetime.timezone.utc)
+EARLIER = "2026-11-08T09:00:00Z"  # today, before the verdict under test
+LATER = "2026-11-08T12:00:00Z"
+YESTERDAY = "2026-11-07T23:59:59Z"
 
 
 class Fake:
@@ -43,6 +49,8 @@ class Fake:
         self.model_raw = None  # a whole response body, in place of one text block
         self.model_body = None
         self.fail = set()  # path prefixes that answer 500
+        self.repo_comments = []  # every comment in the repository, for the daily count
+        self.queries = []  # (path, query) of every request
         self.log = []
 
     def writes(self):
@@ -72,6 +80,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         query = self.path.partition("?")[2]
         f.log.append((method, path, {k.lower(): v for k, v in self.headers.items()}, raw))
+        f.queries.append((path, query))
         if any(path.startswith(p) for p in f.fail):
             return self._send(500, {"message": "boom"})
         r = "/repos/o/r"
@@ -92,6 +101,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"statuses": f.statuses})
         if method == "GET" and path == r + "/issues/7/events":
             return self._send(200, f.events if "page=1" in query or not query else [])
+        if method == "GET" and path == r + "/issues/comments":
+            since = dict(q.split("=", 1) for q in query.split("&") if "=" in q).get("since", "")
+            page = int(dict(q.split("=", 1) for q in query.split("&") if "=" in q).get("page", "1"))
+            rows = [c for c in f.repo_comments if str(c.get("created_at", "")) >= since]
+            return self._send(200, rows[(page - 1) * 100:page * 100])
         if method == "GET" and path == r + "/issues/7/comments":
             return self._send(200, f.comments if "page=1" in query or not query else [])
         if method == "POST" and path == f"{r}/statuses/{SHA}":
@@ -124,12 +138,16 @@ def marker(verdict, sha):
     return f"<!-- review-agent:v1 verdict={verdict} sha={sha} -->\nbody"
 
 
-def bot_comment(verdict, sha, cid=1, login=BOT):
-    return {"id": cid, "user": {"login": login}, "body": marker(verdict, sha)}
+def bot_comment(verdict, sha, cid=1, login=BOT, at=EARLIER):
+    return {"id": cid, "user": {"login": login}, "body": marker(verdict, sha), "created_at": at}
 
 
-def labeled(actor, name="notchling:review"):
-    return {"event": "labeled", "label": {"name": name}, "actor": {"login": actor}}
+def labeled(actor, name="notchling:review", at=EARLIER):
+    return {"event": "labeled", "label": {"name": name}, "actor": {"login": actor}, "created_at": at}
+
+
+def sha_n(n):
+    return "%040x" % n
 
 
 class ReviewTestCase(unittest.TestCase):
@@ -141,6 +159,9 @@ class ReviewTestCase(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.url = "http://127.0.0.1:%d" % self.server.server_address[1]
+        clock = mock.patch.object(review, "utcnow", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
 
     def env(self, **over):
         env = {"GITHUB_API_URL": self.url, "ANTHROPIC_BASE_URL": self.url, "GH_TOKEN": TOKEN, "GH_REPO": "o/r",
@@ -452,17 +473,325 @@ class VerdictFlowTests(ReviewTestCase):
         self.assertNotIn("](http", body)
         self.assertNotIn(self.fake.pr["body"], body)
 
-    def test_same_head_rerun_updates_its_own_comment(self):
-        self.fake.comments = [bot_comment("changes", SHA, cid=55)]
-        self.run_review()
-        self.assertEqual(self.comments(), [])
-        self.assertEqual(len(self.fake.sent("PATCH", r"/issues/comments/55$")), 1)
-
-    def test_a_forged_marker_by_someone_else_is_not_updated(self):
+    def test_a_forged_marker_by_someone_else_is_not_honored(self):
         self.fake.comments = [bot_comment("changes", SHA, cid=55, login="mallory")]
         self.run_review()
         self.assertEqual(len(self.comments()), 1)
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
         self.assertEqual(self.fake.sent("PATCH", r"/issues/comments/"), [])
+
+    def test_the_verdict_comment_is_written_before_the_status(self):
+        """The comment is the record a rerun finds, so it goes first: if the status then fails, the rerun
+        replays the verdict without asking the model again."""
+        self.run_review()
+        order = [p for m, p in self.fake.writes()]
+        self.assertEqual(order, ["/repos/o/r/issues/7/comments", f"/repos/o/r/statuses/{SHA}"])
+
+
+class OneReviewPerHeadTests(ReviewTestCase):
+    """At most one model call per (pull request, head commit); a maintainer's newer label asks again."""
+
+    def reviewed(self, verdict, at=EARLIER, cid=40):
+        self.fake.comments = [bot_comment(verdict, SHA, cid=cid, at=at)]
+
+    def test_a_reviewed_head_replays_its_status_without_the_model(self):
+        for verdict, state, word in (("merge", "success", "merge recommended"), ("changes", "failure", "changes requested"),
+                                     ("not_right", "failure", "not right"), ("missing", "failure", "review missing")):
+            with self.subTest(verdict=verdict):
+                self.setUp()
+                self.reviewed(verdict)
+                self.assertEqual(self.run_review(), 0)
+                self.assertNoModelCall()
+                (st,) = self.statuses()
+                self.assertEqual((st["state"], st["context"]), (state, "review-agent"))
+                self.assertIn(word, st["description"])
+                self.assertEqual(st["target_url"], "https://example.test/run/1")
+                self.assertEqual(self.comments(), [])  # nothing new to say
+                self.assertEqual(self.fake.sent("PATCH", "."), [])  # and the earlier verdict is never rewritten
+
+    def test_a_first_review_then_every_rerun_is_one_model_call(self):
+        self.run_review()
+        (c,) = self.comments()
+        self.fake.comments = [{"id": 9, "user": {"login": BOT}, "body": c["body"], "created_at": EARLIER}]
+        for _ in range(3):  # ready_for_review, a label: whatever starts the run again
+            self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.assertEqual([s["state"] for s in self.statuses()], ["success"] * 4)
+        self.assertEqual(len(self.comments()), 1)
+
+    def test_a_replay_cannot_turn_a_failure_into_a_pass(self):
+        self.reviewed("changes")
+        self.fake.model_text = json.dumps(GOOD)
+        self.run_review()
+        self.assertEqual([s["state"] for s in self.statuses()], ["failure"])
+
+    def test_the_latest_marker_for_the_head_decides(self):
+        self.fake.comments = [bot_comment("changes", SHA, cid=1), bot_comment("merge", SHA, cid=2)]
+        self.run_review()
+        self.assertEqual([s["state"] for s in self.statuses()], ["success"])
+        self.assertNoModelCall()
+
+    def test_a_marker_for_another_head_or_by_someone_else_does_not_count(self):
+        for comments in ([bot_comment("merge", OLD1)], [bot_comment("merge", SHA, login="mallory")],
+                         [bot_comment("needs-you", SHA)]):
+            with self.subTest(comments=comments):
+                self.setUp()
+                self.fake.comments = comments
+                self.run_review()
+                self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+
+    def maintainer_relabels(self, at=LATER, actor="dtthaison", present=True):
+        self.fake.pr["labels"] = [{"name": "notchling:review"}] if present else []
+        self.fake.events = [labeled(actor, at=at)]
+
+    def test_a_maintainer_label_newer_than_the_verdict_asks_for_a_fresh_review(self):
+        self.reviewed("changes")
+        self.maintainer_relabels(at=LATER)
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.assertEqual([s["state"] for s in self.statuses()], ["success"])
+        # The earlier comment is left alone; the new verdict is a comment of its own.
+        self.assertEqual(self.fake.sent("PATCH", "."), [])
+        (c,) = self.comments()
+        self.assertIn("verdict=merge sha=" + SHA, c["body"])
+
+    def test_a_fresh_review_also_works_for_the_apps_own_pr(self):
+        self.reviewed("not_right")
+        self.assertEqual(self.fake.pr["user"]["login"], APP)
+        self.maintainer_relabels(at=LATER)
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+
+    def test_other_label_events_do_not_ask_again(self):
+        cases = {
+            "older than the verdict": dict(at="2026-11-08T08:00:00Z"),
+            "not a maintainer": dict(actor="mallory"),
+            "label no longer on the pull request": dict(present=False),
+            "same second as the verdict": dict(at=EARLIER),
+        }
+        for name, kw in cases.items():
+            with self.subTest(name):
+                self.setUp()
+                self.reviewed("merge")
+                self.maintainer_relabels(**kw)
+                self.run_review()
+                self.assertNoModelCall()
+
+    def test_a_different_label_does_not_ask_again(self):
+        self.reviewed("merge")
+        self.fake.pr["labels"] = [{"name": "notchling:review"}]
+        self.fake.events = [labeled("dtthaison", name="bug", at=LATER)]
+        self.run_review()
+        self.assertNoModelCall()
+
+    def test_unreadable_times_never_ask_again(self):
+        for verdict_at, label_at in ((None, LATER), (EARLIER, None), ("yesterday", LATER), (EARLIER, "soon")):
+            with self.subTest(verdict_at=verdict_at, label_at=label_at):
+                self.setUp()
+                c = bot_comment("merge", SHA, at=verdict_at)
+                if verdict_at is None:
+                    del c["created_at"]
+                self.fake.comments = [c]
+                ev = labeled("dtthaison", at=label_at)
+                if label_at is None:
+                    del ev["created_at"]
+                self.fake.pr["labels"] = [{"name": "notchling:review"}]
+                self.fake.events = [ev]
+                self.run_review()
+                self.assertNoModelCall()
+
+    def test_a_fresh_review_cannot_erase_a_strike(self):
+        """Two failed heads is two strikes however many times a head is looked at again."""
+        self.fake.comments = [bot_comment("changes", OLD1, 1, at="2026-11-08T07:00:00Z"),
+                              bot_comment("changes", SHA, 2, at=EARLIER)]
+        self.maintainer_relabels(at=LATER)
+        self.fake.model_text = json.dumps(GOOD)
+        self.run_review()
+        self.assertEqual(self.fake.sent("PATCH", "."), [])
+        self.assertEqual(len(self.comments()), 1)
+
+
+class CapTests(ReviewTestCase):
+    """A cap per pull request and one per day for the repository, counted from the bot's own markers."""
+
+    def per_pr(self, n, verdict="merge"):
+        self.fake.comments = [bot_comment(verdict, sha_n(i + 100), cid=i + 1) for i in range(n)]
+
+    def test_the_cap_per_pull_request_is_six(self):
+        self.assertEqual(review.MAX_REVIEWS_PER_PR, 6)
+
+    def test_a_pull_request_with_five_reviews_gets_a_sixth(self):
+        self.per_pr(5)
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+
+    def test_a_pull_request_with_six_reviews_gets_no_model_call(self):
+        self.per_pr(6)
+        self.assertEqual(self.run_review(), 0)
+        self.assertNoModelCall()
+        (st,) = self.statuses()
+        self.assertEqual(st["state"], "failure")
+        self.assertTrue(st["description"].startswith("review missing"), st)
+        self.assertIn("6", st["description"])
+        self.assertEqual([json.loads(b) for _h, b in self.fake.sent("POST", "/labels$")], [{"labels": ["notchling:needs-you"]}])
+        self.assertEqual(self.comments(), [])
+
+    def test_the_per_pull_request_cap_counts_failed_attempts_and_not_needs_you_notes(self):
+        self.fake.comments = ([bot_comment("missing", sha_n(i + 100), cid=i + 1) for i in range(3)]
+                              + [bot_comment("needs-you", sha_n(i + 200), cid=i + 10) for i in range(5)])
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.setUp()
+        self.fake.comments = [bot_comment("missing", sha_n(i + 100), cid=i + 1) for i in range(6)]
+        self.run_review()
+        self.assertNoModelCall()
+
+    def test_the_cap_notes_to_the_maintainer_only_once(self):
+        self.per_pr(6)
+        self.fake.pr["labels"] = [{"name": "notchling:needs-you"}]
+        self.run_review()
+        self.assertEqual(self.fake.sent("POST", "/labels$"), [])
+
+    def today(self, n, verdict="merge", at=EARLIER, login=BOT):
+        return [bot_comment(verdict, sha_n(i + 500), cid=i + 1000, at=at, login=login) for i in range(n)]
+
+    def test_the_daily_cap_defaults_to_twenty(self):
+        self.assertEqual(review.Config(self.env()).daily_cap, 20)
+        for bad in ("", "abc", "-1", "2.5", "99999999999", " "):
+            self.assertEqual(review.Config(self.env(REVIEW_DAILY_CAP=bad)).daily_cap, 20, bad)
+        self.assertEqual(review.Config(self.env(REVIEW_DAILY_CAP="40")).daily_cap, 40)
+        self.assertEqual(review.Config(self.env(REVIEW_DAILY_CAP="0")).daily_cap, 0)
+
+    def test_nineteen_reviews_today_allow_the_twentieth(self):
+        self.fake.repo_comments = self.today(19)
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+
+    def test_twenty_reviews_today_stop_the_next_one(self):
+        self.fake.repo_comments = self.today(20)
+        self.assertEqual(self.run_review(), 0)
+        self.assertNoModelCall()
+        (st,) = self.statuses()
+        self.assertEqual(st["state"], "failure")
+        self.assertTrue(st["description"].startswith("review missing"), st)
+        self.assertIn("daily", st["description"])
+        self.assertEqual(self.fake.writes(), [("POST", f"/repos/o/r/statuses/{SHA}")])
+
+    def test_the_variable_sets_the_cap(self):
+        self.fake.repo_comments = self.today(3)
+        self.run_review(REVIEW_DAILY_CAP="3")
+        self.assertNoModelCall()
+        self.setUp()
+        self.fake.repo_comments = self.today(2)
+        self.run_review(REVIEW_DAILY_CAP="3")
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.setUp()
+        self.run_review(REVIEW_DAILY_CAP="0")  # zero turns reviews off
+        self.assertNoModelCall()
+
+    def test_only_todays_markers_by_the_bot_count(self):
+        self.fake.repo_comments = (self.today(30, at=YESTERDAY) + self.today(30, login="mallory")
+                                   + self.today(30, verdict="needs-you"))
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+
+    def test_failed_attempts_count_toward_the_daily_cap(self):
+        self.fake.repo_comments = self.today(20, verdict="missing")
+        self.run_review()
+        self.assertNoModelCall()
+
+    def test_the_count_asks_for_comments_since_midnight_utc(self):
+        self.run_review()
+        queries = [q for p, q in self.fake.queries if p == "/repos/o/r/issues/comments"]
+        self.assertTrue(queries)
+        self.assertTrue(all("since=2026-11-08T00%3A00%3A00Z" in q or "since=2026-11-08T00:00:00Z" in q for q in queries), queries)
+
+    def test_a_day_too_busy_to_count_is_a_stop(self):
+        self.fake.repo_comments = [{"id": i, "user": {"login": "someone"}, "body": "hi", "created_at": EARLIER}
+                                   for i in range(2000)]
+        self.run_review()
+        self.assertNoModelCall()
+        self.assertIn("daily", self.statuses()[0]["description"])
+
+    def test_an_unreadable_count_is_a_stop(self):
+        self.fake.fail = {"/repos/o/r/issues/comments"}
+        self.run_review()
+        self.assertNoModelCall()
+        self.assertEqual(self.statuses()[0]["state"], "failure")
+
+    def test_a_replay_does_not_need_the_daily_count(self):
+        self.fake.comments = [bot_comment("merge", SHA)]
+        self.fake.repo_comments = self.today(50)
+        self.run_review()
+        self.assertEqual([s["state"] for s in self.statuses()], ["success"])
+        self.assertEqual([q for p, q in self.fake.queries if p == "/repos/o/r/issues/comments"], [])
+
+
+class StrikeTimingTests(ReviewTestCase):
+    """The second failed verdict hands the pull request to the maintainer when it is posted."""
+
+    def failing(self, verdict="changes"):
+        self.fake.model_text = json.dumps({"verdict": verdict, "reasons": ["Built differently."], "pointers": ["a.swift:1"]})
+
+    def labels(self):
+        return [json.loads(b) for _h, b in self.fake.sent("POST", "/labels$")]
+
+    def test_the_second_failed_verdict_labels_it_in_the_same_run(self):
+        self.fake.comments = [bot_comment("changes", OLD1)]
+        self.failing("not_right")
+        self.run_review()
+        self.assertEqual(self.labels(), [{"labels": ["notchling:needs-you"]}])
+        (c,) = self.comments()
+        self.assertIn("verdict=not_right", c["body"])
+        self.assertIn("notchling:needs-you", c["body"])  # it says why it will stop
+        self.assertEqual([s["state"] for s in self.statuses()], ["failure"])
+
+    def test_the_first_failed_verdict_does_not(self):
+        self.failing()
+        self.run_review()
+        self.assertEqual(self.labels(), [])
+        self.assertNotIn("needs-you", self.comments()[0]["body"])
+
+    def test_a_passing_verdict_after_one_strike_does_not(self):
+        self.fake.comments = [bot_comment("changes", OLD1)]
+        self.run_review()
+        self.assertEqual(self.labels(), [])
+
+    def test_already_labeled_is_not_labeled_again(self):
+        self.fake.comments = [bot_comment("changes", OLD1)]
+        self.fake.pr["labels"] = [{"name": "notchling:needs-you"}]
+        self.failing()
+        self.run_review()
+        self.assertEqual(self.labels(), [])
+
+    def test_one_head_failing_twice_is_still_one_strike(self):
+        self.fake.comments = [bot_comment("changes", SHA, at=EARLIER)]
+        self.fake.pr["labels"] = [{"name": "notchling:review"}]
+        self.fake.events = [labeled("dtthaison", at=LATER)]
+        self.failing()
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.assertEqual(self.labels(), [])
+
+    def test_a_replay_labels_when_two_heads_have_failed_and_the_label_is_missing(self):
+        self.fake.comments = [bot_comment("changes", OLD1, 1), bot_comment("not_right", SHA, 2)]
+        self.run_review()
+        self.assertNoModelCall()
+        self.assertEqual(self.labels(), [{"labels": ["notchling:needs-you"]}])
+        self.assertEqual(self.comments(), [])
+
+
+class DraftTests(ReviewTestCase):
+    def test_a_draft_is_skipped_without_a_status_or_a_model_call(self):
+        self.fake.pr["draft"] = True
+        self.assertEqual(self.run_review(), 0)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertNoModelCall()
+
+    def test_a_pull_request_that_is_ready_is_reviewed(self):
+        self.fake.pr["draft"] = False
+        self.run_review()
+        self.assertEqual(len(self.statuses()), 1)
 
 
 class EligibilityTests(ReviewTestCase):
@@ -550,14 +879,28 @@ class FailClosedTests(ReviewTestCase):
         self.assertEqual(len(self.statuses()), 2)
         self.assertNoModelCall()
 
+    def assertFailedAfterTheModelCall(self, asked=1):
+        """The model was asked once; the status fails and a `missing` marker records the attempt, so a
+        rerun of the same head replays it instead of asking again."""
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), asked)
+        st = self.statuses()
+        self.assertEqual(len(st), 1)
+        self.assertEqual((st[0]["state"], st[0]["context"]), ("failure", "review-agent"))
+        self.assertTrue(st[0]["description"].startswith("review missing"), st[0])
+        (c,) = self.comments()
+        self.assertTrue(c["body"].startswith("<!-- review-agent:v1 verdict=missing sha=%s -->" % SHA), c["body"])
+        self.assertEqual(sorted(self.fake.writes()),
+                         sorted([("POST", f"/repos/o/r/statuses/{SHA}"), ("POST", "/repos/o/r/issues/7/comments")]))
+
     def test_model_http_error(self):
         self.fake.model_status = 529
         self.run_review()
-        self.assertOnlyFailedStatus()
+        self.assertFailedAfterTheModelCall()
 
     def test_model_unreachable(self):
+        """A timeout may have been billed, so any failure of the model call is one attempt for this head."""
         self.run_review(ANTHROPIC_BASE_URL="http://127.0.0.1:9")
-        self.assertOnlyFailedStatus()
+        self.assertFailedAfterTheModelCall(asked=0)
 
     def test_unparsable_and_invalid_answers(self):
         for text in ("I think it is fine.", json.dumps({"verdict": "approve", "reasons": ["x"], "pointers": []}),
@@ -566,7 +909,7 @@ class FailClosedTests(ReviewTestCase):
                 self.setUp()
                 self.fake.model_text = text
                 self.run_review()
-                self.assertOnlyFailedStatus()
+                self.assertFailedAfterTheModelCall()
 
     def test_answer_without_text_content(self):
         for raw in ({"content": []}, {"content": [{"type": "tool_use"}]}, {}, ["x"]):
@@ -574,7 +917,20 @@ class FailClosedTests(ReviewTestCase):
                 self.setUp()
                 self.fake.model_raw = raw
                 self.run_review()
-                self.assertOnlyFailedStatus()
+                self.assertFailedAfterTheModelCall()
+
+    def test_a_failed_attempt_is_not_asked_again_for_the_same_head(self):
+        self.fake.model_text = "not json"
+        self.run_review()
+        (c,) = self.comments()
+        self.fake.comments = [{"id": 5, "user": {"login": BOT}, "body": c["body"], "created_at": EARLIER}]
+        self.fake.model_text = json.dumps(GOOD)  # the model would now answer; it must not be asked
+        self.run_review()
+        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        st = self.statuses()
+        self.assertEqual([x["state"] for x in st], ["failure", "failure"])
+        self.assertIn("review missing", st[1]["description"])
+        self.assertEqual(len(self.comments()), 1)
 
     def test_diff_fetch_error(self):
         self.fake.fail = {"/repos/o/r/compare"}
@@ -649,9 +1005,13 @@ class TwoStrikesTests(ReviewTestCase):
         self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
 
     def test_the_current_head_does_not_count_against_itself(self):
-        self.fake.comments = [bot_comment("changes", OLD1, 1), bot_comment("changes", SHA, 2)]
+        """Only earlier heads send a new push to the maintainer; this head's own failure is replayed."""
+        self.fake.comments = [bot_comment("changes", SHA, 2)]
         self.run_review()
-        self.assertEqual(len(self.fake.sent("POST", "/v1/messages")), 1)
+        self.assertNoModelCall()
+        self.assertEqual([s["state"] for s in self.statuses()], ["failure"])
+        self.assertNotIn("needs-you", self.statuses()[0]["description"])
+        self.assertEqual(self.fake.sent("POST", "/labels$"), [])
 
     def test_it_stops_quietly_once_the_maintainer_has_been_asked(self):
         self.fake.comments = [bot_comment("changes", OLD1, 1), bot_comment("changes", OLD2, 2),

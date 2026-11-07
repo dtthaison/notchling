@@ -67,8 +67,17 @@ class ReviewRunTests(unittest.TestCase):
     def test_a_label_event_only_for_the_review_label(self):
         text = read(RUN)
         types = re.search(r"types: \[(.*?)\]", text).group(1).replace(" ", "").split(",")
-        self.assertLessEqual({"opened", "synchronize", "reopened", "ready_for_review", "labeled"}, set(types))
+        self.assertEqual(set(types), {"opened", "synchronize", "ready_for_review", "labeled"})
         self.assertIn("github.event.label.name == 'notchling:review'", text)
+
+    def test_reopening_does_not_start_a_run(self):
+        """A reopen brings no new commit, so it would only ask the model about a head it has already judged."""
+        self.assertNotIn("reopened", read(RUN))
+
+    def test_drafts_are_skipped(self):
+        job = re.search(r"(?m)^    if: (.*)$", read(RUN)).group(1)
+        self.assertIn("github.event.pull_request.draft == false", job)
+        self.assertIn("github.event.label.name == 'notchling:review'", job)
 
 
 class ReviewPostTests(unittest.TestCase):
@@ -77,6 +86,16 @@ class ReviewPostTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n  pull-requests: write\n  statuses: write\n")
         self.assertNotRegex(text, r"(?m)^\s*(issues|actions|checks|id-token|packages|deployments):")
         self.assertNotRegex(text, r"contents:\s*write")
+
+    def test_a_run_is_never_cancelled_after_it_may_have_asked_the_model(self):
+        """A cancelled run could lose the comment that records the model call, and the next one would ask again."""
+        text = read(POST)
+        self.assertRegex(text, r"(?m)^concurrency:\n  group: review-post-.*\n  cancel-in-progress: false\n")
+
+    def test_the_daily_cap_variable_reaches_review_py(self):
+        text = read(POST)
+        self.assertRegex(text, r"(?m)^      REVIEW_DAILY_CAP: \$\{\{ vars\.REVIEW_DAILY_CAP \}\}$")
+        self.assertNotIn("secrets.REVIEW_DAILY_CAP", text)
 
     def test_it_waits_on_review_run_and_only_when_that_run_succeeded(self):
         text = read(POST)
