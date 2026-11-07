@@ -17,7 +17,7 @@ TEST_PATHS = [re.compile(p) for p in (
     r"^crates/[^/]+/tests/", r"(^|/)goldens/.*\.png$",
 )]
 SKIPS = [re.compile(p) for p in (r"\bXCTSkip\b", r"#\[ignore\b", r"\bskip:\s*(true|['\"])", r"@Skip\(")]
-HIDDEN = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+HIDDEN = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
 
 
 def _is_test(path: str) -> bool:

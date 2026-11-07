@@ -51,11 +51,11 @@ class WeakeningTests(unittest.TestCase):
                          ["WEAK-SKIP"])
 
     def test_bidi_rejected(self):
-        self.assertEqual(rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1 ‮"])),
+        self.assertEqual(rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1 \u202e"])),
                          ["WEAK-UNICODE"])
 
     def test_zero_width_rejected(self):
-        self.assertEqual(rules(chg("docs/a.md", "M", added=["sa​fe"])), ["WEAK-UNICODE"])
+        self.assertEqual(rules(chg("docs/a.md", "M", added=["sa\u200bfe"])), ["WEAK-UNICODE"])
 
     def test_plain_text_ok(self):
         self.assertEqual(rules(chg("README.md", "M", added=["Việt Nam, đây là tiếng Việt"])), [])

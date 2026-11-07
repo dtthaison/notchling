@@ -284,7 +284,7 @@ def test_renamed_test_is_weakening(self):  rules(chg("Tests/A/B.swift", "R", old
 def test_golden_edit_trips(self):          rules(chg("mobile/test/goldens/kit.png", "M", binary=True)) == ["WEAK-TEST-EDIT"]
 def test_xctskip_trips(self):              rules(chg("Tests/X/New.swift", "A", added=["throw XCTSkip(\"later\")"])) == ["WEAK-SKIP"]
 def test_rust_ignore_trips(self):          rules(chg("crates/engine/src/a.rs", "M", added=["#[ignore]"])) == ["WEAK-SKIP"]
-def test_bidi_rejected(self):              rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1 ‮"])) == ["WEAK-UNICODE"]
+def test_bidi_rejected(self):              rules(chg("Sources/Notchling/Search/S.swift", "M", added=["let a = 1 \u202e"])) == ["WEAK-UNICODE"]
 def test_plain_text_ok(self):              rules(chg("README.md", "M", added=["Việt Nam"])) == []
 ```
 
