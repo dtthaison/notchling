@@ -48,7 +48,7 @@ maintainer. Concretely, the protected paths are:
 | Hook (runs inside every Claude Code prompt) | `Sources/Notchling/Hook/`, `Sources/ConsoleCore/HookResponder.swift` |
 | Phone bridge (TLS, pairing, tokens) | `Sources/Notchling/Phone/`, `Sources/ConsoleCore/Bridge/` *(my call: it holds tokens and a network listener)* |
 | Process launching | `Sources/Notchling/Delegate/`, `Sources/Notchling/Terminal/`, `Sources/hostd/`, `Sources/ConsoleCore/Hostd/`, and any file that reads or writes `~/.claude/settings.json` *(added after the builder check)* |
-| The guard rails themselves | `.github/`, `CODEOWNERS`, `build.sh`, `release.sh`, `Package.swift`, `Info.plist`, `CLAUDE.md`, `AGENTS.md`, per-folder agent notes, `tools/`, `.sd/` *(my call: an agent must not loosen its own rules)* |
+| The guard rails themselves | `.github/`, `CODEOWNERS`, `build.sh`, `release.sh`, `Package.swift`, `Info.plist`, every `AGENTS.md`, `tools/`, `.sd/` *(my call: an agent must not loosen its own rules)* |
 
 Everything else (Chat, Notch, Search, Pages, Terminal, DesignKit, Delegate, Agents, the rest of
 ConsoleCore, docs, tests, fixtures) is the auto-merge zone.
@@ -110,10 +110,14 @@ areas, with files up to 1,200 lines.
 
 Target:
 
-1. **Split CLAUDE.md.** A short root file (what the app is, build/test, the protected-path line, where
-   notes live) plus one `NOTES.md` per feature folder holding today's per-area paragraphs. Agents read the
-   root and the folder they touch. *(Name `NOTES.md` is my call; `AGENTS.md` at the root points to the
-   same root text for Codex/Antigravity.)*
+1. **AGENTS.md, not CLAUDE.md** *(maintainer's decision)*. One set of instructions every tool reads:
+   Claude Code (2.1.319's default `instructionFiles` loads AGENTS.md where a project has no CLAUDE.md,
+   exactly where and how CLAUDE.md would load), Codex and Antigravity. So CLAUDE.md is renamed, not kept
+   beside it: any CLAUDE.md in the repo turns the AGENTS.md loading off for Claude Code. The root
+   AGENTS.md is short (what the app is, build/test, the protected-path line, where notes live); each
+   feature folder gets its own `AGENTS.md` with today's per-area paragraphs, which every tool loads only
+   when it works in that folder. Things that point at CLAUDE.md (README, CONTRIBUTING, docs, skills such
+   as sd's, which look for a CLAUDE.md block) are updated in the same change.
 2. **Feature map.** Generated from the 124 `.part("Name")` tags: part name → file and line, checked in
    CI to be current. This is the "where is the thing the user named" index.
 3. **Modules per feature, gradually.** Turn feature folders into SwiftPM targets in `Package.swift` and
@@ -129,7 +133,7 @@ Target:
 1. Guard rails first: CODEOWNERS, branch protection with required checks, protected-path check,
    `agent-ready`/`needs-maintainer` labels, auto-merge on. Nothing agent-run turns on before this.
 2. Quality checks: build job, architecture lint with its fixtures, cross-model review job.
-3. Agent context: split CLAUDE.md, feature map.
+3. Agent context: CLAUDE.md becomes a short root AGENTS.md plus one per feature folder; feature map.
 4. Turn on the worker for `agent-ready` issues in the auto-merge zone only; watch a week of sampling.
 5. Re-architecture into modules, one folder at a time, each its own PR (protected ones need the
    maintainer).
@@ -161,5 +165,4 @@ threshold, the module split order outside protected areas, and label colors.
 - Phone bridge counts as protected.
 - The guard rails themselves (CI, CODEOWNERS, build/release scripts, agent instructions) are protected.
 - `agent-ready` is added only by the maintainer, not by the triage agent.
-- Per-folder notes named `NOTES.md`.
 - Squash merge for agent PRs.
