@@ -2,16 +2,50 @@
 
 import base64
 import contextlib
+import datetime
+import email.utils
 import io
+import locale
 import os
+import re
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from unittest import mock
 
 import appcast
 
 SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden")
+
+# 2026-11-08 is a Sunday. The only date format the tool writes or accepts for pubDate.
+FIXED_NOW = datetime.datetime(2026, 11, 8, 9, 5, 3, tzinfo=datetime.timezone.utc)
+FIXED_NOW_TEXT = "Sun, 08 Nov 2026 09:05:03 +0000"
+EXACT_DATE = re.compile(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+                        r"\d{4} \d\d:\d\d:\d\d \+0000$")
+
+# Written by hand, not by the tool, so the exact-format rule has something to reject.
+NOT_EXACT_DATES = {
+    "unpadded day": "Sun, 8 Nov 2026 10:00:00 +0000",
+    "GMT zone": "Sun, 08 Nov 2026 10:00:00 GMT",
+    "other offset": "Sun, 08 Nov 2026 10:00:00 -0800",
+    "positive offset": "Sun, 08 Nov 2026 10:00:00 +0100",
+    "no weekday": "08 Nov 2026 10:00:00 +0000",
+    "no seconds": "Sun, 08 Nov 2026 10:00 +0000",
+    "two digit year": "Sun, 08 Nov 26 10:00:00 +0000",
+    "wrong weekday": "Mon, 08 Nov 2026 10:00:00 +0000",
+    "lower case": "sun, 08 nov 2026 10:00:00 +0000",
+    "long names": "Sunday, 08 November 2026 10:00:00 +0000",
+    "trailing space": "Sun, 08 Nov 2026 10:00:00 +0000 ",
+    "trailing newline": "Sun, 08 Nov 2026 10:00:00 +0000\n",
+    "no such day": "Sun, 31 Nov 2026 10:00:00 +0000",
+    "hour 25": "Sun, 08 Nov 2026 25:00:00 +0000",
+    "iso": "2026-11-08T10:00:00Z",
+    "now with a space": "now ",
+    "capital now": "Now",
+    "empty": "",
+    "words": "yesterday",
+}
 
 # A real Ed25519 signature is 64 bytes. These are fixed made-up ones, never keys.
 SIG_A = base64.b64encode(bytes(range(64))).decode()
@@ -123,6 +157,78 @@ class TestAdd(CliCase):
     def test_pub_date_only_when_given(self):
         self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "Sun, 08 Nov 2026 10:00:00 +0000"]))
         self.assertEqual(self.items()[0].findtext("pubDate"), "Sun, 08 Nov 2026 10:00:00 +0000")
+
+    def test_pub_date_now_writes_the_current_utc_time_in_the_exact_format(self):
+        with mock.patch.object(appcast, "now_utc", return_value=FIXED_NOW):
+            code, _, err = self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.items()[0].findtext("pubDate"), FIXED_NOW_TEXT)
+
+    def test_pub_date_now_with_the_real_clock(self):
+        before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+        self.assertEqual(self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))[0], 0)
+        after = datetime.datetime.now(datetime.timezone.utc)
+        text = self.items()[0].findtext("pubDate")
+        self.assertRegex(text, EXACT_DATE)
+        self.assertTrue(before <= email.utils.parsedate_to_datetime(text) <= after, (before, text, after))
+
+    def test_pub_date_now_is_converted_to_utc(self):
+        # A clock that reports another zone still writes UTC with +0000.
+        berlin = datetime.timezone(datetime.timedelta(hours=1))
+        local = datetime.datetime(2026, 11, 8, 23, 30, 0, tzinfo=berlin)  # 22:30 UTC, still Sunday
+        with mock.patch.object(appcast, "now_utc", return_value=local):
+            self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))
+        self.assertEqual(self.items()[0].findtext("pubDate"), "Sun, 08 Nov 2026 22:30:00 +0000")
+
+    def test_pub_date_now_has_english_names_in_any_locale(self):
+        old = locale.setlocale(locale.LC_TIME)
+        for name in ("de_DE.UTF-8", "fr_FR.UTF-8", "ja_JP.UTF-8", "de_DE", "fr_FR"):
+            try:
+                locale.setlocale(locale.LC_TIME, name)
+                break
+            except locale.Error:
+                continue
+        else:
+            self.skipTest("no non-English locale installed")
+        try:
+            self.assertNotEqual(datetime.date(2026, 11, 8).strftime("%a"), "Sun")  # the trap is real here
+            with mock.patch.object(appcast, "now_utc", return_value=FIXED_NOW):
+                self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", "now"]))
+        finally:
+            locale.setlocale(locale.LC_TIME, old)
+        self.assertEqual(self.items()[0].findtext("pubDate"), FIXED_NOW_TEXT)
+
+    def test_pub_date_names_are_a_fixed_english_table(self):
+        utc = datetime.timezone.utc
+        months = [appcast.format_pub_date(datetime.datetime(2026, m, 1, 0, 0, 0, tzinfo=utc)).split(" ")[2]
+                  for m in range(1, 13)]
+        self.assertEqual(months, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+        days = [appcast.format_pub_date(datetime.datetime(2026, 11, d, 0, 0, 0, tzinfo=utc)).split(",")[0]
+                for d in range(2, 9)]
+        self.assertEqual(days, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+
+    def test_an_explicit_pub_date_in_the_exact_format_is_kept(self):
+        for text in ("Sun, 08 Nov 2026 10:00:00 +0000", "Thu, 01 Jan 2026 00:00:00 +0000",
+                     "Wed, 31 Dec 2025 23:59:59 +0000"):
+            with self.subTest(text):
+                if os.path.exists(self.feed):
+                    os.remove(self.feed)
+                self.assertEqual(self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", text]))[0], 0)
+                self.assertEqual(self.items()[0].findtext("pubDate"), text)
+
+    def test_any_other_pub_date_form_is_refused_and_writes_nothing(self):
+        for label, text in NOT_EXACT_DATES.items():
+            with self.subTest(label):
+                if os.path.exists(self.feed):  # only after a wrong acceptance, so one miss is one failure
+                    os.remove(self.feed)
+                code, _, err = self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--pub-date", text]))
+                self.assertEqual(code, 1, err)
+                self.assertIn("pubDate", err)
+                self.assertFalse(os.path.exists(self.feed))
+
+    def test_no_pub_date_flag_still_leaves_the_element_out(self):
+        self.run_cli(add_args(self.feed, 7, "1.0.0"))
+        self.assertIsNone(self.items()[0].find("pubDate"))
 
     def test_rollout_zero_omits_element(self):
         self.run_cli(add_args(self.feed, 7, "1.0.0", extra=["--rollout", "0"]))
@@ -286,6 +392,181 @@ class TestPromote(CliCase):
         self.run_cli(["promote", "--feed", self.feed, "--version", "16"])
         self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
 
+    # --- what a Stable release changes besides the channel ---------------------------------------
+
+    NOTES = "https://github.com/dtthaison/notchling/releases/tag/v1.3.0"
+
+    def item(self, version):
+        return [i for i in self.items() if i.findtext(q("version")) == str(version)][0]
+
+    def promote(self, version, *extra):
+        return self.run_cli(["promote", "--feed", self.feed, "--version", str(version), *extra])
+
+    def test_notes_url_replaces_the_release_notes_link(self):
+        self.build_sample()
+        code, _, err = self.promote(15, "--notes-url", self.NOTES)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.item(15).findtext(q("releaseNotesLink")), self.NOTES)
+        self.assertIsNone(self.item(15).find(q("channel")))
+        self.assertEqual(self.item(16).findtext(q("releaseNotesLink")),
+                         "https://github.com/dtthaison/notchling/releases/tag/v1.3.0-beta.2")
+
+    def test_notes_url_must_be_https(self):
+        self.build_sample()
+        before = self.read()
+        for bad in ("http://github.com/n", "ftp://x/y", "https://", "https://a b", ""):
+            with self.subTest(bad):
+                code, _, err = self.promote(15, "--notes-url", bad)
+                self.assertEqual(code, 1)
+                self.assertIn("releaseNotesLink", err)
+                self.assertEqual(self.read(), before)
+
+    def test_pub_date_now_replaces_an_existing_pub_date(self):
+        self.build_sample()
+        self.assertEqual(self.item(16).findtext("pubDate"), "Sun, 08 Nov 2026 10:00:00 +0000")
+        with mock.patch.object(appcast, "now_utc", return_value=FIXED_NOW):
+            code, _, err = self.promote(16, "--pub-date", "now")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.item(16).findtext("pubDate"), FIXED_NOW_TEXT)
+        self.assertEqual(len(self.item(16).findall("pubDate")), 1)
+
+    def test_pub_date_is_added_after_the_title_when_the_item_has_none(self):
+        self.build_sample()
+        self.assertIsNone(self.item(15).find("pubDate"))
+        self.assertEqual(self.promote(15, "--pub-date", "Sun, 08 Nov 2026 11:00:00 +0000")[0], 0)
+        tags = [c.tag for c in self.item(15)]
+        self.assertEqual(tags[:3], ["title", "pubDate", q("version")])
+        self.assertEqual(self.item(15).findtext("pubDate"), "Sun, 08 Nov 2026 11:00:00 +0000")
+
+    def test_pub_date_other_forms_are_refused_and_the_feed_is_untouched(self):
+        self.build_sample()
+        before = self.read()
+        for label, text in NOT_EXACT_DATES.items():
+            with self.subTest(label):
+                code, _, err = self.promote(15, "--pub-date", text)
+                self.assertEqual(code, 1, err)
+                self.assertIn("pubDate", err)
+                self.assertEqual(self.read(), before)
+
+    def test_rollout_replaces_the_interval(self):
+        self.build_sample()
+        self.assertEqual(self.promote(16, "--rollout", "7200")[0], 0)
+        self.assertEqual(self.item(16).findtext(q("phasedRolloutInterval")), "7200")
+        self.assertEqual(len(self.item(16).findall(q("phasedRolloutInterval"))), 1)
+
+    def test_rollout_zero_removes_the_interval(self):
+        self.build_sample()
+        self.assertEqual(self.promote(15, "--rollout", "0")[0], 0)
+        self.assertIsNone(self.item(15).find(q("phasedRolloutInterval")))
+        self.assertIsNone(self.item(15).find(q("channel")))
+
+    def test_rollout_is_added_in_place_when_the_item_has_none(self):
+        self.assertEqual(self.run_cli(add_args(self.feed, 15, "1.3.0-beta.1", SIG_B, "beta",
+                                               ["--rollout", "0", "--critical"]))[0], 0)
+        self.assertIsNone(self.item(15).find(q("phasedRolloutInterval")))
+        self.assertEqual(self.promote(15, "--rollout", "3600")[0], 0)
+        tags = [c.tag for c in self.item(15)]
+        self.assertEqual(tags.index(q("phasedRolloutInterval")), tags.index(q("minimumSystemVersion")) + 1)
+        self.assertEqual(tags.index(q("criticalUpdate")), tags.index(q("phasedRolloutInterval")) + 1)
+        self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
+
+    def test_bad_rollout_is_refused_and_the_feed_is_untouched(self):
+        self.build_sample()
+        before = self.read()
+        for bad in ("-5", "abc", "007", "1.5", "", "1e3"):
+            with self.subTest(bad):
+                code, _, err = self.promote(15, "--rollout", bad)
+                self.assertEqual(code, 1)
+                self.assertIn("phasedRolloutInterval", err)
+                self.assertEqual(self.read(), before)
+
+    def test_without_the_new_flags_the_other_fields_are_left_alone(self):
+        self.build_sample()
+        before = self.item(16)
+        notes, rollout, date = (before.findtext(q("releaseNotesLink")), before.findtext(q("phasedRolloutInterval")),
+                                before.findtext("pubDate"))
+        self.promote(16)
+        after = self.item(16)
+        self.assertEqual((after.findtext(q("releaseNotesLink")), after.findtext(q("phasedRolloutInterval")),
+                          after.findtext("pubDate")), (notes, rollout, date))
+
+    # --- expectations: the workflow names the Beta it means to promote -----------------------------
+
+    BETA_URL = ("https://github.com/dtthaison/notchling/releases/download/v1.3.0-beta.1/"
+                "Notchling-1.3.0-beta.1.dmg")
+
+    def test_expectations_that_match_promote(self):
+        self.build_sample()
+        code, _, err = self.promote(15, "--expect-url", self.BETA_URL, "--expect-short", "1.3.0-beta.1")
+        self.assertEqual(code, 0, err)
+        self.assertIsNone(self.item(15).find(q("channel")))
+
+    def test_each_expectation_works_alone(self):
+        self.build_sample()
+        self.assertEqual(self.promote(15, "--expect-short", "1.3.0-beta.1")[0], 0)
+        self.assertEqual(self.promote(16, "--expect-url", self.BETA_URL.replace("beta.1", "beta.2"))[0], 0)
+
+    def test_a_different_enclosure_url_is_refused_and_the_feed_is_untouched(self):
+        self.build_sample()
+        before = self.read()
+        code, _, err = self.promote(15, "--expect-url", self.BETA_URL.replace("Notchling-1.3.0", "Other-1.3.0"),
+                                    "--expect-short", "1.3.0-beta.1", "--short", "1.3.0", "--rollout", "0",
+                                    "--notes-url", self.NOTES, "--pub-date", "now")
+        self.assertEqual(code, 1)
+        self.assertIn(self.BETA_URL, err)  # what the feed has
+        self.assertIn("Other-1.3.0", err)  # what was expected
+        self.assertEqual(self.read(), before)
+
+    def test_a_different_short_version_is_refused_and_the_feed_is_untouched(self):
+        self.build_sample()
+        before = self.read()
+        code, _, err = self.promote(15, "--expect-url", self.BETA_URL, "--expect-short", "1.3.0-beta.2")
+        self.assertEqual(code, 1)
+        self.assertIn("1.3.0-beta.1", err)
+        self.assertIn("1.3.0-beta.2", err)
+        self.assertEqual(self.read(), before)
+
+    def test_the_version_number_pointing_at_another_build_is_refused(self):
+        # Right version number, but the item is not the Beta the workflow built: the tag and the feed disagree.
+        self.build_sample()
+        before = self.read()
+        code, _, _ = self.promote(16, "--expect-url", self.BETA_URL, "--expect-short", "1.3.0-beta.1")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.read(), before)
+
+    def test_short_is_compared_before_the_short_override(self):
+        self.build_sample()
+        self.assertEqual(self.promote(15, "--expect-short", "1.3.0-beta.1", "--short", "1.3.0")[0], 0)
+        self.assertEqual(self.item(15).findtext(q("shortVersionString")), "1.3.0")
+
+    def test_expecting_the_stable_short_of_a_beta_item_is_refused(self):
+        self.build_sample()
+        before = self.read()
+        self.assertEqual(self.promote(15, "--expect-short", "1.3.0")[0], 1)
+        self.assertEqual(self.read(), before)
+
+    def test_all_flags_together_golden(self):
+        self.build_sample()
+        with mock.patch.object(appcast, "now_utc", return_value=FIXED_NOW):
+            code, _, err = self.promote(15, "--short", "1.3.0", "--notes-url", self.NOTES, "--pub-date", "now",
+                                        "--rollout", "86400", "--expect-url", self.BETA_URL,
+                                        "--expect-short", "1.3.0-beta.1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.read(), self.golden("appcast-promoted-release.xml"))
+        self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
+
+    def test_a_promoted_item_matches_one_added_as_stable_with_the_same_fields(self):
+        # Child order must be the one `add` writes, wherever promote had to insert an element.
+        self.run_cli(add_args(self.feed, 15, "1.3.0-beta.1", SIG_B, "beta", ["--rollout", "0"]))
+        self.promote(15, "--short", "1.3.0", "--notes-url", self.NOTES, "--pub-date", "Sun, 08 Nov 2026 11:00:00 +0000",
+                     "--rollout", "86400")
+        promoted = self.read()
+        os.remove(self.feed)
+        self.run_cli(add_args(self.feed, 15, "1.3.0", SIG_B, None,
+                              ["--url", self.BETA_URL, "--notes-url", self.NOTES,
+                               "--pub-date", "Sun, 08 Nov 2026 11:00:00 +0000"]))
+        self.assertEqual(promoted, self.read())
+
 
 class TestVerify(CliCase):
     def write(self, text):
@@ -430,6 +711,12 @@ class TestVerify(CliCase):
         code, _, err = self.mutate("<pubDate>Sun, 08 Nov 2026 10:00:00 +0000</pubDate>", "<pubDate>yesterday</pubDate>")
         self.assertEqual(code, 1)
         self.assertIn("pubDate", err)
+
+    def test_other_rfc_822_pub_dates_still_pass(self):
+        # Only our own writers are held to one format; verify asks whether Sparkle can read the feed.
+        code, _, err = self.mutate("<pubDate>Sun, 08 Nov 2026 10:00:00 +0000</pubDate>",
+                                   "<pubDate>Sun, 08 Nov 2026 10:00:00 GMT</pubDate>")
+        self.assertEqual((code, err), (0, ""))
 
 
 class TestCli(CliCase):
