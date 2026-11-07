@@ -28,6 +28,7 @@
     "!docs/feature-map.md",
     "!docs/architecture.md",
     "!docs/superpowers/**",
+    "!docs/agents/**",
     "apps/flutter/lib/features/**",
     "!apps/flutter/lib/features/pairing/**",
     "crates/app/**",
