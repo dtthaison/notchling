@@ -58,9 +58,17 @@ def cmd_pins(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def cmd_rulesets(args: argparse.Namespace) -> int:
+    from guard import rulesets
+
+    return rulesets.main()
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("rulesets", help="the rulesets require checks the workflows provide")
+    p.set_defaults(func=cmd_rulesets)
     p = sub.add_parser("pins", help="every workflow action pinned to a SHA and allowlisted")
     p.add_argument("--fix", action="store_true", help="pin tag references to their SHA (uses git ls-remote)")
     p.set_defaults(func=cmd_pins)
