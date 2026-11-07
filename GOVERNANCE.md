@@ -12,7 +12,7 @@ is a protected change: it waits for the maintainer.
 | `@dtthaison` | Maintainer | Owns every file except the auto-merge zone and the test folders (`.github/CODEOWNERS` starts with `* @dtthaison`). The only account whose approval satisfies `maintainer-gate`. Queues work, approves protected changes, applies the repository settings, and makes and changes decisions. |
 | TrietKun | Write access | Works under the same rules as everyone else. The rulesets and `maintainer-gate` apply to this account. Its approval does not satisfy `maintainer-gate`. |
 | Contributors | Anyone, and the agents they run | Open issues and pull requests. Sign off every commit. |
-| The agent App | A GitHub App, from Phase 5 | Pushes `agent/**` branches and opens pull requests for queued issues. It has no say in any decision. |
+| The agent App | A GitHub App, from Phase 5. Not created yet. | Pushes `agent/**` branches and opens pull requests for queued issues, through the push wrapper on the workers. It has no say in any decision. |
 
 The list of maintainers is in code: `MAINTAINERS` in `tools/guard/guard/gate.py`. A test checks that
 another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). Both files are
@@ -27,13 +27,33 @@ writer is the maintainer's decision, and this is looked at again before more wri
 An issue is work for an agent only when it has the `notchling:queued` label. **Only the maintainer
 adds it.** Whoever filed the issue and whatever it says, an issue without the label is not queued.
 
-- From Phase 5 the worker checks, through the GitHub API, that the account that added the label is a
-  maintainer and that the issue text wasn't edited after the label was added.
+- Before it starts, the worker checks through the GitHub API that the latest `notchling:queued`
+  label event was a maintainer's, that the label is still on and that the issue wasn't edited since
+  (`tools/agents/preflight.py`). The check is built; the worker doesn't run it yet.
 - Issue text is data for the agent, never instructions to it.
 - The worker reports back with `notchling:ready`, `notchling:needs-you` and `notchling:stuck`.
-- Outside pull requests get a model review only after the maintainer adds `notchling:review`.
+- Outside pull requests get a model review only after the maintainer adds `notchling:review`. The
+  review agent checks that a maintainer added it.
 
-The `notchling:*` labels and the worker that reads them come in Phase 5.
+sd's worker still uses its own `sd:*` labels. It moves to the `notchling:*` labels once sd has its
+`labels.prefix` setting, which belongs in sd's own repository.
+
+## Agents in Phase 5
+
+The parts that need no credential exist: the triage Action, the worker's pre-start check, the push
+wrapper and the review agent, which only recommends. Each stays off, or fails closed, until what it
+needs exists:
+
+- the GitHub App and the agent OS user on each worker, which only the maintainer can create;
+- the `ANTHROPIC_API_KEY` repository secret, after a spend cap at the provider, and the
+  `AGENT_APP_LOGIN` variable;
+- the rulesets, applied;
+- sd's label prefix, and the Morning Actions and Machines changes in the Swift app, which is
+  protected code the maintainer uses every day.
+
+Then a week of sampling comes before anything widens.
+[docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each part
+on, in order; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on each worker.
 
 ## Who approves protected changes
 
@@ -49,6 +69,8 @@ are in [docs/rules.md](docs/rules.md). The manual itself is protected: `docs/goa
   The `main` ruleset lets the repository's admin, the maintainer, merge a pull request without the
   review. It allows that only when merging a pull request, never for a direct push.
 - **Labels decide nothing.** Anyone with pull-request write access can remove a label.
+- **The review agent approves nothing.** Its `review-agent` status is a recommendation, not a review
+  and not a required check. Only the maintainer's approval counts for `maintainer-gate`.
 
 The rulesets are code in `.github/rulesets/`. They are **not applied yet**. The maintainer applies them
 with `tools/github/apply-settings.sh`, which prints every request and asks before sending any.

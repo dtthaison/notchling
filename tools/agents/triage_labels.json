@@ -1,0 +1,5 @@
+{
+  "allowed": ["bug", "enhancement", "question", "needs-info"],
+  "by_type": {"bug": "bug", "feature": "enhancement", "question": "question"},
+  "needs_info": "needs-info"
+}

@@ -1,0 +1,89 @@
+name: Review post
+
+# The trusted half of the review agent. It runs after "Review run" finishes (workflow_run), with a
+# token that can write a commit status and a comment, so it runs only the default branch's code: the
+# checkout names it (`ref:` is the repository's default branch), the PR head is never fetched or run,
+# and tools/agents/review.py reads the diff and the check results through the API. Event fields reach
+# the shell only through `env:`.
+#
+# Which PR a run is for comes from the run's head repository, branch and commit (fields GitHub sets): the
+# one open PR that matches all three, else none. A commit alone is not enough, since a fork can push the
+# App's commit and open a PR of its own. The run must also be review-run.yml's own (`workflow_run.path`).
+# Which version of that file ran can't be checked and isn't needed: a pull_request run uses the file from
+# the PR's merge commit, and nothing but those GitHub-set fields is read from the run.
+#
+# It reviews a PR only when it is the App's (login in the repository variable AGENT_APP_LOGIN, which must
+# end in `[bot]`) or a maintainer labeled it `notchling:review`; review.py decides that. It asks the model
+# at most once for each head commit, at most 6 times for a PR and at most REVIEW_DAILY_CAP times a day for
+# the repository, so no PR can make it spend more than 6 reviews however it is poked.
+# It posts the `review-agent` commit status on the head and a comment for each model call. The status is
+# `success` only when the verdict is "merge", and that is a recommendation: nothing here approves,
+# requests reviews on or merges a PR. A missing key, a model error or an unreadable answer is a `failure` ("review missing").
+#
+# review-agent is recommend-only for now: it is NOT added to the required checks in .github/rulesets.
+# Adding it there is a decision for the maintainer, after the agent has agreed with him on enough PRs.
+#
+# Needs the repository secret ANTHROPIC_API_KEY (without it every review is "review missing") and,
+# for App PRs, the repository variable AGENT_APP_LOGIN.
+on:
+  workflow_run:
+    workflows: ["Review run"]
+    types: [completed]
+
+permissions: {}
+
+# Runs for one head commit queue instead of cancelling each other: a run cancelled after it asked the
+# model, before it wrote the comment that records that, would make the next one ask again.
+concurrency:
+  group: review-post-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Nothing at the top; what review.py uses: the diff (contents), the check results (checks), the
+    # comments, events and label (pull-requests) and the commit status (statuses).
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      AGENT_APP_LOGIN: ${{ vars.AGENT_APP_LOGIN }}
+      REVIEW_DAILY_CAP: ${{ vars.REVIEW_DAILY_CAP }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Find the pull request
+        id: pr
+        env:
+          # What GitHub says about the run: the head repository, branch and commit it ran for. They pick
+          # the pull request; a commit alone could belong to a fork's pull request and the App's both.
+          RUN_PATH: ${{ github.event.workflow_run.path }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          listed="$(gh api "repos/$GH_REPO/commits/$RUN_HEAD/pulls?per_page=100")"
+          n="$(printf '%s' "$listed" | python3 tools/agents/review.py find-pr)"
+          if [ -z "$n" ]; then
+            echo "no single pull request for this run: nothing to review"
+            exit 0
+          fi
+          case "$n" in *[!0-9]*) echo "bad PR number"; exit 1;; esac
+          { echo "post=true"; echo "number=$n"; } >> "$GITHUB_OUTPUT"
+      - name: Review
+        if: steps.pr.outputs.post == 'true'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 tools/agents/review.py

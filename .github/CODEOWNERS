@@ -45,6 +45,7 @@
 /docs/feature-map.md @dtthaison
 /docs/architecture.md @dtthaison
 /docs/superpowers/ @dtthaison
+/docs/agents/ @dtthaison
 /apps/flutter/lib/features/pairing/ @dtthaison
 /crates/**/Cargo.toml @dtthaison
 /crates/**/build.rs @dtthaison

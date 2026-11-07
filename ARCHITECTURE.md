@@ -92,6 +92,14 @@ Built in Phase 2; they exist today.
 
 Releases today: `legacy/macos/release.sh <version>` opens a `release/<version>` PR, and merging it tags and publishes. Builds are signed ad hoc. Phase 6 replaces this ([0010](docs/decisions/0010-build-then-sign-beta-then-stable.md)).
 
+### Agents
+
+Phase 5's parts that need no credential exist, in `tools/agents/` (Python standard library, tested against fakes in `tools/agents/tests/`, which the `guard` job runs). Each does nothing, or fails closed, until its credential exists; [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each on.
+
+- Triage: `.github/workflows/triage.yml` runs `triage.py` on each new issue in two jobs, one with the model key and no GitHub token, one with an `issues: write` token and no model key. Labels come from `triage_labels.json`.
+- Review agent, recommend-only: `.github/workflows/review-run.yml` runs on each pull request with no permissions and runs nothing from it; `.github/workflows/review-post.yml` follows it (`workflow_run`) with the default branch's code and runs `review.py`, which reads the diff and check results through the API and posts the `review-agent` status and a comment. `review-agent` is not a required check.
+- The worker's side: `preflight.py` checks a queued issue before sd starts it, and `push_wrapper.py` pushes the agent's `agent/<issue>-<slug>` branch and opens the pull request as the GitHub App. Neither runs anywhere yet; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the setup on each worker.
+
 ## Target
 
 Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), Flutter for the phone, and the engine as an always-on service.
@@ -150,7 +158,7 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 | `apps/flutter/` | The phone app | Exists (moved here from the old top-level phone folder in Phase 4) |
 | `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Exists (moved from the repo root in Phase 4): `legacy/macos/Sources/`, `Tests/`, `Demo/`, `Icon/`, `Pet/`, `build.sh`, `release.sh`. `Package.swift` and a one-line `build.sh` wrapper stay at the root |
 | `protocol/` | Spec (`README.md`), JSON Schema, fixtures | Exists |
-| `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator); the web page behind the phone's Visualize tab | Exist |
+| `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator) and the agents' scripts (`tools/agents/`: triage, preflight, push wrapper, review); the web page behind the phone's Visualize tab | Exist |
 | `spike/` | The GPUI spike's results (`RESULTS.md`); its code stays on branch `spike/gpui-phase1` | Exists |
 
 ### Swift and Rust side by side
@@ -165,7 +173,7 @@ Today the Swift app owns all of them.
 2. Phase 2, guard rails and quality: merged. The maintainer applies the repository settings with `tools/github/apply-settings.sh`.
 3. Phase 3, the operating manual: this document, the decision records, goals, rules, governance and policies.
 4. Phase 4: the repo layout above, the Cargo workspace, the protocol spec and generated types: done. Switching the phone to the generated types is a later change (part P1).
-5. Phase 5: agents on (the GitHub App, a separate agent user and push wrapper on workers, triage, the worker, the review agent).
+5. Phase 5: agents on (the GitHub App, a separate agent user and push wrapper on workers, triage, the worker, the review agent). The parts that need no credential are built and off (see [Agents](#agents)); the rest waits for the maintainer.
 6. Phase 6: releases (notarization, build and sign apart, the Beta feed, Stable by one click).
 7. Phase 7: a recording phase that captures terminal byte fixtures for every reply behavior while the Swift app can still produce them, then Milestones 1 to 6:
    1. read-only viewer;
