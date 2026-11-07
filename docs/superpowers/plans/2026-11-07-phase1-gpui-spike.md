@@ -209,7 +209,7 @@ The question: can Rust drive a background Claude Code session the way `ReplySend
   7. On every exit path, run `claude stop <id>` and `claude rm <id>`, and delete the temp folder.
   - Print `S5 yes`, `S5 no: <reason>` or `S5 unverified: <reason>`.
 - [ ] **Step 6: Run on macOS.** Run `cargo run -p attach -- --scratch`. Expected: `S5 yes`. Save the log to `~/Desktop/notchling-spike/s5-macos.log`.
-- [ ] **Step 7: Run on Linux.** On `vps-sing-1` (it has Claude Code and a login for the worker), copy the workspace, run `cargo run -p attach -- --scratch` and save `s5-linux.log`. Ask the maintainer before running it, because it uses that machine's Claude login for one short turn.
+- [ ] **Step 7: Run on `m1`** *(maintainer: use m1, not vps-sing-1)*. `m1` is a macOS worker, so this checks a second Mac with its own Claude login. Copy the workspace there, run `cargo run -p attach -- --scratch` and save `s5-m1.log`. Ask the maintainer before running it, because it uses that machine's Claude login for one short turn. Linux stays **unverified** in this spike, since there's no Linux machine to use; per the design, Linux then ships showing sessions only until this check passes there.
 - [ ] **Step 8: Run on Windows.** On a Windows machine the maintainer provides, with Claude Code signed in, run the same command and save `s5-windows.log`. If there's no Windows machine before the spike ends, record Windows as **unverified**. Per the design, Windows then ships able to show sessions only, until this check passes.
 - [ ] **Step 9:** Commit: `git commit -am "spike: S5 attach over pty"`.
 
