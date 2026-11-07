@@ -11,14 +11,15 @@ extension ChatModel {
     /// Where dropped images and temporary files are kept, so the path still works when Claude reads it.
     static let dropsDir = HookBridge.dir.appendingPathComponent("drops")
 
-    /// Adds each dropped item's path to the reply. A file in a temporary folder (the screenshot
-    /// thumbnail's goes away within seconds) and an image with no file are copied to `dropsDir` first.
+    /// Attaches each dropped item to the reply: a thumbnail above the box, its path sent after the text.
+    /// A file in a temporary folder (the screenshot thumbnail's goes away within seconds) and an image
+    /// with no file are copied to `dropsDir` first.
     func receiveDrop(_ providers: [NSItemProvider], for id: String) -> Bool {
         var took = false
         for provider in providers {
             let insert: (URL) -> Void = { [weak self] url in
                 DispatchQueue.main.async {
-                    self?.insertPath(url.path, for: id)
+                    self?.attach(url, for: id)
                     self?.focusRequest += 1
                 }
             }
@@ -71,10 +72,33 @@ extension ChatModel {
         return target
     }
 
-    /// Adds a dropped file's path to the reply, quoted when it has spaces.
-    func insertPath(_ path: String, for id: String) {
-        let quoted = path.contains(where: { $0 == " " || $0 == "'" || $0 == "\"" }) ? "\"\(path)\"" : path
-        let draft = drafts[id] ?? ""
-        drafts[id] = draft + (draft.isEmpty || draft.hasSuffix(" ") || draft.hasSuffix("\n") ? "" : " ") + quoted + " "
+    func attach(_ url: URL, for id: String) {
+        var list = attachments[id] ?? []
+        guard !list.contains(url) else { return }
+        list.append(url)
+        attachments[id] = list
+    }
+
+    func detach(_ url: URL, for id: String) {
+        attachments[id]?.removeAll { $0 == url }
+        if attachments[id]?.isEmpty == true { attachments[id] = nil }
+    }
+
+    /// What Return sends: the typed text, then each attached file's path, the way Claude Code's terminal
+    /// takes a dropped file.
+    func composed(_ id: String) -> String {
+        Self.compose(drafts[id] ?? "", paths: (attachments[id] ?? []).map(\.path))
+    }
+
+    func clearComposer(_ id: String) {
+        drafts[id] = ""
+        attachments[id] = nil
+    }
+
+    /// The text with each path after it, quoted when it has spaces or quotes.
+    static func compose(_ text: String, paths: [String]) -> String {
+        let quoted = paths.map { p in p.contains(where: { $0 == " " || $0 == "'" || $0 == "\"" }) ? "\"\(p)\"" : p }
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ([body].filter { !$0.isEmpty } + quoted).joined(separator: " ")
     }
 }

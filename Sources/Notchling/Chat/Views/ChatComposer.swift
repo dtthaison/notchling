@@ -21,7 +21,8 @@ struct Composer: View {
     var body: some View {
         let draft = Binding(get: { model.drafts[agent.id] ?? "" },
                             set: { model.drafts[agent.id] = $0; model.completionIndex = 0 })
-        let empty = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let attached = model.attachments[agent.id] ?? []
+        let empty = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty
         let commands = model.completions(for: agent)
         let sending = model.isSending(agent.id)
         let shell = ShellCommand.isCommand(draft.wrappedValue)
@@ -101,6 +102,9 @@ struct Composer: View {
                         .accessibilityElement(children: .combine)
                         .part("Will Run Box", .trailing)
                     }
+                }
+                if !attached.isEmpty {
+                    AttachmentStrip(model: model, id: agent.id, urls: attached)
                 }
                 HStack(alignment: .bottom, spacing: 10) {
                     ReplyEditor(text: draft, focused: $focused,

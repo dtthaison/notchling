@@ -8,32 +8,32 @@ extension ChatModel {
 
     func send(_ preset: String? = nil) {
         if let agent = selected, let (tool, session) = agent.target.acp {
-            let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = (preset ?? composed(agent.id)).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty, tool.runner.permission(session) == nil else { return }
-            if preset == nil { drafts[agent.id] = "" }
+            if preset == nil { clearComposer(agent.id) }
             sendACP(agent, sessionID: session, text: text)
             return
         }
         if let agent = selected, case .codex(let session) = agent.target {
-            let text = (preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = (preset ?? composed(agent.id)).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
             if let name = CodexCommands.command(in: text) {
                 runCodexCommand(name, text: text, agent: agent, session: session, clearDraft: preset == nil)
                 return
             }
-            if preset == nil { drafts[agent.id] = "" }
+            if preset == nil { clearComposer(agent.id) }
             sendCodex(agent, sessionID: session, text: text)
             return
         }
         guard let agent = selected, agent.canType,
               notch.question(agent.id) == nil, notch.permission(agent.id) == nil else { return }
-        let text = ShellCommand.normalize((preset ?? drafts[agent.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        let text = ShellCommand.normalize((preset ?? composed(agent.id)).trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty, text != "!" else { return }
         let id = agent.id
         // A terminal session the session host owns: typed into its pty, one reply at a time.
         guard case .job(let jobID) = agent.target else {
             guard pending[id]?.sending != true else { return }
-            if preset == nil { drafts[id] = "" }
+            if preset == nil { clearComposer(id) }
             errors[id] = nil
             pending[id] = Pending(text: text, at: Date(), sending: true)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -55,16 +55,16 @@ extension ChatModel {
         }
         // A bare /model wants a picker, which a background session can't show: show ours.
         if text == "/model" {
-            if preset == nil { drafts[id] = "" }
+            if preset == nil { clearComposer(id) }
             ModelPicker.popUp(model: self, current: conversation.facts.model)
             return
         }
         if text == "/effort" {
-            if preset == nil { drafts[id] = "" }
+            if preset == nil { clearComposer(id) }
             EffortPicker.popUp(model: self, current: conversation.facts.effort)
             return
         }
-        if preset == nil { drafts[id] = "" }
+        if preset == nil { clearComposer(id) }
         errors[id] = nil
         // One attach at a time: two would type into the same box. The next waits its turn.
         if pending[id]?.sending == true || takingBack.contains(id) {

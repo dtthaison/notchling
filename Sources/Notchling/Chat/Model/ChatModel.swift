@@ -117,6 +117,8 @@ final class ChatModel: ObservableObject {
     /// The selected background session attached in a terminal sheet, for a command that opens a menu.
     @Published var terminal: TerminalSession?
     @Published var drafts: [String: String] = [:]
+    /// Files dropped on a session's reply box, shown as thumbnails above it; their paths go after the text on send.
+    @Published var attachments: [String: [URL]] = [:]
     @Published var pending: [String: Pending] = [:]
     /// Replies typed while the one before is still going out, sent in order after it. Before this,
     /// Return did nothing while a reply was being typed into the session.
