@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.notchling.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/Notchling.app/Contents/MacOS/notchling</string>
+		<string>daemon</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>Crashed</key>
+		<true/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>/Users/me/Library/Application Support/Notchling/notchlingd.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/me/Library/Application Support/Notchling/notchlingd.log</string>
+</dict>
+</plist>

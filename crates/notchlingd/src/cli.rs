@@ -1,0 +1,168 @@
+//! The `notchling` command line: its subcommands are modes (`daemon`) and clients (the rest).
+
+use std::path::PathBuf;
+
+/// What `notchling service` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceAction {
+    /// Writes the service file and prints the command that loads it.
+    Install,
+    /// Removes the service file and prints the command that unloads it.
+    Uninstall,
+    /// Prints the service file.
+    Print,
+}
+
+/// A parsed command line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Command {
+    Daemon {
+        socket: Option<PathBuf>,
+    },
+    Status {
+        socket: Option<PathBuf>,
+    },
+    Sessions {
+        json: bool,
+        socket: Option<PathBuf>,
+    },
+    Service {
+        action: ServiceAction,
+        dir: Option<PathBuf>,
+    },
+    Version,
+    Help,
+}
+
+/// `notchling <version>`.
+pub fn version_line() -> String {
+    format!("notchling {}", env!("CARGO_PKG_VERSION"))
+}
+
+pub fn usage() -> &'static str {
+    "usage:\n  \
+     notchling daemon [--socket <path>]          serve the local API\n  \
+     notchling status [--socket <path>]          the daemon's version, pid, uptime and clients\n  \
+     notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
+     notchling service install|uninstall|print [--dir <folder>]\n  \
+     notchling --version | --help\n\n\
+     NOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\n\
+     service install writes the file and prints the command that loads it; it never loads it."
+}
+
+fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf, String> {
+    match args.next() {
+        Some(v) if !v.is_empty() && !v.starts_with("--") => Ok(PathBuf::from(v)),
+        _ => Err(format!("{flag} needs a value")),
+    }
+}
+
+/// Reads the arguments after the program name.
+pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    let Some(first) = args.next() else {
+        return Ok(Command::Help);
+    };
+    match first.as_str() {
+        "--version" | "-V" | "version" => return Ok(Command::Version),
+        "--help" | "-h" | "help" => return Ok(Command::Help),
+        _ => {}
+    }
+    let action = if first == "service" {
+        Some(match args.next().as_deref() {
+            Some("install") => ServiceAction::Install,
+            Some("uninstall") => ServiceAction::Uninstall,
+            Some("print") => ServiceAction::Print,
+            Some(other) => return Err(format!("unknown service action: {other}")),
+            None => return Err("service needs install, uninstall or print".into()),
+        })
+    } else {
+        None
+    };
+    let mut socket = None;
+    let mut dir = None;
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--socket" if action.is_none() => socket = Some(value(&mut args, "--socket")?),
+            "--dir" if action.is_some() => dir = Some(value(&mut args, "--dir")?),
+            "--json" if first == "sessions" => json = true,
+            other => return Err(format!("unknown argument for {first}: {other}")),
+        }
+    }
+    match (first.as_str(), action) {
+        ("daemon", _) => Ok(Command::Daemon { socket }),
+        ("status", _) => Ok(Command::Status { socket }),
+        ("sessions", _) => Ok(Command::Sessions { json, socket }),
+        ("service", Some(action)) => Ok(Command::Service { action, dir }),
+        (other, _) => Err(format!("unknown command: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(args: &[&str]) -> Result<Command, String> {
+        parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn modes_and_clients() {
+        assert_eq!(p(&["daemon"]), Ok(Command::Daemon { socket: None }));
+        assert_eq!(
+            p(&["daemon", "--socket", "/tmp/s.sock"]),
+            Ok(Command::Daemon {
+                socket: Some("/tmp/s.sock".into())
+            })
+        );
+        assert_eq!(p(&["status"]), Ok(Command::Status { socket: None }));
+        assert_eq!(
+            p(&["sessions", "--json"]),
+            Ok(Command::Sessions {
+                json: true,
+                socket: None
+            })
+        );
+        assert_eq!(p(&[]), Ok(Command::Help));
+        assert_eq!(p(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn service_actions_take_a_dir() {
+        assert_eq!(
+            p(&["service", "install", "--dir", "/tmp/x"]),
+            Ok(Command::Service {
+                action: ServiceAction::Install,
+                dir: Some("/tmp/x".into())
+            })
+        );
+        assert_eq!(
+            p(&["service", "print"]),
+            Ok(Command::Service {
+                action: ServiceAction::Print,
+                dir: None
+            })
+        );
+        assert!(p(&["service"]).is_err());
+        assert!(p(&["service", "start"]).is_err());
+        assert!(p(&["service", "install", "--socket", "/x"]).is_err());
+    }
+
+    #[test]
+    fn bad_arguments_are_errors() {
+        assert!(p(&["daemon", "--socket"]).is_err());
+        assert!(p(&["status", "--json"]).is_err());
+        assert!(p(&["fly"]).is_err());
+        assert!(p(&["daemon", "--dir", "/x"]).is_err());
+    }
+
+    #[test]
+    fn the_version_line_names_the_binary() {
+        assert_eq!(
+            version_line(),
+            format!("notchling {}", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(usage().contains("service install"));
+    }
+}

@@ -269,7 +269,7 @@ impl Server {
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     if self.shared.hub.len() >= self.shared.limits.max_clients {
-                        drop(stream);
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
                         continue;
                     }
                     // A socket accepted from a non-blocking listener may inherit the flag (BSD).

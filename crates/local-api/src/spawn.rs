@@ -112,6 +112,13 @@ pub fn ensure_daemon_with(
     if let Some(root) = &options.data_root {
         command.env("NOTCHLING_DATA_ROOT", root);
     }
+    // The socket's folder, made private if missing, so the log can go beside the socket.
+    if let Some(parent) = socket.parent().filter(|p| !p.as_os_str().is_empty()) {
+        if !parent.exists() {
+            notchling_platform::files::ensure_private_dir(parent)
+                .map_err(|e| ClientError::Io(io::Error::other(e)))?;
+        }
+    }
     match log_file(socket) {
         Some((out, err)) => command.stdout(out).stderr(err),
         None => command.stdout(Stdio::null()).stderr(Stdio::null()),

@@ -1,0 +1,13 @@
+[Unit]
+Description=Notchling daemon
+
+[Service]
+Type=simple
+ExecStart="/home/me/.local/bin/notchling" daemon
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/me/.local/share/notchling/notchlingd.log
+StandardError=append:/home/me/.local/share/notchling/notchlingd.log
+
+[Install]
+WantedBy=default.target
