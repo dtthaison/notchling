@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/protocol/models.dart';
+import '../macs/session_ref.dart';
 
 /// How many messages per session stay on the phone.
 const int cachedMessageLimit = 100;
@@ -18,6 +19,9 @@ abstract interface class ChatCache {
   Future<void> saveMessages(String sessionId, List<ChatMessage> messages);
   Future<Uint8List?> loadImage(String sessionId, String imageId, int width);
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg);
+
+  /// Forgets everything kept for the computer whose storage scope is [scope] (see `storageKey`), when it is removed.
+  Future<void> deleteScope(String scope);
 }
 
 /// Files under the app's support folder. A cache that cannot be read or written is logged and treated as empty:
@@ -28,9 +32,24 @@ class DiskChatCache implements ChatCache {
 
   String _key(String value) => sha1.convert(utf8.encode(value)).toString().substring(0, 24);
 
-  Future<File> _messagesFile(String sessionId) async => File('${(await _root()).path}/chat_cache/${_key(sessionId)}.json');
-  Future<File> _imageFile(String sessionId, String imageId, int width) async =>
-      File('${(await _root()).path}/chat_images/${_key(sessionId)}/${_key(imageId)}-$width.jpg');
+  /// Where a session's files go. File names are hashes, which can't be searched for a computer's entries, so a
+  /// computer other than the first (a key `<host>/<id>`) keeps its files under its own folder and removing it
+  /// deletes that folder. A bare key (the computer a phone had before it followed several) keeps the flat layout.
+  Future<({String dir, String name})> _place(String kind, String sessionId) async {
+    final String base = (await _root()).path;
+    final SessionRef? on = SessionRef.parse(sessionId);
+    return on == null ? (dir: '$base/$kind', name: _key(sessionId)) : (dir: '$base/computers/${on.host}/$kind', name: _key(on.id));
+  }
+
+  Future<File> _messagesFile(String sessionId) async {
+    final ({String dir, String name}) at = await _place('chat_cache', sessionId);
+    return File('${at.dir}/${at.name}.json');
+  }
+
+  Future<File> _imageFile(String sessionId, String imageId, int width) async {
+    final ({String dir, String name}) at = await _place('chat_images', sessionId);
+    return File('${at.dir}/${at.name}/${_key(imageId)}-$width.jpg');
+  }
 
   @override
   Future<List<ChatMessage>> loadMessages(String sessionId) async {
@@ -72,6 +91,21 @@ class DiskChatCache implements ChatCache {
   }
 
   @override
+  Future<void> deleteScope(String scope) async {
+    final String base = (await _root()).path;
+    // The first computer's entries are the flat ones; any other's are its folder.
+    final List<String> paths = scope.isEmpty ? <String>['$base/chat_cache', '$base/chat_images'] : <String>['$base/computers/$scope'];
+    for (final String path in paths) {
+      try {
+        final Directory dir = Directory(path);
+        if (dir.existsSync()) await dir.delete(recursive: true);
+      } on Object catch (error) {
+        debugPrint('ChatCache.deleteScope($scope): $error');
+      }
+    }
+  }
+
+  @override
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) async {
     try {
       final File file = await _imageFile(sessionId, imageId, width);
@@ -103,6 +137,13 @@ class MemoryChatCache implements ChatCache {
 
   @override
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) async => images['$sessionId|$imageId|$width'] = jpeg;
+
+  @override
+  Future<void> deleteScope(String scope) async {
+    messages.removeWhere((String key, List<ChatMessage> _) => keyInScope(scope, key));
+    // An image is `<session key>|<image id>|<width>`.
+    images.removeWhere((String key, Uint8List _) => keyInScope(scope, key.split('|').first));
+  }
 }
 
 /// One computer's view of the cache: its session ids carry its scope (decision 0012), so `s1` on two computers
@@ -126,4 +167,7 @@ class ScopedChatCache implements ChatCache {
   @override
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) =>
       _inner.saveImage(_key(sessionId), imageId, width, jpeg);
+
+  @override
+  Future<void> deleteScope(String scope) => _inner.deleteScope(scope);
 }

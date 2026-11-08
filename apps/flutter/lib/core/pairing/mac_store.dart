@@ -58,4 +58,7 @@ class MacStore {
   }
 
   Future<void> setActive(String id) => _secrets.write(_activeKey, id);
+
+  /// No computer is in use: forget which one was.
+  Future<void> clearActive() => _secrets.delete(_activeKey);
 }

@@ -19,7 +19,9 @@ import '../voice/voice_controller.dart';
 import '../../app/notifications.dart' show lifecycleProvider;
 import '../../app/widgets/kit.dart';
 import '../../app/widgets/motion.dart';
+import '../macs/macs_notifier.dart';
 import '../macs/macs_screen.dart';
+import '../macs/session_ref.dart';
 import 'chat_header.dart';
 import 'photo_send.dart';
 import 'chat_notifier.dart';
@@ -108,13 +110,16 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
   Future<void> _takeOver() async {
     final Session? session = ref.read(sessionsProvider).byId(widget.sessionId);
     if (session == null) return;
+    // The computer this session is on, taken now: the answer can come after the user picked another
+    // computer's session with the same id, and the resumed session is on the computer that resumed it.
+    final String host = ref.read(selectedSessionProvider)?.host ?? ref.read(macsProvider).active?.id ?? '';
     final TakeoverChoice choice = await confirmTakeover(context, session);
     if (choice == TakeoverChoice.cancel || !mounted) return;
     final String? newId = await ref
         .read(chatProvider(widget.sessionId).notifier)
         .takeOver(stopOriginal: choice == TakeoverChoice.stopAndResume);
     if (newId != null && mounted) {
-      ref.read(selectedSessionIdProvider.notifier).select(newId);
+      ref.read(selectedSessionProvider.notifier).select(SessionRef(host, newId));
     }
   }
 
@@ -393,8 +398,10 @@ class _ChatHeader extends ConsumerWidget {
       sessionsProvider.select((SessionsState s) => s.byId(sessionId)),
     );
     if (session == null) return const SizedBox.shrink();
+    // Muted per computer: the same id on another computer is another session.
+    final String scope = ref.watch(macsProvider.select((MacsState s) => s.activeScope));
     final bool muted = ref.watch(
-      alertPrefsProvider.select((AlertPrefs p) => p.muted.contains(session.id)),
+      alertPrefsProvider.select((AlertPrefs p) => p.isMuted(scope, session.id)),
     );
     return ChatHeaderView(
       session: session,
@@ -407,7 +414,7 @@ class _ChatHeader extends ConsumerWidget {
       onToggleMute: () => unawaited(
         ref
             .read(alertPrefsProvider.notifier)
-            .setMuted(session.id, muted: !muted),
+            .setMuted(session.id, muted: !muted, scope: scope),
       ),
     );
   }

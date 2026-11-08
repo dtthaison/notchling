@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/net/bridge_client.dart';
 import '../core/protocol/models.dart';
 import '../features/connection/connection.dart';
+import '../features/macs/macs_notifier.dart';
+import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
 import 'alerts.dart';
 import 'message_alerts.dart';
@@ -23,8 +25,11 @@ class NotificationService {
   final StreamController<String> _taps = StreamController<String>.broadcast();
   bool _ready = false;
 
-  /// Session ids of tapped notifications.
+  /// Payloads of tapped notifications (see [alertPayload]).
   Stream<String> get taps => _taps.stream;
+
+  /// A tap on a notification, from the plugin; tests send one the same way.
+  void receiveTap(String payload) => _taps.add(payload);
 
   Future<void> init() async {
     if (_ready) return;
@@ -35,7 +40,7 @@ class NotificationService {
       ),
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         final String? payload = response.payload;
-        if (payload != null) _taps.add(payload);
+        if (payload != null) receiveTap(payload);
       },
     );
     _ready = true;
@@ -64,7 +69,7 @@ class NotificationService {
       priority: needs ? Priority.high : Priority.defaultPriority,
       sound: event.kind == AlertKind.finished ? null : RawResourceAndroidNotificationSound(needs ? 'needs_you' : 'new_message'),
       playSound: event.kind != AlertKind.finished,
-      tag: event.sessionId,
+      tag: alertPayload(event),
       groupKey: _group,
       // A quiet update (a burst of replies) changes the text without sounding again.
       onlyAlertOnce: event.quiet,
@@ -72,11 +77,11 @@ class NotificationService {
       category: AndroidNotificationCategory.message,
     );
     await _plugin.show(
-      id: event.sessionId.hashCode & 0x7fffffff,
+      id: alertPayload(event).hashCode & 0x7fffffff,
       title: event.name,
       body: event.body,
       notificationDetails: NotificationDetails(android: android, iOS: DarwinNotificationDetails(threadIdentifier: _group, presentSound: !event.quiet)),
-      payload: event.sessionId,
+      payload: alertPayload(event),
     );
     await _plugin.show(
       id: 1,
@@ -98,6 +103,21 @@ class NotificationService {
     return details?.didNotificationLaunchApp == true ? details?.notificationResponse?.payload : null;
   }
 }
+
+/// What a notification carries so a tap can open the right session: the host-qualified id (a bare id when the
+/// computer is not known), so a tap after switching computers still opens the computer that raised the alert.
+String alertPayload(AlertEvent event) => event.session.qualified;
+
+/// Opens the session of a tapped notification.
+final Provider<void> notificationTapsProvider = Provider<void>((Ref ref) {
+  final StreamSubscription<String> taps = ref.read(notificationServiceProvider).taps.listen((String payload) {
+    // An older notification has a bare id: it means the computer in use.
+    final String inUse = ref.read(macsProvider).active?.id ?? '';
+    ref.read(selectedSessionProvider.notifier).select(SessionRef.fromPayload(payload, fallbackHost: inUse));
+    ref.read(activeTabProvider.notifier).show(1);
+  });
+  ref.onDispose(taps.cancel);
+});
 
 final Provider<NotificationService> notificationServiceProvider = Provider<NotificationService>((Ref ref) => NotificationService());
 
@@ -134,7 +154,7 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
   ref.listen<SessionsState>(sessionsProvider, (SessionsState? previous, SessionsState next) {
     if (next.phase != LoadPhase.ready) return;
     final bool hadList = previous != null && previous.phase == LoadPhase.ready;
-    final Set<String> muted = ref.read(alertPrefsProvider).muted;
+    final Set<String> muted = ref.read(alertPrefsProvider).mutedIn(ref.read(macsProvider).activeScope);
     // Track every change, even when nothing is shown, so a later alert does not repeat an old one.
     final Map<String, AlertKind> stateAlerts = hadList ? alertsBetween(previous.sessions, next.sessions, announced) : <String, AlertKind>{};
     final List<MessageAlert> replies = tracker.update(next.sessions, now: DateTime.now(), muted: muted);
@@ -146,6 +166,7 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
         if (!muted.contains(e.key) && !(e.value == AlertKind.finished && replied.contains(e.key))) e.key: e.value,
     };
     final List<AlertEvent> events = buildAlertEvents(
+      host: ref.read(macsProvider).active?.id ?? '',
       sessions: next.sessions,
       stateAlerts: states,
       messages: replies,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/macs/macs_notifier.dart';
 import '../../features/sessions/sessions_notifier.dart';
 import '../message_alerts.dart';
 import '../nav_state.dart';
@@ -25,7 +26,8 @@ class InAppAlertBanner extends ConsumerWidget {
       event: event,
       onTap: () {
         if (event == null) return;
-        ref.read(selectedSessionIdProvider.notifier).select(event.sessionId);
+        // The computer that raised the alert, not whichever one is in use now.
+        ref.read(selectedSessionProvider.notifier).select(event.session.onHostIfUnknown(ref.read(macsProvider).active?.id ?? ''));
         ref.read(activeTabProvider.notifier).show(1);
         ref.read(inAppAlertProvider.notifier).dismiss();
       },
@@ -59,7 +61,7 @@ class AlertBannerView extends StatelessWidget {
           ? const SizedBox.shrink(key: ValueKey<String>('no-alert'))
           : Padding(
               // The same session keeps its key, so a newer alert for it changes the text in place instead of re-entering.
-              key: ValueKey<String>('alert-${e.sessionId}'),
+              key: ValueKey<String>('alert-${e.session.qualified}'),
               padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
               child: Semantics(
                 container: true,
