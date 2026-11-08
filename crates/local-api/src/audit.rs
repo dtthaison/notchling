@@ -1,6 +1,7 @@
 //! The audit log: `<data dir>/audit.jsonl`, 0600, one line per privileged call or refusal, with the
 //! time, op, tier, peer path and result. It rotates at 5 MB, keeping one old file
-//! (`audit.jsonl.1`). In Milestone 2 only refusals are logged.
+//! (`audit.jsonl.1`). Refusals are logged, and since Milestone 3 every app-tier call with its
+//! outcome (`ok`, or the error code).
 
 use crate::wire::Tier;
 use serde::Serialize;

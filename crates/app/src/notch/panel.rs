@@ -24,11 +24,14 @@ use super::layout::{
 use super::model::NotchModel;
 use super::source::{now_ms, Source};
 use super::view::NotchView;
+use crate::actions::Actions;
 use crate::mac::capture::ns_window;
-use crate::session_source::SessionSource;
+use crate::session_source::{Link, SessionSource};
 
 const TICK: Duration = Duration::from_millis(50);
 const POLL: Duration = Duration::from_secs(2);
+/// How many polls between asking the daemon whether acting is on.
+const ACTING_EVERY: u32 = 5;
 
 /// The display with a camera housing, else the main one, as AppKit sees it.
 fn screen_info(mtm: MainThreadMarker) -> Option<ScreenInfo> {
@@ -56,6 +59,7 @@ pub fn open(
     cx: &mut App,
     source: Source,
     sessions: Arc<SessionSource>,
+    actions: Arc<Actions>,
 ) -> Option<WindowHandle<NotchView>> {
     let mtm = MainThreadMarker::new()?;
     let geometry = geometry(&screen_info(mtm)?);
@@ -85,7 +89,7 @@ pub fn open(
             let mut model = NotchModel::default();
             model.notch = geometry.notch;
             model.now_ms = now_ms();
-            let mut view = NotchView::new(model, false);
+            let mut view = NotchView::new(model, false, actions, cx);
             view.ns_window = ns;
             view.geometry = Some(geometry);
             view.source = Some(source);
@@ -142,7 +146,8 @@ fn tick(view: &mut NotchView, cx: &mut gpui::Context<NotchView>) {
     let was = view.model.hovering();
     view.model.hover(inside, now);
     let moved = view.model.tick(now);
-    if moved || was != inside {
+    let pet = view.step_pet(now as f64 / 1000.0);
+    if moved || pet || was != inside {
         cx.notify();
     }
 }
@@ -158,7 +163,30 @@ fn place(w: &NSWindow, g: &Geometry) {
 
 /// Reads the sessions every [`POLL`], off the main thread, and the display's geometry with them.
 async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
+    let mut polls = 0u32;
+    let mut was_attached = false;
     loop {
+        polls = polls.wrapping_add(1);
+        // Whether acting is on, now and then and only while the daemon serves the rows; at once
+        // after a (re)connect, so a daemon that started off gets the user's choice back.
+        let asking = this.update(cx, |view, _| {
+            let attached = view
+                .sessions
+                .as_ref()
+                .is_some_and(|s| s.view().link == Link::Daemon);
+            let fresh = attached && !was_attached;
+            was_attached = attached;
+            (attached && (fresh || polls % ACTING_EVERY == 1)).then(|| view.actions.clone())
+        });
+        match asking {
+            Ok(Some(actions)) => {
+                cx.background_executor()
+                    .spawn(async move { actions.refresh() })
+                    .await;
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
         let taken = this.update(cx, |view, _| {
             let answer = view.sessions.as_ref().map(|s| s.view());
             (view.source.take(), answer)
@@ -166,18 +194,18 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, note) = match answer {
+        let (claude, prompts, note) = match answer {
             Some(answer) => {
                 let note = answer.note();
-                (answer.agents, note)
+                (answer.agents, answer.prompts, note)
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = source.load_from(claude, now_ms());
+                    let loaded = source.load_from(claude, prompts, now_ms());
                     (source, loaded)
                 })
                 .await;

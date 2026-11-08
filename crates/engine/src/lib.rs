@@ -1,10 +1,15 @@
 //! The engine: transcripts, sessions and accounts, with no UI.
 //!
-//! Milestone 1 fills `transcript` (E1), `sessions` (E2) and `settings` (E14).
+//! Milestone 1 fills `transcript` (E1), `sessions` (E2) and `settings` (E14); milestone 3 adds
+//! `control` (E11), which plans what the app does to a session and launches it through a trait,
+//! `terminal` (E3a) and `reply` (E3b), which plans what is typed into a session.
 
+pub mod control;
+pub mod reply;
 pub mod search;
 pub mod sessions;
 pub mod settings;
+pub mod terminal;
 pub mod transcript;
 
 /// The crate's short name.

@@ -9,8 +9,13 @@ pub const NOT_RUNNING: i32 = 3;
 
 /// One line about the daemon.
 pub fn status_line(s: &DaemonStatus) -> String {
+    let acting = match s.acting {
+        Some(true) => "; acting on",
+        Some(false) => "; acting off",
+        None => "",
+    };
     format!(
-        "notchlingd {}, pid {}, up {}s; clients: app {}, cli {}, hook {}",
+        "notchlingd {}, pid {}, up {}s; clients: app {}, cli {}, hook {}{acting}",
         s.version, s.pid, s.uptime_secs, s.clients.app, s.clients.cli, s.clients.hook
     )
 }
@@ -110,7 +115,7 @@ mod tests {
 
     #[test]
     fn the_status_line() {
-        let s = DaemonStatus {
+        let mut s = DaemonStatus {
             version: "0.1.0".into(),
             pid: 42,
             uptime_secs: 7,
@@ -119,11 +124,19 @@ mod tests {
                 cli: 2,
                 hook: 0,
             },
+            acting: None,
         };
         assert_eq!(
             status_line(&s),
             "notchlingd 0.1.0, pid 42, up 7s; clients: app 1, cli 2, hook 0"
         );
+        s.acting = Some(false);
+        assert_eq!(
+            status_line(&s),
+            "notchlingd 0.1.0, pid 42, up 7s; clients: app 1, cli 2, hook 0; acting off"
+        );
+        s.acting = Some(true);
+        assert!(status_line(&s).ends_with("; acting on"));
     }
 
     #[test]

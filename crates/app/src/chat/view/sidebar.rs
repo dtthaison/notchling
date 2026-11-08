@@ -11,7 +11,7 @@ use crate::chat::data::Tool;
 use crate::chat::sidebar::sections;
 
 /// The footer, with what there is to say about the daemon (down, or not trusted).
-fn footer(a: Appearance, note: Option<&'static str>) -> Div {
+fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>) -> Div {
     div()
         .h(px(44.0))
         .flex_shrink_0()
@@ -19,13 +19,16 @@ fn footer(a: Appearance, note: Option<&'static str>) -> Div {
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(button(
-            "settings",
-            "Settings",
-            ButtonKind::Ghost,
-            PartState::Disabled,
-            a,
-        ))
+        .child(
+            button(
+                "settings",
+                "Settings",
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
+        )
         .child(button(
             "parts",
             "?",
@@ -108,8 +111,18 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .items_center()
                 .justify_between()
                 .child(label("Sessions", TypeRole::Title, Ink::Text, a))
-                .child(label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a)),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a))
+                        .child(
+                            button("new-session", "+", ButtonKind::Ghost, PartState::Rest, a)
+                                .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx))),
+                        ),
+                ),
         )
         .child(list)
-        .child(footer(a, view.daemon_note))
+        .child(footer(a, view.daemon_note, cx))
 }

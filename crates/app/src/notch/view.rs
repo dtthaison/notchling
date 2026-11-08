@@ -5,29 +5,31 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, relative, AnyView, App, Context, Div, Render, ScrollHandle, SharedString,
+    div, prelude::*, px, relative, Context, Div, FocusHandle, Render, ScrollHandle, SharedString,
     Stateful, Window,
 };
 use notchling_engine::sessions::{Agent, AgentGroup};
-use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
+use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, status_pill, KitStyled};
 use notchling_kit::{Color, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 
-use super::cards::{
-    bubble, needs_box, permission_card, permission_height, question_card, question_height, tag,
-    text, A,
-};
+use super::answer::QuestionDraft;
+use super::answering::{permission_height, question_height};
+use super::cards::{bubble, needs_box, tag, text, A};
 use super::layout::{Geometry, NotchState, FLARE, TAB_BAR};
 use super::model::{
     ago, empty_text, last_paragraph, one_line, short_host, status, tab_title, Card, NotchModel,
     TABS,
 };
-use super::renders;
+use super::perch::{AxFrame, Perch, PetMode};
+use super::pet::Walk;
 use super::source::Source;
-use crate::session_source::SessionSource;
+use crate::acting::{Acting, Control};
+use crate::actions::Actions;
+use crate::session_source::{Link, SessionSource};
 
 /// The notch's root view: a transparent canvas with the shape at its top centre.
 pub struct NotchView {
@@ -43,10 +45,31 @@ pub struct NotchView {
     /// The conversation scrolls to its end when it opens and when a line arrives.
     scroll: ScrollHandle,
     scrolled_for: Option<(String, usize)>,
+    /// Where the actions go, and what is known about acting.
+    pub(super) actions: Arc<Actions>,
+    /// The answers being put together for the question on show.
+    pub(super) draft: QuestionDraft,
+    pub(super) sending: bool,
+    pub(super) send_error: Option<String>,
+    /// The answer box's focus, and whether it had it at the last draw.
+    pub(super) focus: FocusHandle,
+    pub(super) focused: bool,
+    /// The pet: its place, the setting, and what a render forces.
+    pub(super) walk: Walk,
+    pub(super) show_pet: bool,
+    pub(super) forced_pet: Option<PetMode>,
+    pub(super) perch: Option<Perch>,
+    /// A render's stand-in for the frontmost window, in the canvas (y down).
+    pub(super) scene_window: Option<AxFrame>,
 }
 
 impl NotchView {
-    pub fn new(model: NotchModel, backdrop: bool) -> NotchView {
+    pub fn new(
+        model: NotchModel,
+        backdrop: bool,
+        actions: Arc<Actions>,
+        cx: &mut Context<Self>,
+    ) -> NotchView {
         NotchView {
             model,
             backdrop,
@@ -56,25 +79,66 @@ impl NotchView {
             sessions: None,
             scroll: ScrollHandle::new(),
             scrolled_for: None,
+            actions,
+            draft: QuestionDraft::default(),
+            sending: false,
+            send_error: None,
+            focus: cx.focus_handle(),
+            focused: false,
+            walk: Walk::default(),
+            show_pet: true,
+            forced_pet: None,
+            perch: None,
+            scene_window: None,
         }
+    }
+
+    /// What acting is now: the daemon must be the rows' source and have said it's on.
+    pub fn acting(&self) -> Acting {
+        let attached = self
+            .sessions
+            .as_ref()
+            .is_some_and(|s| s.view().link == Link::Daemon);
+        self.actions.acting(attached)
+    }
+
+    /// Every action control's gate.
+    pub(super) fn gate(&self) -> Control {
+        self.acting().control()
     }
 
     /// The card on show in a state, and its drawn height.
     fn card(&self, id: &str) -> Option<(Card, f32)> {
         let card = self.model.card(id)?;
+        let gate = self.gate();
+        let status = self.status_text(gate);
         let height = match &card {
-            Card::Question(q) => question_height(q),
-            Card::Permission(r) => permission_height(r),
+            Card::Question(q) => question_height(q, self.draft.tab, status),
+            Card::Permission(r) => permission_height(r, status),
         };
         Some((card, height))
     }
-}
 
-/// `--render notch-<state>`: the model over the fixture, drawn on a backdrop.
-pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
-    let shown = renders::shown(name)?;
-    let model = renders::model(shown);
-    Some(cx.new(|_| NotchView::new(model, true)).into())
+    /// The draft follows the question on show; another question starts a fresh one.
+    pub(super) fn sync_draft(&mut self) {
+        let id = match &self.model.state {
+            NotchState::Peek(id) | NotchState::Detail(id) => id.clone(),
+            _ => return,
+        };
+        if let Some(Card::Question(q)) = self.model.card(&id) {
+            if !self.draft.is_for(&q) {
+                self.send_error = None;
+            }
+            self.draft.follow(&q);
+        }
+    }
+
+    /// Answered from a peek: fold it away unless the pointer is on it.
+    pub(super) fn fold_peek(&mut self) {
+        if matches!(self.model.state, NotchState::Peek(_)) && !self.model.hovering() {
+            self.model.go(NotchState::Collapsed);
+        }
+    }
 }
 
 /// Pure black, like the camera housing it continues; no ink is that dark.
@@ -108,6 +172,7 @@ fn flare(left: bool) -> Div {
 
 impl NotchView {
     fn shape(&mut self, cx: &mut Context<Self>) -> Div {
+        self.sync_draft();
         let state = self.model.state.clone();
         self.model.card_height = match &state {
             NotchState::Peek(id) => self.card(id).map(|(_, h)| f64::from(h)),
@@ -138,12 +203,15 @@ impl NotchView {
             .flex_col()
             .child(self.top_bar())
             .children(content.map(|c| c.flex_1().min_h(px(0.0))));
+        let pet = self.pet_layer(size);
         div()
+            .relative()
             .flex()
             .items_start()
             .child(flare(true))
             .child(body)
             .child(flare(false))
+            .children(pet)
     }
 
     /// The housing's own height. Active sessions are counted at its right while the shape is open
@@ -323,8 +391,8 @@ impl NotchView {
         let agent = self.model.agent(id)?;
         if let Some((card, _)) = self.card(id) {
             let element = match &card {
-                Card::Question(q) => question_card(q, &agent.host, Some(&agent.name)),
-                Card::Permission(r) => permission_card(r, &agent.host, Some(&agent.name)),
+                Card::Question(q) => self.question_card(id, q, Some(&agent.name), cx),
+                Card::Permission(r) => self.permission_card(id, r, Some(&agent.name), cx),
             };
             return Some(
                 div()
@@ -383,8 +451,8 @@ impl NotchView {
         let agent = m.agent(id)?;
         let lines = m.snapshot(id).map(|s| s.lines.as_slice()).unwrap_or(&[]);
         let card = self.card(id).map(|(card, _)| match card {
-            Card::Question(q) => question_card(&q, &agent.host, None),
-            Card::Permission(r) => permission_card(&r, &agent.host, None),
+            Card::Question(q) => self.question_card(id, &q, None, cx),
+            Card::Permission(r) => self.permission_card(id, &r, None, cx),
         });
         let needs = agent
             .detail
@@ -468,30 +536,11 @@ impl NotchView {
                 ),
             )
     }
-
-    /// A render's stand-in for the desktop: a menu bar the housing's height, the desktop below.
-    fn backdrop(&self) -> Div {
-        div()
-            .absolute()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .h(px(self.model.notch.h as f32))
-                    .w_full()
-                    .fill(Ink::Raised, A)
-                    .px(px(SIDE_PADDING))
-                    .flex()
-                    .items_center()
-                    .child(text("Notchling", TypeRole::Label, Ink::Text)),
-            )
-            .child(div().flex_1().w_full().fill(Ink::Sidebar, A))
-    }
 }
 
 impl Render for NotchView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focused = self.focus.is_focused(window);
         let shape = self.shape(cx);
         div()
             .relative()

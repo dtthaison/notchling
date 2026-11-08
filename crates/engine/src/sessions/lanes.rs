@@ -76,7 +76,7 @@ pub fn lane_at_path(roots: &Roots, path: &str) -> Option<Lane> {
         .find(|l| standardize(&l.path) == wanted)
 }
 
-fn standardize(path: &str) -> String {
+pub(crate) fn standardize(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
         match part {

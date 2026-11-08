@@ -371,3 +371,19 @@ fn small_formatters() {
     m.agents.push(agent("a", AgentGroup::Working));
     assert_eq!(empty_text(&m), "Nothing needs input");
 }
+
+#[test]
+fn an_answered_card_hides_until_the_files_catch_up() {
+    let mut a = agent("j", AgentGroup::NeedsInput);
+    a.detail = Some("answer: Pick? (a · b)".into());
+    let mut m = model(vec![a]);
+    m.requests.insert("j".into(), permission("j"));
+    m.mark_answered("j");
+    assert!(m.answered.contains("r1"), "a hook request by its id");
+    // The permission is gone; the question underneath shows.
+    assert!(matches!(m.card("j"), Some(Card::Question(_))));
+    m.requests.clear();
+    m.mark_answered("j");
+    assert_eq!(m.card("j"), None, "a question by its tool use id");
+    m.mark_answered("nobody");
+}

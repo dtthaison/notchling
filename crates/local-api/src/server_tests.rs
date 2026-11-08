@@ -328,6 +328,10 @@ fn status_counts_clients_by_kind() {
         (status.clients.cli, status.clients.hook, status.clients.app),
         (1, 1, 0)
     );
+    // A handler that has no acting switch leaves the field out.
+    assert_eq!(status.acting, None);
+    let raw: Value = c.call(crate::ops::DAEMON_STATUS, json!({})).unwrap();
+    assert!(raw.get("acting").is_none(), "{raw}");
 }
 
 #[test]

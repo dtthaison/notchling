@@ -1,0 +1,7 @@
+{
+  "pid": 4242,
+  "sessionId": "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c",
+  "cwd": "/tmp/demo",
+  "startedAt": 1762588800000,
+  "entrypoint": "sdk-cli"
+}

@@ -32,6 +32,8 @@ pub mod transport;
 pub mod wire;
 
 #[cfg(test)]
+mod server_audit_tests;
+#[cfg(test)]
 mod server_tests;
 #[cfg(test)]
 pub(crate) mod testutil;

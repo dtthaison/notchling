@@ -2,7 +2,7 @@
 //! session's snapshot and held prompt, the state, the tab, the shape's size, when to peek and when
 //! hovering opens or folds it. The window feeds it the mouse and the clock; nothing here draws.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem, Snapshot};
@@ -80,6 +80,9 @@ pub struct NotchModel {
     pub now_ms: i64,
     /// The card on show's drawn height, which beats the estimate (`cardHeight`); the view sets it.
     pub card_height: Option<f64>,
+    /// Prompts answered from here (a hook request's id, a question's tool use id), hidden until
+    /// the session's files catch up.
+    pub answered: HashSet<String>,
     hovering: bool,
     pending: Option<Pending>,
     /// Each row's group at the last update; `None` before the first, which only sets the baseline.
@@ -102,6 +105,7 @@ impl Default for NotchModel {
             daemon_note: None,
             now_ms: 0,
             card_height: None,
+            answered: HashSet::new(),
             hovering: false,
             pending: None,
             last_groups: None,
@@ -133,20 +137,42 @@ impl NotchModel {
     /// The question a session is asking, from the best source there is: the hook holding it, the
     /// transcript, then the summary in the job's state. Only one ever shows.
     pub fn question(&self, id: &str) -> Option<PendingQuestion> {
-        if let Some(q) = self.requests.get(id).and_then(HookRequest::question) {
-            return Some(q.clone());
+        if let Some(r) = self.requests.get(id) {
+            if let Some(q) = r.question() {
+                return (!self.answered.contains(&r.id)).then(|| q.clone());
+            }
         }
-        if let Some(q) = self.snapshot(id).and_then(|s| s.question.clone()) {
-            return Some(q);
-        }
-        self.agent(id).and_then(question_from_needs)
+        self.snapshot(id)
+            .and_then(|s| s.question.clone())
+            .or_else(|| self.agent(id).and_then(question_from_needs))
+            .filter(|q| !self.answered.contains(&q.tool_use_id))
+    }
+
+    /// The id of the prompt a hook holds for a session, while it isn't answered: what a card
+    /// answers it by.
+    pub fn prompt_id(&self, id: &str) -> Option<String> {
+        self.requests
+            .get(id)
+            .filter(|r| !self.answered.contains(&r.id))
+            .map(|r| r.id.clone())
     }
 
     /// The permission prompt the hook holds for a session.
     pub fn permission(&self, id: &str) -> Option<&HookRequest> {
         self.requests
             .get(id)
-            .filter(|r| r.kind == RequestKind::Permission)
+            .filter(|r| r.kind == RequestKind::Permission && !self.answered.contains(&r.id))
+    }
+
+    /// Hides a session's card once it was answered from here; the key is the hook request's id,
+    /// else the question's tool use id.
+    pub fn mark_answered(&mut self, id: &str) {
+        let key = match (self.requests.get(id), self.question(id)) {
+            (Some(r), _) => Some(r.id.clone()),
+            (None, Some(q)) => Some(q.tool_use_id),
+            (None, None) => None,
+        };
+        self.answered.extend(key);
     }
 
     /// The card to show for a session: a permission, else a question.
@@ -347,9 +373,27 @@ impl NotchModel {
             .iter()
             .filter_map(|a| Some((a.id.clone(), self.question(&a.id)?.tool_use_id)))
             .collect();
+        let old_prompts: HashMap<String, String> = self
+            .requests
+            .iter()
+            .map(|(row, r)| (row.clone(), r.id.clone()))
+            .collect();
         self.agents = agents;
         self.snapshots = snapshots;
         self.requests = requests;
+        // A session a hook holds a prompt for is waiting on you, whatever its files say yet.
+        for agent in &mut self.agents {
+            let held = self
+                .requests
+                .get(&agent.id)
+                .is_some_and(|r| !self.answered.contains(&r.id));
+            if held && agent.group != AgentGroup::NeedsInput {
+                agent.group = AgentGroup::NeedsInput;
+                agent.label = "Needs input".into();
+            }
+        }
+        // `TABS` order: needs input first, as the list keeps it.
+        self.agents.sort_by_key(|a| a.group);
         let current: HashMap<String, AgentGroup> = self
             .agents
             .iter()
@@ -359,6 +403,9 @@ impl NotchModel {
         let asked = self.agents.iter().find(|a| {
             self.question(&a.id)
                 .is_some_and(|q| old_questions.get(&a.id) != Some(&q.tool_use_id))
+                || self
+                    .prompt_id(&a.id)
+                    .is_some_and(|p| old_prompts.get(&a.id) != Some(&p))
         });
         let changed: Vec<&Agent> = self
             .agents

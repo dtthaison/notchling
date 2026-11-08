@@ -5,14 +5,36 @@
 //! - `notchling service install|uninstall|print [--dir]` writes the per-OS service file
 //!   ([`service`]) and prints the command that loads it; it never runs that command.
 //!
-//! Later milestones add `hook`, `secret`, `delegate` and `page`.
+//! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
+//!   permission or question and prints the answer; anything else, or any trouble, passes.
+//!
+//! Milestone 3 adds the acting ops ([`acting_ops`], session control in [`control_ops`], the real
+//! terminal and launcher in [`attach`]), switched off by [`acting`] until the maintainer hands
+//! sessions over. Later milestones add `secret`, `delegate` and `page`.
 
+pub mod acting;
+pub mod acting_ops;
+pub mod attach;
 pub mod cli;
 pub mod clients;
+pub mod control_ops;
 pub mod daemon;
+pub mod hook;
+pub mod hook_ops;
+pub mod hook_output;
 pub mod layout;
+pub mod prompts;
 pub mod service;
 pub mod signals;
+
+#[cfg(test)]
+mod acting_ops_tests;
+#[cfg(test)]
+mod control_ops_tests;
+#[cfg(test)]
+mod hook_ops_tests;
+#[cfg(test)]
+mod hook_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
@@ -43,6 +65,11 @@ pub fn run(command: Command) -> i32 {
             None => 1,
         },
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
+        // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
+        Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
+            Some(l) => hook::run(&l.socket, &l.claude_dir),
+            None => 0,
+        },
     }
 }
 
