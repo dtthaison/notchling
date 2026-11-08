@@ -1,0 +1,47 @@
+{
+  "session_id": "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c",
+  "transcript_path": "/tmp/notchling-fixture/projects/-tmp-demo/6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c.jsonl",
+  "cwd": "/tmp/demo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_use_id": "toolu_01AbCdEf",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "Which pets?",
+        "header": "Pets",
+        "multiSelect": true,
+        "options": [
+          {
+            "label": "Cat",
+            "description": "Purrs"
+          },
+          {
+            "label": "Dog",
+            "description": "Barks"
+          },
+          {
+            "label": "Fish",
+            "description": ""
+          }
+        ]
+      },
+      {
+        "question": "Where?",
+        "header": "Place",
+        "multiSelect": false,
+        "options": [
+          {
+            "label": "Home",
+            "description": ""
+          },
+          {
+            "label": "Away",
+            "description": "Elsewhere"
+          }
+        ]
+      }
+    ]
+  }
+}

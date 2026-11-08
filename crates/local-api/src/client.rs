@@ -210,6 +210,12 @@ impl Client {
         self.hello.tier
     }
 
+    /// How long later calls wait for their reply. The hook says hello with a short wait, then
+    /// waits for the user's answer as long as its own deadline allows.
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
+    }
+
     /// Calls an op and waits for its reply. Events that arrive meanwhile are kept for
     /// [`Client::next_event`].
     pub fn call(&mut self, op: &str, args: Value) -> Result<Value, ClientError> {

@@ -66,13 +66,14 @@ impl Pty {
             ws_ypixel: 0,
         };
         let mut master: libc::c_int = -1;
-        // SAFETY: the pointers are valid for the call; termp may be null.
+        // SAFETY: the pointers are valid for the call; termp may be null. The size is a raw pointer
+        // because libc declares it `*mut` on macOS and `*const` on Linux.
         let pid = unsafe {
             libc::forkpty(
                 &mut master,
                 std::ptr::null_mut(),
                 std::ptr::null_mut::<libc::termios>(),
-                &mut size,
+                std::ptr::addr_of_mut!(size),
             )
         };
         if pid == 0 {

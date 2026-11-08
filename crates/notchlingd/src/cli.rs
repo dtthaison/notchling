@@ -30,6 +30,10 @@ pub enum Command {
         action: ServiceAction,
         dir: Option<PathBuf>,
     },
+    /// Claude Code's hook: stdin in, the answer (or nothing) out, always exit 0.
+    Hook {
+        socket: Option<PathBuf>,
+    },
     Version,
     Help,
 }
@@ -45,6 +49,7 @@ pub fn usage() -> &'static str {
      notchling status [--socket <path>]          the daemon's version, pid, uptime and clients\n  \
      notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
+     notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
      NOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\n\
      service install writes the file and prints the command that loads it; it never loads it."
@@ -94,6 +99,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         ("daemon", _) => Ok(Command::Daemon { socket }),
         ("status", _) => Ok(Command::Status { socket }),
         ("sessions", _) => Ok(Command::Sessions { json, socket }),
+        ("hook", _) => Ok(Command::Hook { socket }),
         ("service", Some(action)) => Ok(Command::Service { action, dir }),
         (other, _) => Err(format!("unknown command: {other}")),
     }
@@ -126,6 +132,19 @@ mod tests {
         );
         assert_eq!(p(&[]), Ok(Command::Help));
         assert_eq!(p(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn the_hook_takes_a_socket_only() {
+        assert_eq!(p(&["hook"]), Ok(Command::Hook { socket: None }));
+        assert_eq!(
+            p(&["hook", "--socket", "/tmp/s.sock"]),
+            Ok(Command::Hook {
+                socket: Some("/tmp/s.sock".into())
+            })
+        );
+        assert!(p(&["hook", "--json"]).is_err());
+        assert!(usage().contains("notchling hook"));
     }
 
     #[test]

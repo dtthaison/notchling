@@ -67,6 +67,10 @@ pub trait Handler: Send + Sync + 'static {
     fn topics(&self) -> &[&str] {
         &[]
     }
+    /// The acting switch, for `daemon.status`; `None` when the handler has none.
+    fn acting(&self) -> Option<bool> {
+        None
+    }
 }
 
 /// How long a connection may take, and how many there may be.
@@ -180,6 +184,7 @@ impl Shared {
             pid: std::process::id(),
             uptime_secs: self.started.elapsed().as_secs(),
             clients: self.hub.counts(),
+            acting: self.handler.acting(),
         }
     }
 }
@@ -216,6 +221,12 @@ impl ServerHandle {
 
     pub fn status(&self) -> DaemonStatus {
         self.shared.status()
+    }
+
+    /// Whether the app is attached: a client with the app tier that said hello as the app, someone
+    /// who can answer a prompt (the app's binary run as a hook or a command line isn't).
+    pub fn app_attached(&self) -> bool {
+        self.shared.hub.app_client_attached()
     }
 
     /// Open connections, hello said or not.

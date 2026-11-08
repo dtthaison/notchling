@@ -1,25 +1,33 @@
-//! `notchling daemon`: serves the session list and its changes over the local API. It only reads
-//! files and acts on nothing (Milestone 2); it owns none of the resources in decision 0011.
+//! `notchling daemon`: serves the session list and its changes over the local API. Milestone 3
+//! adds the acting ops and the hook's request ([`ActingOps`]), all behind the `acting` switch,
+//! which is off: until the maintainer turns it on the daemon acts on nothing and owns none of the
+//! resources in decision 0011.
 //!
 //! One [`Monitor`] polls the config folders (the main one and each lane's) on a change that
 //! `platform::watch` reports under their `jobs/` and `sessions/` folders, and every few seconds
 //! anyway (a process can end without touching a file, and a lane can appear). A list that differs
 //! from the last one goes out as `sessions.changed` with the whole new list.
 
+use crate::acting::{Acting, SETTINGS_NAME};
+use crate::acting_ops::{ActingOps, Room};
+use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::layout::Layout;
+use notchling_engine::control::launcher::claude_path;
+use notchling_engine::control::session::home_of;
+use notchling_engine::control::RealLauncher;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
     ops, topics, Allowlist, ApiError, AuditLog, Caller, Handler, Limits, OpSpec, Server,
-    ServerConfig, APP_TIER_PATHS_ENV,
+    ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How often the list is read again with no change seen.
@@ -44,14 +52,25 @@ impl std::fmt::Display for DaemonError {
     }
 }
 
-/// The M2 ops: the session list, all agent tier.
+/// The ops: M2's session list (agent tier), and with [`Ops::with_acting`] M3's ([`ActingOps`]).
 pub struct Ops {
     sessions: Arc<Mutex<Value>>,
+    acting: Option<Arc<ActingOps>>,
 }
 
 impl Ops {
     pub fn new(sessions: Arc<Mutex<Value>>) -> Ops {
-        Ops { sessions }
+        Ops {
+            sessions,
+            acting: None,
+        }
+    }
+
+    pub fn with_acting(sessions: Arc<Mutex<Value>>, acting: Arc<ActingOps>) -> Ops {
+        Ops {
+            sessions,
+            acting: Some(acting),
+        }
     }
 }
 
@@ -59,23 +78,53 @@ impl Handler for Ops {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
-            _ => None,
+            op => self.acting.as_ref().and_then(|a| a.spec(op)),
         }
     }
 
-    fn call(&self, _caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {
-        match op {
-            ops::SESSIONS_LIST => Ok(self
+    fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        match (op, &self.acting) {
+            (ops::SESSIONS_LIST, _) => Ok(self
                 .sessions
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()),
-            _ => Err(ApiError::internal(format!("{op} has no handler"))),
+            (op, Some(acting)) => acting.call(caller, op, args),
+            (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
 
     fn topics(&self) -> &[&str] {
-        &[topics::SESSIONS]
+        match self.acting {
+            Some(_) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
+            None => &[topics::SESSIONS],
+        }
+    }
+
+    fn acting(&self) -> Option<bool> {
+        self.acting.as_ref().map(|a| a.is_on())
+    }
+}
+
+/// The server, for the acting ops: set once it's bound, which is after they're made.
+#[derive(Default)]
+pub struct LateRoom(OnceLock<ServerHandle>);
+
+impl LateRoom {
+    pub fn set(&self, handle: ServerHandle) {
+        let _ = self.0.set(handle);
+    }
+}
+
+impl Room for LateRoom {
+    fn publish(&self, topic: &str, event: &str, data: &Value) {
+        if let Some(handle) = self.0.get() {
+            handle.publish(topic, event, data);
+        }
+    }
+
+    fn can_answer(&self) -> bool {
+        self.0.get().is_some_and(ServerHandle::app_attached)
     }
 }
 
@@ -184,6 +233,24 @@ pub fn run(
     let mut lister = Lister::new(layout.clone());
     let first = poll_or_keep(|| lister.poll()).unwrap_or_else(|| Value::Array(Vec::new()));
     let sessions = Arc::new(Mutex::new(first));
+    // Read once, at start; off unless the maintainer turned it on (decision 0011).
+    let acting = Arc::new(Acting::load(&layout.data_dir.join(SETTINGS_NAME)));
+    let room = Arc::new(LateRoom::default());
+    // The real terminal and launcher, used only while acting is on.
+    let claude = claude_path(std::path::Path::new(&home_of(&layout.roots())));
+    let acting_ops = Arc::new(
+        ActingOps::new(
+            acting,
+            sessions.clone(),
+            layout.roots(),
+            room.clone(),
+            Box::new(ClaudeAttacher::new(&claude)),
+        )
+        .with_launcher(
+            Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
+            Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
+        ),
+    );
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -192,13 +259,14 @@ pub fn run(
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },
-        Arc::new(Ops::new(sessions.clone())),
+        Arc::new(Ops::with_acting(sessions.clone(), acting_ops.clone())),
     )
     .map_err(|e| match e.kind() {
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),
         _ => DaemonError::Io(e),
     })?;
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
+    room.set(handle.clone());
     eprintln!(
         "notchling daemon {} serving {}",
         env!("CARGO_PKG_VERSION"),
@@ -241,6 +309,8 @@ pub fn run(
             watched = now;
         }
     }
+    // Held hooks pass now rather than at their deadline.
+    acting_ops.close();
     handle.shutdown();
     match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),
