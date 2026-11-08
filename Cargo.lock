@@ -3299,6 +3299,7 @@ name = "notchling-app"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "notchling-engine",
  "notchling-kit",
  "objc2",
  "objc2-app-kit",
@@ -3306,6 +3307,7 @@ dependencies = [
  "objc2-foundation",
  "png 0.17.16",
  "raw-window-handle",
+ "serde_json",
 ]
 
 [[package]]

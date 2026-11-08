@@ -91,7 +91,7 @@ fn chrome(notch: Size) -> f64 {
 
 /// Exactly the camera housing; the pet and its count live outside it.
 pub fn collapsed_size(notch: Size) -> Size {
-    let _ = (notch,); Size::default()
+    Size::new(notch.w + 2.0 * FLARE, notch.h)
 }
 
 /// A peek. A card's measured height (`card_height`) beats its estimate; either is capped.
@@ -101,35 +101,66 @@ pub fn peek_size(
     content: PeekContent,
     card_height: Option<f64>,
 ) -> Size {
-    Size::default()
+    let chrome = chrome(notch);
+    match content {
+        PeekContent::Notice { long } => {
+            Size::new(width.list(), chrome + if long { 78.0 } else { 58.0 })
+        }
+        PeekContent::Card { height } => Size::new(
+            width.panel(),
+            chrome + card_height.unwrap_or(height).min(MAX_CARD) + 16.0,
+        ),
+        PeekContent::Plain { has_text } => {
+            Size::new(width.list(), chrome + if has_text { 100.0 } else { 56.0 })
+        }
+    }
 }
 
 /// The open list: the tab row, then the rows of the tab on show (each `row_height` plus 4 between),
 /// a "Clear all" line under the Done tab, capped at [`MAX_LIST`].
 pub fn list_size(notch: Size, width: NotchWidth, rows: &[f64], done_tab: bool) -> Size {
-    Size::default()
+    let content = if rows.is_empty() {
+        44.0
+    } else {
+        let start = if done_tab { 28.0 } else { 0.0 };
+        rows.iter().fold(start, |sum, h| sum + h + 4.0)
+    };
+    Size::new(
+        width.list(),
+        chrome(notch) + TAB_BAR + content.min(MAX_LIST) + 6.0,
+    )
 }
 
 /// One agent's conversation, taller while a question or permission card is on show.
 pub fn detail_size(notch: Size, width: NotchWidth, has_card: bool) -> Size {
-    Size::default()
+    Size::new(
+        width.panel(),
+        chrome(notch) + if has_card { 470.0 } else { 420.0 },
+    )
 }
 
 /// A row: one line for a finished agent or one without a prompt yet, two otherwise.
 pub fn row_height(completed: bool, has_prompt: bool) -> f64 {
-    0.0
+    if completed || !has_prompt {
+        44.0
+    } else {
+        58.0
+    }
 }
 
 /// A question card's estimate: header, up to three lines of question, an option row each, the
 /// answer line.
 pub fn question_height(question_chars: usize, options: usize) -> f64 {
-    0.0
+    let lines = (question_chars / 60 + 1).min(3) as f64;
+    28.0 + lines * 17.0 + options as f64 * 36.0 + 40.0 + 8.0
 }
 
 /// A permission card's estimate: header, the tool line, up to four lines of summary, two or three
 /// options, the answer line.
 pub fn permission_height(summary_chars: usize, can_always_allow: bool) -> f64 {
-    0.0
+    let lines = (summary_chars / 62 + 1).min(4) as f64;
+    let options = if can_always_allow { 3.0 } else { 2.0 };
+    28.0 + 20.0 + lines * 16.0 + 14.0 + options * 36.0 + 42.0 + 28.0
 }
 
 /// A rectangle in AppKit screen coordinates (y up).
@@ -258,16 +289,14 @@ mod tests {
     fn collapsed_is_the_housing_plus_the_flares() {
         assert_eq!(collapsed_size(NOTCH), Size::new(201.0, 32.0));
         // No notch: a zero-width strip still gets its flares.
-        assert_eq!(
-            collapsed_size(Size::new(0.0, 24.0)),
-            Size::new(16.0, 24.0)
-        );
+        assert_eq!(collapsed_size(Size::new(0.0, 24.0)), Size::new(16.0, 24.0));
     }
 
     #[test]
     fn widths_follow_the_setting() {
         assert_eq!(
-            [NotchWidth::Small, NotchWidth::Medium, NotchWidth::Large].map(|w| (w.list(), w.panel())),
+            [NotchWidth::Small, NotchWidth::Medium, NotchWidth::Large]
+                .map(|w| (w.list(), w.panel())),
             [(300.0, 360.0), (340.0, 420.0), (400.0, 520.0)]
         );
         assert_eq!(NotchWidth::default(), NotchWidth::Medium);
@@ -299,11 +328,17 @@ mod tests {
     fn a_card_peek_is_panel_wide_measured_beats_estimate_and_both_are_capped() {
         let w = NotchWidth::Large;
         let card = PeekContent::Card { height: 200.0 };
-        assert_eq!(peek_size(NOTCH, w, card, None), Size::new(520.0, CHROME + 216.0));
+        assert_eq!(
+            peek_size(NOTCH, w, card, None),
+            Size::new(520.0, CHROME + 216.0)
+        );
         assert_eq!(peek_size(NOTCH, w, card, Some(150.0)).h, CHROME + 166.0);
         let huge = PeekContent::Card { height: 2000.0 };
         assert_eq!(peek_size(NOTCH, w, huge, None).h, CHROME + MAX_CARD + 16.0);
-        assert_eq!(peek_size(NOTCH, w, card, Some(900.0)).h, CHROME + MAX_CARD + 16.0);
+        assert_eq!(
+            peek_size(NOTCH, w, card, Some(900.0)).h,
+            CHROME + MAX_CARD + 16.0
+        );
     }
 
     // Port of NotchForeignTests.testModelCountsAndAnswersPermission's size check: a permission peek
@@ -321,7 +356,10 @@ mod tests {
     #[test]
     fn the_list_adds_rows_and_caps_them() {
         let w = NotchWidth::Medium;
-        assert_eq!(list_size(NOTCH, w, &[], false), Size::new(340.0, CHROME + 34.0 + 44.0 + 6.0));
+        assert_eq!(
+            list_size(NOTCH, w, &[], false),
+            Size::new(340.0, CHROME + 34.0 + 44.0 + 6.0)
+        );
         assert_eq!(
             list_size(NOTCH, w, &[44.0, 58.0], false).h,
             CHROME + 34.0 + (48.0 + 62.0) + 6.0
@@ -340,8 +378,14 @@ mod tests {
     #[test]
     fn detail_is_taller_with_a_card() {
         let w = NotchWidth::Medium;
-        assert_eq!(detail_size(NOTCH, w, false), Size::new(420.0, CHROME + 420.0));
-        assert_eq!(detail_size(NOTCH, w, true), Size::new(420.0, CHROME + 470.0));
+        assert_eq!(
+            detail_size(NOTCH, w, false),
+            Size::new(420.0, CHROME + 420.0)
+        );
+        assert_eq!(
+            detail_size(NOTCH, w, true),
+            Size::new(420.0, CHROME + 470.0)
+        );
     }
 
     #[test]
@@ -357,9 +401,15 @@ mod tests {
         assert!(question_height(10, 4) > question_height(10, 2));
         assert!(question_height(130, 2) > question_height(10, 2));
         assert_eq!(question_height(1000, 2), question_height(180, 2));
-        assert_eq!(permission_height(10, false), 28.0 + 20.0 + 16.0 + 14.0 + 72.0 + 70.0);
+        assert_eq!(
+            permission_height(10, false),
+            28.0 + 20.0 + 16.0 + 14.0 + 72.0 + 70.0
+        );
         assert!(permission_height(10, true) > permission_height(10, false));
-        assert_eq!(permission_height(1000, false), permission_height(248, false));
+        assert_eq!(
+            permission_height(1000, false),
+            permission_height(248, false)
+        );
     }
 
     fn macbook() -> ScreenInfo {
@@ -375,7 +425,10 @@ mod tests {
     // Ported from the spike's notch_rect tests.
     #[test]
     fn notch_rect_on_a_macbook() {
-        assert_eq!(notch_rect(&macbook()), Some(Rect::new(662.0, 950.0, 188.0, 32.0)));
+        assert_eq!(
+            notch_rect(&macbook()),
+            Some(Rect::new(662.0, 950.0, 188.0, 32.0))
+        );
     }
 
     #[test]
@@ -438,7 +491,10 @@ mod tests {
     fn hit_test_edges() {
         let shape = Rect::new(100.0, 900.0, 200.0, 32.0);
         assert!(hit_test(shape, (100.0, 900.0)), "the corner is inside");
-        assert!(!hit_test(shape, (300.0, 916.0)), "the right edge is outside");
+        assert!(
+            !hit_test(shape, (300.0, 916.0)),
+            "the right edge is outside"
+        );
         assert!(!hit_test(shape, (99.9, 916.0)));
         assert!(!hit_test(shape, (150.0, 899.0)));
     }

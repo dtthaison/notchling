@@ -40,7 +40,12 @@ pub const NAMES: [&str; 4] = [
 ];
 
 pub fn spec(name: &str) -> Option<&'static ViewSpec> {
-    ALL.iter().find(|v| v.name == name)
+    every().find(|v| v.name == name)
+}
+
+/// Every renderable view: these, then each part's own (the notch's).
+pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
+    ALL.iter().chain(crate::notch::renders::VIEWS.iter())
 }
 
 #[cfg(test)]

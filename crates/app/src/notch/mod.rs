@@ -2,7 +2,21 @@
 //! housing, with the sessions' rows, a peek when one finishes or asks, and one session's last lines.
 //! It never replies or answers: a question or permission shows with its options disabled.
 //!
-//! [`layout`] is the pure geometry: the shape's size per state (`NotchModel.size(for:)`), the canvas
-//! around the camera and the hit test that lets clicks outside the shape through.
+//! The pure parts build and are tested on every system: [`layout`] (the shape's size per state,
+//! `NotchModel.size(for:)`, the canvas around the camera and the hit test that lets clicks outside
+//! the shape through), [`model`] (rows, cards, hover and peeks), [`requests`] (the prompts the hook
+//! holds, read-only), [`source`] (where it all is read from) and [`renders`] (the `--render`
+//! views over a fixture). The GPUI view and the panel are
+//! macOS only (`LINT-GPUI-MACOS-ONLY`).
 
+#[cfg(target_os = "macos")]
+pub mod cards;
 pub mod layout;
+pub mod model;
+#[cfg(target_os = "macos")]
+pub mod panel;
+pub mod renders;
+pub mod requests;
+pub mod source;
+#[cfg(target_os = "macos")]
+pub mod view;

@@ -40,7 +40,10 @@ where
             if views::spec(&view).is_none() {
                 return Err(format!(
                     "unknown view {view}; the views are {}",
-                    views::NAMES.join(", ")
+                    views::every()
+                        .map(|v| v.name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
             if out.extension().and_then(|e| e.to_str()) != Some("png") {
@@ -75,7 +78,7 @@ pub fn usage() -> String {
          notchling-app --render <view> --out <file.png> a picture of a view, then exit\n       \
          notchling-app --version | --help\n\nviews:\n",
     );
-    for spec in views::ALL.iter() {
+    for spec in views::every() {
         text.push_str(&format!("  {:<20} {}\n", spec.name, spec.about));
     }
     text
