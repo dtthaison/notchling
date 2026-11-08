@@ -8,6 +8,7 @@
 
 use crate::acting_ops::Room;
 use crate::layout::Layout;
+use crate::providers_gate::Gated;
 use crate::providers_ops::ProvidersOps;
 use crate::switches::SwitchFlag;
 use notchling_engine::accounts::antigravity::{
@@ -56,7 +57,11 @@ impl ProviderStores {
     /// `/usr/bin/security`, apps, processes and HTTPS. The saved account names and Claude
     /// Desktop's copies are the daemon's own, in `<data dir>/daemon/accounts`. `claude_accounts`
     /// is E8a's account list, which Desktop's rows are matched against.
-    pub fn for_daemon(layout: &Layout, claude_accounts: ClaudeNames) -> ProviderStores {
+    pub fn for_daemon(
+        layout: &Layout,
+        accounts: &Arc<SwitchFlag>,
+        claude_accounts: ClaudeNames,
+    ) -> ProviderStores {
         let home = layout.home();
         let state_dir = layout.data_dir.join("daemon").join("accounts");
         let (keychain, http, procs, apps): Effects = if layout.fixture {
@@ -67,11 +72,12 @@ impl ProviderStores {
                 Arc::new(FakeApps::new()),
             )
         } else {
+            // Gated on the switch as well as each op's own check ([`crate::providers_gate`]).
             (
-                Arc::new(SecurityTool),
-                Arc::new(TlsHttp),
-                Arc::new(SystemProcs { home: home.clone() }),
-                Arc::new(SystemApps),
+                Gated::new(accounts, Arc::new(SecurityTool)),
+                Gated::new(accounts, Arc::new(TlsHttp)),
+                Gated::new(accounts, Arc::new(SystemProcs { home: home.clone() })),
+                Gated::new(accounts, Arc::new(SystemApps)),
             )
         };
         let (apps_dir, claude_dir) = if layout.fixture {
@@ -152,7 +158,8 @@ impl ProvidersOps {
         accounts: Arc<SwitchFlag>,
         room: Arc<dyn Room>,
     ) -> ProvidersOps {
-        let stores = ProviderStores::for_daemon(layout, Arc::new(Vec::<ClaudeName>::new));
+        let stores =
+            ProviderStores::for_daemon(layout, &accounts, Arc::new(Vec::<ClaudeName>::new));
         ProvidersOps::new(accounts, stores.registry(), room)
     }
 }

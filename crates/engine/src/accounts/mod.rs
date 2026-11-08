@@ -14,9 +14,10 @@
 //!     value too long for `security -i`'s line refused rather than put on argv.
 //!   - [`generic_password::Keychain`] is the plain read/write/delete the E8b stores use, with the
 //!     item shapes the Swift app wrote (Codex's base64 copies, Antigravity's go-keyring value). Its
-//!     real form, [`generic_password::SecurityTool`], runs through [`keychain::SystemSecurity`] too;
-//!     it keeps the Swift app's fallback of putting a too-long value's hex on argv (a known gap,
-//!     documented there).
+//!     real form, [`generic_password::SecurityTool`], runs through [`keychain::SystemSecurity`] too.
+//!   - Either way a value too long for one `security -i` line is split over several items when the
+//!     item is Notchling's own saved copy ([`chunked`] has the format), and refused when another
+//!     tool reads the item; it never goes on argv.
 //! - processes and apps are [`procs::Procs`] and [`procs::Apps`];
 //! - the network is [`http::HttpClient`] (Claude's profile and token endpoints) and
 //!   [`crate::providers::HttpClient`] (the other providers' limits);
@@ -31,6 +32,7 @@
 
 pub mod antigravity;
 pub mod book;
+pub mod chunked;
 pub mod claude;
 pub mod codex;
 pub mod desktop;

@@ -4,13 +4,14 @@
 //!
 //! A value goes in as hex on stdin through `security -i`, so it never shows in the process list.
 //! `security -i` reads a command into a 4 KB line; the Swift app put a longer value on argv
-//! instead, where `ps` shows it. This port refuses such a value ([`KeychainError::TooLong`]): a
-//! token never goes on a command line.
+//! instead, where `ps` shows it. A token never goes on a command line here: a long value in one of
+//! Notchling's own items is split over several ([`super::chunked`] has the format), and one in an
+//! item another tool reads (Claude Code's own login) is refused ([`KeychainError::TooLong`]).
 //!
 //! Every call goes through a [`SecurityRunner`]. The daemon's is [`SystemSecurity`] (macOS only;
 //! elsewhere it answers `Unsupported`); tests use fakes, and never the real Keychain.
 
-use super::{Login, Secret};
+use super::{chunked, Login, Secret};
 use serde_json::{Map, Value};
 use std::fmt;
 use std::time::Duration;
@@ -56,6 +57,8 @@ pub enum KeychainError {
     BadName,
     /// The item was written but reads back different.
     NotStored,
+    /// A value split over several items doesn't add up (a part missing or changed).
+    Damaged,
 }
 
 impl fmt::Display for KeychainError {
@@ -71,6 +74,9 @@ impl fmt::Display for KeychainError {
             ),
             KeychainError::BadName => f.write_str("a Keychain name with a quote, backslash or control character"),
             KeychainError::NotStored => f.write_str("the Keychain item didn't keep the new value"),
+            KeychainError::Damaged => f.write_str(
+                "the saved copy in the Keychain is damaged (its parts don't add up), so it wasn't used",
+            ),
         }
     }
 }
@@ -88,8 +94,14 @@ pub struct Keys {
 }
 
 impl Keys {
-    /// The item's value as printed, trimmed; `None` when there is no item.
+    /// The value as printed, trimmed; `None` when there is no item. A value Notchling split over
+    /// several of its own items comes back whole ([`super::chunked`]).
     pub fn read(&self, service: &str, account: &str) -> Result<Option<Secret>, KeychainError> {
+        Ok(chunked::read(&Raw(self), service, account)?.map(Secret::new))
+    }
+
+    /// One item's value as printed, trimmed.
+    fn read_item(&self, service: &str, account: &str) -> Result<Option<Secret>, KeychainError> {
         check_name(service)?;
         check_name(account)?;
         let args = strings(&["find-generic-password", "-s", service, "-a", account, "-w"]);
@@ -120,8 +132,13 @@ impl Keys {
             .map(|text| Secret::new(text_from_printed(text.expose()))))
     }
 
-    /// Adds or updates the item (`-U`), then reads it back to be sure it holds `value`.
+    /// Adds or updates the item (`-U`), then reads it back to be sure it holds `value`. A value
+    /// too long for one line is split when the service is Notchling's own, else refused.
     pub fn write(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError> {
+        chunked::write(&Raw(self), service, account, value)
+    }
+
+    fn write_item(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError> {
         let line = add_line(service, account, value)?;
         let out = self
             .runner
@@ -130,14 +147,21 @@ impl Keys {
             return Err(KeychainError::Refused(out.status));
         }
         // `security -i` can exit 0 after a command inside it failed: check what's stored.
-        match self.read_text(service, account)? {
-            Some(stored) if stored.expose() == value => Ok(()),
+        let stored = self
+            .read_item(service, account)?
+            .map(|t| text_from_printed(t.expose()));
+        match stored {
+            Some(stored) if stored == value => Ok(()),
             _ => Err(KeychainError::NotStored),
         }
     }
 
-    /// Removes the item; true when there was one.
+    /// Removes the item (and the parts of a split value); true when there was one.
     pub fn delete(&self, service: &str, account: &str) -> Result<bool, KeychainError> {
+        chunked::delete(&Raw(self), service, account)
+    }
+
+    fn delete_item(&self, service: &str, account: &str) -> Result<bool, KeychainError> {
         check_name(service)?;
         check_name(account)?;
         let args = strings(&["delete-generic-password", "-s", service, "-a", account]);
@@ -146,6 +170,26 @@ impl Keys {
             NOT_FOUND => Ok(false),
             status => Err(KeychainError::Refused(status)),
         }
+    }
+}
+
+/// One item at a time, for [`chunked`].
+struct Raw<'a>(&'a Keys);
+
+impl chunked::Items for Raw<'_> {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>, KeychainError> {
+        Ok(self
+            .0
+            .read_item(service, account)?
+            .map(|t| t.expose().to_string()))
+    }
+
+    fn put(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError> {
+        self.0.write_item(service, account, value)
+    }
+
+    fn remove(&self, service: &str, account: &str) -> Result<bool, KeychainError> {
+        self.0.delete_item(service, account)
     }
 }
 

@@ -240,3 +240,26 @@ fn the_lane_login_keeps_the_rest_of_its_item() {
     assert!(s.remove_login(&keys, &l).unwrap());
     assert!(s.login(&keys, &l).unwrap().is_none());
 }
+
+#[test]
+fn a_lane_config_that_cant_be_read_is_never_written_over() {
+    let tmp = TempDir::new("lane-profile-unreadable");
+    let s = store(&tmp);
+    let l = lane(&s, "w");
+    std::fs::create_dir_all(&l.path).unwrap();
+    let config = Path::new(&l.path).join(".claude.json");
+    // Not UTF-8: reading it as text fails, and that is not "there is no file".
+    let bytes = b"{\"projects\": \"\xff\xfe\"}".to_vec();
+    std::fs::write(&config, &bytes).unwrap();
+    assert!(s
+        .set_profile(&l, &json!({"emailAddress": "w@example.com"}))
+        .is_err());
+    assert_eq!(std::fs::read(&config).unwrap(), bytes);
+    // A missing file is a new one.
+    std::fs::remove_file(&config).unwrap();
+    s.set_profile(&l, &json!({"emailAddress": "w@example.com"}))
+        .unwrap();
+    assert!(std::fs::read_to_string(&config)
+        .unwrap()
+        .contains("w@example.com"));
+}

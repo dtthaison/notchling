@@ -221,6 +221,12 @@ pub trait AccountProvider: Send + Sync {
     fn begin_add(&self) -> Result<AddStarted, AccountError>;
     fn poll_add(&self) -> AddProgress;
     fn cancel_add(&self);
+    /// The `accounts` switch went off during an add: stop it without writing or restoring any
+    /// login (a cancel may put the previous one back; this never does). Words for the user when
+    /// the provider is left signed out.
+    fn abandon_add(&self) -> Option<String> {
+        None
+    }
     /// Forgets a saved login. The provider stays signed in if it is the one in use.
     fn remove(&self, id: &str);
     /// Asked before `switch_to`: `None` when nothing would be interrupted.

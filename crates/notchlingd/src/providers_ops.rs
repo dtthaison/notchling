@@ -25,7 +25,9 @@
 //! reply or an event; a failure's text is fixed words.
 //!
 //! One switch or add flow per provider at a time. A flow that waits for the user stops being
-//! polled the moment the switch turns off, and is cancelled when the daemon stops while it is on.
+//! polled the moment the switch turns off and is abandoned (`AccountProvider::abandon_add`: Codex's
+//! `codex login` stopped and its scratch home removed; nothing written or restored, the event's
+//! `note` says where a provider was left), and is cancelled when the daemon stops while it is on.
 
 use crate::acting_ops::{bad, text_arg, Room};
 use crate::op_group::OpGroup;
@@ -74,6 +76,9 @@ struct Shared {
     busy: Mutex<HashSet<String>>,
     /// Providers whose add flow is waiting for the user.
     adding: Mutex<HashSet<String>>,
+    /// Providers with a sync (a list's or a usage refresh's) on a thread now: one each at most, so
+    /// a sync stuck on a Keychain prompt doesn't gather a thread per call behind it.
+    syncing: Mutex<HashSet<String>>,
     /// Wakes a waiting add flow early: the switch went off or the daemon is stopping.
     wake: Condvar,
 }
@@ -97,6 +102,31 @@ impl Shared {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A provider's sync claimed until dropped (also when a thread that would have run it never
+/// started, since the closure holding it is dropped then).
+struct SyncClaim {
+    shared: Arc<Shared>,
+    key: String,
+}
+
+impl SyncClaim {
+    /// `None` when that provider's sync is already going.
+    fn take(shared: &Arc<Shared>, provider: &str) -> Option<SyncClaim> {
+        lock(&shared.syncing)
+            .insert(provider.to_string())
+            .then(|| SyncClaim {
+                shared: shared.clone(),
+                key: provider.to_string(),
+            })
+    }
+}
+
+impl Drop for SyncClaim {
+    fn drop(&mut self) {
+        lock(&self.shared.syncing).remove(&self.key);
+    }
 }
 
 /// Holds a provider's busy slot until dropped.
@@ -132,6 +162,7 @@ impl ProvidersOps {
             closing: AtomicBool::new(false),
             busy: Mutex::new(HashSet::new()),
             adding: Mutex::new(HashSet::new()),
+            syncing: Mutex::new(HashSet::new()),
             wake: Condvar::new(),
         });
         // Off: a flow waiting for the user stops at once and touches nothing more (it doesn't
@@ -297,20 +328,36 @@ impl ProvidersOps {
     fn list_on(&self, args: &Value) -> Value {
         let sync = Self::flag(args, "sync", true);
         let sh = self.sh.clone();
-        let reads = self.deferred(move || {
-            let mut available = vec![];
-            for p in sh.registry.providers() {
-                if !sh.accounts.is_on() {
-                    break;
+        // Each provider's sync is claimed before the thread starts; one already syncing is left
+        // to the thread that has it, and with every one taken no thread starts at all.
+        let claimed: Vec<Option<SyncClaim>> = sh
+            .registry
+            .providers()
+            .iter()
+            .map(|p| {
+                sync.then(|| SyncClaim::take(&sh, p.id().as_str()))
+                    .flatten()
+            })
+            .collect();
+        let reads = if sync && claimed.iter().all(Option::is_none) {
+            None
+        } else {
+            self.deferred(move || {
+                let mut available = vec![];
+                for (p, mine) in sh.registry.providers().iter().zip(claimed) {
+                    if !sh.accounts.is_on() {
+                        break;
+                    }
+                    if let Some(claim) = mine {
+                        p.sync(false);
+                        drop(claim);
+                    }
+                    available.push(p.is_available());
                 }
-                if sync {
-                    p.sync(false);
-                }
-                available.push(p.is_available());
-            }
-            Self::changed(&sh, json!({"provider": null, "reason": "sync"}));
-            available
-        });
+                Self::changed(&sh, json!({"provider": null, "reason": "sync"}));
+                available
+            })
+        };
         let providers: Vec<Value> = self
             .sh
             .registry
@@ -334,15 +381,19 @@ impl ProvidersOps {
         let refresh = Self::flag(args, "refresh", false);
         let sh = self.sh.clone();
         let worker = p.clone();
-        let done = self.deferred(move || {
-            if sh.accounts.is_on() {
-                worker.sync(refresh);
-            }
-            Self::changed(
-                &sh,
-                json!({"provider": worker.id().as_str(), "reason": "usage"}),
-            );
-        });
+        let done = match SyncClaim::take(&sh, p.id().as_str()) {
+            Some(claim) => self.deferred(move || {
+                if sh.accounts.is_on() {
+                    worker.sync(refresh);
+                }
+                drop(claim);
+                Self::changed(
+                    &sh,
+                    json!({"provider": worker.id().as_str(), "reason": "usage"}),
+                );
+            }),
+            None => None,
+        };
         let mut reports = serde_json::Map::new();
         for account in p.state().accounts {
             if let Some(report) = p.usage_report(&account.id) {
@@ -486,85 +537,6 @@ fn confirmation_json(c: &Confirmation) -> Value {
     })
 }
 
-/// Lists `provider`'s add flow as waiting, unless the daemon is already stopping. Under the same
-/// lock [`ProvidersOps::close`] reads the list with, after it set `closing`: so exactly one of
-/// them cancels the flow.
-fn enlist(sh: &Shared, provider: &str) -> bool {
-    let mut adding = lock(&sh.adding);
-    if sh.closing.load(Ordering::SeqCst) {
-        return false;
-    }
-    adding.insert(provider.to_string());
-    true
-}
-
-/// One add flow, on its own thread: start it, hand the reply its first answer, then look for the
-/// user's sign-in until it lands, is cancelled, fails, takes too long, the switch turns off or the
-/// daemon stops. Holds the provider's slot until it ends.
-fn add_flow(
-    sh: Arc<Shared>,
-    p: Arc<dyn AccountProvider>,
-    confirmed: bool,
-    slot: Slot,
-    first: std::sync::mpsc::Sender<First>,
-) {
-    let provider = p.id().as_str().to_string();
-    let event = |state: &str, extra: Value| {
-        let mut data = json!({"provider": provider, "reason": "add", "state": state});
-        if let (Some(map), Some(more)) = (data.as_object_mut(), extra.as_object()) {
-            map.extend(more.clone());
-        }
-        ProvidersOps::changed(&sh, data);
-    };
-    if !confirmed {
-        if let Some(c) = p.add_confirmation() {
-            let _ = first.send(First::Confirm(c));
-            return;
-        }
-    }
-    let started = p.begin_add();
-    // Listed as waiting before the reply goes out, so a stop right after the reply cancels this
-    // flow; a stop that came while it started is seen here instead, and cancels it here once.
-    if started.is_ok() && !enlist(&sh, &provider) && sh.accounts.is_on() {
-        p.cancel_add();
-    }
-    let _ = first.send(First::Started(started.clone()));
-    let mut url = match started {
-        Ok(started) => {
-            event("started", json!({"sign_in_url": started.sign_in_url}));
-            started.sign_in_url
-        }
-        Err(e) => {
-            event("failed", json!({"error": e.message()}));
-            return;
-        }
-    };
-    let _slot = slot;
-    let started_at = Instant::now();
-    let limit = Duration::from_millis(sh.add_limit_ms.load(Ordering::SeqCst));
-    loop {
-        sh.nap(Duration::from_millis(sh.poll_ms.load(Ordering::SeqCst)));
-        // The daemon stopping, or the switch off: stop touching logins.
-        if sh.closing.load(Ordering::SeqCst) {
-            return;
-        }
-        if !sh.accounts.is_on() {
-            return event("cancelled", json!({"error": ACCOUNTS_OFF}));
-        }
-        match p.poll_add() {
-            AddProgress::Waiting { sign_in_url } => {
-                if sign_in_url != url {
-                    url = sign_in_url;
-                    event("waiting", json!({"sign_in_url": url}));
-                }
-            }
-            AddProgress::Done => return event("done", json!({})),
-            AddProgress::Cancelled | AddProgress::Idle => return event("cancelled", json!({})),
-            AddProgress::Failed(e) => return event("failed", json!({"error": e.message()})),
-        }
-        if started_at.elapsed() > limit {
-            p.cancel_add();
-            return event("failed", json!({"error": "The sign-in took too long."}));
-        }
-    }
-}
+#[path = "providers_add.rs"]
+mod add;
+use add::add_flow;

@@ -107,6 +107,9 @@ pub mod ops {
     pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
     pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
     pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
+    /// `{ticket}`: the result of an accounts op that answered `{state: "working", ticket}`, after
+    /// up to 4 s; `{state: "working", ticket}` again while it still runs.
+    pub const ACCOUNTS_RESULT: &str = "accounts.result";
     pub const LANES_LIST: &str = "lanes.list";
     pub const LANES_CREATE: &str = "lanes.create";
     pub const LANES_REMOVE: &str = "lanes.remove";
@@ -137,6 +140,9 @@ pub mod ops {
     pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
     /// `{id}`: the user closed a `vault.request.pending` form without saving.
     pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
+    /// `{}` → `{approvals: [..], requests: [..]}`: the `vault.approval.pending` and
+    /// `vault.request.pending` events still waiting, oldest first, for an app that (re)connects.
+    pub const VAULT_PENDING: &str = "vault.pending";
 }
 
 /// Event topics and the events they carry.
@@ -162,6 +168,8 @@ pub mod topics {
     pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
     /// `{login, state: "added" | "failed" | "cancelled", account?, error?}`: a sign-in ended.
     pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
+    /// `{ticket, op, ok, result?, error?}`: an accounts op that outlasted its call ended.
+    pub const ACCOUNTS_DONE: &str = "accounts.done";
     /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
     /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
@@ -191,7 +199,9 @@ pub mod topics {
 
     /// The Secret Vault (app tier). Never carries a value.
     pub const VAULT: &str = "vault";
-    /// `{id, names, entries, command, folder}`: an agent waits to use secrets marked ask-first.
+    /// `{id, names, entries, command, folder, verified: {exe, pid, cwd, parents,
+    /// folder_matches}}`: an agent waits to use secrets marked ask-first. `command` and `folder`
+    /// are what it claims; `verified` is what the daemon checked with the kernel.
     pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
     /// `{id, decision}`: answered, timed out, or the app left.
     pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";

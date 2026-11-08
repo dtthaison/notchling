@@ -195,21 +195,29 @@ impl InstallOps {
         self
     }
 
+    /// Takes the writing lock, so a test can have a call wait at it (tests).
+    #[cfg(test)]
+    pub(crate) fn hold_writes(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The three ops without a caller (the group's `call` is this): tests drive it directly.
     pub fn run(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
         let request = self.request(op, args)?;
-        let plan = self.plan(&request)?;
-        let on = self.switch.is_on();
         if op == ops::INSTALL_PLAN {
-            return Ok(envelope(on, false, None, &plan, None));
+            let plan = self.plan(&request)?;
+            return Ok(envelope(self.switch.is_on(), false, None, &plan, None));
         }
-        if !on {
+        // The switch and the file are read only once this call has the lock: a call that waited
+        // for another change must not write on what the switch said before the wait.
+        let _one_at_a_time = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let plan = self.plan(&request)?;
+        if !self.switch.is_on() {
             return Ok(envelope(false, false, Some(INSTALL_OFF), &plan, None));
         }
         if let Some(why) = &plan.blocked {
             return Err(failed(why.clone()));
         }
-        let _one_at_a_time = self.writing.lock().unwrap_or_else(|e| e.into_inner());
         self.apply(&request, plan)
     }
 

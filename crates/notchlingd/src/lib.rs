@@ -29,6 +29,7 @@
 //! ([`limits_ops`]) behind `accounts`, and the Secret Vault ([`vault_ops`]) behind `vault`, with
 //! its command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
 
+mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
@@ -59,15 +60,19 @@ pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
 pub mod providers_daemon;
+mod providers_gate;
 pub mod providers_ops;
 pub mod service;
 pub mod signals;
 pub mod switches;
 pub mod vault_args;
+pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
 
+#[cfg(test)]
+mod accounts_late_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]
@@ -89,7 +94,13 @@ mod limits_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]
+mod providers_add_tests;
+#[cfg(test)]
 mod providers_ops_tests;
+#[cfg(test)]
+mod providers_sync_tests;
+#[cfg(test)]
+mod vault_ops_lock_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;

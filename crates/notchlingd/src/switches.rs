@@ -24,7 +24,9 @@ use crate::op_group::OpGroup;
 use notchling_local_api::{ops, topics, ApiError, AuditEntry, AuditLog, Caller, OpSpec};
 use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, sync_channel, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub const ACCOUNTS: &str = "accounts";
 pub const VAULT: &str = "vault";
@@ -41,15 +43,43 @@ pub const INSTALL_OFF: &str =
     "install is off: the Swift app owns hooks and skills until the maintainer turns this on";
 
 type Listener = Arc<dyn Fn(bool) + Send + Sync>;
+type Listeners = Arc<Mutex<Vec<Listener>>>;
+/// A change for the listeners, and where to say they have all heard it.
+type Change = (bool, SyncSender<()>);
+
+/// How long [`SwitchFlag::set`] waits for its listeners before it answers anyway: a listener
+/// stuck on something (a Keychain prompt) must not hold up `settings.set_switch` past the app's
+/// client timeout.
+const LISTENER_WAIT: Duration = Duration::from_millis(500);
 
 /// One switch, for this daemon run only.
 pub struct SwitchFlag {
     name: &'static str,
     off_message: &'static str,
     on: AtomicBool,
-    listeners: Mutex<Vec<Listener>>,
-    /// One change at a time, so listeners see the changes in the order they were made.
-    changing: Mutex<()>,
+    listeners: Listeners,
+    /// One change at a time, each queued for the listeners' thread (started by the first change)
+    /// in the order it was made.
+    changing: Mutex<Option<Sender<Change>>>,
+}
+
+/// The thread that calls the listeners, one change after another; it ends with its switch.
+fn listen(name: &str, listeners: Listeners) -> Option<Sender<Change>> {
+    let (tx, rx) = channel::<Change>();
+    std::thread::Builder::new()
+        .name(format!("switch-{name}"))
+        .spawn(move || {
+            for (on, heard) in rx {
+                let now: Vec<Listener> =
+                    listeners.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                for listener in now {
+                    listener(on);
+                }
+                let _ = heard.try_send(());
+            }
+        })
+        .ok()?;
+    Some(tx)
 }
 
 impl SwitchFlag {
@@ -64,8 +94,8 @@ impl SwitchFlag {
             name,
             off_message,
             on: AtomicBool::new(on),
-            listeners: Mutex::new(Vec::new()),
-            changing: Mutex::new(()),
+            listeners: Arc::new(Mutex::new(Vec::new())),
+            changing: Mutex::new(None),
         })
     }
 
@@ -91,8 +121,10 @@ impl SwitchFlag {
         }
     }
 
-    /// Calls `listener` with the new state after each change, on the thread that made it, after
-    /// the flag has flipped. A listener must not set this switch itself.
+    /// Calls `listener` with the new state after each change, after the flag has flipped, on the
+    /// switch's own thread: every listener hears every change, in the order they were made.
+    /// [`SwitchFlag::set`] waits up to [`LISTENER_WAIT`] for them. A listener must not set this
+    /// switch itself.
     pub fn subscribe(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
         self.listeners
             .lock()
@@ -101,20 +133,38 @@ impl SwitchFlag {
     }
 
     /// Flips it; true when that changed it, and only then are the listeners called. Only
-    /// `settings.set_switch` calls this in the daemon.
+    /// `settings.set_switch` calls this in the daemon. It answers once the listeners have heard
+    /// the change or [`LISTENER_WAIT`] has passed, whichever is first; the flag itself has
+    /// flipped either way.
     pub(crate) fn set(&self, on: bool) -> bool {
-        let _one = self.changing.lock().unwrap_or_else(|e| e.into_inner());
-        if self.on.swap(on, Ordering::SeqCst) == on {
-            return false;
-        }
-        let listeners: Vec<Listener> = self
-            .listeners
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        for listener in listeners {
-            listener(on);
-        }
+        let heard = {
+            let mut queue = self.changing.lock().unwrap_or_else(|e| e.into_inner());
+            if self.on.swap(on, Ordering::SeqCst) == on {
+                return false;
+            }
+            if queue.is_none() {
+                *queue = listen(self.name, self.listeners.clone());
+            }
+            let (tx, rx) = sync_channel(1);
+            match queue.as_ref().map(|q| q.send((on, tx))) {
+                Some(Ok(())) => rx,
+                // No thread (the OS refused one, or a listener panicked on it): called here, still
+                // one change at a time.
+                _ => {
+                    *queue = None;
+                    let now: Vec<Listener> = self
+                        .listeners
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    for listener in now {
+                        listener(on);
+                    }
+                    return true;
+                }
+            }
+        };
+        let _ = heard.recv_timeout(LISTENER_WAIT);
         true
     }
 }
@@ -230,6 +280,7 @@ mod tests {
     use crate::acting_ops_tests::{app, FakeRoom};
     use notchling_local_api::ErrorCode;
     use std::sync::atomic::AtomicUsize;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn every_switch_starts_off() {
@@ -254,6 +305,46 @@ mod tests {
         assert!(flag.set(false));
         assert_eq!(*heard.lock().unwrap(), vec![true, false]);
         assert!(flag.check().is_err());
+    }
+
+    #[test]
+    fn a_slow_listener_holds_up_no_change_and_hears_them_in_order() {
+        let flag = SwitchFlag::in_memory(VAULT, VAULT_OFF, true);
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let wait = Mutex::new(wait);
+        let h = heard.clone();
+        flag.subscribe(move |on| {
+            let first = {
+                let mut heard = h.lock().unwrap();
+                heard.push(on);
+                heard.len() == 1
+            };
+            if first {
+                let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(30));
+            }
+        });
+        let started = Instant::now();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        {
+            let flag = flag.clone();
+            std::thread::spawn(move || {
+                flag.set(false);
+                flag.set(true);
+                flag.set(false);
+                let _ = done_tx.send(());
+            });
+        }
+        let finished = done.recv_timeout(Duration::from_secs(5));
+        release.send(()).unwrap();
+        assert!(finished.is_ok(), "set waited for a stuck listener");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!flag.is_on(), "off, on, off ends off");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while heard.lock().unwrap().len() < 3 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*heard.lock().unwrap(), vec![false, true, false]);
     }
 
     #[test]

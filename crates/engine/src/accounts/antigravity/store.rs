@@ -11,12 +11,16 @@
 //!
 //! Add Account deletes the item and the file so Antigravity starts at its sign-in screen; the next
 //! login it saves is picked up. Our own copies are the Keychain items `Notchling Antigravity`,
-//! one per account, holding the raw login JSON as the Swift app stored it.
+//! one per account, holding the raw login JSON as the Swift app stored it (split over several items
+//! when too long for one line, [`crate::accounts::chunked`]). A switch or an add changes
+//! Antigravity's login only once the current one reads back from its saved copy exactly, and only
+//! with a login short enough for Antigravity's own item, which is never split.
 
 use super::login::{self, EMAIL_ID_PREFIX};
 use super::quota;
 use crate::accounts::book::{self, Saved};
-use crate::accounts::generic_password::Keychain;
+use crate::accounts::chunked::{self, Plain};
+use crate::accounts::generic_password::{plan_write, Keychain, KeychainError};
 use crate::accounts::procs::{Apps, Procs};
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
@@ -209,13 +213,7 @@ impl AntigravityStore {
             }
         }
         let unchanged = lock(&self.inner).last_saved.as_deref() == Some(login.as_str());
-        if !unchanged
-            && self
-                .deps
-                .keychain
-                .write(SERVICE, &account.id, &login)
-                .is_ok()
-        {
+        if !unchanged && self.save_copy(&account.id, &login).is_ok() {
             lock(&self.inner).last_saved = Some(login);
         }
         let mut inner = lock(&self.inner);
@@ -231,15 +229,60 @@ impl AntigravityStore {
         Some(account.id)
     }
 
+    /// Our saved copy of an account's login, put back together if it was split.
+    fn saved_copy(&self, id: &str) -> Result<Option<String>, KeychainError> {
+        chunked::read(&Plain(self.deps.keychain.as_ref()), SERVICE, id)
+    }
+
+    fn save_copy(&self, id: &str, login: &str) -> Result<(), KeychainError> {
+        chunked::write(&Plain(self.deps.keychain.as_ref()), SERVICE, id, login)
+    }
+
+    /// Ok when Antigravity has no login, or ours reads back from the account's saved copy exactly:
+    /// only then may its login be replaced or signed out.
+    fn live_is_saved(&self, active: Option<&str>, refusal: &str) -> Result<(), AccountError> {
+        let Some(current) = self.read_login() else {
+            return Ok(());
+        };
+        match active.map(|id| self.saved_copy(id)) {
+            Some(Ok(Some(saved))) if saved == current => Ok(()),
+            _ => Err(AccountError::new(refusal)),
+        }
+    }
+
+    /// Antigravity's own item takes one `security -i` line (it is never split: Antigravity reads
+    /// it), so a login too long for it is refused before anything quits or changes.
+    fn fits_live_item(login: &str) -> Result<(), AccountError> {
+        plan_write(LIVE_SERVICE, LIVE_ACCOUNT, &login::encode_keyring(login))
+            .map(|_| ())
+            .map_err(|e| {
+                AccountError::new(&format!(
+                    "This Antigravity login is too long for Notchling to put back in Antigravity's Keychain item, so nothing changed ({e})."
+                ))
+            })
+    }
+
     fn switch_locked(&self, id: &str) -> Result<(), AccountError> {
         let active = self.capture();
         // Already in use: the live login may be newer than the saved copy (renewed), so keep it.
         if active.as_deref() == Some(id) {
             return Ok(());
         }
-        let login = self.deps.keychain.read(SERVICE, id).ok_or_else(|| {
-            AccountError::new("Notchling has no saved login for this account. Add it again.")
-        })?;
+        self.live_is_saved(
+            active.as_deref(),
+            "Couldn't save the current Antigravity login, so the account wasn't changed.",
+        )?;
+        let login = self
+            .saved_copy(id)
+            .map_err(|e| {
+                AccountError::new(&format!(
+                    "Couldn't read the saved login for this account, so nothing changed: {e}."
+                ))
+            })?
+            .ok_or_else(|| {
+                AccountError::new("Notchling has no saved login for this account. Add it again.")
+            })?;
+        Self::fits_live_item(&login)?;
         let mut reopen: Vec<String> = vec![];
         let result = self.quit_apps().and_then(|quit| {
             reopen = quit;
@@ -390,9 +433,18 @@ impl AccountProvider for AntigravityStore {
         }
     }
 
+    /// Stops waiting without putting the previous login back (that would write Antigravity's item).
+    fn abandon_add(&self) -> Option<String> {
+        let mut inner = lock(&self.inner);
+        inner.adding = false;
+        inner.before_add.take().map(|_| {
+            "Antigravity was left at its sign-in screen. Sign in there, or turn accounts on and switch to an account to put its login back.".to_string()
+        })
+    }
+
     fn remove(&self, id: &str) {
         let _op = lock(&self.op);
-        self.deps.keychain.delete(SERVICE, id);
+        let _ = chunked::delete(&Plain(self.deps.keychain.as_ref()), SERVICE, id);
         let mut inner = lock(&self.inner);
         inner.accounts.retain(|a| a.id != id);
         let accounts = inner.accounts.clone();
@@ -417,16 +469,14 @@ impl AccountProvider for AntigravityStore {
 impl AntigravityStore {
     fn begin_add_locked(&self) -> Result<(), AccountError> {
         let active = self.capture();
+        // The item and the file go away next; make sure the copy really is in the Keychain first,
+        // and that a cancel could put it back.
+        self.live_is_saved(
+            active.as_deref(),
+            "Couldn't save the current Antigravity login, so it was left in place.",
+        )?;
         if let Some(current) = self.read_login() {
-            // The file goes away next; make sure the copy really is in the Keychain first.
-            let saved = active
-                .as_ref()
-                .and_then(|id| self.deps.keychain.read(SERVICE, id));
-            if saved.as_deref() != Some(current.as_str()) {
-                return Err(AccountError::new(
-                    "Couldn't save the current Antigravity login, so it was left in place.",
-                ));
-            }
+            Self::fits_live_item(&current)?;
         }
         let reopen = self.quit_apps()?;
         self.sign_out();

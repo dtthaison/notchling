@@ -1,4 +1,5 @@
 use super::edit::*;
+use super::hooks::plan_hooks;
 use super::jsonc;
 use super::render::Json;
 use super::testutil::*;
@@ -108,6 +109,103 @@ fn trailing_commas_and_comments_stay_where_they_were() {
     assert_eq!(out, "[\n  1,\n  2, // two\n  3\n]");
     assert!(jsonc::parse(&out).is_ok());
     assert_eq!(remove(&out, &[], 2).unwrap(), "[\n  1,\n  2 // two\n]");
+}
+
+/// The numbers in the list at the top of `text`.
+fn numbers(text: &str) -> Vec<u64> {
+    let root = jsonc::parse(text).unwrap();
+    let items = root.items().unwrap();
+    items
+        .iter()
+        .map(|n| text[n.start..n.end].parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn removing_an_item_keeps_every_comment_before_between_and_after_the_items() {
+    let lists = [
+        // Inline.
+        "[/* before */ 1, /* between */ 2, /* more */ 3 /* after */]",
+        "[ 1 , /* b1 */ 2 /* x */ , /* b2 */ 3 ]",
+        "[1,/* b1 */2,/* b2 */3]",
+        "[/* before */ 1, /* b1 */ 2, /* b2 */ 3, /* after */]",
+        // The first item on the bracket's line, a comment ending that line.
+        "[1, // one\n  // between\n  2,\n  /* b2 */ 3\n  // after\n]",
+        // Every item on its own line, comments on lines of their own.
+        "[\n  // before\n  1,\n  // between\n  2,\n  /* more\n     lines */\n  3\n  // after\n]",
+        // The last item shares its line with the closing bracket.
+        "[\n  1,\n  // between\n  2,\n  /* b2 */ 3 ]",
+    ];
+    for text in lists {
+        let comments: Vec<&str> = [
+            "/* before */",
+            "/* between */",
+            "/* more */",
+            "/* after */",
+            "// between",
+            "// before",
+            "// after",
+            "/* b1 */",
+            "/* b2 */",
+            "/* x */",
+            "/* more\n     lines */",
+            "// one",
+        ]
+        .into_iter()
+        .filter(|c| text.contains(c))
+        .collect();
+        assert!(!comments.is_empty(), "{text}");
+        for index in 0..3 {
+            let out = remove(text, &[], index).unwrap();
+            let mut want = numbers(text);
+            want.remove(index);
+            assert_eq!(numbers(&out), want, "remove {index} of {text:?}: {out:?}");
+            for c in &comments {
+                assert!(
+                    out.contains(c),
+                    "remove {index} of {text:?} lost {c:?}: {out:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn removing_our_group_keeps_the_users_comments_between_the_groups() {
+    let ours = r#"{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "'/opt/notchling/bin/notchling' hook", "timeout": 300}]}"#;
+    let theirs = r#"{"matcher": "Bash", "hooks": [{"type": "command", "command": "~/bin/x.sh"}]}"#;
+    for text in [
+        format!(r#"{{"hooks": {{"PreToolUse": [{ours}, /* mine */ {theirs}]}}}}"#),
+        format!(r#"{{"hooks": {{"PreToolUse": [{theirs}, /* mine */ {ours}]}}}}"#),
+        format!(r#"{{"hooks": {{"PreToolUse": [{theirs}, /* mine */ {ours}, /* too */]}}}}"#),
+    ] {
+        let out = plan_hooks(&text, &remove_all()).unwrap();
+        assert!(out.changed, "{text}");
+        assert!(out.text.contains("/* mine */"), "{}", out.text);
+        assert_eq!(
+            value(&out.text)["hooks"]["PreToolUse"],
+            serde_json::json!([value(theirs)]),
+            "{}",
+            out.text
+        );
+    }
+}
+
+#[test]
+fn removing_an_item_inline_takes_its_comma_and_the_space_after_it_only() {
+    assert_eq!(
+        remove("[1, /* a */ 2, 3]", &[], 0).unwrap(),
+        "[/* a */ 2, 3]"
+    );
+    assert_eq!(
+        remove("[1, /* a */ 2, 3]", &[], 1).unwrap(),
+        "[1, /* a */ 3]"
+    );
+    assert_eq!(
+        remove("[1, 2, /* z */ 3]", &[], 2).unwrap(),
+        "[1, 2 /* z */ ]"
+    );
+    assert_eq!(remove("[1, 2, 3]", &[], 2).unwrap(), "[1, 2]");
 }
 
 #[test]

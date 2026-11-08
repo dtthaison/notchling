@@ -16,7 +16,7 @@ fn a_value_goes_as_hex_on_stdin_never_on_argv() {
         .write("Notchling Accounts", "a:o", "{\"t\":\"test-secret\"}")
         .unwrap();
     let calls = chain.calls();
-    assert_eq!(calls[0], vec!["-i".to_string()]);
+    assert!(calls.contains(&vec!["-i".to_string()]));
     for call in &calls {
         let joined = call.join(" ");
         assert!(!joined.contains("test-secret"), "{joined}");
