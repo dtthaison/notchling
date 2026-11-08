@@ -294,8 +294,7 @@ pub struct Confirm {
     pub ok: &'static str,
 }
 
-const KEEPS_CHOICE: &str =
-    "This app keeps your choice and asks the daemon for it again at every start.";
+const KEEPS_CHOICE: &str = "The daemon starts with it off every time. This app remembers your choice and, after a restart, offers it back; only your Turn Back On sends it.";
 
 /// The dialog for turning `control` on or off.
 pub fn confirm(control: Control, turn_on: bool) -> Confirm {
@@ -539,6 +538,9 @@ mod tests {
                 assert!(c.title.ends_with('?'));
                 assert!(c.lines.len() >= 2);
                 assert_eq!(c.lines.last().copied(), Some(KEEPS_CHOICE));
+                // Never a promise to turn it back on by itself (C1): only Turn Back On does.
+                assert!(KEEPS_CHOICE.contains("Turn Back On"), "{KEEPS_CHOICE}");
+                assert!(!KEEPS_CHOICE.contains("again at every start"));
                 assert_eq!(c.ok, if turn_on { "Turn On" } else { "Turn Off" });
             }
         }
