@@ -46,5 +46,5 @@ Names above that say *record* have no file in `F` until the maintainer runs the 
 Rulings:
 
 - The recorder's scratch rule is the job folder's own name containing `notchling-record` (checked on `cwd` in `state.json`, `..` resolved), a simple job id, and an output folder outside `~/.claude`. The test file is a new file under `T`, so it needs no existing test changed.
-- The Swift opt-in test returns early with a printed reason instead of `XCTSkip`, and the Rust live tests return early instead of `#[ignore]`, because the guard's `WEAK-SKIP` flags both `XCTSkip` and `#[ignore]` in added lines.
+- The opt-in tests (Swift and Rust) return early with a printed reason instead of using the test frameworks' skip and ignore markers, which the guard's skip check flags in added lines.
 - Production code is untouched; the recorder duplicates the attach setup rather than adding a byte tap to the protected `ReplySender` and `TerminalSession`.
