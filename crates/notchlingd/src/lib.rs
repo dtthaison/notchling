@@ -12,6 +12,10 @@
 //!   another tool ([`delegate_cli`] over `notchling_engine::delegate`). They need no daemon and are
 //!   not behind `acting`.
 //!
+//! - The daemon serves `install.plan`, `install.apply` and `install.remove` ([`install_ops`] over
+//!   `notchling_engine::install`): the hook entries in `settings.json` and the `notchling-*` skills,
+//!   behind the `install` switch, which is off.
+//!
 //! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
 //!   permission or question and prints the answer; anything else, or any trouble, passes.
 //!
@@ -41,6 +45,7 @@ pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
+pub mod install_ops;
 pub mod late_reply;
 pub mod layout;
 pub mod op_group;
@@ -63,6 +68,8 @@ mod daemon_tests;
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod install_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 

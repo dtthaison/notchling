@@ -9,6 +9,7 @@ pub mod accounts;
 pub mod bridge;
 pub mod control;
 pub mod delegate;
+pub mod install;
 pub mod lanes;
 pub mod pages;
 pub mod reply;
