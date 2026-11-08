@@ -167,15 +167,29 @@ impl NotchModel {
             .filter(|r| r.kind == RequestKind::Permission && !self.answered.contains(&r.id))
     }
 
-    /// Hides a session's card once it was answered from here; the key is the hook request's id,
-    /// else the question's tool use id.
-    pub fn mark_answered(&mut self, id: &str) {
-        let key = match (self.requests.get(id), self.question(id)) {
+    /// What an answer to this session's card now is keyed by: the hook request's id, else the
+    /// question's tool use id. Taken when the answer is sent, since the prompt on the card can
+    /// change before the reply comes back.
+    pub fn answer_key(&self, id: &str) -> Option<String> {
+        match (self.requests.get(id), self.question(id)) {
             (Some(r), _) => Some(r.id.clone()),
             (None, Some(q)) => Some(q.tool_use_id),
             (None, None) => None,
-        };
-        self.answered.extend(key);
+        }
+    }
+
+    /// Hides the prompt an answer was keyed by ([`NotchModel::answer_key`]) once it was answered
+    /// from here, and only that one.
+    pub fn mark_answered_key(&mut self, key: &str) {
+        self.answered.insert(key.to_owned());
+    }
+
+    /// Hides a session's card as it is now: [`NotchModel::answer_key`], then
+    /// [`NotchModel::mark_answered_key`].
+    pub fn mark_answered(&mut self, id: &str) {
+        if let Some(key) = self.answer_key(id) {
+            self.mark_answered_key(&key);
+        }
     }
 
     /// The card to show for a session: a permission, else a question.

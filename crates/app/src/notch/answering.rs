@@ -143,8 +143,15 @@ impl NotchView {
         gate.tooltip
     }
 
-    /// Sends an answer or a decision for a session; on success its card hides.
-    pub(super) fn send_for(&mut self, id: String, request: Request, cx: &mut Context<Self>) {
+    /// Sends an answer or a decision; on success the prompt it answered (`key`, from
+    /// `NotchModel::answer_key` or the prompt's own id, taken when the button was pressed) hides,
+    /// and no other: the session may have a newer prompt by the time the reply comes back.
+    pub(super) fn send_for(
+        &mut self,
+        key: Option<String>,
+        request: Request,
+        cx: &mut Context<Self>,
+    ) {
         if self.sending || !self.gate().enabled {
             return;
         }
@@ -160,7 +167,9 @@ impl NotchView {
                 view.sending = false;
                 match result {
                     Ok(_) => {
-                        view.model.mark_answered(&id);
+                        if let Some(key) = &key {
+                            view.model.mark_answered_key(key);
+                        }
                         view.fold_peek();
                     }
                     Err(message) => view.send_error = Some(message),
@@ -210,8 +219,9 @@ impl NotchView {
                 gate::tip(row, gate, A).when(gate.enabled, |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(answers) = this.draft.choose(&question, i + 1) {
+                            let key = this.model.answer_key(&session);
                             this.send_for(
-                                session.clone(),
+                                key,
                                 Request::answer_for(&session, &question, &answers),
                                 cx,
                             );
@@ -315,7 +325,8 @@ impl NotchView {
                         Typed::Submit => {
                             if let Some(answers) = this.draft.submit_text(&question) {
                                 let request = Request::answer_for(&session, &question, &answers);
-                                this.send_for(session.clone(), request, cx);
+                                let key = this.model.answer_key(&session);
+                                this.send_for(key, request, cx);
                             }
                         }
                         Typed::Changed => {}
@@ -359,11 +370,8 @@ impl NotchView {
         let submit = gate::tip(submit, ready, A).when(ready.enabled, |b| {
             b.on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(answers) = this.draft.answers(&question) {
-                    this.send_for(
-                        session.clone(),
-                        Request::answer_for(&session, &question, &answers),
-                        cx,
-                    );
+                    let key = this.model.answer_key(&session);
+                    this.send_for(key, Request::answer_for(&session, &question, &answers), cx);
                 }
             }))
         });
@@ -381,13 +389,12 @@ impl NotchView {
     /// Antigravity's permissions carry their own options and take the card in `agy_card`.
     pub(super) fn permission_card(
         &self,
-        id: &str,
         r: &HookRequest,
         agent: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Div {
         if let Some(agy) = &r.agy {
-            return self.agy_permission_card(id, r, agy, agent, cx);
+            return self.agy_permission_card(r, agy, agent, cx);
         }
         let gate = self.gate();
         let mut choices = vec![(Decision::Allow, "Allow", "This time only")];
@@ -413,12 +420,12 @@ impl NotchView {
                     A,
                 )
                 .line_height(px(line(TypeRole::Heading)));
-                // The card hides by row; the decision goes to the prompt by its own id.
-                let (session, prompt) = (id.to_owned(), r.id.clone());
+                // The decision goes to the prompt by its own id, and hides that prompt only.
+                let prompt = r.id.clone();
                 gate::tip(row, gate, A).when(gate.enabled, |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
                         let request = Request::permission(&prompt, decision);
-                        this.send_for(session.clone(), request, cx);
+                        this.send_for(Some(prompt.clone()), request, cx);
                     }))
                 })
             });

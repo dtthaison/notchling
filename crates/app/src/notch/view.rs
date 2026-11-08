@@ -396,7 +396,7 @@ impl NotchView {
         if let Some((card, _)) = self.card(id) {
             let element = match &card {
                 Card::Question(q) => self.question_card(id, q, Some(&agent.name), cx),
-                Card::Permission(r) => self.permission_card(id, r, Some(&agent.name), cx),
+                Card::Permission(r) => self.permission_card(r, Some(&agent.name), cx),
             };
             return Some(
                 div()
@@ -456,7 +456,7 @@ impl NotchView {
         let lines = m.snapshot(id).map(|s| s.lines.as_slice()).unwrap_or(&[]);
         let card = self.card(id).map(|(card, _)| match card {
             Card::Question(q) => self.question_card(id, &q, None, cx),
-            Card::Permission(r) => self.permission_card(id, &r, None, cx),
+            Card::Permission(r) => self.permission_card(&r, None, cx),
         });
         let needs = agent
             .detail

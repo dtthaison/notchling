@@ -39,7 +39,6 @@ impl NotchView {
     /// The card for a row whose held prompt is Antigravity's.
     pub(super) fn agy_permission_card(
         &self,
-        id: &str,
         request: &HookRequest,
         agy: &AgyPermission,
         agent: Option<&str>,
@@ -47,10 +46,10 @@ impl NotchView {
     ) -> Div {
         let gate = self.gate();
         let (session, rpc) = (request.session_id.clone(), agy.rpc_id.clone());
-        let row = id.to_owned();
+        let prompt = request.id.clone();
         let card = agy_card(agy, agent, gate, A, cx, move |this, option, cx| {
             let request = agy_permission(&session, &rpc, Some(option));
-            this.send_for(row.clone(), request, cx);
+            this.send_for(Some(prompt.clone()), request, cx);
         });
         div()
             .flex()
