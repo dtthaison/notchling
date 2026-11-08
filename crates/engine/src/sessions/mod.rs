@@ -10,7 +10,7 @@
 //!   as "Exited" with a resume target, and remembering which lane each session ran in
 //!   ([`Monitor::config_dir_for_session`]).
 //! - [`Probes`]: what files can't tell: whether a pid is alive and which app hosts a terminal.
-//!   [`Probes::from_proc`] is the default (Linux `/proc`; elsewhere it assumes alive).
+//!   [`Probes::from_proc`] is the default (`kill(pid, 0)` on Unix; elsewhere it assumes alive).
 //! - [`Agent`], [`AgentGroup`], [`AgentTarget`]: the row.
 //! - [`job_dirs`] / [`config_dir_for_job`]: which config folder holds a job (the current copy first), to
 //!   run `claude attach|rm` there with `CLAUDE_CONFIG_DIR`.
