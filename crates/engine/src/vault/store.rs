@@ -7,8 +7,12 @@
 //! - The list is a `vault.json` the store is given (the daemon's own, never the Swift app's).
 //! - Values are read once and kept in memory until [`VaultStore::forget`].
 //!
-//! Every change holds one lock, so a save can't interleave with another. No error here holds a
-//! value: Keychain failures are fixed texts, and the item's JSON is never quoted.
+//! Every change, and every Keychain call, holds one lock, so a save can't interleave with
+//! another. The values kept in memory sit behind a second lock that is never held across a
+//! Keychain call: on macOS a read can wait on the user's prompt for as long as it stays up, and
+//! [`VaultStore::forget`] (the switch going off) must not wait for that. A read that began before
+//! a forget doesn't put what it read back in memory. No error here holds a value: Keychain
+//! failures are fixed texts, and the item's JSON is never quoted.
 
 use super::entry::{Kind, VaultEntry, VaultValue};
 use super::list::{self, IndexError};
@@ -124,12 +128,22 @@ pub struct Saved {
     pub value_changed: bool,
 }
 
+/// The values kept in memory, and how many times they were forgotten.
+#[derive(Default)]
+struct Cache {
+    values: Option<BTreeMap<String, VaultValue>>,
+    /// Bumped by each forget: what a read that started before it got is not kept.
+    generation: u64,
+}
+
 /// The values and the list.
 pub struct VaultStore {
     index: PathBuf,
     keychain: Box<dyn VaultKeychain>,
-    /// The values once read; the lock every change holds.
-    cache: Mutex<Option<BTreeMap<String, VaultValue>>>,
+    /// The lock every change and every Keychain call holds.
+    changing: Mutex<()>,
+    /// The values once read; held only to look or swap, never across a Keychain call.
+    cache: Mutex<Cache>,
 }
 
 impl VaultStore {
@@ -137,7 +151,8 @@ impl VaultStore {
         VaultStore {
             index,
             keychain,
-            cache: Mutex::new(None),
+            changing: Mutex::new(()),
+            cache: Mutex::new(Cache::default()),
         }
     }
 
@@ -145,8 +160,25 @@ impl VaultStore {
         &self.index
     }
 
-    fn lock(&self) -> MutexGuard<'_, Option<BTreeMap<String, VaultValue>>> {
+    fn lock(&self) -> MutexGuard<'_, ()> {
+        self.changing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn cache(&self) -> MutexGuard<'_, Cache> {
         self.cache.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// How many forgets so far; taken before a Keychain call, given back to [`Self::keep`].
+    fn generation(&self) -> u64 {
+        self.cache().generation
+    }
+
+    /// Keeps `values` in memory unless a forget came after `generation` was taken.
+    fn keep(&self, generation: u64, values: BTreeMap<String, VaultValue>) {
+        let mut cache = self.cache();
+        if cache.generation == generation {
+            cache.values = Some(values);
+        }
     }
 
     /// The list; a file that can't be read is an error, not an empty list.
@@ -161,42 +193,45 @@ impl VaultStore {
         Ok(self.entries()?.into_iter().find(|e| e.id() == id))
     }
 
-    /// Drops the values kept in memory; the next use reads the item again.
+    /// Drops the values kept in memory; the next use reads the item again. Never waits for a
+    /// Keychain call: one under way keeps nothing it read.
     pub fn forget(&self) {
-        *self.lock() = None;
+        let mut cache = self.cache();
+        cache.values = None;
+        cache.generation = cache.generation.wrapping_add(1);
     }
 
-    fn load(
-        &self,
-        cache: &mut Option<BTreeMap<String, VaultValue>>,
-    ) -> Result<BTreeMap<String, VaultValue>, VaultError> {
-        if let Some(values) = cache {
+    /// The values, from memory or the item. Called holding [`Self::lock`]; `generation` was taken
+    /// after it.
+    fn load(&self, generation: u64) -> Result<BTreeMap<String, VaultValue>, VaultError> {
+        if let Some(values) = &self.cache().values {
             return Ok(values.clone());
         }
-        let values = match self.keychain.read()? {
+        let values: BTreeMap<String, VaultValue> = match self.keychain.read()? {
             None => BTreeMap::new(),
             // The item's text is never quoted: a parse error could hold a value.
             Some(data) => serde_json::from_slice(&data).map_err(|_| VaultError::ItemUnreadable)?,
         };
-        *cache = Some(values.clone());
+        self.keep(generation, values.clone());
         Ok(values)
     }
 
     fn store(
         &self,
-        cache: &mut Option<BTreeMap<String, VaultValue>>,
+        generation: u64,
         values: BTreeMap<String, VaultValue>,
     ) -> Result<(), VaultError> {
         let data = serde_json::to_vec(&values).map_err(|_| VaultError::ItemUnreadable)?;
         self.keychain.write(&data)?;
-        *cache = Some(values);
+        self.keep(generation, values);
         Ok(())
     }
 
     /// The stored value of an entry.
     pub fn value(&self, entry: &VaultEntry) -> Result<Option<VaultValue>, VaultError> {
-        let mut cache = self.lock();
-        Ok(self.load(&mut cache)?.remove(&entry.id()))
+        let _held = self.lock();
+        let generation = self.generation();
+        Ok(self.load(generation)?.remove(&entry.id()))
     }
 
     /// Saves an entry. A `None` value keeps the stored one (editing the note, URL or variables
@@ -209,12 +244,13 @@ impl VaultStore {
         old: Option<&VaultEntry>,
         now: &str,
     ) -> Result<Saved, VaultError> {
-        let mut cache = self.lock();
+        let _held = self.lock();
+        let generation = self.generation();
         let mut index = list::read_index(&self.index)?;
         if let Some(problem) = list::problem(entry, &index, old) {
             return Err(VaultError::Problem(problem));
         }
-        let mut values = self.load(&mut cache)?;
+        let mut values = self.load(generation)?;
         let id = entry.id();
         let old_id = old.map(VaultEntry::id);
         // A rename whose list write failed left the value under the new id: finding it there makes
@@ -245,7 +281,7 @@ impl VaultStore {
             values.remove(o);
         }
         values.insert(id.clone(), stored.clone());
-        self.store(&mut cache, values)?;
+        self.store(generation, values)?;
         index.retain(|e| e.id() != id && Some(e.id()) != old_id);
         let mut saved = entry.clone();
         saved.updated = now.to_string();
@@ -264,13 +300,14 @@ impl VaultStore {
 
     /// Removes an entry and its value; false when there was none by that name.
     pub fn remove(&self, name: &str) -> Result<bool, VaultError> {
-        let mut cache = self.lock();
+        let _held = self.lock();
+        let generation = self.generation();
         let index = list::read_index(&self.index)?;
         let id = name.to_lowercase();
-        let mut values = self.load(&mut cache)?;
+        let mut values = self.load(generation)?;
         let had = values.remove(&id).is_some();
         if had {
-            self.store(&mut cache, values)?;
+            self.store(generation, values)?;
         }
         let left: Vec<VaultEntry> = index.iter().filter(|e| e.id() != id).cloned().collect();
         let listed = left.len() != index.len();
