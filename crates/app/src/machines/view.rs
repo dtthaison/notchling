@@ -2,8 +2,8 @@
 //! the banners, then the cards (`cards`, `jobs_view`) and the sheets over them (`sheets_view`).
 //! Everything that touches a machine runs on the background executor through the model's parts,
 //! and only from a click: a Fix after its plan was shown in the Fix sheet and Run was pressed.
-//! The admin password lives in this view's `password` for the one confirm and is cleared when
-//! the sheet closes; it never reaches the model or a log.
+//! The admin password lives in the model only while its Fix sheet is on show (`model_sheet`): every
+//! change of sheet clears it, and it never reaches a log.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -12,7 +12,6 @@ use gpui::{
     div, prelude::*, px, AnyView, App, Context, Div, FocusHandle, KeyDownEvent, Render,
     SharedString, Window,
 };
-use notchling_engine::accounts::Secret;
 use notchling_engine::machines::actions::MorningActions;
 use notchling_engine::machines::morning::MorningItem;
 use notchling_engine::machines::poller::INTERVAL_SECS;
@@ -40,8 +39,6 @@ pub enum Confirming {
 pub struct MachinesView {
     pub model: MachinesModel,
     pub(super) focus: FocusHandle,
-    /// The Fix sheet's admin password, for one Run. Drawn as dots, cleared with the sheet.
-    pub(super) password: String,
     /// The morning card whose note field takes the keys.
     pub(super) typing: Option<String>,
     /// The Send back and Answer texts, by item id.
@@ -98,7 +95,6 @@ impl MachinesView {
             seen_revision: model.engine().revision(),
             model,
             focus: cx.focus_handle(),
-            password: String::new(),
             typing: None,
             notes: BTreeMap::new(),
             sending_back: BTreeSet::new(),
@@ -235,28 +231,24 @@ impl MachinesView {
 
     // MARK: Sheets
 
+    /// An Add or Job sheet; refused while another sheet is on show.
     pub(super) fn open_sheet(&mut self, sheet: Sheet, window: &mut Window, cx: &mut Context<Self>) {
-        self.password.clear();
-        self.model.sheet = Some(sheet);
-        window.focus(&self.focus);
+        if self.model.open_sheet(sheet) {
+            window.focus(&self.focus);
+        }
         cx.notify();
     }
 
     /// The Fix sheet's Run: the password, if any, goes into this one confirm and nowhere else.
     pub(super) fn confirm_sheet(&mut self, cx: &mut Context<Self>) {
-        let password =
-            (!self.password.is_empty()).then(|| Secret::new(std::mem::take(&mut self.password)));
-        self.password.clear();
-        if let Some(run) = self.model.confirm(password) {
+        if let Some(run) = self.model.confirm() {
             self.run(run, cx);
         }
         cx.notify();
     }
 
     pub(super) fn cancel_sheet(&mut self, cx: &mut Context<Self>) {
-        self.password.clear();
         self.model.cancel_sheet();
-        self.model.sheet = None;
         cx.notify();
     }
 
@@ -265,7 +257,7 @@ impl MachinesView {
     pub(super) fn check_draft(&mut self, cx: &mut Context<Self>) {
         let existing = self.model.names();
         let can_add = self.model.can_add();
-        let Some(Sheet::Add(form)) = &mut self.model.sheet else {
+        let Some(Sheet::Add(form)) = self.model.sheet_mut() else {
             return;
         };
         if !form.can_check(&existing, can_add) {
@@ -278,7 +270,7 @@ impl MachinesView {
             cx,
             move || MachinesModel::draft_check(&engine, &name, &host, &user, &existing),
             |view, check, _| {
-                if let Some(Sheet::Add(form)) = &mut view.model.sheet {
+                if let Some(Sheet::Add(form)) = view.model.sheet_mut() {
                     form.checked(check);
                 }
             },
@@ -290,7 +282,7 @@ impl MachinesView {
     pub(super) fn add_machine(&mut self, cx: &mut Context<Self>) {
         let existing = self.model.names();
         let can_add = self.model.can_add();
-        let Some(Sheet::Add(form)) = &self.model.sheet else {
+        let Some(Sheet::Add(form)) = self.model.sheet() else {
             return;
         };
         if !form.can_add(&existing, can_add) {
@@ -302,11 +294,11 @@ impl MachinesView {
         };
         match self.model.add(&form.name, &form.host, &form.user, check) {
             Ok(()) => {
-                self.model.sheet = None;
+                self.model.close_sheet();
                 self.check(&form.name, cx);
             }
             Err(why) => {
-                if let Some(Sheet::Add(form)) = &mut self.model.sheet {
+                if let Some(Sheet::Add(form)) = self.model.sheet_mut() {
                     form.error = Some(why);
                 }
             }
@@ -315,7 +307,7 @@ impl MachinesView {
     }
 
     pub(super) fn save_job(&mut self, cx: &mut Context<Self>) {
-        let Some(Sheet::Job(form)) = &self.model.sheet else {
+        let Some(Sheet::Job(form)) = self.model.sheet() else {
             return;
         };
         if !form.can_save() {
@@ -323,9 +315,9 @@ impl MachinesView {
         }
         let draft = form.draft.clone();
         match self.model.save_job(&draft) {
-            Ok(()) => self.model.sheet = None,
+            Ok(()) => self.model.close_sheet(),
             Err(why) => {
-                if let Some(Sheet::Job(form)) = &mut self.model.sheet {
+                if let Some(Sheet::Job(form)) = self.model.sheet_mut() {
                     form.error = Some(why);
                 }
             }
@@ -345,7 +337,7 @@ impl MachinesView {
             .map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>());
         if k.key == "escape" {
             if self.confirming.take().is_some() || self.model.diff.take().is_some() {
-            } else if self.model.sheet.is_some() {
+            } else if self.model.sheet().is_some() {
                 self.cancel_sheet(cx);
             } else {
                 self.typing = None;
@@ -354,43 +346,16 @@ impl MachinesView {
             cx.notify();
             return;
         }
-        let typed = match &mut self.model.sheet {
-            Some(Sheet::Fix(prompt)) if prompt.needs_password() => {
-                if let Some(text) = pasted {
-                    self.password.push_str(&text);
+        let typed = if let Some(password) = self.model.password_field() {
+            match pasted {
+                Some(text) => {
+                    password.push_str(&text);
                     Typed::Changed
-                } else {
-                    type_key(&mut self.password, &k.key, k.key_char.as_deref(), modified)
                 }
+                None => type_key(password, &k.key, k.key_char.as_deref(), modified),
             }
-            Some(Sheet::Fix(_)) => Typed::Ignored,
-            Some(Sheet::Add(form)) => match pasted {
-                Some(text) => {
-                    form.paste(&text);
-                    Typed::Changed
-                }
-                None => form.type_key(&k.key, k.key_char.as_deref(), modified),
-            },
-            Some(Sheet::Job(form)) => match pasted {
-                Some(text) => {
-                    form.paste(&text);
-                    Typed::Changed
-                }
-                None => form.type_key(&k.key, k.key_char.as_deref(), modified),
-            },
-            None => match self.typing.clone() {
-                Some(id) => {
-                    let note = self.notes.entry(id).or_default();
-                    match pasted {
-                        Some(text) => {
-                            note.push_str(&text);
-                            Typed::Changed
-                        }
-                        None => type_key(note, &k.key, k.key_char.as_deref(), modified),
-                    }
-                }
-                None => Typed::Ignored,
-            },
+        } else {
+            self.type_into_sheet(pasted, &k.key, k.key_char.as_deref(), modified)
         };
         match typed {
             Typed::Ignored => return,
@@ -401,13 +366,54 @@ impl MachinesView {
         cx.notify();
     }
 
+    /// A key for an Add or Job sheet's field, or for the note field under no sheet.
+    fn type_into_sheet(
+        &mut self,
+        pasted: Option<String>,
+        key: &str,
+        key_char: Option<&str>,
+        modified: bool,
+    ) -> Typed {
+        match self.model.sheet_mut() {
+            Some(Sheet::Fix(_)) => Typed::Ignored,
+            Some(Sheet::Add(form)) => match pasted {
+                Some(text) => {
+                    form.paste(&text);
+                    Typed::Changed
+                }
+                None => form.type_key(key, key_char, modified),
+            },
+            Some(Sheet::Job(form)) => match pasted {
+                Some(text) => {
+                    form.paste(&text);
+                    Typed::Changed
+                }
+                None => form.type_key(key, key_char, modified),
+            },
+            None => match self.typing.clone() {
+                Some(id) => {
+                    let note = self.notes.entry(id).or_default();
+                    match pasted {
+                        Some(text) => {
+                            note.push_str(&text);
+                            Typed::Changed
+                        }
+                        None => type_key(note, key, key_char, modified),
+                    }
+                }
+                None => Typed::Ignored,
+            },
+        }
+    }
+
     /// Return: the sheet's default button, or the note field's Send.
     fn submit(&mut self, cx: &mut Context<Self>) {
         let existing = self.model.names();
         let can_add = self.model.can_add();
-        match &self.model.sheet {
+        let password_given = self.model.password_len() > 0;
+        match self.model.sheet() {
             Some(Sheet::Fix(prompt)) => {
-                if prompt.can_run(!self.password.is_empty()) {
+                if prompt.can_run(password_given) {
                     self.confirm_sheet(cx);
                 }
             }
@@ -432,7 +438,8 @@ impl Render for MachinesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         // the sheets and the note fields type through this view
-        if (self.model.sheet.is_some() || self.typing.is_some()) && !self.focus.is_focused(window) {
+        if (self.model.sheet().is_some() || self.typing.is_some()) && !self.focus.is_focused(window)
+        {
             window.focus(&self.focus);
         }
         let body = match self.model.tab {

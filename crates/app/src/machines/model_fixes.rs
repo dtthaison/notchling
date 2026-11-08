@@ -3,7 +3,6 @@
 //! sheet; `confirm` takes the one click on Run and hands back the [`Run`] to execute off the UI
 //! thread; `tick` picks up the admin step a Set up all reached.
 
-use notchling_engine::accounts::Secret;
 use notchling_engine::machines::engine_plan::{AdminAnswer, AdminNeed, PlanKind};
 use notchling_engine::machines::step::{FixOutcome, StepId};
 use notchling_engine::machines::usage::SecretUsage;
@@ -15,7 +14,16 @@ use super::runs::{Run, RunDone};
 impl MachinesModel {
     // MARK: Fixes: every one starts here, from a button, and only shows its plan
 
+    /// A request while a sheet is on show came from a click that reached a card under it (or a
+    /// key): it is refused, so the Run on screen stays the plan it shows.
+    fn busy(&self) -> bool {
+        self.sheet.is_some()
+    }
+
     fn show_plan(&mut self, machine: &str, kind: PlanKind) {
+        if self.busy() {
+            return;
+        }
         match self.parts.engine.plan(machine, kind) {
             Ok(plan) => {
                 let prompt = match self.machine(machine) {
@@ -27,7 +35,7 @@ impl MachinesModel {
                         asked: false,
                     },
                 };
-                self.sheet = Some(Sheet::Fix(prompt));
+                self.set_sheet(Some(Sheet::Fix(prompt)));
             }
             Err(why) if why == "nothing to set up" => {
                 self.outcomes.insert(machine.to_owned(), FixLine::note(why));
@@ -58,6 +66,9 @@ impl MachinesModel {
 
     /// The Running switch: shows its script. Runs nothing.
     pub fn request_toggle(&mut self, machine: &str, on: bool) {
+        if self.busy() {
+            return;
+        }
         if on {
             if let Some(blocker) = self.parts.engine.turn_on_blocker(machine) {
                 self.outcomes.insert(
@@ -77,28 +88,33 @@ impl MachinesModel {
 
     /// Update N machines: shows each delivery. Runs nothing.
     pub fn request_update(&mut self, secret: &str) {
+        if self.busy() {
+            return;
+        }
         match self
             .parts
             .engine
             .plan("", PlanKind::Update(secret.to_owned()))
         {
-            Ok(plan) => {
-                self.sheet = Some(Sheet::Fix(FixPrompt {
-                    plan,
-                    host: String::new(),
-                    user: String::new(),
-                    asked: false,
-                }))
-            }
+            Ok(plan) => self.set_sheet(Some(Sheet::Fix(FixPrompt {
+                plan,
+                host: String::new(),
+                user: String::new(),
+                asked: false,
+            }))),
             Err(why) => {
                 self.update_notes.insert(secret.to_owned(), why);
             }
         }
     }
 
-    /// The sheet's Run. `password` is for this one run: it goes into the answer and nowhere else,
-    /// and nothing here keeps it. The [`Run`] is executed by the caller, off the UI thread.
-    pub fn confirm(&mut self, password: Option<Secret>) -> Option<Run> {
+    /// The sheet's Run. The typed password is for this one run: it goes into the answer and
+    /// leaves the model. The [`Run`] is executed by the caller, off the UI thread.
+    pub fn confirm(&mut self) -> Option<Run> {
+        if !matches!(self.sheet, Some(Sheet::Fix(_))) {
+            return None;
+        }
+        let password = self.password.take();
         let Some(Sheet::Fix(prompt)) = self.sheet.take() else {
             return None;
         };
@@ -139,7 +155,9 @@ impl MachinesModel {
 
     /// The sheet's Cancel (or Esc): nothing runs. A Set up all waiting on it stops.
     pub fn cancel_sheet(&mut self) {
-        if let Some(Sheet::Fix(prompt)) = self.sheet.take() {
+        let closed = self.sheet.take();
+        self.set_sheet(None);
+        if let Some(Sheet::Fix(prompt)) = closed {
             if prompt.asked {
                 if let Some(pending) = self.pending.take() {
                     pending.answer(AdminAnswer::None);
@@ -179,7 +197,7 @@ impl MachinesModel {
         }
         match self.machine(&pending.machine) {
             Some(m) => {
-                self.sheet = Some(Sheet::Fix(FixPrompt::asking(&m, &pending.step)));
+                self.set_sheet(Some(Sheet::Fix(FixPrompt::asking(&m, &pending.step))));
                 self.pending = Some(pending);
                 true
             }

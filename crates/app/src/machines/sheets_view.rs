@@ -77,7 +77,7 @@ fn checkbox<V: 'static>(
 impl MachinesView {
     /// The sheet on show, over the dimmed window.
     pub(super) fn sheet_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
-        let (width, body) = match self.model.sheet.as_ref()? {
+        let (width, body) = match self.model.sheet()? {
             Sheet::Fix(prompt) => (600.0, self.fix_sheet(prompt, a, cx)),
             Sheet::Add(form) => (520.0, self.add_sheet(form, a, cx)),
             Sheet::Job(form) => (620.0, self.job_sheet(form, a, cx)),
@@ -86,6 +86,8 @@ impl MachinesView {
             div()
                 .absolute()
                 .size_full()
+                // The backdrop takes every click and hover: no card button under it is live.
+                .occlude()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -115,7 +117,7 @@ impl MachinesView {
     }
 
     /// The commands, then the admin password (or the root warning, or the block), then Cancel
-    /// and Run. The password lives in the view's `password` only and is cleared when it closes.
+    /// and Run. The password lives in the model only while this sheet does (`model_sheet`).
     fn fix_sheet(&self, prompt: &FixPrompt, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut column = div()
             .flex()
@@ -139,7 +141,7 @@ impl MachinesView {
                 a,
             ));
         } else if prompt.needs_password() {
-            let dots = "•".repeat(self.password.chars().count());
+            let dots = "•".repeat(self.model.password_len());
             column = column.child(
                 div()
                     .id("fix-password")
@@ -154,7 +156,7 @@ impl MachinesView {
                     .on_click(cx.listener(|this, _, window, _| window.focus(&this.focus))),
             );
         }
-        let can_run = prompt.can_run(!self.password.is_empty());
+        let can_run = prompt.can_run(self.model.password_len() > 0);
         let cancel = button(
             "fix-cancel",
             "Cancel",
@@ -191,7 +193,7 @@ impl MachinesView {
                     .cursor_text()
                     .child(field(form.text(which), which.placeholder(), focused, a).w_full())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(Sheet::Add(form)) = &mut this.model.sheet {
+                        if let Some(Sheet::Add(form)) = this.model.sheet_mut() {
                             form.focus = Some(which);
                         }
                         window.focus(&this.focus);
@@ -304,7 +306,7 @@ impl MachinesView {
                     .cursor_text()
                     .child(field(form.text(which), placeholder, focused, a).w_full())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(Sheet::Job(form)) = &mut this.model.sheet {
+                        if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
                             form.focus = Some(which);
                         }
                         window.focus(&this.focus);
@@ -344,7 +346,7 @@ impl MachinesView {
             a,
         )
         .on_click(cx.listener(move |this, _, _, cx| {
-            if let Some(Sheet::Job(form)) = &mut this.model.sheet {
+            if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
                 form.remove_repo(index);
             }
             cx.notify();
@@ -372,7 +374,7 @@ impl MachinesView {
             a,
         )
         .on_click(cx.listener(|this, _, window, cx| {
-            if let Some(Sheet::Job(form)) = &mut this.model.sheet {
+            if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
                 form.add_repo();
             }
             window.focus(&this.focus);
@@ -394,7 +396,7 @@ impl MachinesView {
                 a,
                 cx,
                 move |this, _| {
-                    if let Some(Sheet::Job(form)) = &mut this.model.sheet {
+                    if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
                         form.toggle_kind(&k);
                     }
                 },
@@ -422,7 +424,7 @@ impl MachinesView {
                         a,
                         cx,
                         |this, _| {
-                            if let Some(Sheet::Job(form)) = &mut this.model.sheet {
+                            if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
                                 form.toggle_all_repos();
                             }
                         },

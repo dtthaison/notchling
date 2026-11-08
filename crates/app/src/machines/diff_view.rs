@@ -80,6 +80,8 @@ impl MachinesView {
             div()
                 .absolute()
                 .size_full()
+                // The backdrop takes every click and hover: no card button under it is live.
+                .occlude()
                 .flex()
                 .items_center()
                 .justify_center()

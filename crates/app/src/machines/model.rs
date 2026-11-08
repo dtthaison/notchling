@@ -15,8 +15,8 @@ use std::sync::Arc;
 use notchling_engine::machines::actions::MorningActions;
 use notchling_engine::machines::engine::SetupEngine;
 use notchling_engine::machines::forms::{
-    job_problems, job_settings, machine_problems, migrated_note, rename_note, secret_row,
-    unreadable_note, JobDraft,
+    job_problems, job_settings, machine_problems, migrated_note, secret_row, unreadable_note,
+    JobDraft,
 };
 use notchling_engine::machines::morning::{self, GhIssue, MorningItem};
 use notchling_engine::machines::poller::{LastReport, MachinePoller};
@@ -27,14 +27,13 @@ use notchling_engine::machines::runner::Runner;
 use notchling_engine::machines::shell::is_safe_machine_path;
 use notchling_engine::machines::status::WorkerStatus;
 use notchling_engine::machines::step::StepId;
-use notchling_engine::machines::steps_secret::{pending_renames, usages};
+use notchling_engine::machines::steps_secret::usages;
 use notchling_engine::vault::entry::VaultEntry;
 use notchling_engine::vault::expiry::today_local;
 
 use super::forms::{AddForm, JobForm};
-use super::pieces::{
-    DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow, UpdateOfferRow,
-};
+pub use super::model_sheet::AdminPassword;
+use super::pieces::{DraftCheck, FixLine, FixPrompt, MachineChip, RunningSwitch, SecretRow};
 pub use super::runs::{AdminAsks, PendingAdmin, Run, RunDone};
 
 /// `machines.json` as the window reads and writes it.
@@ -159,7 +158,11 @@ pub struct MachinesModel {
     pub notice: Option<String>,
     pub outcomes: BTreeMap<String, FixLine>,
     pub update_notes: BTreeMap<String, String>,
-    pub sheet: Option<Sheet>,
+    /// The sheet on show; changed only through `open_sheet`, `close_sheet` and the Fix requests,
+    /// which clear the admin password with it (`model_sheet`).
+    pub(super) sheet: Option<Sheet>,
+    /// The Fix sheet's admin password, for its one Run.
+    pub(super) password: AdminPassword,
     pub items: Vec<MorningItem>,
     /// A line for an item whose last action worked, by item id. It leaves with the item.
     pub done: BTreeMap<String, String>,
@@ -186,6 +189,7 @@ impl MachinesModel {
             outcomes: BTreeMap::new(),
             update_notes: BTreeMap::new(),
             sheet: None,
+            password: AdminPassword::default(),
             items: Vec::new(),
             done: BTreeMap::new(),
             github_note: None,
@@ -218,7 +222,7 @@ impl MachinesModel {
         self.rebuild();
     }
 
-    fn refresh_vault(&mut self) {
+    pub(super) fn refresh_vault(&mut self) {
         self.vault_entries = self.parts.vault.entries();
     }
 
@@ -518,50 +522,6 @@ impl MachinesModel {
             list.push(machine);
             true
         })
-    }
-
-    // MARK: Renewed secrets, renames
-
-    pub fn update_offers(&self) -> Vec<UpdateOfferRow> {
-        self.parts
-            .engine
-            .update_offers()
-            .into_iter()
-            .map(|(secret, usages)| UpdateOfferRow {
-                secret,
-                count: usages.len(),
-            })
-            .collect()
-    }
-
-    pub fn rename_banner(&self) -> Option<String> {
-        let names: Vec<String> = pending_renames(&self.vault_entries)
-            .into_iter()
-            .map(|(e, _)| e.name)
-            .collect();
-        rename_note(&names)
-    }
-
-    /// The Rename button: moves each legacy secret to its new name, keeping its value.
-    pub fn rename_secrets(&mut self) {
-        let mut failed = false;
-        for (entry, name) in pending_renames(&self.vault_entries) {
-            if self.parts.vault.rename(&entry.name, &name).is_err() {
-                failed = true;
-            }
-        }
-        self.refresh_vault();
-        self.rename_note = failed.then(|| "Rename didn't finish; try again".to_owned());
-    }
-
-    /// Renew…: the secret's page (GitHub's token page for a GitHub secret).
-    pub fn renew(&mut self, name: &str) {
-        let url = self
-            .vault_entries
-            .iter()
-            .find(|e| e.id() == name.to_lowercase())
-            .and_then(|e| e.url.clone());
-        self.notice = self.parts.vault.renew(name, url.as_deref()).err();
     }
 
     // MARK: Actions on the morning items (called from buttons only)

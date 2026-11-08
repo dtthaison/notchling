@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use notchling_engine::accounts::Secret;
 use notchling_engine::machines::actions::MorningActions;
 use notchling_engine::machines::catalog;
 use notchling_engine::machines::engine::{Deps, MachineStore, SetupEngine};
@@ -20,17 +19,17 @@ use notchling_engine::vault::entry::{Kind, VaultEntry};
 use super::model::{MachinesModel, Parts, Registry, Sheet, VaultList};
 use super::pieces::DraftCheck;
 
-const T0: f64 = 1_800_000_000.0;
+pub(super) const T0: f64 = 1_800_000_000.0;
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(super) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[derive(Default)]
-struct MemRegistry {
-    list: Mutex<Vec<Machine>>,
-    unreadable: Mutex<Option<String>>,
-    saves: Mutex<usize>,
+pub(super) struct MemRegistry {
+    pub(super) list: Mutex<Vec<Machine>>,
+    pub(super) unreadable: Mutex<Option<String>>,
+    pub(super) saves: Mutex<usize>,
 }
 
 impl Registry for MemRegistry {
@@ -69,10 +68,10 @@ impl MachineStore for MemRegistry {
 }
 
 #[derive(Default)]
-struct FakeVault {
-    entries: Mutex<Vec<VaultEntry>>,
-    renames: Mutex<Vec<(String, String)>>,
-    renewed: Mutex<Vec<String>>,
+pub(super) struct FakeVault {
+    pub(super) entries: Mutex<Vec<VaultEntry>>,
+    pub(super) renames: Mutex<Vec<(String, String)>>,
+    pub(super) renewed: Mutex<Vec<String>>,
 }
 
 impl VaultList for FakeVault {
@@ -96,20 +95,20 @@ impl VaultList for FakeVault {
     }
 }
 
-struct World {
-    registry: Arc<MemRegistry>,
-    vault: Arc<FakeVault>,
-    runner: Arc<ScriptedRunner>,
-    model: MachinesModel,
+pub(super) struct World {
+    pub(super) registry: Arc<MemRegistry>,
+    pub(super) vault: Arc<FakeVault>,
+    pub(super) runner: Arc<ScriptedRunner>,
+    pub(super) model: MachinesModel,
 }
 
-fn mac(name: &str) -> Machine {
+pub(super) fn mac(name: &str) -> Machine {
     let mut m = Machine::new(name, &format!("{name}.test"), "worker");
     m.os = Some(MachineOs::MacOs);
     m
 }
 
-fn with_job(mut m: Machine) -> Machine {
+pub(super) fn with_job(mut m: Machine) -> Machine {
     let mut job = notchling_engine::machines::registry::SdWorkerSettings::new(&m.name);
     job.sd_path = "/Users/worker/sd/sd.py".into();
     job.repos
@@ -124,7 +123,7 @@ fn with_job(mut m: Machine) -> Machine {
     m
 }
 
-fn world_with(
+pub(super) fn world_with(
     machines: Vec<Machine>,
     runner: Arc<dyn Runner>,
     scripted: Arc<ScriptedRunner>,
@@ -177,7 +176,7 @@ fn world_with(
 }
 
 /// A world whose runner refuses everything (the tool before handover).
-fn off_world(machines: Vec<Machine>) -> World {
+pub(super) fn off_world(machines: Vec<Machine>) -> World {
     world_with(
         machines,
         Arc::new(Refusing(OFF)),
@@ -186,12 +185,12 @@ fn off_world(machines: Vec<Machine>) -> World {
 }
 
 /// A world whose runner records every call and answers each with an empty success.
-fn scripted_world(machines: Vec<Machine>) -> World {
+pub(super) fn scripted_world(machines: Vec<Machine>) -> World {
     let scripted = Arc::new(ScriptedRunner::new());
     world_with(machines, scripted.clone(), scripted)
 }
 
-fn fix_sheet(model: &MachinesModel) -> &super::pieces::FixPrompt {
+pub(super) fn fix_sheet(model: &MachinesModel) -> &super::pieces::FixPrompt {
     match &model.sheet {
         Some(Sheet::Fix(p)) => p,
         other => panic!("no Fix sheet: {other:?}"),
@@ -313,12 +312,12 @@ fn set_up_shows_the_steps_exact_commands_and_runs_nothing_until_confirmed() {
     // Cancel: the plan is forgotten, so a confirm of it would fail; nothing ran
     w.model.cancel_sheet();
     assert!(w.model.sheet.is_none());
-    assert!(w.model.confirm(None).is_none());
+    assert!(w.model.confirm().is_none());
     assert!(w.runner.calls().is_empty());
 
     // Run: without Reachable ✓ the engine refuses, and the card gets the line
     w.model.request_set_up(&StepId::BASE_TOOLS, "m1");
-    let run = w.model.confirm(None).expect("a confirmed run");
+    let run = w.model.confirm().expect("a confirmed run");
     assert_eq!(run.machine, "m1");
     let (done, outcome) = run.execute(w.model.engine());
     assert!(!outcome.ok);
@@ -356,7 +355,7 @@ fn the_running_switch_waits_for_the_steps_before_it() {
     assert_eq!(prompt.plan.kind, PlanKind::Running(false));
     assert_eq!(prompt.plan.admin, AdminNeed::None);
     assert!(prompt.can_run(false));
-    let run = w.model.confirm(None).expect("a run");
+    let run = w.model.confirm().expect("a run");
     assert_eq!(run.kind, PlanKind::Running(false));
 }
 
@@ -369,14 +368,12 @@ fn an_admin_step_needs_the_password_for_the_one_run() {
     assert!(prompt.needs_password() && !prompt.can_run(false) && prompt.can_run(true));
     assert!(prompt.text().starts_with("as admin:"));
     // confirm without a password is refused and recorded
-    assert!(w.model.confirm(None).is_none());
+    assert!(w.model.confirm().is_none());
     assert_eq!(w.model.outcomes["m1"].text, "needs the admin password");
     // with one, the run is handed back; the password is in the answer and nowhere in the model
     w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
-    let run = w
-        .model
-        .confirm(Some(Secret::new("hunter2")))
-        .expect("a run");
+    w.model.password_field().unwrap().push_str("hunter2");
+    let run = w.model.confirm().expect("a run");
     assert_eq!(run.kind, PlanKind::Fix(StepId::STAYS_AWAKE));
     assert!(w.model.sheet.is_none());
     assert!(!format!("{:?}", w.model.outcomes).contains("hunter2"));
@@ -464,6 +461,7 @@ fn a_renewed_vault_value_offers_an_update_whose_plan_names_no_value() {
     assert_eq!(prompt.plan.kind, PlanKind::Update("claude-worker".into()));
     assert_eq!(prompt.plan.steps.len(), 2);
     assert!(prompt.intro().contains("one machine at a time"));
+    w.model.cancel_sheet();
     w.model.request_update("nobody-waits");
     assert!(w.model.update_notes["nobody-waits"].contains("no machine waits"));
 }
@@ -531,7 +529,10 @@ fn set_up_all_asks_for_an_admin_step_through_the_sheet() {
     assert!(prompt.asked && prompt.needs_password());
     assert_eq!(prompt.text(), "sudo pmset -a sleep 0");
     assert!(
-        w.model.confirm(Some(Secret::new("pw"))).is_none(),
+        {
+            w.model.password_field().unwrap().push_str("pw");
+            w.model.confirm().is_none()
+        },
         "the answer goes to the run, not a new plan"
     );
     let answer = asked.join().unwrap();

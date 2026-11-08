@@ -77,12 +77,14 @@ pub fn model(which: Shown) -> MachinesModel {
     match which {
         Shown::Machines => {}
         Shown::Fix => model.request_set_up(&StepId::STAYS_AWAKE, "m1"),
-        Shown::Add => model.sheet = Some(Sheet::Add(AddForm::new())),
+        Shown::Add => {
+            model.open_sheet(Sheet::Add(AddForm::new()));
+        }
         Shown::Jobs => model.tab = Tab::Jobs,
         Shown::JobSheet => {
             model.tab = Tab::Jobs;
             if let Some(m) = model.machine("m1") {
-                model.sheet = Some(Sheet::Job(JobForm::new(JobDraft::of(&m))));
+                model.open_sheet(Sheet::Job(JobForm::new(JobDraft::of(&m))));
             }
         }
     }

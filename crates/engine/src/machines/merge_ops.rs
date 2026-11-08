@@ -332,5 +332,7 @@ fn is_executable(path: &str) -> bool {
 /// No execute bit off Unix: a file is as close as it gets.
 #[cfg(not(unix))]
 fn is_executable(path: &str) -> bool {
-    std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+    std::fs::metadata(path)
+        .map(|m| m.is_file())
+        .unwrap_or(false)
 }
