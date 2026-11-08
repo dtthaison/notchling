@@ -37,6 +37,11 @@ impl MachineRoots {
         self.own_dir.join("pending-updates.json")
     }
 
+    /// One line per Fix that ran.
+    pub fn audit_file(&self) -> PathBuf {
+        self.own_dir.join("audit.jsonl")
+    }
+
     /// A private folder for files a Fix hands `gh` (a public key).
     pub fn scratch(&self) -> PathBuf {
         self.own_dir.join("scratch")

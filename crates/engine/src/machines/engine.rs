@@ -73,6 +73,8 @@ pub struct Deps {
     pub scratch: PathBuf,
     /// `pending-updates.json`; `None` keeps the offers in memory only.
     pub offers_file: Option<PathBuf>,
+    /// `audit.jsonl`: one line per Fix that ran (time, machine, step, outcome; never its output).
+    pub audit: Option<PathBuf>,
 }
 
 pub const LOG_LIMIT: usize = 2000;

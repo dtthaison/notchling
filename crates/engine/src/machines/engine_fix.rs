@@ -178,6 +178,7 @@ impl SetupEngine {
             s.running.remove(&m.name);
             *s.fixes_ended.entry(m.name.clone()).or_default() += 1;
         }
+        self.audit(&m.name, title, raw.ok);
         self.changed();
         FixOutcome {
             ok: raw.ok,
@@ -412,4 +413,35 @@ pub(super) fn append(
         log.drain(..cut);
     }
     s.revision += 1;
+}
+
+impl SetupEngine {
+    /// Appends one line to the audit log: when, which machine, which Fix, whether it worked. The
+    /// output and the message stay out of it.
+    fn audit(&self, machine: &str, title: &str, ok: bool) {
+        let Some(path) = &self.deps.audit else {
+            return;
+        };
+        let line = serde_json::json!({
+            "time": (self.deps.clock)(),
+            "op": "machines.fix",
+            "machine": machine,
+            "fix": title,
+            "ok": ok,
+        });
+        if let Some(dir) = path.parent() {
+            let _ = notchling_platform::files::ensure_private_dir(dir);
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        if let Ok(mut f) = options.open(path) {
+            use std::io::Write;
+            let _ = writeln!(f, "{line}");
+        }
+    }
 }

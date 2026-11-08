@@ -180,3 +180,31 @@ fn a_failed_delivery_stays_in_the_offer() {
     assert!(!out.ok);
     assert_eq!(w.engine.update_offers()["m1-github-issues"].len(), 1);
 }
+
+#[test]
+fn every_fix_that_ran_is_audited_without_its_output() {
+    let dir = std::env::temp_dir().join(format!("notchling-audit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("audit.jsonl");
+    let mut s = Setup::new(|_, _| {
+        vec![StepBuilder::new("a")
+            .fix(super::step::StepFix::Run(super::step::FixPlan::new(
+                "echo",
+                false,
+                |_| FixOutcome::ok("printed fake-claude-0000"),
+            )))
+            .build()]
+    });
+    s.secrets = Secrets::with(&[("claude-worker", "fake-claude-0000")]);
+    s.audit = Some(file.clone());
+    let w = s.build();
+    assert!(
+        w.click("m1", PlanKind::Fix(StepId("a".into())), AdminAnswer::None)
+            .ok
+    );
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(text.lines().count(), 1);
+    assert!(text.contains("\"op\":\"machines.fix\"") && text.contains("\"machine\":\"m1\""));
+    assert!(!text.contains("fake-claude") && !text.contains("printed"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
