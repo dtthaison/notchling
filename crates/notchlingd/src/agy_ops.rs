@@ -7,6 +7,7 @@
 //! | --- | --- | --- | --- | --- |
 //! | `agy.sessions` | agent | no | `{}` | `[{id: "agy:<id>", name, project, cwd, sinceMs, working}]` (the summaries copy, plus sessions started here the copy doesn't list yet) |
 //! | `agy.state` | app | no | `{id}` | `{id, open, loading, loadError, working, title, folder, config, commands, permission}` |
+//! | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
 //! | `agy.open` | app | yes | `{id}` | `{id, loading: true}`: starts `agy acp` in the session's own folder and loads it |
 //! | `agy.send` | app | yes | `{id, text}` or `{draft_folder, text}` | `{id, sent: true}`; a draft starts the session first |
 //! | `agy.cancel` | app | yes | `{id}` | `{cancelled: true}` |
@@ -17,46 +18,45 @@
 //! session this daemon started, never from the caller; a draft's `draft_folder` is an absolute
 //! folder that exists. One turn runs per session: `agy.send` while one runs is `failed` ("busy").
 //!
-//! Events: `session.changed {id, session, row, change, error?}` on `tools` (as Codex's; chunks at most every 250 ms),
-//! and on `prompts` (app tier) `agy.permission.pending` / `agy.permission.resolved`, each also as
-//! `prompt.pending` / `prompt.resolved`, so the notch shares one answered state with Chat. A
-//! pending permission is a `prompts.list` row too. Its id is `agy-perm:<row id>:<rpc id>`.
-//! Nothing is answered by the daemon on its own; turning acting off closes every session, which
-//! cancels what was waiting.
+//! Events ([`crate::agy_sink`]): `session.changed {id, session, row, change, error?}` on `tools`
+//! (as Codex's; chunks at most every 250 ms), and on `prompts` (app tier) `agy.permission.pending`
+//! / `agy.permission.resolved`, each also as `prompt.pending` / `prompt.resolved`, so the notch
+//! shares one answered state with Chat. A pending permission is a `prompts.list` row too. Its id is
+//! `agy-perm:<row id>:<rpc id>`. Nothing is answered by the daemon on its own; turning acting off
+//! closes every session, which cancels what was waiting.
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_ops::{now_ms, text_arg, Room};
+use crate::acting_ops::{text_arg, Room};
+use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::layout::Layout;
 use crate::pages_ops::Titles;
-use notchling_engine::bridge::foreign::PROMPT_PREFIX;
 use notchling_engine::search::index::TitledSession;
-use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
-use notchling_engine::tools::agy::{self, Change, Permission, RunError, Runner, Sink, Timing};
-use notchling_local_api::{topics, ApiError, ErrorCode, OpSpec};
+use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
+use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::Duration;
 
-pub const SESSIONS: &str = "agy.sessions";
-pub const STATE: &str = "agy.state";
-pub const OPEN: &str = "agy.open";
-pub const SEND: &str = "agy.send";
-pub const CANCEL: &str = "agy.cancel";
-pub const SET_OPTION: &str = "agy.set_option";
-pub const PERMISSION: &str = "agy.permission";
+pub const SESSIONS: &str = ops::AGY_SESSIONS;
+pub const STATE: &str = ops::AGY_STATE;
+pub const CONVERSATION: &str = ops::AGY_CONVERSATION;
+pub const OPEN: &str = ops::AGY_OPEN;
+pub const SEND: &str = ops::AGY_SEND;
+pub const CANCEL: &str = ops::AGY_CANCEL;
+pub const SET_OPTION: &str = ops::AGY_SET_OPTION;
+pub const PERMISSION: &str = ops::AGY_PERMISSION;
 
-pub const PERMISSION_PENDING: &str = "agy.permission.pending";
-pub const PERMISSION_RESOLVED: &str = "agy.permission.resolved";
+pub const PERMISSION_PENDING: &str = topics::AGY_PERMISSION_PENDING;
+pub const PERMISSION_RESOLVED: &str = topics::AGY_PERMISSION_RESOLVED;
 
 /// The ops that start, type into or answer `agy`: refused while acting is off.
 pub const ACTING_OPS: [&str; 5] = [OPEN, SEND, CANCEL, SET_OPTION, PERMISSION];
 
-/// Chunk events are thinned to one per session in this long.
-const CHUNK_EVERY: Duration = Duration::from_millis(250);
+/// The app-tier reads, which work whatever the switch says.
+pub const READ_OPS: [&str; 2] = [STATE, CONVERSATION];
 
 /// Where `agy` lives and where its list is copied.
 #[derive(Clone, Debug)]
@@ -72,195 +72,11 @@ pub struct AgySetup {
     pub timing: Timing,
 }
 
-/// A session this daemon started that the summaries copy may not list yet.
-struct Started {
-    name: String,
-    folder: String,
-    at: f64,
-}
-
-/// What the runner reports, turned into events; also the permissions waiting.
-struct Shared {
-    room: Arc<dyn Room>,
-    pending: Mutex<BTreeMap<String, Value>>,
-    last_chunk: Mutex<HashMap<String, Instant>>,
-    started: Mutex<HashMap<String, Started>>,
-    runner: OnceLock<Runner>,
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-fn row_id(session: &str) -> String {
-    format!("agy:{session}")
-}
-
-fn prompt_id(session: &str, rpc: &str) -> String {
-    format!("{PROMPT_PREFIX}{}:{rpc}", row_id(session))
-}
-
-impl Shared {
-    fn publish_both(&self, event: &str, prompt_event: &str, data: &Value) {
-        self.room.publish(topics::PROMPTS, event, data);
-        self.room.publish(topics::PROMPTS, prompt_event, data);
-    }
-
-    /// `session.changed` on the `tools` topic, as Codex's: `{id, session, row, change, error?}`.
-    /// `row` is the session as `sessions.list` would give it, or null when this daemon no longer
-    /// holds it (read `agy.sessions` again).
-    fn session_changed(&self, session: &str, change: &str, error: Option<String>) {
-        let mut data = json!({"id": row_id(session), "session": session,
-                              "row": self.row(session), "change": change});
-        if let Some(error) = error {
-            data["error"] = json!(error);
-        }
-        self.room
-            .publish(topics::TOOLS, topics::SESSION_CHANGED, &data);
-    }
-
-    /// The row of a session the runner holds, working or idle by its own word.
-    fn row(&self, session: &str) -> Value {
-        let Some(runner) = self.runner.get() else {
-            return Value::Null;
-        };
-        let Some(folder) = runner.folder(session) else {
-            return Value::Null;
-        };
-        let working = runner.is_working(session);
-        let name = runner
-            .title(session)
-            .or_else(|| lock(&self.started).get(session).map(|s| s.name.clone()));
-        let agent = Agent {
-            id: row_id(session),
-            name: name.unwrap_or_else(|| "Antigravity Session".to_string()),
-            project: Path::new(&folder)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            cwd: folder.clone(),
-            group: if working {
-                AgentGroup::Working
-            } else {
-                AgentGroup::Completed
-            },
-            label: if working { "Working" } else { "Antigravity" }.to_string(),
-            detail: None,
-            since_ms: (now_secs() * 1000.0) as i64,
-            target: AgentTarget::Resume {
-                session_id: session.to_string(),
-                cwd: folder,
-            },
-            suggested_reply: None,
-            transcript_path: None,
-            host: "Antigravity".to_string(),
-            headless: false,
-            config_dir: None,
-            command: None,
-            resume_session_id: None,
-        };
-        serde_json::to_value(agent).unwrap_or(Value::Null)
-    }
-
-    /// `prompt.pending`'s shape (as a hook prompt's) plus `tool`, `rpcId`, `options` and `diff`.
-    fn prompt_json(&self, session: &str, p: &Permission, folder: &str) -> Value {
-        let card = p.to_json();
-        let summary = if p.call.title.is_empty() {
-            p.call.name.clone()
-        } else {
-            p.call.title.clone()
-        };
-        let mut data = json!({
-            "id": prompt_id(session, &p.rpc_text()),
-            "sessionId": row_id(session),
-            "tool": "agy",
-            "kind": "permission",
-            "toolName": p.call.name,
-            "summary": summary,
-            "input": p.call.input,
-            "canAlwaysAllow": p.options.iter().any(|o| o.kind == "allow_always"),
-            "question": null,
-            "cwd": folder,
-            "transcriptPath": "",
-            "createdMs": now_ms(),
-        });
-        for key in ["rpcId", "options", "diff"] {
-            data[key] = card[key].clone();
-        }
-        data
-    }
-}
-
-/// What the runner reports to.
-struct DaemonSink {
-    shared: Arc<Shared>,
-}
-
-impl Sink for DaemonSink {
-    fn changed(&self, session: &str, change: Change) {
-        let shared = &self.shared;
-        match change {
-            Change::Chunk => {
-                let mut last = lock(&shared.last_chunk);
-                let due = last
-                    .get(session)
-                    .is_none_or(|at| at.elapsed() >= CHUNK_EVERY);
-                if due {
-                    last.insert(session.to_string(), Instant::now());
-                    drop(last);
-                    shared.session_changed(session, "chunk", None);
-                }
-            }
-            Change::Loaded => shared.session_changed(session, "loaded", None),
-            Change::LoadFailed(e) => shared.session_changed(session, "load_failed", Some(e)),
-            Change::TurnStarted => shared.session_changed(session, "turn_started", None),
-            Change::TurnEnded(error) => shared.session_changed(session, "turn_ended", error),
-            Change::Options => shared.session_changed(session, "options", None),
-            Change::OptionFailed(e) => shared.session_changed(session, "option_failed", Some(e)),
-            Change::Closed => {
-                lock(&shared.last_chunk).remove(session);
-                shared.session_changed(session, "closed", None);
-            }
-            Change::PermissionPending(p) => {
-                let folder = shared
-                    .runner
-                    .get()
-                    .and_then(|r| r.folder(session))
-                    .unwrap_or_default();
-                let data = shared.prompt_json(session, &p, &folder);
-                let id = data["id"].as_str().unwrap_or_default().to_string();
-                lock(&shared.pending).insert(id, data.clone());
-                shared.publish_both(PERMISSION_PENDING, topics::PROMPT_PENDING, &data);
-                shared.session_changed(session, "permission", None);
-            }
-            Change::PermissionResolved { rpc_id, outcome } => {
-                let id = prompt_id(session, &rpc_id);
-                lock(&shared.pending).remove(&id);
-                let by = if outcome == "cancelled" {
-                    "stopped"
-                } else {
-                    "app"
-                };
-                let data = json!({"id": id, "sessionId": row_id(session), "tool": "agy",
-                                  "outcome": outcome, "by": by});
-                shared.publish_both(PERMISSION_RESOLVED, topics::PROMPT_RESOLVED, &data);
-                shared.session_changed(session, "permission_resolved", None);
-            }
-        }
-    }
-}
-
 pub struct AgyOps {
     acting: Arc<Acting>,
     shared: Arc<Shared>,
     runner: Runner,
     setup: AgySetup,
-}
-
-fn now_secs() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -286,13 +102,7 @@ impl AgyOps {
         spawner: Arc<dyn Spawner>,
         setup: AgySetup,
     ) -> AgyOps {
-        let shared = Arc::new(Shared {
-            room,
-            pending: Mutex::new(BTreeMap::new()),
-            last_chunk: Mutex::new(HashMap::new()),
-            started: Mutex::new(HashMap::new()),
-            runner: OnceLock::new(),
-        });
+        let shared = Arc::new(Shared::new(room));
         let runner = Runner::new(
             spawner,
             setup.binary.clone(),
@@ -314,8 +124,7 @@ impl AgyOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             SESSIONS => Some(OpSpec::AGENT),
-            STATE => Some(OpSpec::APP),
-            op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
+            op if READ_OPS.contains(&op) || ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -327,6 +136,7 @@ impl AgyOps {
         match op {
             SESSIONS => Ok(self.sessions()),
             STATE => self.state(args),
+            CONVERSATION => self.conversation(args),
             OPEN => self.open(args),
             SEND => self.send(args),
             CANCEL => {
@@ -451,6 +261,34 @@ impl AgyOps {
             "config": r.config(&session).iter().map(|o| o.to_json()).collect::<Vec<_>>(),
             "commands": r.commands(&session).iter().map(|c| c.to_json()).collect::<Vec<_>>(),
             "permission": r.permission(&session).map(|p| p.to_json()),
+        }))
+    }
+
+    /// The conversation the runner holds for a session, as far as it has loaded. A read: it works
+    /// with acting off, and starts nothing (a session not open answers empty, `open: false`).
+    fn conversation(&self, args: &Value) -> Result<Value, ApiError> {
+        let session = self.session_arg(args)?;
+        let peek = match args.get("peek") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(peek)) => *peek,
+            Some(_) => return Err(bad("peek is true or false")),
+        };
+        let r = &self.runner;
+        let held = if peek {
+            r.peek_conversation(&session)
+        } else {
+            r.conversation(&session)
+        };
+        let open = held.is_some();
+        let conversation =
+            serde_json::to_value(held.unwrap_or_default()).map_err(|e| failed(e.to_string()))?;
+        Ok(json!({
+            "id": row_id(&session),
+            "open": open,
+            "loading": r.is_loading(&session),
+            "loadError": r.load_error(&session),
+            "working": r.is_working(&session),
+            "conversation": conversation,
         }))
     }
 

@@ -18,6 +18,7 @@
 pub mod acting;
 pub mod acting_ops;
 pub mod agy_ops;
+pub mod agy_sink;
 pub mod attach;
 pub mod bridge_backend;
 pub mod bridge_ops;

@@ -45,6 +45,20 @@ pub mod ops {
     pub const CODEX_STOP: &str = "codex.stop";
     pub const CODEX_DELETE: &str = "codex.delete";
 
+    /// Milestone 5's Antigravity CLI ops (E6b), the shapes in `notchlingd`'s `agy_ops` module
+    /// docs. `agy.sessions` is agent tier; the rest app tier. The ones that start, type into or
+    /// answer `agy` are refused while acting is off; `agy.state` and `agy.conversation` are reads.
+    pub const AGY_SESSIONS: &str = "agy.sessions";
+    pub const AGY_STATE: &str = "agy.state";
+    /// `{id, peek?}` → `{id, open, loading, working, loadError, conversation}`: what the open
+    /// runner holds; an empty conversation with `open: false` for a session it doesn't.
+    pub const AGY_CONVERSATION: &str = "agy.conversation";
+    pub const AGY_OPEN: &str = "agy.open";
+    pub const AGY_SEND: &str = "agy.send";
+    pub const AGY_CANCEL: &str = "agy.cancel";
+    pub const AGY_SET_OPTION: &str = "agy.set_option";
+    pub const AGY_PERMISSION: &str = "agy.permission";
+
     /// Milestone 4's phone bridge, app tier. The bridge is off at every start; `bridge.set
     /// {"on": bool}` and `bridge.status` answer `{state, port, fingerprint, ...}`.
     pub const BRIDGE_SET: &str = "bridge.set";
@@ -94,6 +108,10 @@ pub mod topics {
     /// another tool runs changed (its row is given as `sessions.list` would, or `null` when it is
     /// gone).
     pub const SESSION_CHANGED: &str = "session.changed";
+    /// On `prompts`: an Antigravity permission waiting or answered, each also sent as
+    /// `prompt.pending` / `prompt.resolved` (the id is `agy-perm:<row id>:<rpc id>`).
+    pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
+    pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
     /// The phone bridge (app tier).
     pub const BRIDGE: &str = "bridge";
     /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at

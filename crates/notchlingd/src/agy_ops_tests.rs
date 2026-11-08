@@ -8,6 +8,8 @@ use notchling_engine::tools::acp::fake::{FakeHandle, FakeSpawner};
 use notchling_local_api::ops;
 use rusqlite::Connection;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::time::Instant;
 
 const RECORDING: &str =
     include_str!("../../../legacy/macos/Tests/NotchlingTests/Fixtures/acp-agy.jsonl");
@@ -205,11 +207,59 @@ fn acting_off_refuses_every_acting_op_before_anything_starts() {
 fn the_tiers() {
     let rig = rig(true);
     assert_eq!(rig.ops.spec(SESSIONS), Some(OpSpec::AGENT));
-    for op in [STATE, OPEN, SEND, CANCEL, SET_OPTION, PERMISSION] {
+    for op in [
+        STATE,
+        CONVERSATION,
+        OPEN,
+        SEND,
+        CANCEL,
+        SET_OPTION,
+        PERMISSION,
+    ] {
         assert_eq!(rig.ops.spec(op), Some(OpSpec::APP), "{op}");
     }
     assert_eq!(rig.ops.spec("agy.run"), None);
     assert_eq!(rig.ops.spec(ops::SESSIONS_LIST), None);
+}
+
+#[test]
+fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
+    // Off: a read, so it answers; nothing is open, so it is empty and starts nothing.
+    let off = rig(false);
+    let empty = off.call(CONVERSATION, json!({"id": ROW})).unwrap();
+    assert_eq!(empty["open"], false);
+    assert_eq!(empty["loading"], false);
+    assert_eq!(empty["working"], false);
+    assert_eq!(empty["conversation"]["items"], json!([]));
+    assert!(off.spawner.calls().is_empty());
+    for bad_id in [json!({"id": "x"}), json!({"id": ROW, "peek": "yes"})] {
+        assert_eq!(
+            refused(off.call(CONVERSATION, bad_id)).0,
+            ErrorCode::BadRequest
+        );
+    }
+
+    // On and loaded: the recording's history, decodable as the engine's own type.
+    let rig = rig(true);
+    rig.loaded();
+    let loaded = rig
+        .call(CONVERSATION, json!({"id": ROW, "peek": true}))
+        .unwrap();
+    assert_eq!(loaded["id"], ROW);
+    assert_eq!(loaded["open"], true);
+    let conversation: notchling_engine::transcript::model::Conversation =
+        serde_json::from_value(loaded["conversation"].clone()).unwrap();
+    assert!(
+        !conversation.items.is_empty(),
+        "session/load replayed the history"
+    );
+    // Not on the daemon's handler as an agent: the app tier only.
+    use crate::daemon::Ops;
+    use notchling_local_api::Handler;
+    let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(Arc::new(rig.ops));
+    assert_eq!(ops.spec(CONVERSATION), Some(OpSpec::APP));
+    let read = ops.call(&app(), CONVERSATION, &json!({"id": ROW})).unwrap();
+    assert_eq!(read["open"], true);
 }
 
 #[test]
