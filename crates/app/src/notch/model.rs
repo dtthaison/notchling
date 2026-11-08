@@ -44,7 +44,10 @@ impl Card {
             Card::Question(q) => q.items.first().map_or(0.0, |item| {
                 question_height(item.question.chars().count(), item.options.len())
             }),
-            Card::Permission(r) => permission_height(r.summary.chars().count(), r.can_always_allow),
+            Card::Permission(r) => match &r.agy {
+                Some(agy) => agy.height(),
+                None => permission_height(r.summary.chars().count(), r.can_always_allow),
+            },
         }
     }
 }

@@ -34,6 +34,7 @@ pub fn build(
         notch if notch.starts_with("notch-") => crate::notch::backdrop::build_render(notch, cx),
         other => crate::phone::view::build_render(other, cx)
             .or_else(|| crate::phone::prompt_view::build_render(other, cx))
-            .or_else(|| crate::sheets::view::build_render(other, cx)),
+            .or_else(|| crate::sheets::view::build_render(other, cx))
+            .or_else(|| crate::tools::view::build_render(other, cx)),
     }
 }

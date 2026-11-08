@@ -5,7 +5,7 @@ use std::path::Path;
 use notchling_engine::transcript::model::Conversation;
 use notchling_kit::Status;
 
-use super::data::{Session, Tool};
+use super::data::Session;
 use super::format::{context_text, model_name, short_path};
 use super::sidebar::status_of;
 
@@ -30,10 +30,7 @@ pub struct Header {
 /// The header for a session and its conversation.
 pub fn header(session: &Session, conversation: &Conversation, home: &Path) -> Header {
     let agent = &session.agent;
-    let tool = match session.tool {
-        Tool::Claude => "Claude Code",
-        Tool::Codex => "Codex",
-    };
+    let tool = session.tool.name();
     let host = if agent.host.is_empty() {
         tool.to_owned()
     } else {
@@ -80,7 +77,7 @@ mod tests {
                 command: None,
                 resume_session_id: None,
             },
-            tool: Tool::Claude,
+            tool: crate::chat::data::Tool::Claude,
             transcript: None,
         }
     }

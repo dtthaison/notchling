@@ -13,7 +13,10 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
-use crate::notch::source::{DataRoot as NotchRoot, Source, DATA_ROOT_ENV};
+use crate::notch::source::{DataRoot as NotchRoot, Source, ANTIGRAVITY_DIR, DATA_ROOT_ENV};
+use crate::tools::foreign::AgyList;
+use crate::tools::live::ToolLive;
+use crate::tools::requests::RowTool;
 use crate::transcripts::Locator;
 
 /// Which tool a session belongs to.
@@ -21,6 +24,27 @@ use crate::transcripts::Locator;
 pub enum Tool {
     Claude,
     Codex,
+    /// Antigravity CLI: its rows come from a copy of its summaries database, and its conversation
+    /// from the daemon (`agy.conversation`), since the files are protobuf.
+    Antigravity,
+}
+
+impl Tool {
+    pub fn of(row_id: &str) -> Tool {
+        match RowTool::of(row_id) {
+            RowTool::Claude => Tool::Claude,
+            RowTool::Codex => Tool::Codex,
+            RowTool::Agy => Tool::Antigravity,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tool::Claude => "Claude Code",
+            Tool::Codex => "Codex",
+            Tool::Antigravity => "Antigravity",
+        }
+    }
 }
 
 /// The folders with none scanned twice. A lane's `projects` is a symlink to the main one, so
@@ -60,6 +84,8 @@ pub struct DataRoot {
     pub data_dir: PathBuf,
     /// Read as `~/.codex`: Codex's `sessions/`.
     pub codex_dir: PathBuf,
+    /// Read as `~/.gemini/antigravity-cli`, through a copy of its summaries database.
+    pub antigravity_dir: PathBuf,
     /// The user's home, for `~` in paths.
     pub home: PathBuf,
     /// A fixture root: transcript paths in it may be relative to this folder, its rows never age
@@ -75,20 +101,31 @@ impl DataRoot {
             claude_dir: home.join(".claude"),
             data_dir: paths::data_dir()?,
             codex_dir: home.join(".codex"),
+            antigravity_dir: home.join(ANTIGRAVITY_DIR),
             home,
             fixture: None,
         })
     }
 
-    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`.
+    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`,
+    /// `<root>/antigravity-cli`.
     pub fn fixture(root: &Path) -> DataRoot {
         DataRoot {
             claude_dir: root.join("claude"),
             data_dir: root.join("notchling"),
             codex_dir: root.join("codex"),
+            antigravity_dir: root.join("antigravity-cli"),
             home: root.to_path_buf(),
             fixture: Some(root.to_path_buf()),
         }
+    }
+
+    /// The Antigravity list, read through a copy in our own folder.
+    pub fn new_agy_list(&self) -> AgyList {
+        AgyList::new(
+            self.antigravity_dir.clone(),
+            self.data_dir.join("antigravity"),
+        )
     }
 
     /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
@@ -138,6 +175,8 @@ impl DataRoot {
         let root = NotchRoot {
             claude_dir: self.claude_dir.clone(),
             data_dir: self.data_dir.clone(),
+            codex_dir: self.codex_dir.clone(),
+            antigravity_dir: self.antigravity_dir.clone(),
             fixture: self.fixture.clone(),
         };
         match self.fixture {
@@ -190,17 +229,17 @@ impl DataRoot {
     }
 
     /// Every session, needs input first, then working, then done, newest first in each: Claude
-    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
-    /// Each Claude row's transcript is found the way the notch finds it (`Locator`). The monitor
-    /// and the locator keep what polls need between them: ended terminal sessions, and rows with no
-    /// transcript yet.
+    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days)
+    /// and Antigravity's summaries (14 days). Each Claude row's transcript is found the way the
+    /// notch finds it (`Locator`). The monitor and the locator keep what polls need between them:
+    /// ended terminal sessions, and rows with no transcript yet.
     pub fn sessions_with(
         &self,
         monitor: &mut Monitor,
         locator: &mut Locator,
         now_ms: i64,
     ) -> Vec<Session> {
-        self.sessions_from(monitor, locator, None, now_ms)
+        self.sessions_from(monitor, locator, &mut self.new_agy_list(), None, now_ms)
     }
 
     /// [`DataRoot::sessions_with`] with Claude Code's rows given: the daemon's list
@@ -209,6 +248,7 @@ impl DataRoot {
         &self,
         monitor: &mut Monitor,
         locator: &mut Locator,
+        agy: &mut AgyList,
         claude: Option<Vec<Agent>>,
         now_ms: i64,
     ) -> Vec<Session> {
@@ -236,6 +276,11 @@ impl DataRoot {
                 });
             }
         }
+        out.extend(agy.rows(now_ms).into_iter().map(|agent| Session {
+            agent,
+            tool: Tool::Antigravity,
+            transcript: None,
+        }));
         out.sort_by(|a, b| {
             a.agent
                 .group
@@ -255,6 +300,8 @@ impl DataRoot {
         match session.tool {
             Tool::Claude => conversation::read(&path),
             Tool::Codex => codex::read(&path),
+            // The daemon's, fetched by the view; never read from Antigravity's files.
+            Tool::Antigravity => Conversation::default(),
         }
     }
 
@@ -294,6 +341,7 @@ pub struct Loader {
     root: DataRoot,
     monitor: Monitor,
     locator: Locator,
+    agy: AgyList,
 }
 
 impl Loader {
@@ -301,6 +349,7 @@ impl Loader {
         Loader {
             monitor: root.new_monitor(),
             locator: root.new_locator(),
+            agy: root.new_agy_list(),
             root,
         }
     }
@@ -318,9 +367,38 @@ impl Loader {
         claude: Option<Vec<Agent>>,
         now_ms: i64,
     ) -> Loaded {
-        let sessions =
-            self.root
-                .sessions_from(&mut self.monitor, &mut self.locator, claude, now_ms);
+        self.load_live(selected, claude, &ToolLive::default(), now_ms)
+    }
+
+    /// [`Loader::load_from`] with what the daemon said about the other tools laid over their rows
+    /// (a running turn, a session it started that the files don't list yet, one deleted).
+    pub fn load_live(
+        &mut self,
+        selected: Option<&str>,
+        claude: Option<Vec<Agent>>,
+        live: &ToolLive,
+        now_ms: i64,
+    ) -> Loaded {
+        let listed = self.root.sessions_from(
+            &mut self.monitor,
+            &mut self.locator,
+            &mut self.agy,
+            claude,
+            now_ms,
+        );
+        let mut agents: Vec<Agent> = listed.iter().map(|s| s.agent.clone()).collect();
+        live.overlay(&mut agents);
+        let sessions: Vec<Session> = agents
+            .into_iter()
+            .map(|agent| Session {
+                transcript: listed
+                    .iter()
+                    .find(|s| s.agent.id == agent.id)
+                    .and_then(|s| s.transcript.clone()),
+                tool: Tool::of(&agent.id),
+                agent,
+            })
+            .collect();
         let selected = selected
             .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
             .map(str::to_owned)
@@ -373,6 +451,7 @@ mod tests {
             claude_dir: "/Users/me/.claude".into(),
             data_dir: "/Users/me/Library/Application Support/Notchling".into(),
             codex_dir: "/Users/me/.codex".into(),
+            antigravity_dir: "/Users/me/.gemini/antigravity-cli".into(),
             home: "/Users/me".into(),
             fixture: None,
         };
@@ -499,6 +578,7 @@ mod tests {
             claude_dir: "/Users/me/.claude".into(),
             data_dir: "/Users/me/Library/Application Support/Notchling".into(),
             codex_dir: "/Users/me/.codex".into(),
+            antigravity_dir: "/Users/me/.gemini/antigravity-cli".into(),
             home: "/Users/me".into(),
             fixture: None,
         })

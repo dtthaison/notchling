@@ -24,6 +24,7 @@ pub mod session_source;
 pub mod sheets;
 #[cfg(test)]
 mod testutil;
+pub mod tools;
 pub mod transcripts;
 pub mod views;
 

@@ -212,6 +212,25 @@ impl Actions {
                 }
             })
     }
+
+    /// Asks the daemon for something that needs no acting (`agy.conversation`, `agy.state`).
+    /// Blocking. Only what the connection says about acting is kept: a lost daemon detaches.
+    pub fn read(&self, request: &Request) -> Result<Value, String> {
+        let Some(transport) = &self.transport else {
+            return Err(Acting::Detached.message().unwrap_or_default().to_owned());
+        };
+        transport
+            .call(request.op, request.args.clone())
+            .map_err(|e| {
+                if let Some(Acting::Detached) = acting::after_error(&e) {
+                    self.set(Acting::Detached);
+                }
+                match e {
+                    ClientError::Api(api) => api.message,
+                    other => other.to_string(),
+                }
+            })
+    }
 }
 
 #[cfg(test)]
@@ -374,6 +393,31 @@ mod tests {
         let (actions, _) = fake(|_| Err(ClientError::Closed));
         assert_eq!(actions.refresh(), Acting::Detached);
         assert!(actions.send(&Request::stop("s1")).is_err());
+    }
+
+    #[test]
+    fn a_read_needs_no_acting_and_a_refusal_changes_nothing() {
+        let (actions, calls) = fake(|op| match op {
+            "agy.conversation" => Ok(json!({"open": false})),
+            _ => Err(ClientError::Api(ApiError::bad_request("no such session"))),
+        });
+        let read = Request {
+            op: "agy.conversation",
+            args: json!({"id": "agy:s1", "peek": true}),
+        };
+        assert_eq!(actions.acting(true), Acting::Off);
+        assert_eq!(actions.read(&read).unwrap(), json!({"open": false}));
+        assert_eq!(calls.lock().unwrap().len(), 1, "sent, acting off or not");
+        let bad = Request {
+            op: "agy.state",
+            args: json!({"id": "x"}),
+        };
+        assert_eq!(actions.read(&bad).unwrap_err(), "no such session");
+        assert_eq!(actions.acting(true), Acting::Off);
+        let (gone, _) = fake(|_| Err(ClientError::Closed));
+        assert!(gone.read(&read).is_err());
+        assert_eq!(gone.acting(true), Acting::Detached);
+        assert!(Actions::fixed(Acting::On).read(&read).is_err());
     }
 
     #[test]

@@ -18,8 +18,8 @@ use super::view::NotchView;
 use crate::acting::{Control, Decision, Request};
 use crate::mac::gate;
 
-const HEADER: f32 = 22.0;
-const GAP: f32 = 8.0;
+pub(super) const HEADER: f32 = 22.0;
+pub(super) const GAP: f32 = 8.0;
 const TAB_ROW: f32 = 24.0;
 /// The kit's option row: 10 padding around the title over its detail, or the 22 badge.
 const OPTION_PADDING: f32 = 20.0;
@@ -43,7 +43,7 @@ fn option_height() -> f32 {
 const META_CHARS_PER_LINE: usize = 62;
 
 /// The line under the controls (why they're off, the send error, or "Sending…"), wrapped.
-fn status_height(status: Option<&str>) -> f32 {
+pub(super) fn status_height(status: Option<&str>) -> f32 {
     match status {
         Some(t) => {
             wrapped_lines(t.chars().count(), META_CHARS_PER_LINE) * line(TypeRole::Meta) + GAP
@@ -144,7 +144,7 @@ impl NotchView {
     }
 
     /// Sends an answer or a decision for a session; on success its card hides.
-    fn send_for(&mut self, id: String, request: Request, cx: &mut Context<Self>) {
+    pub(super) fn send_for(&mut self, id: String, request: Request, cx: &mut Context<Self>) {
         if self.sending || !self.gate().enabled {
             return;
         }
@@ -378,6 +378,7 @@ impl NotchView {
     }
 
     /// "Permission needed": the tool and what it would run, then Allow, Always allow and Deny.
+    /// Antigravity's permissions carry their own options and take the card in `agy_card`.
     pub(super) fn permission_card(
         &self,
         id: &str,
@@ -385,6 +386,9 @@ impl NotchView {
         agent: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Div {
+        if let Some(agy) = &r.agy {
+            return self.agy_permission_card(id, r, agy, agent, cx);
+        }
         let gate = self.gate();
         let mut choices = vec![(Decision::Allow, "Allow", "This time only")];
         if r.can_always_allow {

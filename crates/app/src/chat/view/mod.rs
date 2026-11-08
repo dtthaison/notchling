@@ -1,30 +1,32 @@
-//! The Chat window's GPUI views (macOS): sidebar, header, conversation, disabled reply box,
-//! inspector. Read-only: picking a session is the only thing a click does. The view reloads when
-//! `platform::watch` reports a change under the data root (at most every 2 s while changes keep
-//! arriving) and every 30 s for the ages (`chat::reload`). Every load runs on the background
-//! executor: the [`Loader`] is sent there and taken back with the result, so the window never
-//! waits on the disk. The session rows come from the daemon (`session_source`) while it answers.
+//! The Chat window's GPUI views (macOS): sidebar, header, conversation, the reply box
+//! (`composer`), inspector. The view reloads when `platform::watch` reports a change under the
+//! data root (at most every 2 s while changes keep arriving) and every 30 s for the ages
+//! (`chat::reload`). Every load runs on the background executor: the [`Loader`] is sent there and
+//! taken back with the result, so the window never waits on the disk. The session rows come from
+//! the daemon (`session_source`) while it answers, and so do the other tools' live state and an
+//! Antigravity row's conversation (`tools`).
 
+mod composer;
 mod conversation;
 mod header;
 mod inspector;
 mod phone;
 mod sheets;
 mod sidebar;
+mod tools;
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui::{div, prelude::*, px, Context, Div, Entity, Render, ScrollHandle, Subscription, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, ScrollHandle, Subscription, Window};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
-use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
-use notchling_kit::ui::{hsla, window_appearance, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{window_appearance, KitStyled};
+use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
 
-use crate::chat::data::{DataRoot, Loaded, Loader, Session};
+use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::phone::bridge::Bridge;
 use crate::phone::view::PhonePanelView;
@@ -58,6 +60,8 @@ pub struct ChatView {
     daemon_note: Option<&'static str>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
+    /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
+    tools: tools::ChatTools,
     /// New Session or Settings, over the window.
     sheet: Option<sheets::Sheet>,
     /// The phone bridge the Phone button and its panel read.
@@ -112,6 +116,7 @@ impl ChatView {
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
+            tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
             phone: None,
@@ -146,12 +151,13 @@ impl ChatView {
         };
         let asked = self.selected.clone();
         let wanted = asked.clone();
-        let claude = self.source.view().agents;
+        let view = self.source.view();
+        let (claude, live) = (view.agents, view.tools);
         cx.spawn(async move |this, cx| {
             let (loader, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = loader.load_from(wanted.as_deref(), claude, now_ms());
+                    let loaded = loader.load_live(wanted.as_deref(), claude, &live, now_ms());
                     (loader, loaded)
                 })
                 .await;
@@ -175,9 +181,14 @@ impl ChatView {
         self.sessions = loaded.sessions;
         if self.selected == asked {
             self.selected = loaded.selected;
-            self.conversation = loaded.conversation;
+            // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
+            // files have none to put in its place.
+            let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
+            if !agy {
+                self.conversation = loaded.conversation;
+                self.loading = false;
+            }
             self.subagents = loaded.subagents;
-            self.loading = false;
             if std::mem::take(&mut self.scroll_to_end) {
                 self.conversation_scroll.scroll_to_bottom();
             }
@@ -187,7 +198,14 @@ impl ChatView {
         if std::mem::take(&mut self.load_again) {
             self.start_load(cx);
         }
+        self.sync_tools(cx);
         cx.notify();
+    }
+
+    /// Reads again now, past the gate (something this window did changed the files).
+    pub(super) fn reload_now(&mut self, cx: &mut Context<Self>) {
+        self.gate.changed();
+        self.start_load(cx);
     }
 
     fn select(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -199,6 +217,11 @@ impl ChatView {
         self.subagents.clear();
         self.loading = true;
         self.scroll_to_end = true;
+        self.tools.error = None;
+        self.tools.picker = None;
+        self.tools.agy = None;
+        self.tools.agy_fetched = None;
+        self.tools.agy_config.clear();
         self.start_load(cx);
         cx.notify();
     }
@@ -212,8 +235,9 @@ impl ChatView {
             let note = self.source.view().note();
             if note != self.daemon_note {
                 self.daemon_note = note;
-                cx.notify();
             }
+            self.sync_tools(cx);
+            cx.notify();
         }
         let dot = self.bridge_on();
         if dot != self.phone_dot {
@@ -229,50 +253,6 @@ impl ChatView {
             self.start_load(cx);
         }
     }
-}
-
-/// The reply box, disabled: replies arrive with Milestone 3.
-fn composer(a: Appearance) -> Div {
-    div()
-        .flex_shrink_0()
-        .px(px(SIDE_PADDING))
-        .pt(px(8.0))
-        .pb(px(SIDE_PADDING))
-        .child(
-            div()
-                .w_full()
-                .min_h(px(44.0))
-                .pl(px(14.0))
-                .pr(px(8.0))
-                .py(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .rounded(px(RADIUS_COMPOSER))
-                .fill(Ink::Card, a)
-                .border(px(1.0))
-                .border_color(hsla(Ink::Hairline.color(a)))
-                .opacity(0.55)
-                .child(
-                    div()
-                        .flex_1()
-                        .kit_type(TypeRole::Body)
-                        .ink(Ink::TextFaint, a)
-                        .child("Read-only for now. Replies arrive with Milestone 3."),
-                )
-                .child(
-                    div()
-                        .size(px(SEND_DISC))
-                        .flex_shrink_0()
-                        .rounded_full()
-                        .fill(Ink::Accent, a)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .ink(Ink::OnAccent, a)
-                        .child(Icon::Send.glyph()),
-                ),
-        )
 }
 
 impl Render for ChatView {
@@ -293,7 +273,7 @@ impl Render for ChatView {
                     .flex_col()
                     .child(header::render(self, a, cx))
                     .child(conversation::render(self, a))
-                    .child(composer(a)),
+                    .child(composer::render(self, a, window, cx)),
             )
             .child(inspector::render(self, a))
             .children(sheets::render(self, a))

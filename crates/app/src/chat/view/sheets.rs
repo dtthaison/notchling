@@ -24,7 +24,7 @@ pub struct Sheet {
 }
 
 impl ChatView {
-    fn acts(&self, cx: &mut Context<Self>) -> Acts {
+    pub(super) fn acts(&self, cx: &mut Context<Self>) -> Acts {
         let actions = cx
             .try_global::<AppActions>()
             .map(|a| a.0.clone())

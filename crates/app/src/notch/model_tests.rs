@@ -50,6 +50,7 @@ fn permission(session: &str) -> HookRequest {
         tool_name: "Bash".into(),
         summary: "rm -rf build".into(),
         can_always_allow: true,
+        agy: None,
     }
 }
 

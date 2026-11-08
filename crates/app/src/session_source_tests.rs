@@ -57,6 +57,7 @@ fn real_root(data_dir: &Path) -> DataRoot {
         claude_dir: data_dir.join("claude"),
         data_dir: data_dir.to_path_buf(),
         codex_dir: data_dir.join("codex"),
+        antigravity_dir: data_dir.join("antigravity-cli"),
         home: data_dir.to_path_buf(),
         fixture: None,
     }
