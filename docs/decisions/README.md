@@ -19,6 +19,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0009](0009-rulesets-as-code.md) | Rulesets as code in `.github/rulesets/`, applied by the maintainer | Accepted |
 | [0010](0010-build-then-sign-beta-then-stable.md) | Build, then sign apart; Beta daily, Stable by one click | Accepted |
 | [0011](0011-one-owner-per-resource.md) | One owner per resource while the Swift app and the daemon run side by side | Accepted |
+| [0012](0012-remote-computers.md) | Remote computers: identity by certificate, host-qualified session ids, nothing replicated | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
