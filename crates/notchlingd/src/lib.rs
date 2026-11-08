@@ -35,6 +35,7 @@ pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
+pub mod late_reply;
 pub mod layout;
 pub mod pages_cli;
 pub mod pages_ops;

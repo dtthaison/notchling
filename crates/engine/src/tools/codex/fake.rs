@@ -19,6 +19,9 @@ pub struct FakeRun {
     /// Ignores an interrupt and a terminate (like a process that traps SIGINT and SIGTERM); only
     /// a kill (or a release) ends it.
     pub stubborn: bool,
+    /// Prints nothing, not even its lines, until [`FakeProcess::release`]: a Codex slow to name
+    /// its session.
+    pub gated: bool,
 }
 
 impl FakeRun {
@@ -39,6 +42,15 @@ impl FakeRun {
                 signaled: true,
             },
             stubborn: false,
+            gated: false,
+        }
+    }
+
+    /// Prints `lines` (and exits 0) only once released.
+    pub fn gated(lines: &[&str]) -> FakeRun {
+        FakeRun {
+            gated: true,
+            ..FakeRun::ok(lines)
         }
     }
 
@@ -126,6 +138,10 @@ impl ToolProcess for FakeProcess {
     fn next(&self) -> Next {
         let mut state = self.lock();
         loop {
+            if self.run.gated && !state.released && state.ended.is_none() {
+                state = self.changed.wait(state).unwrap_or_else(|e| e.into_inner());
+                continue;
+            }
             if let Some((stream, text)) = state.lines.pop_front() {
                 return Next::Line(ToolLine { stream, text });
             }

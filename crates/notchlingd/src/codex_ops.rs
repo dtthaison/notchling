@@ -5,14 +5,16 @@
 //!
 //! | Op | Args | Reply |
 //! | --- | --- | --- |
-//! | `codex.send` | `{id \| draft_folder, text, model?, effort?}` | `{"id": "codex:<session>", "session", "state": "started"}`, or `"state": "queued", "waiting": n` behind the session's running turn |
+//! | `codex.send` | `{id \| draft_folder, text, model?, effort?, draft?}` | `{"id": "codex:<session>", "session", "state": "started"}`, or `"state": "queued", "waiting": n` behind the session's running turn, or `{"state": "starting", "draft"}` for a new session Codex hasn't named within 4.5 s |
 //! | `codex.stop` | `{id}` | `{"stopped": bool}`: SIGINT to the running turn; false when none runs |
-//! | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force` |
+//! | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force`; `{"deleted": false, "state": "deleting"}` when that takes over 4.5 s |
 //!
 //! `id` is a row id (`codex:<session>`). `draft_folder` starts a new session in that folder and
-//! the reply comes once `thread.started` names it. Events, on topic `tools`: `codex.turn {id,
-//! session, state: started | queued | ended | failed, waiting?, error?}` and `session.changed
-//! {id, session, row}` ([`topics`]).
+//! the reply comes once `thread.started` names it, or `starting` if that takes over 4.5 s (a call
+//! is given up at 5 s); `draft` (`codex-new:<uuid>`) is the app's row for it, echoed in the late
+//! events below. Events, on topic `tools`: `codex.turn {id, session, state: started | queued |
+//! ended | failed, waiting?, error?}` and `session.changed {id, session, row}` ([`topics`]); the
+//! ends of the jobs that outlast a reply are in `codex_slow.rs`.
 //!
 //! What a caller may name is narrow, since whoever holds the app tier for a moment shouldn't be
 //! able to point a sandboxed-but-writable agent anywhere or pass Codex options:
@@ -45,6 +47,7 @@ use notchling_engine::transcript::codex::meta;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -53,6 +56,11 @@ pub const CODEX_OPS: [&str; 3] = [ops::CODEX_SEND, ops::CODEX_STOP, ops::CODEX_D
 
 /// A row id's prefix (`CodexSessions.agentID`).
 const ID_PREFIX: &str = "codex:";
+
+/// How long a reply waits for a new session to be named or a delete to finish. The client gives up
+/// at 5 s (`CALL_TIMEOUT`), so a slower job is answered `starting`/`deleting` here and reports its
+/// end as an event.
+const REPLY_WAIT: Duration = Duration::from_millis(4_500);
 
 /// How long `codex delete` may run, and how long a stopped turn is waited for first.
 const DELETE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -80,6 +88,8 @@ pub struct CodexOps {
     setup: CodexSetup,
     resolve: Resolver,
     room: Arc<dyn Room>,
+    /// How long a reply waits for a new session to be named or a delete to finish, in ms.
+    reply_wait_ms: AtomicU64,
 }
 
 impl CodexOps {
@@ -109,6 +119,7 @@ impl CodexOps {
             setup,
             resolve: Box::new(move || system_codex(&found)),
             room,
+            reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
         }
     }
 
@@ -138,6 +149,12 @@ impl CodexOps {
     pub fn with_resolver(mut self, resolve: Resolver) -> CodexOps {
         self.resolve = resolve;
         self
+    }
+
+    /// How long a reply waits before it says the job is still going (tests shorten it).
+    pub fn set_reply_wait(&self, wait: Duration) {
+        let ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX);
+        self.reply_wait_ms.store(ms, Ordering::SeqCst);
     }
 
     pub fn runs(&self) -> &CodexRuns {
@@ -200,6 +217,7 @@ impl CodexOps {
             )));
         }
         let pick = self.pick(args)?;
+        let draft = Self::draft_arg(args, args.get("draft_folder").is_some())?;
         let (session, folder) = match (args.get("id"), args.get("draft_folder")) {
             (Some(_), None) => {
                 let session = Self::session_arg(args)?;
@@ -221,26 +239,17 @@ impl CodexOps {
         })?;
         self.runs.set_command(codex, Some(path));
         self.runs.set_network(self.network_allowed());
-        let sent = self
-            .runs
-            .send(Request {
-                text: text.to_string(),
-                session,
-                folder,
-                pick,
-            })
-            .map_err(|e| match e {
-                SendError::NotAllowed => forbidden(ACTING_OFF),
-                other => ApiError::new(ErrorCode::Failed, other.to_string()),
-            })?;
-        Ok(match sent {
-            Sent::Started { session } => {
-                json!({"id": row_id(&session), "session": session, "state": "started"})
-            }
-            Sent::Queued { session, waiting } => json!({
-                "id": row_id(&session), "session": session, "state": "queued", "waiting": waiting
-            }),
-        })
+        let request = Request {
+            text: text.to_string(),
+            session,
+            folder,
+            pick,
+        };
+        // A new session waits for Codex to name it, which can outlast the caller's 5 s.
+        if request.session.is_none() {
+            return self.send_new(request, draft);
+        }
+        self.runs.send(request).map(sent_json).map_err(send_error)
     }
 
     fn stop(&self, args: &Value) -> Result<Value, ApiError> {
@@ -255,40 +264,7 @@ impl CodexOps {
         }
         let (codex, path) = (self.resolve)()
             .ok_or_else(|| ApiError::new(ErrorCode::Failed, "Couldn't find the codex command."))?;
-        // The turn is stopped and its waiting messages dropped first, and given a moment to let go
-        // of the file `codex delete` removes.
-        if self.runs.forget(&session) {
-            let until = Instant::now() + STOP_SETTLE;
-            while self.runs.is_running(&session) && Instant::now() < until {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-        let command = Command::from_args(
-            &codex.to_string_lossy(),
-            &["delete".into(), "--force".into(), session.clone()],
-        )
-        .with_env("PATH", Some(&path))
-        .with_env("CODEX_HOME", Some(&self.setup.codex_home.to_string_lossy()));
-        let done = self
-            .launcher
-            .run(&command, DELETE_TIMEOUT)
-            .map_err(|e| ApiError::new(ErrorCode::Failed, e.to_string()))?;
-        if done.code != 0 {
-            let line = done.stderr.lines().rev().find(|l| !l.trim().is_empty());
-            return Err(ApiError::new(
-                ErrorCode::Failed,
-                line.map_or_else(
-                    || format!("codex delete exited with code {}.", done.code),
-                    |l| l.trim().to_string(),
-                ),
-            ));
-        }
-        self.room.publish(
-            topics::TOOLS,
-            topics::SESSION_CHANGED,
-            &json!({"id": row_id(&session), "session": session, "row": Value::Null, "deleted": true}),
-        );
-        Ok(json!({"deleted": true}))
+        self.delete_session(session, codex, path)
     }
 
     /// The folder a session runs in: the one its rollout records. A session whose turn is running
@@ -451,6 +427,10 @@ impl TurnSink for RoomSink {
         }
     }
 }
+
+#[path = "codex_slow.rs"]
+mod slow;
+use slow::{send_error, sent_json};
 
 #[cfg(test)]
 #[path = "codex_ops_tests.rs"]
