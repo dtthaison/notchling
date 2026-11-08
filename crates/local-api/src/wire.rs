@@ -1,0 +1,312 @@
+//! What goes over the socket: one JSON object per line.
+//!
+//! - Request `{"id": <u64>, "op": "<name>", "args": {...}}`.
+//! - Reply `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.
+//! - Event, only after `events.subscribe`: `{"event": "<name>", "data": {...}}`.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::fmt;
+
+/// The API version this crate speaks; `hello` must name it.
+pub const API_VERSION: u32 = 1;
+
+/// The op names of Milestone 2.
+pub mod ops {
+    pub const HELLO: &str = "hello";
+    pub const DAEMON_STATUS: &str = "daemon.status";
+    pub const SESSIONS_LIST: &str = "sessions.list";
+    pub const EVENTS_SUBSCRIBE: &str = "events.subscribe";
+}
+
+/// Event topics and the events they carry.
+pub mod topics {
+    /// `events.subscribe {"topics": ["sessions"]}`.
+    pub const SESSIONS: &str = "sessions";
+    /// The full new session list, as `sessions.list` returns it.
+    pub const SESSIONS_CHANGED: &str = "sessions.changed";
+}
+
+/// Who the caller says it is. Self-reported, so it never decides the tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientKind {
+    App,
+    Cli,
+    Hook,
+}
+
+/// What a caller may do (decision 0007). Decided by the daemon from the peer's executable path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tier {
+    /// The installed desktop app: may do everything.
+    App,
+    /// Everything else, the command line agents run included: only its narrow operations.
+    Agent,
+}
+
+/// Why a call failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    BadRequest,
+    UnknownOp,
+    Forbidden,
+    NeedsApproval,
+    Internal,
+}
+
+impl ErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::BadRequest => "bad_request",
+            ErrorCode::UnknownOp => "unknown_op",
+            ErrorCode::Forbidden => "forbidden",
+            ErrorCode::NeedsApproval => "needs_approval",
+            ErrorCode::Internal => "internal",
+        }
+    }
+}
+
+/// An `err` reply's body.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiError {
+    pub code: ErrorCode,
+    pub message: String,
+}
+
+impl ApiError {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> ApiError {
+        ApiError {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> ApiError {
+        ApiError::new(ErrorCode::BadRequest, message)
+    }
+
+    pub fn internal(message: impl Into<String>) -> ApiError {
+        ApiError::new(ErrorCode::Internal, message)
+    }
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code.as_str(), self.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+/// A request line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub id: u64,
+    pub op: String,
+    #[serde(default)]
+    pub args: Value,
+}
+
+impl Request {
+    /// Reads a request line. On failure the error carries the line's `id` when it had one, so the
+    /// reply can still name it (0 otherwise).
+    pub fn parse(line: &[u8]) -> Result<Request, (u64, ApiError)> {
+        let value: Value = serde_json::from_slice(line)
+            .map_err(|e| (0, ApiError::bad_request(format!("not JSON: {e}"))))?;
+        let id = value.get("id").and_then(Value::as_u64).unwrap_or(0);
+        serde_json::from_value(value)
+            .map_err(|e| (id, ApiError::bad_request(format!("not a request: {e}"))))
+    }
+}
+
+/// `hello`'s arguments.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hello {
+    pub client: ClientKind,
+    pub version: String,
+    pub api: u32,
+}
+
+/// `hello`'s result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloReply {
+    pub api: u32,
+    pub daemon: String,
+    pub tier: Tier,
+}
+
+/// How many clients of each kind have said hello.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientCounts {
+    pub app: u32,
+    pub cli: u32,
+    pub hook: u32,
+}
+
+/// `daemon.status`'s result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonStatus {
+    pub version: String,
+    pub pid: u32,
+    pub uptime_secs: u64,
+    pub clients: ClientCounts,
+}
+
+/// `events.subscribe`'s arguments.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Subscribe {
+    pub topics: Vec<String>,
+}
+
+/// An event line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    pub event: String,
+    #[serde(default)]
+    pub data: Value,
+}
+
+/// A line the client reads: a reply to one of its requests, or an event.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Incoming {
+    Reply {
+        id: u64,
+        result: Result<Value, ApiError>,
+    },
+    Event(Event),
+}
+
+impl Incoming {
+    /// Reads a line from the daemon. A reply whose `ok` is `null` is still a success.
+    pub fn parse(line: &[u8]) -> Result<Incoming, String> {
+        let value: Value = serde_json::from_slice(line).map_err(|e| format!("not JSON: {e}"))?;
+        let Value::Object(mut map) = value else {
+            return Err("not an object".into());
+        };
+        if let Some(name) = map.get("event").and_then(Value::as_str) {
+            let event = name.to_string();
+            let data = map.remove("data").unwrap_or(Value::Null);
+            return Ok(Incoming::Event(Event { event, data }));
+        }
+        let id = map
+            .get("id")
+            .and_then(Value::as_u64)
+            .ok_or("a reply without an id")?;
+        if let Some(err) = map.remove("err") {
+            let err: ApiError =
+                serde_json::from_value(err).map_err(|e| format!("a bad error: {e}"))?;
+            return Ok(Incoming::Reply {
+                id,
+                result: Err(err),
+            });
+        }
+        match map.remove("ok") {
+            Some(ok) => Ok(Incoming::Reply { id, result: Ok(ok) }),
+            None => Err("a reply with neither ok nor err".into()),
+        }
+    }
+}
+
+/// A success reply.
+pub fn ok_reply(id: u64, result: Value) -> Value {
+    json!({ "id": id, "ok": result })
+}
+
+/// A failure reply.
+pub fn err_reply(id: u64, error: &ApiError) -> Value {
+    json!({ "id": id, "err": { "code": error.code.as_str(), "message": error.message } })
+}
+
+/// An event line's object.
+pub fn event_line(event: &str, data: &Value) -> Value {
+    json!({ "event": event, "data": data })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_reads_with_default_args() {
+        let r = Request::parse(br#"{"id":7,"op":"sessions.list"}"#).unwrap();
+        assert_eq!(r.id, 7);
+        assert_eq!(r.op, "sessions.list");
+        assert_eq!(r.args, Value::Null);
+    }
+
+    #[test]
+    fn a_bad_request_keeps_its_id_when_it_has_one() {
+        let (id, e) = Request::parse(br#"{"id":9,"op":5}"#).unwrap_err();
+        assert_eq!(id, 9);
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        let (id, _) = Request::parse(b"\xff\xfe garbage").unwrap_err();
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn replies_and_events_round_trip() {
+        let ok = serde_json::to_vec(&ok_reply(3, json!(null))).unwrap();
+        assert_eq!(
+            Incoming::parse(&ok).unwrap(),
+            Incoming::Reply {
+                id: 3,
+                result: Ok(Value::Null)
+            }
+        );
+        let e = ApiError::new(ErrorCode::NeedsApproval, "no app attached");
+        let err = serde_json::to_vec(&err_reply(4, &e)).unwrap();
+        assert_eq!(
+            Incoming::parse(&err).unwrap(),
+            Incoming::Reply {
+                id: 4,
+                result: Err(e)
+            }
+        );
+        let ev = serde_json::to_vec(&event_line("sessions.changed", &json!([1]))).unwrap();
+        assert_eq!(
+            Incoming::parse(&ev).unwrap(),
+            Incoming::Event(Event {
+                event: "sessions.changed".into(),
+                data: json!([1])
+            })
+        );
+    }
+
+    #[test]
+    fn error_codes_are_the_wire_names() {
+        let text = serde_json::to_string(&ErrorCode::NeedsApproval).unwrap();
+        assert_eq!(text, "\"needs_approval\"");
+        for code in [
+            ErrorCode::BadRequest,
+            ErrorCode::UnknownOp,
+            ErrorCode::Forbidden,
+            ErrorCode::NeedsApproval,
+            ErrorCode::Internal,
+        ] {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                Value::String(code.as_str().into())
+            );
+        }
+    }
+
+    #[test]
+    fn hello_reads_the_plan_shape() {
+        let h: Hello =
+            serde_json::from_str(r#"{"client":"cli","version":"0.1.0","api":1}"#).unwrap();
+        assert_eq!(h.client, ClientKind::Cli);
+        let r = HelloReply {
+            api: 1,
+            daemon: "0.1.0".into(),
+            tier: Tier::Agent,
+        };
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({"api":1,"daemon":"0.1.0","tier":"agent"})
+        );
+    }
+}

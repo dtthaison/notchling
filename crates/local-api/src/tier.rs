@@ -1,0 +1,164 @@
+//! Which tier a peer gets, from its executable path (decision 0007).
+//!
+//! The app tier needs an executable path in the allowlist: the installed app bundle's binary, or for
+//! dev a path in `NOTCHLING_APP_TIER_PATHS`, read once at daemon start. Everything else, a copy of
+//! the app elsewhere included, is the agent tier.
+//!
+//! Both sides are compared canonical (symlinks resolved). The kernel already reports the file a
+//! process really runs (`proc_pidpath` on macOS, `/proc/<pid>/exe` on Linux), so a peer started
+//! through a symlink to the app is the app's own binary and counts as it. The allowlist is
+//! canonicalized once, at load: a symlink in it names the file it pointed at then, and retargeting
+//! the link later grants nothing. A path that doesn't exist at load is dropped.
+
+use crate::wire::Tier;
+use std::collections::BTreeSet;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
+/// The environment variable a dev daemon reads its extra app-tier paths from (OS path-list syntax).
+pub const APP_TIER_PATHS_ENV: &str = "NOTCHLING_APP_TIER_PATHS";
+
+/// The executables that get the app tier.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Allowlist {
+    paths: BTreeSet<PathBuf>,
+}
+
+impl Allowlist {
+    /// Nobody gets the app tier.
+    pub fn empty() -> Allowlist {
+        Allowlist::default()
+    }
+
+    /// The canonical form of each path that exists.
+    pub fn new<I, P>(paths: I) -> Allowlist
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let paths = paths
+            .into_iter()
+            .filter_map(|p| std::fs::canonicalize(p.as_ref()).ok())
+            .collect();
+        Allowlist { paths }
+    }
+
+    /// The daemon's list: the installed app's binaries plus `NOTCHLING_APP_TIER_PATHS`'s, read now.
+    pub fn for_daemon(installed: &[PathBuf], env_value: Option<&OsStr>) -> Allowlist {
+        let mut all: Vec<PathBuf> = installed.to_vec();
+        if let Some(value) = env_value {
+            all.extend(std::env::split_paths(value).filter(|p| p.is_absolute()));
+        }
+        Allowlist::new(all)
+    }
+
+    /// The tier for a peer whose executable is `exe`; an unknown path is the agent tier.
+    pub fn tier_of(&self, exe: Option<&Path>) -> Tier {
+        let Some(exe) = exe else {
+            return Tier::Agent;
+        };
+        match std::fs::canonicalize(exe) {
+            Ok(real) if self.paths.contains(&real) => Tier::App,
+            _ => Tier::Agent,
+        }
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.paths.iter()
+    }
+}
+
+/// Where the installed desktop app's binary sits, per OS. Only these and the dev variable count.
+pub fn installed_app_paths() -> Vec<PathBuf> {
+    if cfg!(target_os = "macos") {
+        vec![PathBuf::from(
+            "/Applications/Notchling.app/Contents/MacOS/notchling-app",
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::TempDir;
+
+    fn exe(dir: &TempDir, name: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        std::fs::write(&path, b"binary").unwrap();
+        path
+    }
+
+    #[test]
+    fn only_an_allowlisted_path_is_the_app_tier() {
+        let dir = TempDir::new("tier");
+        let app = exe(&dir, "app");
+        let other = exe(&dir, "other");
+        let list = Allowlist::new([&app]);
+        assert_eq!(list.tier_of(Some(&app)), Tier::App);
+        assert_eq!(list.tier_of(Some(&other)), Tier::Agent);
+        assert_eq!(list.tier_of(None), Tier::Agent);
+        assert_eq!(Allowlist::empty().tier_of(Some(&app)), Tier::Agent);
+    }
+
+    #[test]
+    fn a_copy_of_the_app_elsewhere_is_the_agent_tier() {
+        let dir = TempDir::new("tier-copy");
+        let app = exe(&dir, "app");
+        let copy = dir.path().join("copy");
+        std::fs::copy(&app, &copy).unwrap();
+        assert_eq!(Allowlist::new([&app]).tier_of(Some(&copy)), Tier::Agent);
+    }
+
+    #[test]
+    fn a_missing_path_is_dropped_at_load() {
+        let dir = TempDir::new("tier-missing");
+        let later = dir.path().join("later");
+        let list = Allowlist::new([&later]);
+        assert_eq!(list.paths().count(), 0);
+        std::fs::write(&later, b"x").unwrap();
+        assert_eq!(list.tier_of(Some(&later)), Tier::Agent);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_the_app_counts_as_the_app() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("tier-link");
+        let app = exe(&dir, "app");
+        let link = dir.path().join("link");
+        symlink(&app, &link).unwrap();
+        // The peer path through a link resolves to the app.
+        assert_eq!(Allowlist::new([&app]).tier_of(Some(&link)), Tier::App);
+        // A link in the list names its target at load.
+        assert_eq!(Allowlist::new([&link]).tier_of(Some(&app)), Tier::App);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retargeting_an_allowlisted_link_grants_nothing() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("tier-retarget");
+        let app = exe(&dir, "app");
+        let evil = exe(&dir, "evil");
+        let link = dir.path().join("link");
+        symlink(&app, &link).unwrap();
+        let list = Allowlist::new([&link]);
+        std::fs::remove_file(&link).unwrap();
+        symlink(&evil, &link).unwrap();
+        assert_eq!(list.tier_of(Some(&evil)), Tier::Agent);
+        assert_eq!(list.tier_of(Some(&link)), Tier::Agent);
+    }
+
+    #[test]
+    fn the_dev_variable_adds_absolute_paths_only() {
+        let dir = TempDir::new("tier-env");
+        let app = exe(&dir, "app");
+        let joined = std::env::join_paths([app.clone(), PathBuf::from("relative/app")]).unwrap();
+        let list = Allowlist::for_daemon(&[], Some(&joined));
+        assert_eq!(list.paths().count(), 1);
+        assert_eq!(list.tier_of(Some(&app)), Tier::App);
+        assert_eq!(Allowlist::for_daemon(&[], None).paths().count(), 0);
+    }
+}
