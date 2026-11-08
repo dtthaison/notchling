@@ -22,7 +22,7 @@ Checked against the tree on 2026-11-08. When you add, move or delete a file, upd
 | Claude Code transcripts | `Agents/TranscriptReader.swift`, `Agents/TranscriptCursor.swift`, `Chat/ConversationReader.swift`, `Agents/Subagents.swift`, `Chat/BackgroundShells.swift`, `Chat/CommandJob.swift` | `TranscriptTests`, `SnapshotTests`, `TranscriptCursorsTests`, `QueuedMessageTests`, `SuccessorTests`, `SubagentsTests`, `BackgroundShellsTests`, `CommandJobTests`, `ModelConfirmationTests`, `ZBenchmarkTests` (opt-in); fixtures `conversation.jsonl`, `notch.jsonl`, `compact.jsonl`, `bash-mode.jsonl`, `limit-hit.jsonl`, `rate-limited-429.jsonl` | mixed: `TranscriptReader.swift`, `ConversationReader.swift` auto | E1 |
 | Codex and Antigravity readers | `Agents/CodexSessions.swift`, `Agents/ACPTranscript.swift`, `Agents/AntigravityCLI.swift` | `CodexSessionsTests`, `ACPTranscriptTests`; fixtures `codex-rollout.jsonl`, `acp-agy.jsonl` | mixed: `CodexSessions.swift`, `ACPTranscript.swift` auto | E1 |
 | Phone-side transcripts | `CC/ChatTranscript.swift`, `CC/SubagentReader.swift`, `CC/TranscriptFacts.swift`, `CC/TranscriptLocator.swift`, `CC/ChatImages.swift` | CC: `ChatTranscriptTests`, `ChatRichTests`, `ChatPagingTests`, `ChatImagesTests`, `TranscriptLocatorTests`; fixtures `chat/` | mixed: `ChatTranscript.swift`, `SubagentReader.swift`, `TranscriptFacts.swift` auto | E1 |
-| Sessions and jobs | `Agents/AgentMonitor.swift`, `CC/SessionCatalog.swift`, `CC/SessionSource.swift`, `CC/SessionStore.swift`, `CC/Models.swift`, `CC/Support.swift`, `CC/PendingPromptReader.swift` | `SessionIDTests`, `JobTranscriptTests`, `MovedJobTests`; CC: `CatalogTests`, `SessionSourceTests`, `SessionSwitchTests`; fixtures `claude/`, `notchling/` | protected | E2 |
+| Sessions and jobs | `Agents/AgentMonitor.swift`, `CC/SessionCatalog.swift`, `CC/SessionSource.swift`, `CC/SessionStore.swift`, `CC/Models.swift`, `CC/Support.swift`, `CC/PendingPromptReader.swift`; Rust: `crates/engine/src/sessions/` | `SessionIDTests`, `JobTranscriptTests`, `MovedJobTests`; CC: `CatalogTests`, `SessionSourceTests`, `SessionSwitchTests`; fixtures `claude/`, `notchling/` | protected | E2 |
 | Search | `Search/SearchPanel.swift`, `Search/SessionIndex.swift`, `Search/SessionSearch.swift` | `SessionSearchTests` | auto | E1 (matching), E7 (index), U3 |
 
 ## Mac app: acting
@@ -59,7 +59,7 @@ Checked against the tree on 2026-11-08. When you add, move or delete a file, upd
 | Notch views and pet | `Notch/NotchView.swift`, `Notch/NotchRows.swift`, `Notch/NotchPeek.swift`, `Notch/NotchDetail.swift`, `Notch/NotchCardParts.swift`, `Notch/TabPerch.swift`, `Notch/Pet/` | none; check with the `render-notch-view` skill | auto | U2 |
 | Notch model, controller and cards | `Notch/NotchModel.swift`, `Notch/NotchController.swift`, `Notch/NotchForeign.swift`, `Notch/QuestionCard.swift`, `Notch/PermissionCard.swift`, `Notch/AgyPermissionCard.swift`, `Notch/PetLayer.swift` | `NotchForeignTests` | protected | U2 |
 | Design kit | `DesignKit/ChatKit.swift`, `DesignKit/PointerCursors.swift` | `PointerCursorsTests` | auto | U0 |
-| App shell, keep awake and system | `App/main.swift`, `App/AppDelegate.swift`, `App/AwakeController.swift`, `App/DockPresence.swift`, `App/PrivateFile.swift`, `App/TestRun.swift`, `System/FileEvents.swift` | `ReviewFixTests` (`PrivateFile`) | protected | E12, E14 (`migrateFromAwake`), E16 (`main.swift` modes), U0, U11 |
+| App shell, keep awake and system | `App/main.swift`, `App/AppDelegate.swift`, `App/AwakeController.swift`, `App/DockPresence.swift`, `App/PrivateFile.swift`, `App/TestRun.swift`, `System/FileEvents.swift`; Rust (E14): `crates/engine/src/settings/` | `ReviewFixTests` (`PrivateFile`) | protected | E12, E14 (`migrateFromAwake`), E16 (`main.swift` modes), U0, U11 |
 
 ## Mac app: phone bridge
 
@@ -91,7 +91,7 @@ Since Phase 4. Every crate but `crates/protocol` is a stub that builds, has one 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |
 | Workspace | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` (Rust 1.99.1), `deny.toml` (the license allowlist) | the `rust-test`, `rust-clippy` and `rust-deny` checks | protected | none |
-| Engine | `crates/engine/` | unit test in `src/lib.rs` | mixed: `src/transcript/`, `src/search/` auto (not written yet) | E1 to E3, E5 to E9, E11 to E15 |
+| Engine | `crates/engine/` | unit test in `src/lib.rs`; E1 ports in `tests/transcript_*.rs` (read the Swift fixtures by path) | mixed: `src/transcript/`, `src/search/` auto (not written yet) | E1 to E3, E5 to E9, E11 to E15 |
 | Engine service | `crates/notchlingd/` (prints its version) | unit test in `src/main.rs` | protected | E4, E16 |
 | Terminal host | `crates/ptyhost/` (prints its version) | unit test in `src/main.rs` | protected | E3 |
 | Local API | `crates/local-api/` | unit test in `src/lib.rs` | protected | E17 |
