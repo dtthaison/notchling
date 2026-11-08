@@ -1,6 +1,6 @@
-//! The read-only Chat's view models over the fixture data root (`tests/fixtures/chat-root`), on
-//! every system: what the sidebar lists, what the conversation shows, what the header and
-//! inspector say. Nothing here reads the real `~/.claude`.
+//! The read-only Chat's view models over the fixture data root (`fixtures/chat`, laid out as the
+//! notch's: `claude`, `notchling`, `codex`), on every system: what the sidebar lists, what the
+//! conversation shows, what the header and inspector say. Nothing here reads the real `~/.claude`.
 
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ use notchling_kit::{Icon, Status};
 const NOW_MS: i64 = 1_794_182_400_000;
 
 fn fixture_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/chat-root")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat")
 }
 
 #[test]

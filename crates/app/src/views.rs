@@ -33,7 +33,7 @@ pub const ALL: [ViewSpec; 5] = [
     ViewSpec {
         name: "chat",
         size: (1240.0, 780.0),
-        about: "the read-only Chat window over --data-root <dir> (a fixture, never ~/.claude)",
+        about: "the read-only Chat window (fixture data, never ~/.claude)",
     },
 ];
 
@@ -54,11 +54,6 @@ pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
     ALL.iter().chain(crate::notch::renders::VIEWS.iter())
 }
 
-/// Views that read sessions, and so take `--data-root` when rendered.
-pub fn needs_data_root(name: &str) -> bool {
-    name == "chat"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +67,5 @@ mod tests {
             assert!(!spec.about.is_empty());
         }
         assert_eq!(spec("notch"), None);
-        assert!(needs_data_root("chat") && !needs_data_root("shell"));
     }
 }

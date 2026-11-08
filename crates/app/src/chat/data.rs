@@ -1,5 +1,7 @@
-//! Where Chat reads from: the real folders, or a fixture root for `--render chat` and the tests,
-//! which never touch `~/.claude`. Everything here only reads files.
+//! Where Chat reads from: the real folders, or a fixture root laid out like the notch's
+//! (`<root>/claude`, `<root>/notchling`, `<root>/codex`; never a `.claude` path), named by
+//! `--data-root`, by `NOTCHLING_DATA_ROOT`, or for a render the checked-in `crates/app/fixtures/chat`.
+//! A render never reads the real `~/.claude`. Everything here only reads files.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +12,7 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
+use crate::notch::source::DATA_ROOT_ENV;
 
 /// Which tool a session belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,12 +32,14 @@ pub struct Session {
 /// The folders Chat reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataRoot {
-    /// Holds `.claude` (jobs, sessions, projects).
-    pub home: PathBuf,
+    /// Read as `~/.claude`: `jobs/`, `sessions/`, `projects/`.
+    pub claude_dir: PathBuf,
     /// Notchling's data folder (`lanes.json`).
     pub data_dir: PathBuf,
-    /// `~/.codex`: Codex's sessions.
-    pub codex_home: PathBuf,
+    /// Read as `~/.codex`: Codex's `sessions/`.
+    pub codex_dir: PathBuf,
+    /// The user's home, for `~` in paths.
+    pub home: PathBuf,
     /// A fixture root: transcript paths in it may be relative to this folder, its rows never age
     /// out of the Done section and its Codex files aren't filtered by date.
     pub fixture: Option<PathBuf>,
@@ -45,25 +50,48 @@ impl DataRoot {
     pub fn real() -> Option<DataRoot> {
         let home = paths::home()?;
         Some(DataRoot {
-            codex_home: home.join(".codex"),
+            claude_dir: home.join(".claude"),
             data_dir: paths::data_dir()?,
+            codex_dir: home.join(".codex"),
             home,
             fixture: None,
         })
     }
 
-    /// A fixture root: `<dir>/home/.claude`, `<dir>/data/lanes.json`, `<dir>/.codex`.
-    pub fn fixture(dir: &Path) -> DataRoot {
+    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`.
+    pub fn fixture(root: &Path) -> DataRoot {
         DataRoot {
-            home: dir.join("home"),
-            data_dir: dir.join("data"),
-            codex_home: dir.join(".codex"),
-            fixture: Some(dir.to_path_buf()),
+            claude_dir: root.join("claude"),
+            data_dir: root.join("notchling"),
+            codex_dir: root.join("codex"),
+            home: root.to_path_buf(),
+            fixture: Some(root.to_path_buf()),
+        }
+    }
+
+    /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
+    pub fn from_env() -> Option<DataRoot> {
+        std::env::var_os(DATA_ROOT_ENV)
+            .filter(|v| !v.is_empty())
+            .map(|v| DataRoot::fixture(Path::new(&v)))
+    }
+
+    /// What a render reads: the `--data-root` folder, else the environment's, else the fixture this
+    /// crate carries. Never the real home.
+    pub fn for_render(data_root: Option<&Path>) -> DataRoot {
+        match data_root {
+            Some(dir) => DataRoot::fixture(dir),
+            None => DataRoot::from_env().unwrap_or_else(|| {
+                DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"))
+            }),
         }
     }
 
     pub fn roots(&self) -> Roots {
-        Roots::new(&self.home, &self.data_dir)
+        Roots {
+            main_dir: self.claude_dir.clone(),
+            lanes_file: self.data_dir.join("lanes.json"),
+        }
     }
 
     /// The folders whose changes mean a reload: jobs, sessions and transcripts of every config
@@ -75,7 +103,7 @@ impl DataRoot {
             out.push(config.dir.join("sessions"));
             out.push(config.dir.join("projects"));
         }
-        out.push(self.codex_home.join("sessions"));
+        out.push(self.codex_dir.join("sessions"));
         out
     }
 
@@ -94,7 +122,7 @@ impl DataRoot {
         let probes = Probes::from_proc();
         let mut monitor = Monitor::default();
         if self.fixture.is_some() {
-            monitor.completed_window_ms = i64::MAX / 2;
+            monitor.completed_window_ms = i64::MAX / 4;
         }
         let mut out: Vec<Session> = monitor
             .poll(&self.roots(), &probes, now_ms)
@@ -106,7 +134,7 @@ impl DataRoot {
             })
             .collect();
         let days = self.fixture.is_none().then_some(14);
-        for path in codex_list::rollouts(&self.codex_home.join("sessions"), days, now_ms, 30) {
+        for path in codex_list::rollouts(&self.codex_dir.join("sessions"), days, now_ms, 30) {
             if let Some(agent) = codex_list::session(&path) {
                 out.push(Session {
                     agent,
@@ -160,29 +188,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixture_root_layout() {
+    fn fixture_root_layout_is_the_notch_convention() {
         let root = DataRoot::fixture(Path::new("/f"));
-        assert_eq!(root.home, PathBuf::from("/f/home"));
-        assert_eq!(root.roots().main_dir, PathBuf::from("/f/home/.claude"));
-        assert_eq!(root.roots().lanes_file, PathBuf::from("/f/data/lanes.json"));
+        assert_eq!(root.claude_dir, PathBuf::from("/f/claude"));
+        assert_eq!(root.roots().main_dir, PathBuf::from("/f/claude"));
         assert_eq!(
-            root.resolve("home/x.jsonl"),
-            PathBuf::from("/f/home/x.jsonl")
+            root.roots().lanes_file,
+            PathBuf::from("/f/notchling/lanes.json")
+        );
+        assert_eq!(
+            root.resolve("claude/x.jsonl"),
+            PathBuf::from("/f/claude/x.jsonl")
         );
         assert_eq!(root.resolve("/abs/x.jsonl"), PathBuf::from("/abs/x.jsonl"));
         let folders = root.watch_folders();
-        assert!(folders.contains(&PathBuf::from("/f/home/.claude/projects")));
-        assert!(folders.contains(&PathBuf::from("/f/.codex/sessions")));
+        assert!(folders.contains(&PathBuf::from("/f/claude/projects")));
+        assert!(folders.contains(&PathBuf::from("/f/codex/sessions")));
     }
 
     #[test]
     fn real_root_leaves_paths_alone() {
         let root = DataRoot {
-            home: "/Users/me".into(),
+            claude_dir: "/Users/me/.claude".into(),
             data_dir: "/Users/me/Library/Application Support/Notchling".into(),
-            codex_home: "/Users/me/.codex".into(),
+            codex_dir: "/Users/me/.codex".into(),
+            home: "/Users/me".into(),
             fixture: None,
         };
         assert_eq!(root.resolve("rel.jsonl"), PathBuf::from("rel.jsonl"));
+    }
+
+    #[test]
+    fn a_render_never_names_the_real_home() {
+        let explicit = DataRoot::for_render(Some(Path::new("/f")));
+        assert_eq!(explicit.claude_dir, PathBuf::from("/f/claude"));
+        let default = DataRoot::for_render(None);
+        assert!(default.fixture.is_some());
+        assert!(!default.claude_dir.ends_with(".claude"));
+        // The environment may name another fixture; either way it's a fixture, never ~/.claude.
+        assert!(default.claude_dir.ends_with("claude"));
     }
 }

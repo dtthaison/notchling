@@ -11,7 +11,9 @@ pub enum Command {
     Run {
         data_root: Option<PathBuf>,
     },
-    /// Open `view` off to the side, write it to `out` as a PNG, exit (part U10).
+    /// Open `view` off to the side, write it to `out` as a PNG, exit (part U10). A view that reads
+    /// sessions reads `data_root`, else `NOTCHLING_DATA_ROOT`, else the crate's fixture: never the
+    /// real home.
     Render {
         view: String,
         out: PathBuf,
@@ -57,11 +59,6 @@ where
             if out.extension().and_then(|e| e.to_str()) != Some("png") {
                 return Err("--out must name a .png file".to_owned());
             }
-            if views::needs_data_root(&view) && data_root.is_none() {
-                return Err(format!(
-                    "--render {view} needs --data-root <dir>: a render never reads the real ~/.claude"
-                ));
-            }
             Ok(Command::Render {
                 view,
                 out,
@@ -93,8 +90,10 @@ pub fn usage() -> String {
     let mut text = String::from(
         "usage: notchling-app [--data-root <dir>]                     the menu bar app\n       \
          notchling-app --render <view> --out <file.png> [--data-root <dir>]\n       \
-         notchling-app --version | --help\n\n--data-root <dir> reads sessions from a fixture \
-         root (<dir>/home/.claude, <dir>/.codex), never the real folders.\n\nviews:\n",
+         notchling-app --version | --help\n\n--data-root <dir> (or NOTCHLING_DATA_ROOT) reads \
+         sessions from a fixture root laid out as <dir>/claude, <dir>/notchling and <dir>/codex, \
+         never the real folders. A render without one reads the fixture this build carries.\n\n\
+         views:\n",
     );
     for spec in views::every() {
         text.push_str(&format!("  {:<20} {}\n", spec.name, spec.about));
@@ -132,21 +131,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_str("--out /tmp/g.png --render kit-gallery-dark"),
-            Ok(Command::Render {
-                view: "kit-gallery-dark".into(),
-                out: PathBuf::from("/tmp/g.png"),
-                data_root: None
-            })
-        );
-    }
-
-    #[test]
-    fn chat_render_needs_a_data_root() {
-        let err = parse_str("--render chat --out /tmp/c.png").unwrap_err();
-        assert!(err.contains("--data-root"));
-        assert_eq!(
-            parse_str("--render chat --out /tmp/c.png --data-root /f"),
+            parse_str("--out /tmp/c.png --render chat --data-root /f"),
             Ok(Command::Render {
                 view: "chat".into(),
                 out: PathBuf::from("/tmp/c.png"),
@@ -180,6 +165,6 @@ mod tests {
             Err("unknown argument: --frobnicate".to_owned())
         );
         assert!(version_line().starts_with("notchling-app "));
-        assert!(usage().contains("kit-gallery") && usage().contains("--data-root"));
+        assert!(usage().contains("kit-gallery") && usage().contains("NOTCHLING_DATA_ROOT"));
     }
 }

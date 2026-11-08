@@ -28,7 +28,7 @@ pub fn build(
         "kit-gallery" => Some(cx.new(|cx| KitGallery::new(appearance, window, cx)).into()),
         "shell" => Some(cx.new(|cx| ShellView::new(appearance, window, cx)).into()),
         "chat" => {
-            let root = DataRoot::fixture(data_root?);
+            let root = DataRoot::for_render(data_root);
             Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
         }
         notch if notch.starts_with("notch-") => crate::notch::view::build_render(notch, cx),
