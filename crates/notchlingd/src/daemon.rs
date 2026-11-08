@@ -112,6 +112,24 @@ impl Lister {
     }
 }
 
+/// Runs one read of the session list; `None` when it panicked, so the caller keeps serving the
+/// last good list. A bug in a reader (a file shaped in a way nobody expected) must not take the
+/// daemon down for every client.
+fn poll_or_keep(poll: impl FnOnce() -> Value) -> Option<Value> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(poll)) {
+        Ok(list) => Some(list),
+        Err(payload) => {
+            let why = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".into());
+            eprintln!("notchling: reading the sessions failed ({why}); serving the last list");
+            None
+        }
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -164,7 +182,8 @@ pub fn run(
         std::env::current_exe().ok().as_deref(),
     );
     let mut lister = Lister::new(layout.clone());
-    let sessions = Arc::new(Mutex::new(lister.poll()));
+    let first = poll_or_keep(|| lister.poll()).unwrap_or_else(|| Value::Array(Vec::new()));
+    let sessions = Arc::new(Mutex::new(first));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -201,17 +220,18 @@ pub fn run(
             continue;
         }
         last_poll = Instant::now();
-        let next = lister.poll();
-        let differs = {
-            let mut current = sessions.lock().unwrap_or_else(|e| e.into_inner());
-            let differs = *current != next;
+        if let Some(next) = poll_or_keep(|| lister.poll()) {
+            let differs = {
+                let mut current = sessions.lock().unwrap_or_else(|e| e.into_inner());
+                let differs = *current != next;
+                if differs {
+                    *current = next.clone();
+                }
+                differs
+            };
             if differs {
-                *current = next.clone();
+                handle.publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &next);
             }
-            differs
-        };
-        if differs {
-            handle.publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &next);
         }
         // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
@@ -308,6 +328,13 @@ mod tests {
         );
         assert!(!root.join("elsewhere/x.sock").exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_read_that_panics_keeps_the_last_list() {
+        assert_eq!(poll_or_keep(|| json!([1])), Some(json!([1])));
+        let kept = poll_or_keep(|| panic!("a reader bug"));
+        assert_eq!(kept, None);
     }
 
     #[test]
