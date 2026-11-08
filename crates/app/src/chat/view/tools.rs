@@ -15,10 +15,12 @@ use serde_json::Value;
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::chat::data::Tool;
+use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::AgyPermission;
 use crate::tools::codex_picker::CodexPicker;
 use crate::tools::live::ToolLive;
+use crate::tools::open_gate::OpenGate;
 use crate::tools::requests::{
     agy_cancel, agy_conversation, agy_open, agy_permission, agy_send, agy_send_draft,
     agy_set_option, agy_state, codex_send, codex_send_draft, codex_stop, is_draft,
@@ -52,8 +54,9 @@ pub struct ChatTools {
     /// Which row and change count the last fetch was for.
     pub agy_fetched: Option<(String, u64)>,
     pub agy_config: Vec<ConfigOption>,
-    /// Antigravity rows this Chat asked the daemon to open, once each.
-    pub opened: HashSet<String>,
+    /// Which Antigravity rows this Chat asked the daemon to open, and when to ask again (the
+    /// daemon closes a session after ten idle minutes).
+    pub opens: OpenGate,
     /// Messages the daemon queued behind a Codex turn, shown until that turn ends.
     pub queued: HashMap<String, Vec<String>>,
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
@@ -73,7 +76,7 @@ impl ChatTools {
             agy: None,
             agy_fetched: None,
             agy_config: Vec::new(),
-            opened: HashSet::new(),
+            opens: OpenGate::default(),
             queued: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
@@ -353,22 +356,26 @@ impl ChatView {
         if session.tool != Tool::Antigravity || is_draft(&id) {
             return;
         }
-        if !self.tools.live.is_open(&id)
-            && !self.tools.opened.contains(&id)
-            && self.acting(cx) == Acting::On
+        let changes = self.tools.live.agy_changes.get(&id).copied().unwrap_or(0);
+        let acting = self.acting(cx) == Acting::On;
+        let asked = u64::try_from(now_ms()).unwrap_or(0);
+        if self
+            .tools
+            .opens
+            .should_open(&id, self.tools.live.is_open(&id), acting, changes, asked)
         {
-            self.tools.opened.insert(id.clone());
+            let opened = id.clone();
             self.spawn_send(
                 agy_open(&id),
-                |view, result, _| {
+                move |view, result, _| {
                     if let Err(message) = result {
+                        view.tools.opens.failed(&opened);
                         view.tools.error = Some(message);
                     }
                 },
                 cx,
             );
         }
-        let changes = self.tools.live.agy_changes.get(&id).copied().unwrap_or(0);
         if self.tools.agy_fetched.as_ref() != Some(&(id.clone(), changes)) {
             self.tools.agy_fetched = Some((id.clone(), changes));
             self.fetch_agy(id, cx);

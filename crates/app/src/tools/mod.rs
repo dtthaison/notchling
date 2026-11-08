@@ -20,6 +20,7 @@ pub mod agy_permission;
 pub mod codex_picker;
 pub mod foreign;
 pub mod live;
+pub mod open_gate;
 pub mod renders;
 pub mod requests;
 pub mod second_opinion;
