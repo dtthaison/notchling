@@ -25,7 +25,7 @@ impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT),
-            ops::SETTINGS_SET_SWITCH => Some(OpSpec::APP),
+            ops::SETTINGS_SET_SWITCH | ops::VAULT_PENDING => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -39,6 +39,11 @@ impl Handler for Daemon {
         match op {
             ops::SETTINGS_SWITCHES => Ok(json!({
                 "accounts": on.accounts, "vault": on.vault, "install": on.install
+            })),
+            // One approval waits from before the app (re)connected.
+            ops::VAULT_PENDING => Ok(json!({
+                "approvals": [{"id": "ap-early", "names": ["github"], "command": "gh api /user"}],
+                "requests": []
             })),
             _ => {
                 on.apply(args);
@@ -152,7 +157,15 @@ fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on
         feed.following() && !notice.state().offer().is_empty()
     });
     let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
-    assert_eq!(sent, ["settings.switches"], "no switch is turned on");
+    assert_eq!(
+        sent,
+        ["settings.switches", "vault.pending"],
+        "no switch is turned on"
+    );
+    // What waited from before the connection is there, as if its event had come.
+    let waiting = feed.approvals();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0]["id"], "ap-early");
     let s = feed.switches();
     assert!(s.attached && !s.vault && !s.accounts && !s.install, "{s:?}");
     let confirm = notice.state().confirm().unwrap();
@@ -212,7 +225,15 @@ fn the_app_reads_the_switches_and_follows_the_events() {
         Some(super::super::ACCOUNTS_OFF)
     );
     let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
-    assert_eq!(sent, ["settings.switches"]);
+    assert_eq!(sent, ["settings.switches", "vault.pending"]);
+    // The approval that waited from before the connection, answered elsewhere: it goes.
+    wait_until("the early approval", || feed.approvals().len() == 1);
+    daemon.0.publish(
+        "vault",
+        "vault.approval.resolved",
+        &json!({"id": "ap-early", "decision": "deny"}),
+    );
+    wait_until("early resolved", || feed.approvals().is_empty());
 
     // The maintainer turns accounts on elsewhere: the event reaches the app.
     daemon.0.publish(

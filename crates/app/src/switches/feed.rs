@@ -150,6 +150,28 @@ impl Shared {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The daemon's `vault.pending` reply, read on each (re)connect: what waits now replaces what
+    /// was held (an id that's gone is dropped), each id once, oldest first. Events that follow
+    /// still add and resolve by id. A reply that isn't the expected object changes nothing.
+    fn load_pending(&self, reply: &Value) {
+        let (Some(approvals), Some(requests)) = (
+            reply.get("approvals").and_then(Value::as_array),
+            reply.get("requests").and_then(Value::as_array),
+        ) else {
+            return;
+        };
+        let mut s = self.state();
+        s.approvals.clear();
+        s.requests.clear();
+        for item in approvals {
+            push_pending(&mut s.approvals, item);
+        }
+        for item in requests {
+            push_pending(&mut s.requests, item);
+        }
+        s.changes.vault += 1;
+    }
+
     fn apply(&self, event: &Event) {
         let mut s = self.state();
         match event.event.as_str() {
@@ -412,8 +434,11 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     let mut failures = 0u32;
     while !shared.stopped() {
         match connect(config) {
-            Ok((client, switches)) => {
+            Ok((client, switches, pending)) => {
                 failures = 0;
+                if let Some(pending) = pending {
+                    shared.load_pending(&pending);
+                }
                 for switch in Switch::ALL {
                     let said = Said::from_bool(switches.is_on(switch));
                     shared
@@ -438,9 +463,10 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     }
 }
 
-/// Connects, subscribes and reads the switches on the same connection, so the first events seen
-/// are not older than what is read. Nothing is turned on.
-fn connect(config: &FeedConfig) -> Result<(Client, Switches), ClientError> {
+/// Connects, subscribes, then reads the switches and the vault's waiting approvals and forms
+/// (`vault.pending`) on the same connection, so the first events seen are not older than what is
+/// read: an agent that asked while the app was away still gets its prompt. Nothing is turned on.
+fn connect(config: &FeedConfig) -> Result<(Client, Switches, Option<Value>), ClientError> {
     let options = ConnectOptions {
         check_server: config.check_server,
         ..ConnectOptions::default()
@@ -459,7 +485,13 @@ fn connect(config: &FeedConfig) -> Result<(Client, Switches), ClientError> {
         Err(ClientError::Api(_)) => Switches::all_off(),
         Err(e) => return Err(e),
     };
-    Ok((client, switches))
+    // An older daemon has no such op: the events alone, as before.
+    let pending = match client.call(ops::VAULT_PENDING, json!({})) {
+        Ok(reply) => Some(reply),
+        Err(ClientError::Api(_)) => None,
+        Err(e) => return Err(e),
+    };
+    Ok((client, switches, pending))
 }
 
 fn follow(mut client: Client, shared: &Shared) {

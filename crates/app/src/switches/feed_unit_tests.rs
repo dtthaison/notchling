@@ -149,6 +149,43 @@ fn the_choice_is_kept_in_the_apps_own_settings() {
 }
 
 #[test]
+fn the_pending_list_read_on_connect_replaces_what_was_held_and_events_still_dedupe() {
+    let s = shared();
+    s.apply(&event(
+        topics::VAULT_APPROVAL_PENDING,
+        json!({"id": "gone"}),
+    ));
+    s.apply(&event(
+        topics::VAULT_REQUEST_PENDING,
+        json!({"id": "r-gone"}),
+    ));
+    let before = s.state().changes.vault;
+    s.load_pending(&json!({
+        "approvals": [{"id": "a2", "names": ["github"]}, {"id": "a2"}, {"id": "a3"}, {"no": "id"}],
+        "requests": [{"id": "r1"}]
+    }));
+    let ids = |list: &Vec<Value>| -> Vec<String> {
+        list.iter()
+            .filter_map(|p| p["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+    {
+        let st = s.state();
+        assert_eq!(ids(&st.approvals), ["a2", "a3"], "oldest first, once each");
+        assert_eq!(ids(&st.requests), ["r1"]);
+        assert_eq!(st.approvals[0]["names"], json!(["github"]));
+        assert_eq!(st.changes.vault, before + 1);
+    }
+    // An event for one already listed after the read adds nothing; a resolved one goes.
+    s.apply(&event(topics::VAULT_APPROVAL_PENDING, json!({"id": "a3"})));
+    s.apply(&event(topics::VAULT_APPROVAL_RESOLVED, json!({"id": "a2"})));
+    assert_eq!(ids(&s.state().approvals), ["a3"]);
+    // A reply this app can't read changes nothing.
+    s.load_pending(&json!("odd"));
+    assert_eq!(ids(&s.state().approvals), ["a3"]);
+}
+
+#[test]
 fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
     let s = shared();
     s.apply(&event(topics::ACCOUNTS_CHANGED, json!({"active": "a1"})));
