@@ -68,7 +68,8 @@ impl MachinesView {
                 let alive = this.update(cx, |view, cx| {
                     let revision = view.model.engine().revision();
                     let asked = view.model.tick();
-                    if asked || revision != view.seen_revision {
+                    let vault = view.model.watch_vault();
+                    if asked || vault || revision != view.seen_revision {
                         view.seen_revision = revision;
                         cx.notify();
                     }

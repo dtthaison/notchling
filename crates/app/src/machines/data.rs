@@ -27,7 +27,7 @@ use notchling_engine::vault::store::{system_keychain, Unsupported, VaultStore};
 use notchling_engine::vault::url::renew_url;
 use notchling_engine::vault::VaultRequest;
 
-use super::model::{Parts, VaultList};
+use super::model::{Parts, VaultList, VaultStamp};
 use crate::chat::data::DataRoot;
 
 /// What the tool runs over.
@@ -208,6 +208,11 @@ impl VaultList for VaultFiles {
 
     fn rename(&self, old: &str, new: &str) -> Result<(), String> {
         self.secrets.rename(old, new)
+    }
+
+    fn stamp(&self) -> Option<VaultStamp> {
+        let meta = std::fs::metadata(&self.index).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
     }
 
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String> {

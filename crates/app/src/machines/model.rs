@@ -72,7 +72,15 @@ pub trait VaultList: Send + Sync {
     fn rename(&self, old: &str, new: &str) -> Result<(), String>;
     /// Renew…: opens the secret's page.
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String>;
+    /// What changes when the list is saved (its time and size), to watch it cheaply; `None` when
+    /// there is nothing to watch.
+    fn stamp(&self) -> Option<VaultStamp> {
+        None
+    }
 }
+
+/// The vault list's modified time and size.
+pub type VaultStamp = (std::time::SystemTime, u64);
 
 /// The engine's parts the window holds, shared with its background work.
 #[derive(Clone)]
@@ -151,6 +159,9 @@ pub struct MachinesModel {
     pub registry: RegistryState,
     pub machines: Vec<Machine>,
     pub vault_entries: Vec<VaultEntry>,
+    /// The list's stamp and each name's `updated` when last looked at (`model_vault`).
+    pub(super) vault_stamp: Option<VaultStamp>,
+    pub(super) vault_seen: BTreeMap<String, String>,
     pub migration_note: Option<String>,
     pub rename_note: Option<String>,
     /// A Rename is moving the legacy secrets in the background.
@@ -184,6 +195,8 @@ impl MachinesModel {
             registry: RegistryState::Missing,
             machines: Vec::new(),
             vault_entries: Vec::new(),
+            vault_stamp: None,
+            vault_seen: BTreeMap::new(),
             migration_note: None,
             rename_note: None,
             renaming: false,
@@ -202,6 +215,7 @@ impl MachinesModel {
         };
         model.refresh_machines();
         model.refresh_vault();
+        model.rebase_vault();
         model
     }
 

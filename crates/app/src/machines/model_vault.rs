@@ -1,6 +1,7 @@
 //! The Secret Vault as the Machines window sees it (Swift `MachinesModel`'s vault half): the update
 //! offers of renewed values, the Rename banner of legacy names, Renew….
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use notchling_engine::machines::forms::rename_note;
@@ -11,6 +12,41 @@ use super::pieces::UpdateOfferRow;
 
 impl MachinesModel {
     // MARK: Renewed secrets, renames
+
+    /// Every tick: when the vault's list changed on disk, each name saved since it was last looked
+    /// at (a new name, or a new `updated`) makes its update offer, and the names are read again
+    /// (Swift: the `vaultValueChanged` notification). Only the list is read, never a value, and
+    /// nothing is sent. Whether anything changed.
+    pub fn watch_vault(&mut self) -> bool {
+        if self.renaming {
+            return false;
+        }
+        let stamp = self.parts.vault.stamp();
+        if stamp == self.vault_stamp {
+            return false;
+        }
+        self.vault_stamp = stamp;
+        self.refresh_vault();
+        for entry in &self.vault_entries {
+            let seen = self.vault_seen.insert(entry.id(), entry.updated.clone());
+            if seen.as_ref() != Some(&entry.updated) {
+                self.parts.engine.vault_value_changed(&entry.name);
+            }
+        }
+        let ids: BTreeSet<String> = self.vault_entries.iter().map(|e| e.id()).collect();
+        self.vault_seen.retain(|id, _| ids.contains(id));
+        true
+    }
+
+    /// Takes the list as it is now as seen, without an offer (the window opening, a Rename).
+    pub(super) fn rebase_vault(&mut self) {
+        self.vault_stamp = self.parts.vault.stamp();
+        self.vault_seen = self
+            .vault_entries
+            .iter()
+            .map(|e| (e.id(), e.updated.clone()))
+            .collect();
+    }
 
     pub fn update_offers(&self) -> Vec<UpdateOfferRow> {
         self.parts
@@ -52,10 +88,12 @@ impl MachinesModel {
         })
     }
 
-    /// A rename ended: the vault's names again, and a line when one didn't move.
+    /// A rename ended: the vault's names again, and a line when one didn't move. The moved names
+    /// hold the values the machines have already, so they make no update offer.
     pub fn renamed(&mut self, failed: bool) {
         self.renaming = false;
         self.refresh_vault();
+        self.rebase_vault();
         self.rename_note = failed.then(|| "Rename didn't finish; try again".to_owned());
     }
 

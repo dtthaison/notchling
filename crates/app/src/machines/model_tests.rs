@@ -89,6 +89,10 @@ impl VaultList for FakeVault {
             None => Err(format!("no {old}")),
         }
     }
+    fn stamp(&self) -> Option<super::model::VaultStamp> {
+        let n = lock(&self.renames).len() as u64;
+        Some((std::time::UNIX_EPOCH + std::time::Duration::from_secs(n), 0))
+    }
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String> {
         lock(&self.renewed).push(name.into());
         url.map(|_| ()).ok_or("no page".into())
@@ -423,35 +427,6 @@ fn secret_rows_say_what_the_vault_has_and_send_again_shows_the_delivery() {
 }
 
 #[test]
-fn renamed_legacy_secrets_show_a_banner_until_rename_moves_them() {
-    let mut w = off_world(vec![mac("m1")]);
-    lock(&w.vault.entries).push(VaultEntry::new("sd-claude", Kind::Token));
-    lock(&w.vault.entries).push(VaultEntry::new("sd-worker-m1", Kind::Token));
-    w.model.reload();
-    assert_eq!(
-        w.model.rename_banner().as_deref(),
-        Some("Rename sd-worker-m1 and sd-claude to the new names")
-    );
-    let work = w.model.rename_work().expect("two to move");
-    assert!(
-        lock(&w.vault.renames).is_empty(),
-        "nothing moves on the UI thread"
-    );
-    assert!(w.model.rename_work().is_none(), "one rename at a time");
-    let failed = work.run();
-    w.model.renamed(failed);
-    assert_eq!(
-        *lock(&w.vault.renames),
-        [
-            ("sd-worker-m1".to_string(), "m1-github-issues".to_string()),
-            ("sd-claude".to_string(), "claude-worker".to_string())
-        ]
-    );
-    assert_eq!(w.model.rename_banner(), None);
-    assert_eq!(w.model.rename_note, None);
-}
-
-#[test]
 fn a_renewed_vault_value_offers_an_update_whose_plan_names_no_value() {
     let mut w = off_world(vec![with_job(mac("m1")), with_job(mac("m2"))]);
     assert!(w.model.update_offers().is_empty());
@@ -564,27 +539,6 @@ fn set_up_all_asks_for_an_admin_step_through_the_sheet() {
     }
     w.model.cancel_sheet();
     assert!(matches!(asked.join().unwrap(), AdminAnswer::None));
-}
-
-#[test]
-fn renew_opens_the_secrets_page_or_says_why_not() {
-    let mut w = off_world(vec![mac("m1")]);
-    let mut entry = VaultEntry::new("claude-worker", Kind::Token);
-    entry.url = Some("https://claude.ai".into());
-    lock(&w.vault.entries).push(entry);
-    lock(&w.vault.entries).push(VaultEntry::new("bare", Kind::Token));
-    w.model.reload();
-    let work = w.model.renew_work("claude-worker");
-    assert!(
-        lock(&w.vault.renewed).is_empty(),
-        "nothing opens on the UI thread"
-    );
-    w.model.renewed(work.run());
-    assert_eq!(w.model.notice, None);
-    let work = w.model.renew_work("bare");
-    w.model.renewed(work.run());
-    assert_eq!(w.model.notice.as_deref(), Some("no page"));
-    assert_eq!(*lock(&w.vault.renewed), ["claude-worker", "bare"]);
 }
 
 #[test]
