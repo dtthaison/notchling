@@ -136,7 +136,9 @@ impl SetupEngine {
     }
 
     /// Runs `body` as the Fix in flight on `m`: logs `▸ <title>` and the outcome, streams its masked
-    /// output into the log.
+    /// output into the log. The machine is claimed under the same lock that checks it is free, so
+    /// two Fixes that both passed [`SetupEngine::refusal`] can't both start: the later one is
+    /// refused here and its body never runs.
     pub(super) fn perform(
         &self,
         id: StepId,
@@ -145,7 +147,13 @@ impl SetupEngine {
         password: Option<Secret>,
         body: impl FnOnce(&FixContext) -> FixOutcome,
     ) -> FixOutcome {
-        lock(&self.state).running.insert(m.name.clone(), id);
+        {
+            let mut s = lock(&self.state);
+            if s.running.contains_key(&m.name) {
+                return fail(format!("another Fix is running on {}", m.name));
+            }
+            s.running.insert(m.name.clone(), id);
+        }
         let masks: Masks = self.masks(m, password.as_ref().map(Secret::expose));
         self.append_log(&m.name, vec![format!("▸ {title}")]);
         self.changed();

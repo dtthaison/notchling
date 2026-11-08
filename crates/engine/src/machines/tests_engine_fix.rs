@@ -449,3 +449,66 @@ fn turning_the_worker_on_waits_for_every_step_before_it_but_off_never_does() {
         .run(w.engine.confirm(plan.id, AdminAnswer::None).unwrap());
     assert_eq!(off, FixOutcome::ok("Running is off"));
 }
+
+#[test]
+fn a_second_fix_on_a_machine_is_refused_even_after_both_passed_the_refusals() {
+    use std::sync::mpsc::channel;
+    let (started_tx, started) = channel::<()>();
+    let (go_tx, go) = channel::<()>();
+    let (started_tx, go) = (Mutex::new(started_tx), Mutex::new(go));
+    let slow = StepFix::Run(FixPlan::new("do slow", false, move |_| {
+        let _ = lock(&started_tx).send(());
+        let _ = lock(&go).recv();
+        FixOutcome::ok("slow done")
+    }));
+    let s = Setup::new(move |_, _| vec![StepBuilder::new("slow").fix(slow.clone()).build()]);
+    let w = Arc::new(s.build());
+    let m = lock(&w.store.list)[0].clone();
+
+    // the claim and the start are one step: a Fix that got past the refusals while another began
+    // is still turned away when it starts, and its body never runs
+    let (held_tx, held) = channel::<()>();
+    let (release_tx, release) = channel::<()>();
+    let holder = {
+        let (w, m) = (w.clone(), m.clone());
+        std::thread::spawn(move || {
+            w.engine.perform(sid("slow"), "Slow", &m, None, move |_| {
+                let _ = held_tx.send(());
+                let _ = release.recv();
+                FixOutcome::ok("held")
+            })
+        })
+    };
+    held.recv().unwrap();
+    let ran = Arc::new(Mutex::new(false));
+    let r = ran.clone();
+    let second = w.engine.perform(sid("slow"), "Slow", &m, None, move |_| {
+        *lock(&r) = true;
+        FixOutcome::ok("second")
+    });
+    assert_eq!(second, FixOutcome::fail("another Fix is running on m1"));
+    assert!(!*lock(&ran), "the second Fix never ran");
+    release_tx.send(()).unwrap();
+    assert_eq!(holder.join().unwrap(), FixOutcome::ok("held"));
+    assert!(
+        w.engine.running("m1").is_none(),
+        "the first one's claim ended"
+    );
+
+    // two confirms on the real path: the one that runs second is refused, the first runs on
+    let one = w.engine.plan("m1", PlanKind::Fix(sid("slow"))).unwrap();
+    let two = w.engine.plan("m1", PlanKind::Fix(sid("slow"))).unwrap();
+    let one = w.engine.confirm(one.id, AdminAnswer::None).unwrap();
+    let two = w.engine.confirm(two.id, AdminAnswer::None).unwrap();
+    let running = {
+        let w = w.clone();
+        std::thread::spawn(move || w.engine.run(one))
+    };
+    started.recv().unwrap();
+    assert_eq!(
+        w.engine.run(two),
+        FixOutcome::fail("another Fix is running on m1")
+    );
+    go_tx.send(()).unwrap();
+    assert_eq!(running.join().unwrap(), FixOutcome::ok("slow done"));
+}
