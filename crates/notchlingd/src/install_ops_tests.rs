@@ -201,6 +201,36 @@ fn apply_and_remove_with_the_switch_off_answer_the_dry_run_and_write_nothing() {
 }
 
 #[test]
+fn a_switch_turned_off_while_a_call_waits_for_the_writing_lock_stops_the_write() {
+    for (tag, op) in [
+        ("race-apply", ops::INSTALL_APPLY),
+        ("race-remove", ops::INSTALL_REMOVE),
+    ] {
+        let dir = Dir::new(tag);
+        let (ops, switch) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
+        let ops = Arc::new(ops);
+        let before = dir.tree();
+        // Another change is going on: the call has to wait for it.
+        let held = ops.hold_writes();
+        let waiting = {
+            let ops = ops.clone();
+            std::thread::spawn(move || ops.run(op, &json!({})))
+        };
+        // Time enough for it to reach the lock; it cannot pass while the lock is held, and
+        // however late it arrives it reads the switch only once it has the lock.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        switch.set(false);
+        drop(held);
+        let reply = waiting.join().unwrap().unwrap();
+        assert_eq!(reply["applied"], false, "{op}");
+        assert_eq!(reply["on"], false, "{op}");
+        assert_eq!(reply["message"], INSTALL_OFF, "{op}");
+        assert_eq!(dir.tree(), before, "{op}");
+        assert_eq!(settings_text(&dir), USER_SETTINGS, "{op}");
+    }
+}
+
+#[test]
 fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
     let dir = Dir::new("on");
     let (ops, switch) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
