@@ -7,8 +7,10 @@
 use crate::bridge::foreign::ForeignRow;
 use crate::sessions::iso::parse_iso_ms;
 use rusqlite::{Connection, OpenFlags};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Rows older than this are left out (14 days).
 pub const RECENT_SECS: f64 = 14.0 * 86_400.0;
@@ -22,7 +24,9 @@ pub const DB_NAME: &str = "conversation_summaries.db";
 /// The copy's name in ours.
 const COPY_NAME: &str = "summaries.db";
 
-static COPYING: Mutex<()> = Mutex::new(());
+/// Held while a copy is made or read, so two calls never clobber each other's files; holds when
+/// each copy was last made.
+static COPIES: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
@@ -60,22 +64,40 @@ impl Row {
 /// The conversations of the last 14 days, newest first, read through a copy of `root`'s database
 /// made in `copy_dir`. Empty when there is no database or the copy can't be read.
 pub fn rows(root: &Path, copy_dir: &Path, now_secs: f64) -> Vec<Row> {
+    rows_cached(root, copy_dir, now_secs, Duration::ZERO)
+}
+
+/// [`rows`], but a copy made less than `reuse` ago is read again instead of being made again:
+/// callers that ask every few seconds (the session list, the index, a folder lookup) share one copy
+/// of the database and its WAL.
+pub fn rows_cached(root: &Path, copy_dir: &Path, now_secs: f64, reuse: Duration) -> Vec<Row> {
     let source = root.join(DB_NAME);
     if !source.is_file() {
         return Vec::new();
     }
-    let _one = COPYING.lock().unwrap_or_else(|e| e.into_inner());
+    // One copy being made or read at a time in this process, and when each was made. The folder is
+    // ours alone (the daemon's own, never the Swift app's), so no other process writes there.
+    let mut made = COPIES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     if notchling_platform::files::ensure_private_dir(copy_dir).is_err() {
         return Vec::new();
     }
     let copy = copy_dir.join(COPY_NAME);
-    for suffix in ["", "-wal", "-shm"] {
-        let to = with_suffix(&copy, suffix);
-        let _ = std::fs::remove_file(&to);
-        let from = with_suffix(&source, suffix);
-        if suffix != "-shm" && from.is_file() {
-            let _ = std::fs::copy(&from, &to);
+    let young = made
+        .get(&copy)
+        .is_some_and(|at| at.elapsed() < reuse && copy.is_file());
+    if !young {
+        for suffix in ["", "-wal", "-shm"] {
+            let to = with_suffix(&copy, suffix);
+            let _ = std::fs::remove_file(&to);
+            let from = with_suffix(&source, suffix);
+            if suffix != "-shm" && from.is_file() {
+                let _ = std::fs::copy(&from, &to);
+            }
         }
+        made.insert(copy.clone(), Instant::now());
     }
     read_copy(&copy, now_secs).unwrap_or_default()
 }

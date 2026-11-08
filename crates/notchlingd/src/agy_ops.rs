@@ -41,6 +41,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// How long one copy of Antigravity's summaries database is read again before it is remade.
+const COPY_REUSE: Duration = Duration::from_secs(3);
+
 pub const SESSIONS: &str = ops::AGY_SESSIONS;
 pub const STATE: &str = ops::AGY_STATE;
 pub const CONVERSATION: &str = ops::AGY_CONVERSATION;
@@ -222,8 +225,15 @@ impl AgyOps {
 
     // MARK: Ops
 
+    /// The rows, from a copy of the database at most [`COPY_REUSE`] old: the session list, a
+    /// folder lookup and the prompts all ask, and each used to copy the database and its WAL.
     fn rows(&self) -> Vec<Row> {
-        summaries::rows(&self.setup.root, &self.setup.copy_dir, now_secs())
+        summaries::rows_cached(
+            &self.setup.root,
+            &self.setup.copy_dir,
+            now_secs(),
+            COPY_REUSE,
+        )
     }
 
     fn sessions(&self) -> Value {

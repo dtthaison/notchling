@@ -72,6 +72,10 @@ fn civil(days: i64) -> (i64, i64, i64) {
 }
 
 struct Rig {
+    /// Antigravity's folder, with its summaries database.
+    root: PathBuf,
+    /// Where the daemon makes its copy of that database.
+    copies: PathBuf,
     ops: AgyOps,
     room: Arc<FakeRoom>,
     spawner: Arc<FakeSpawner>,
@@ -83,13 +87,15 @@ fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
     let room = Arc::new(FakeRoom::default());
     let acting = Arc::new(Acting::in_memory(on));
     let spawner = Arc::new(spawner);
+    let root = antigravity_root(&folder);
+    let copies = scratch("copy");
     let ops = AgyOps::new(
         acting.clone(),
         room.clone(),
         spawner.clone(),
         AgySetup {
-            root: antigravity_root(&folder),
-            copy_dir: scratch("copy"),
+            root: root.clone(),
+            copy_dir: copies.clone(),
             home: scratch("home"),
             binary: binary.map(String::from),
             start_wait: Duration::from_secs(10),
@@ -97,6 +103,8 @@ fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
         },
     );
     Rig {
+        root,
+        copies,
         ops,
         room,
         spawner,
@@ -202,6 +210,40 @@ fn acting_off_refuses_every_acting_op_before_anything_starts() {
     assert_eq!(titled[0].folder, rig.folder.to_string_lossy());
     let state = rig.call(STATE, json!({"id": ROW})).unwrap();
     assert_eq!(state["open"], false);
+}
+
+#[test]
+fn the_session_list_shares_one_copy_of_the_database_for_a_few_seconds() {
+    let rig = rig(true);
+    assert_eq!(
+        rig.call(SESSIONS, json!({}))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let copy = rig.copies.join("summaries.db");
+    assert!(copy.is_file(), "the copy is made in the daemon's folder");
+    let made = std::fs::metadata(&copy).unwrap().modified().unwrap();
+    // A row Antigravity writes now is not seen until the copy is remade; asking again (the list,
+    // the index and a folder lookup all do) does not copy the database and its WAL again.
+    let db = Connection::open(rig.root.join(summaries::DB_NAME)).unwrap();
+    db.execute(
+        "INSERT INTO conversation_summaries SELECT 'later', title, preview, workspace_uris, status, \
+         last_modified_time, nesting_depth FROM conversation_summaries LIMIT 1",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        rig.call(SESSIONS, json!({}))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(std::fs::metadata(&copy).unwrap().modified().unwrap(), made);
 }
 
 #[test]
