@@ -8,6 +8,10 @@
 //! Milestone 1 did; the thread keeps trying to reconnect with a growing wait, at most
 //! [`Backoff::max`] (10 s) apart, and the callers go back to the daemon's rows as soon as it is up.
 //!
+//! Before saying hello the client checks who serves the socket (`server_trusted`: this user, and
+//! on macOS a `notchling` in an app bundle or a cargo target folder). Anything else hears nothing;
+//! the files are read and both windows say "Daemon not trusted" ([`Link::Untrusted`]).
+//!
 //! Only the session list comes from the daemon. Transcripts and Codex rollouts are still read by
 //! the app, read-only.
 //!
@@ -23,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use notchling_engine::sessions::Agent;
 use notchling_local_api::{
-    ensure_daemon, topics, Client, ClientError, ClientKind, Started, SOCKET_NAME,
+    ensure_daemon, topics, Client, ClientError, ClientKind, ConnectOptions, Started, SOCKET_NAME,
 };
 
 use crate::chat::data::DataRoot;
@@ -65,6 +69,9 @@ pub struct SourceConfig {
     pub start: Option<Starter>,
     pub backoff: Backoff,
     pub version: String,
+    /// Check that a Notchling daemon serves the socket before saying anything (the local API's
+    /// `server_trusted`). Always on in the app; off only for tests that serve from their own binary.
+    pub check_server: bool,
 }
 
 /// The configuration for the running app over `root`, or `None` when it must read files only: a
@@ -84,6 +91,7 @@ pub fn config_for(root: &DataRoot, exe: Option<&Path>) -> Option<SourceConfig> {
         start,
         backoff: Backoff::default(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        check_server: true,
     })
 }
 
@@ -98,6 +106,9 @@ pub enum Link {
     Daemon,
     /// The daemon is unreachable: the files are read, and the UI says so.
     Down,
+    /// Something that isn't a trusted Notchling daemon serves the socket: nothing is said to it,
+    /// the files are read, and the UI says so.
+    Untrusted,
 }
 
 /// The latest answer.
@@ -115,10 +126,23 @@ impl View {
     pub fn daemon_down(&self) -> bool {
         self.link == Link::Down
     }
+
+    /// The note both windows show about the daemon, if any.
+    pub fn note(&self) -> Option<&'static str> {
+        match self.link {
+            Link::Down => Some(DAEMON_DOWN_NOTE),
+            Link::Untrusted => Some(DAEMON_UNTRUSTED_NOTE),
+            Link::Files | Link::Connecting | Link::Daemon => None,
+        }
+    }
 }
 
 /// The note both windows show while the daemon can't be reached.
 pub const DAEMON_DOWN_NOTE: &str = "Daemon not running";
+
+/// The note both windows show while the socket is served by something that isn't Notchling's
+/// daemon.
+pub const DAEMON_UNTRUSTED_NOTE: &str = "Daemon not trusted";
 
 struct State {
     agents: Option<Vec<Agent>>,
@@ -223,18 +247,23 @@ fn run(config: SourceConfig, shared: &Shared) {
     let mut tried_start = false;
     let mut failures = 0u32;
     while !shared.stopped() {
+        let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
             Ok((client, agents)) => {
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
             }
+            Err(ClientError::UntrustedServer(_)) => {
+                link = Link::Untrusted;
+                failures = failures.saturating_add(1);
+            }
             Err(_) => failures = failures.saturating_add(1),
         }
         if shared.stopped() {
             return;
         }
-        shared.set(Link::Down, None);
+        shared.set(link, None);
         // The short wait after a lost connection, longer after each failed attempt.
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
@@ -247,7 +276,11 @@ fn connect(
     config: &SourceConfig,
     tried_start: &mut bool,
 ) -> Result<(Client, Vec<Agent>), ClientError> {
-    let open = || Client::connect(&config.socket, ClientKind::App, &config.version);
+    let options = ConnectOptions {
+        check_server: config.check_server,
+        ..ConnectOptions::default()
+    };
+    let open = || Client::connect_with(&config.socket, ClientKind::App, &config.version, &options);
     let mut client = match open() {
         Err(ClientError::NotRunning(_)) if !*tried_start && config.start.is_some() => {
             *tried_start = true;

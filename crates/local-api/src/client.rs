@@ -4,6 +4,8 @@
 //! background thread, never its UI thread; [`Client::into_events`] does that for an event stream.
 
 use crate::framing::{write_line, FrameError, LineReader};
+use crate::peer::{same_user, PeerInfo};
+use crate::spawn::spawn_allowed;
 use crate::transport::{self, Stream};
 use crate::wire::{
     ops, ApiError, ClientKind, DaemonStatus, Event, Hello, HelloReply, Incoming, Tier, API_VERSION,
@@ -35,6 +37,9 @@ pub enum ClientError {
     Protocol(String),
     /// This system has no transport yet (Windows in Milestone 2).
     Unsupported,
+    /// The process serving the socket isn't a Notchling daemon this client trusts: another user,
+    /// or (macOS) not a `notchling` in an app bundle or a cargo target folder. Nothing was sent.
+    UntrustedServer(String),
     Io(io::Error),
 }
 
@@ -48,6 +53,12 @@ impl fmt::Display for ClientError {
             ClientError::Protocol(e) => write!(f, "the daemon sent something unexpected: {e}"),
             ClientError::Unsupported => {
                 write!(f, "the local API is not supported on this system yet")
+            }
+            ClientError::UntrustedServer(why) => {
+                write!(
+                    f,
+                    "the socket isn't served by a trusted notchling daemon: {why}"
+                )
             }
             ClientError::Io(e) => write!(f, "{e}"),
         }
@@ -75,6 +86,44 @@ pub fn connect_raw(socket: &Path) -> Result<Stream, ClientError> {
     })
 }
 
+/// Whether the process serving a socket, `server`, may be talked to: it runs as this user, and on
+/// macOS its file (from its audit token) is one [`spawn_allowed`] would start, a `notchling` in an
+/// app bundle or a cargo target folder. Linux checks the user only: a Linux install has no fixed
+/// place yet.
+pub fn server_trusted(server: &PeerInfo, my_uid: u32) -> Result<(), String> {
+    if !same_user(server.uid, my_uid) {
+        return Err(format!("it runs as user {}", server.uid));
+    }
+    if cfg!(target_os = "macos") {
+        let Some(exe) = &server.exe else {
+            return Err("its executable can't be named".into());
+        };
+        if !spawn_allowed(exe) {
+            return Err(format!("{} is not a notchling daemon", exe.display()));
+        }
+    }
+    Ok(())
+}
+
+/// How [`Client::connect_with`] connects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConnectOptions {
+    /// How long each call waits for its reply.
+    pub timeout: Duration,
+    /// Check who serves the socket before saying anything ([`server_trusted`]). On by default;
+    /// only a test serving from its own binary turns it off.
+    pub check_server: bool,
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        ConnectOptions {
+            timeout: CALL_TIMEOUT,
+            check_server: true,
+        }
+    }
+}
+
 /// A connection that has said hello.
 pub struct Client {
     stream: Stream,
@@ -86,18 +135,43 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connects and says hello as `kind` with `version`, waiting up to [`CALL_TIMEOUT`].
+    /// Connects, checks that a Notchling daemon serves the socket ([`server_trusted`]), and says
+    /// hello as `kind` with `version`, waiting up to [`CALL_TIMEOUT`].
     pub fn connect(socket: &Path, kind: ClientKind, version: &str) -> Result<Client, ClientError> {
         Client::connect_with_timeout(socket, kind, version, CALL_TIMEOUT)
     }
 
+    /// [`Client::connect`] with another call timeout.
     pub fn connect_with_timeout(
         socket: &Path,
         kind: ClientKind,
         version: &str,
         timeout: Duration,
     ) -> Result<Client, ClientError> {
+        let options = ConnectOptions {
+            timeout,
+            ..ConnectOptions::default()
+        };
+        Client::connect_with(socket, kind, version, &options)
+    }
+
+    /// Connects, checks the server unless `options` say not to, and says hello.
+    pub fn connect_with(
+        socket: &Path,
+        kind: ClientKind,
+        version: &str,
+        options: &ConnectOptions,
+    ) -> Result<Client, ClientError> {
+        let timeout = options.timeout;
         let stream = connect_raw(socket)?;
+        if options.check_server {
+            // Before a word is sent: a stranger on the socket hears nothing from us.
+            let server = transport::peer(&stream).map_err(|e| {
+                ClientError::UntrustedServer(format!("its process can't be identified ({e})"))
+            })?;
+            server_trusted(&server, crate::peer::current_uid())
+                .map_err(ClientError::UntrustedServer)?;
+        }
         stream
             .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(ClientError::Io)?;
@@ -239,5 +313,48 @@ impl Client {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn server(uid: u32, exe: Option<PathBuf>) -> PeerInfo {
+        PeerInfo {
+            uid,
+            pid: 1,
+            exe,
+            generation: Some(1),
+        }
+    }
+
+    #[test]
+    fn a_server_of_another_user_is_never_trusted() {
+        let err = server_trusted(&server(0, None), 501).unwrap_err();
+        assert!(err.contains("user 0"), "{err}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_macos_the_server_must_be_a_notchling_in_a_bundle_or_target_folder() {
+        let dir = crate::testutil::TempDir::new("trust");
+        let make = |rel: &str| {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"bin").unwrap();
+            path
+        };
+        let me = crate::peer::current_uid();
+        let bundled = make("Notchling.app/Contents/MacOS/notchling");
+        let built = make("repo/target/debug/notchling");
+        let stranger = make("bin/notchling");
+        let renamed = make("repo/target/debug/other");
+        assert!(server_trusted(&server(me, Some(bundled)), me).is_ok());
+        assert!(server_trusted(&server(me, Some(built)), me).is_ok());
+        assert!(server_trusted(&server(me, Some(stranger)), me).is_err());
+        assert!(server_trusted(&server(me, Some(renamed)), me).is_err());
+        assert!(server_trusted(&server(me, None), me).is_err());
     }
 }

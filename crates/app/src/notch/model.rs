@@ -73,8 +73,9 @@ pub struct NotchModel {
     pub width: NotchWidth,
     /// Off, a peek shows only who finished or wants you.
     pub show_last_reply: bool,
-    /// The daemon can't be reached, so the rows are read from the files: the list says so.
-    pub daemon_down: bool,
+    /// What the list says about the daemon while the rows are read from the files (it is down, or
+    /// not trusted); `None` says nothing.
+    pub daemon_note: Option<&'static str>,
     /// The clock for ages, in milliseconds since the epoch.
     pub now_ms: i64,
     /// The card on show's drawn height, which beats the estimate (`cardHeight`); the view sets it.
@@ -98,7 +99,7 @@ impl Default for NotchModel {
             notch: DEFAULT_NOTCH,
             width: NotchWidth::default(),
             show_last_reply: true,
-            daemon_down: false,
+            daemon_note: None,
             now_ms: 0,
             card_height: None,
             hovering: false,

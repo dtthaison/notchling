@@ -8,6 +8,7 @@
 
 use crate::layout::Layout;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
+use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
     ops, topics, Allowlist, ApiError, AuditLog, Caller, Handler, Limits, OpSpec, Server,
@@ -111,6 +112,24 @@ impl Lister {
     }
 }
 
+/// Runs one read of the session list; `None` when it panicked, so the caller keeps serving the
+/// last good list. A bug in a reader (a file shaped in a way nobody expected) must not take the
+/// daemon down for every client.
+fn poll_or_keep(poll: impl FnOnce() -> Value) -> Option<Value> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(poll)) {
+        Ok(list) => Some(list),
+        Err(payload) => {
+            let why = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".into());
+            eprintln!("notchling: reading the sessions failed ({why}); serving the last list");
+            None
+        }
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -144,12 +163,27 @@ pub fn run(
         notchling_platform::files::ensure_private_dir(&layout.state_dir())
             .map_err(|e| DaemonError::Io(io::Error::other(e)))?;
     }
+    // One daemon per real data folder, wherever its socket is (the socket's own lock comes with
+    // `Server::bind`). Held until this returns.
+    let _data_lock = match layout.data_lock() {
+        Some(path) => {
+            notchling_platform::files::ensure_private_dir(&layout.data_dir)
+                .map_err(|e| DaemonError::Io(io::Error::other(e)))?;
+            match InstanceLock::try_acquire(&path).map_err(DaemonError::Io)? {
+                Some(lock) => Some(lock),
+                None => return Err(DaemonError::AlreadyRunning(layout.data_dir.clone())),
+            }
+        }
+        None => None,
+    };
     let allowlist = Allowlist::for_daemon(
         &installed_app_paths(),
         std::env::var_os(APP_TIER_PATHS_ENV).as_deref(),
+        std::env::current_exe().ok().as_deref(),
     );
     let mut lister = Lister::new(layout.clone());
-    let sessions = Arc::new(Mutex::new(lister.poll()));
+    let first = poll_or_keep(|| lister.poll()).unwrap_or_else(|| Value::Array(Vec::new()));
+    let sessions = Arc::new(Mutex::new(first));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -186,17 +220,18 @@ pub fn run(
             continue;
         }
         last_poll = Instant::now();
-        let next = lister.poll();
-        let differs = {
-            let mut current = sessions.lock().unwrap_or_else(|e| e.into_inner());
-            let differs = *current != next;
+        if let Some(next) = poll_or_keep(|| lister.poll()) {
+            let differs = {
+                let mut current = sessions.lock().unwrap_or_else(|e| e.into_inner());
+                let differs = *current != next;
+                if differs {
+                    *current = next.clone();
+                }
+                differs
+            };
             if differs {
-                *current = next.clone();
+                handle.publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &next);
             }
-            differs
-        };
-        if differs {
-            handle.publish(topics::SESSIONS, topics::SESSIONS_CHANGED, &next);
         }
         // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
@@ -266,6 +301,40 @@ mod tests {
             .call(&caller(), ops::SESSIONS_LIST, &Value::Null)
             .unwrap();
         assert_eq!(got, json!([{"id": "a"}]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_second_daemon_on_another_socket_over_the_same_data_folder_is_refused() {
+        // A stand-in for the real folders, in /tmp (socket paths are short); never the real ones.
+        let root = PathBuf::from(format!("/tmp/nl-datalock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let layout = Layout {
+            claude_dir: root.join("claude"),
+            data_dir: root.join("data"),
+            socket: root.join("elsewhere/x.sock"),
+            socket_given: true,
+            fixture: false,
+        };
+        // The first daemon, as far as the data folder knows.
+        let _first = InstanceLock::try_acquire(&root.join("data/notchlingd.lock"))
+            .unwrap()
+            .unwrap();
+        let result = run(layout, DaemonOptions::default(), &|| true);
+        assert!(
+            matches!(result, Err(DaemonError::AlreadyRunning(_))),
+            "{result:?}"
+        );
+        assert!(!root.join("elsewhere/x.sock").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_read_that_panics_keeps_the_last_list() {
+        assert_eq!(poll_or_keep(|| json!([1])), Some(json!([1])));
+        let kept = poll_or_keep(|| panic!("a reader bug"));
+        assert_eq!(kept, None);
     }
 
     #[test]

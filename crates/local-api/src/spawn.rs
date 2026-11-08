@@ -2,13 +2,15 @@
 //!
 //! [`ensure_daemon`] connects first; only when nobody listens does it start `<binary> daemon
 //! --socket <socket>` detached and wait up to 3 s for the socket. It refuses a binary outside an app
-//! bundle (`*.app/Contents/…`) or a cargo target folder (`target/[<triple>/]debug|release`, or a moved one marked by `CACHEDIR.TAG`), and
-//! one not named `notchling`, so a test can never start some other program, and the socket is
-//! always passed explicitly, so a daemon started for a test socket keeps its lock, audit log and
-//! log beside that socket.
+//! bundle (`*.app/Contents/…`) or a cargo target folder (`target/[<triple>/]debug|release`, or a
+//! moved one marked by `CACHEDIR.TAG`), and one not named `notchling`, so a test can never start
+//! some other program, and the socket is always passed explicitly, so a daemon started for a test
+//! socket keeps its lock, audit log and log beside that socket. It starts the canonical path it
+//! checked, and passes on none of the starter's `NOTCHLING_*` variables (above all not
+//! `NOTCHLING_APP_TIER_PATHS`).
 
 use crate::client::{connect_raw, ClientError};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -33,7 +35,8 @@ pub enum Started {
 #[derive(Clone, Debug)]
 pub struct SpawnOptions {
     pub wait: Duration,
-    /// Passed to the daemon as `NOTCHLING_DATA_ROOT` (a fixture root), else it inherits ours.
+    /// Passed to the daemon as `NOTCHLING_DATA_ROOT` (a fixture root). No other `NOTCHLING_*`
+    /// variable reaches it: the starter's own are removed.
     pub data_root: Option<PathBuf>,
 }
 
@@ -49,32 +52,49 @@ impl Default for SpawnOptions {
 /// Whether `binary` may be started as the daemon: named `notchling`, inside an app bundle or a
 /// cargo target folder. Checked on the canonical path, so a symlink counts as what it points at.
 pub fn spawn_allowed(binary: &Path) -> bool {
-    let Ok(real) = std::fs::canonicalize(binary) else {
-        return false;
-    };
+    allowed_binary(binary).is_some()
+}
+
+/// The canonical path of `binary` when [`spawn_allowed`] says yes. That path, not `binary`, is
+/// the one to start, so a symlink retargeted after the check starts nothing new.
+pub fn allowed_binary(binary: &Path) -> Option<PathBuf> {
+    let real = std::fs::canonicalize(binary).ok()?;
     let named = real.file_stem() == Some(OsStr::new("notchling"))
         && matches!(real.extension().and_then(OsStr::to_str), None | Some("exe"));
-    if !named {
-        return false;
-    }
-    let parts: Vec<&OsStr> = real
-        .components()
+    (named && (in_app_bundle(&real) || in_cargo_target_real(&real))).then_some(real)
+}
+
+/// Whether `binary` (resolved) sits in a cargo target folder: a build, not an install. The daemon
+/// honors its dev knobs ([`crate::tier::APP_TIER_PATHS_ENV`]) only then.
+pub fn in_cargo_target(binary: &Path) -> bool {
+    std::fs::canonicalize(binary).is_ok_and(|real| in_cargo_target_real(&real))
+}
+
+fn normal_parts(real: &Path) -> Vec<&OsStr> {
+    real.components()
         .filter_map(|c| match c {
             Component::Normal(name) => Some(name),
             _ => None,
         })
-        .collect();
-    let in_bundle = parts.windows(2).any(|w| {
+        .collect()
+}
+
+fn in_app_bundle(real: &Path) -> bool {
+    normal_parts(real).windows(2).any(|w| {
         w[0].to_str().is_some_and(|n| n.ends_with(".app")) && w[1] == OsStr::new("Contents")
-    });
+    })
+}
+
+fn in_cargo_target_real(real: &Path) -> bool {
+    let parts = normal_parts(real);
     let profile = |name: &OsStr| name == OsStr::new("debug") || name == OsStr::new("release");
-    let in_target = parts
+    parts
         .windows(2)
         .any(|w| w[0] == OsStr::new("target") && profile(w[1]))
         || parts
             .windows(3)
-            .any(|w| w[0] == OsStr::new("target") && profile(w[2]));
-    in_bundle || in_target || in_tagged_target(&real, profile)
+            .any(|w| w[0] == OsStr::new("target") && profile(w[2]))
+        || in_tagged_target(real, profile)
 }
 
 /// A cargo target folder moved elsewhere (`build.target-dir`, `CARGO_TARGET_DIR`) is still named by
@@ -108,24 +128,12 @@ pub fn ensure_daemon_with(
         Err(ClientError::NotRunning(_)) => {}
         Err(e) => return Err(e),
     }
-    if !spawn_allowed(binary) {
-        return Err(ClientError::Io(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "won't start {} as the daemon: only a notchling binary in an app bundle or a cargo target folder",
-                binary.display()
-            ),
-        )));
-    }
-    let mut command = Command::new(binary);
-    command
-        .arg("daemon")
-        .arg("--socket")
-        .arg(socket)
-        .stdin(Stdio::null());
-    if let Some(root) = &options.data_root {
-        command.env("NOTCHLING_DATA_ROOT", root);
-    }
+    let mut command = daemon_command(
+        binary,
+        socket,
+        options,
+        std::env::vars_os().map(|(name, _)| name),
+    )?;
     // The socket's folder, made private if missing, so the log can go beside the socket.
     if let Some(parent) = socket.parent().filter(|p| !p.as_os_str().is_empty()) {
         if !parent.exists() {
@@ -162,6 +170,45 @@ pub fn ensure_daemon_with(
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Every Notchling setting variable starts with this.
+const KNOB_PREFIX: &str = "NOTCHLING_";
+
+/// The command that starts the daemon; `inherited` names the variables this process has.
+fn daemon_command(
+    binary: &Path,
+    socket: &Path,
+    options: &SpawnOptions,
+    inherited: impl IntoIterator<Item = OsString>,
+) -> Result<Command, ClientError> {
+    let Some(real) = allowed_binary(binary) else {
+        return Err(ClientError::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "won't start {} as the daemon: only a notchling binary in an app bundle or a cargo target folder",
+                binary.display()
+            ),
+        )));
+    };
+    let mut command = Command::new(real);
+    command
+        .arg("daemon")
+        .arg("--socket")
+        .arg(socket)
+        .stdin(Stdio::null());
+    // No NOTCHLING_* variable passes from whoever starts it (an agent's shell may be the
+    // starter): the tier variable always goes, and the data root only when the caller names one.
+    command.env_remove(crate::tier::APP_TIER_PATHS_ENV);
+    for name in inherited {
+        if name.to_str().is_some_and(|n| n.starts_with(KNOB_PREFIX)) {
+            command.env_remove(name);
+        }
+    }
+    if let Some(root) = &options.data_root {
+        command.env("NOTCHLING_DATA_ROOT", root);
+    }
+    Ok(command)
 }
 
 /// The log beside the socket, opened twice (stdout and stderr), when its folder exists.
@@ -247,6 +294,57 @@ mod tests {
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();
         symlink(&real, &link).unwrap();
         assert!(!spawn_allowed(&link));
+    }
+
+    #[test]
+    fn the_daemon_inherits_no_notchling_knob() {
+        let dir = TempDir::new("spawn-env");
+        let binary = file(dir.path(), "repo/target/debug/notchling");
+        let socket = dir.path().join("notchlingd.sock");
+        let inherited = [
+            "PATH",
+            "NOTCHLING_APP_TIER_PATHS",
+            "NOTCHLING_DATA_ROOT",
+            "HOME",
+        ]
+        .map(OsString::from);
+        let command =
+            daemon_command(&binary, &socket, &SpawnOptions::default(), inherited).unwrap();
+        let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
+        // Removed, so the daemon never sees them; the rest is inherited untouched.
+        assert!(envs.contains(&(OsStr::new(crate::tier::APP_TIER_PATHS_ENV), None)));
+        assert!(envs.contains(&(OsStr::new("NOTCHLING_DATA_ROOT"), None)));
+        assert!(!envs.iter().any(|(k, _)| *k == "PATH" || *k == "HOME"));
+        // A data root the caller names is the only one passed.
+        let options = SpawnOptions {
+            data_root: Some(dir.path().join("root")),
+            ..SpawnOptions::default()
+        };
+        let command = daemon_command(&binary, &socket, &options, []).unwrap();
+        let root = dir.path().join("root");
+        assert!(command
+            .get_envs()
+            .any(|(k, v)| k == "NOTCHLING_DATA_ROOT" && v == Some(root.as_os_str())));
+        assert!(command
+            .get_envs()
+            .any(|(k, v)| k == crate::tier::APP_TIER_PATHS_ENV && v.is_none()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_canonical_path_that_was_checked_is_the_one_started() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("spawn-canon");
+        let real = file(dir.path(), "repo/target/debug/notchling");
+        let link = dir.path().join("link/notchling");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(&real, &link).unwrap();
+        let socket = dir.path().join("notchlingd.sock");
+        let command = daemon_command(&link, &socket, &SpawnOptions::default(), []).unwrap();
+        assert_eq!(
+            Path::new(command.get_program()),
+            std::fs::canonicalize(&real).unwrap()
+        );
     }
 
     #[test]

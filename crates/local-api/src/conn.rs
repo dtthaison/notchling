@@ -2,8 +2,8 @@
 //! server stops. Replies and events leave through a writer thread with a bounded queue.
 
 use crate::framing::{encode_line, FrameError, LineReader};
-use crate::peer::same_user;
-use crate::server::{Caller, Shared};
+use crate::peer::{same_user, PeerInfo};
+use crate::server::{Caller, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
     err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
@@ -12,12 +12,14 @@ use crate::wire::{
 use serde_json::Value;
 use std::io::Write;
 use std::net::Shutdown;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::Instant;
 
-pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
+/// Serves one connection; `slot` is its place under `max_clients`, given back when this returns
+/// or unwinds.
+pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     let peer = match transport::peer(&stream) {
         Ok(peer) => peer,
         Err(_) => {
@@ -29,14 +31,19 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
         shared.audit("connect", None, peer.exe.as_deref(), "other_user");
         return;
     }
-    let tier = shared.allowlist.tier_of(peer.exe.as_deref());
+    // A slot kept for the app: anyone else goes now (and the app is checked again at hello).
+    if slot.reserved && shared.allowlist.tier_of(peer.exe.as_deref()) != Tier::App {
+        return;
+    }
     let limits = shared.limits;
     if stream.set_read_timeout(Some(limits.tick)).is_err()
         || stream.set_write_timeout(Some(limits.write_within)).is_err()
     {
         return;
     }
-    let (Ok(write_half), Ok(hub_half)) = (stream.try_clone(), stream.try_clone()) else {
+    let (Ok(write_half), Ok(hub_half), Ok(probe)) =
+        (stream.try_clone(), stream.try_clone(), stream.try_clone())
+    else {
         return;
     };
     let (tx, rx) = sync_channel::<Vec<u8>>(limits.queue);
@@ -46,15 +53,21 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
     let Ok(writer) = writer else {
         return;
     };
-    let id = shared.hub.add(tier, tx.clone(), hub_half);
+    // The agent tier until hello, when the peer is read again (the exec race, in `peer`).
+    let id = shared.hub.add(Tier::Agent, tx.clone(), hub_half);
     let mut session = Session {
         id,
-        tier,
-        peer: peer.exe,
+        tier: Tier::Agent,
+        at_accept: peer,
+        at_hello: None,
+        probe,
         kind: None,
         tx,
         shared: shared.clone(),
         accepted: Instant::now(),
+        reserved: slot.reserved,
+        subscribed: false,
+        last_request: Instant::now(),
     };
     let reader = match stream.try_clone() {
         Ok(read_half) => Some(LineReader::new(read_half)),
@@ -63,12 +76,22 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
     if let Some(reader) = reader {
         session.read_loop(reader);
     }
-    // Off the list, then let the writer send what is queued (a refusal's reply, say) before closing.
-    // A client that doesn't read holds this up only until the write timeout.
-    shared.hub.forget(id);
+    // Off the list (dropping the session does that, also when a handler panics), then let the
+    // writer send what is queued (a refusal's reply, say) before closing. A client that doesn't
+    // read holds this up only until the write timeout.
     drop(session);
     let _ = writer.join();
     let _ = stream.shutdown(Shutdown::Both);
+    drop(slot);
+}
+
+/// Takes the connection off the hub however its thread ends. A panic in a handler unwinds through
+/// here: left on the hub, an app-tier entry would keep `app_attached` true and approval would fail
+/// open, and the hub's handle would keep the socket open.
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.shared.hub.forget(self.id);
+    }
 }
 
 fn write_loop(mut stream: Stream, rx: Receiver<Vec<u8>>) {
@@ -83,11 +106,20 @@ fn write_loop(mut stream: Stream, rx: Receiver<Vec<u8>>) {
 struct Session {
     id: u64,
     tier: Tier,
-    peer: Option<PathBuf>,
+    /// The peer read at accept, and again at hello; the tier needs both to be one process.
+    at_accept: PeerInfo,
+    at_hello: Option<PeerInfo>,
+    /// A handle to read the peer again.
+    probe: Stream,
     kind: Option<ClientKind>,
     tx: SyncSender<Vec<u8>>,
     shared: Arc<Shared>,
     accepted: Instant,
+    /// In a slot kept for the app: closed at hello unless it gets the app tier.
+    reserved: bool,
+    /// Follows a topic, so it may wait for events as long as it likes.
+    subscribed: bool,
+    last_request: Instant,
 }
 
 impl Session {
@@ -109,6 +141,13 @@ impl Session {
                 Err(FrameError::TooLong | FrameError::PartialAtEof | FrameError::Io(_)) => return,
             }
             if self.kind.is_none() && self.accepted.elapsed() > limits.hello_within {
+                return;
+            }
+            // Idle and following nothing: a held slot doing no work.
+            if self.kind.is_some()
+                && !self.subscribed
+                && self.last_request.elapsed() > limits.idle_within
+            {
                 return;
             }
             if reader
@@ -144,6 +183,7 @@ impl Session {
 
     /// Handles one line; false closes the connection.
     fn on_line(&mut self, line: &[u8]) -> bool {
+        self.last_request = Instant::now();
         let request = match Request::parse(line) {
             Ok(request) => request,
             Err((id, e)) => {
@@ -193,8 +233,28 @@ impl Session {
             self.reply(id, Err(ApiError::bad_request(message)));
             return false;
         }
+        let now = transport::peer(&self.probe).ok();
+        self.tier = self
+            .shared
+            .allowlist
+            .tier_for(&self.at_accept, now.as_ref());
+        let listed = |p: Option<&PeerInfo>| {
+            p.is_some_and(|p| self.shared.allowlist.tier_of(p.exe.as_deref()) == Tier::App)
+        };
+        // An app's file, but not one process from connect to hello: the exec race, or a fork.
+        let refused =
+            self.tier != Tier::App && (listed(Some(&self.at_accept)) || listed(now.as_ref()));
+        self.at_hello = now;
+        if refused {
+            self.shared
+                .audit(ops::HELLO, Some(self.tier), self.peer(), "peer_changed");
+        }
+        if self.reserved && self.tier != Tier::App {
+            // It took a slot kept for the app and isn't the app.
+            return false;
+        }
         self.kind = Some(hello.client);
-        self.shared.hub.hello(self.id, hello.client);
+        self.shared.hub.hello(self.id, hello.client, self.tier);
         let reply = HelloReply {
             api: API_VERSION,
             daemon: self.shared.version.clone(),
@@ -204,7 +264,7 @@ impl Session {
         self.reply(id, value)
     }
 
-    fn subscribe(&self, args: &Value) -> Result<Value, ApiError> {
+    fn subscribe(&mut self, args: &Value) -> Result<Value, ApiError> {
         let subscribe: Subscribe = serde_json::from_value(args.clone())
             .map_err(|e| ApiError::bad_request(format!("bad subscribe: {e}")))?;
         let known = self.shared.handler.topics();
@@ -216,6 +276,7 @@ impl Session {
             return Err(ApiError::bad_request(format!("no topic named {bad}")));
         }
         self.shared.hub.subscribe(self.id, &subscribe.topics);
+        self.subscribed |= !subscribe.topics.is_empty();
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }
 
@@ -229,15 +290,24 @@ impl Session {
         };
         if spec.tier == Tier::App && self.tier != Tier::App {
             self.shared
-                .audit(op, Some(self.tier), self.peer.as_deref(), "forbidden");
+                .audit(op, Some(self.tier), self.peer(), "forbidden");
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "only the Notchling app may do this",
             ));
         }
+        if spec.tier == Tier::App && !self.still_the_hello_process() {
+            // The kernel names whoever last used the peer's socket: a fork that shares it, say.
+            self.shared
+                .audit(op, Some(self.tier), self.peer(), "peer_changed");
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "this request didn't come from the process that said hello",
+            ));
+        }
         if spec.approval && !self.shared.hub.app_attached() {
             self.shared
-                .audit(op, Some(self.tier), self.peer.as_deref(), "needs_approval");
+                .audit(op, Some(self.tier), self.peer(), "needs_approval");
             return Err(ApiError::new(
                 ErrorCode::NeedsApproval,
                 "this needs approval in the Notchling app, and the app isn't attached",
@@ -246,8 +316,25 @@ impl Session {
         let caller = Caller {
             tier: self.tier,
             client: self.kind.unwrap_or(ClientKind::Cli),
-            peer: self.peer.clone(),
+            peer: self.peer().map(Path::to_path_buf),
         };
         handler.call(&caller, op, args)
+    }
+
+    /// The peer's file as last read: at hello once said, else at accept.
+    fn peer(&self) -> Option<&Path> {
+        self.at_hello
+            .as_ref()
+            .unwrap_or(&self.at_accept)
+            .exe
+            .as_deref()
+    }
+
+    /// Whether the peer, read now, is still the process that said hello.
+    fn still_the_hello_process(&self) -> bool {
+        match (&self.at_hello, transport::peer(&self.probe)) {
+            (Some(at_hello), Ok(now)) => at_hello.same_process(&now),
+            _ => false,
+        }
     }
 }

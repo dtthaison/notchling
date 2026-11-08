@@ -4,11 +4,15 @@
 //!   and `<dir>/notchling` is the data folder. A fixture root keeps finished rows however old,
 //!   since a fixture's dates are fixed.
 //! - Otherwise `~/.claude` and the OS's data folder (`platform::paths`).
-//! - The socket is `<data dir>/notchlingd.sock` unless `--socket` names another. The lock and the
-//!   audit log sit beside the socket, so a daemon given a test socket never writes to the real
-//!   data folder.
+//! - The socket is `<data dir>/notchlingd.sock` unless `--socket` names another. The socket's lock
+//!   and the audit log sit beside the socket.
+//! - One daemon per data folder: over the real folders, a daemon whose socket is elsewhere also
+//!   locks `<data dir>/notchlingd.lock` ([`Layout::data_lock`]), so `--socket` can't start a
+//!   second one over the same folders. Under a fixture root only the socket's lock is taken, so a
+//!   daemon given a test socket writes nothing in the root.
 
 use notchling_engine::sessions::Roots;
+use notchling_local_api::lock::lock_path_for;
 use notchling_local_api::{AUDIT_NAME, SOCKET_NAME};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -88,6 +92,17 @@ impl Layout {
     pub fn audit_path(&self) -> PathBuf {
         self.state_dir().join(AUDIT_NAME)
     }
+
+    /// The lock that keeps one daemon per real data folder, when it isn't the socket's own lock:
+    /// with `--socket` elsewhere a second daemon could otherwise read the same folders. A fixture
+    /// root (`NOTCHLING_DATA_ROOT`) is a test's own, so it takes only the socket's lock.
+    pub fn data_lock(&self) -> Option<PathBuf> {
+        if self.fixture {
+            return None;
+        }
+        let lock = lock_path_for(&self.data_dir.join(SOCKET_NAME));
+        (lock_path_for(&self.socket) != lock).then_some(lock)
+    }
 }
 
 #[cfg(test)]
@@ -140,6 +155,31 @@ mod tests {
         assert_eq!(l.socket, PathBuf::from("/tmp/t/x.sock"));
         assert_eq!(l.audit_path(), PathBuf::from("/tmp/t/audit.jsonl"));
         assert!(l.socket_given);
+    }
+
+    #[test]
+    fn the_real_data_folder_is_locked_even_with_a_socket_elsewhere() {
+        let default = Layout::resolve(None, None, real).unwrap();
+        assert_eq!(
+            default.data_lock(),
+            None,
+            "the socket's lock is the data folder's"
+        );
+        let elsewhere = Layout::resolve(Some(Path::new("/tmp/t/x.sock")), None, real).unwrap();
+        assert_eq!(
+            elsewhere.data_lock(),
+            Some(PathBuf::from(
+                "/Users/me/Library/Application Support/Notchling/notchlingd.lock"
+            ))
+        );
+        // A fixture root is the test's own: only the socket's lock.
+        let fixture = Layout::resolve(
+            Some(Path::new("/tmp/t/x.sock")),
+            Some(OsStr::new("/r")),
+            real,
+        )
+        .unwrap();
+        assert_eq!(fixture.data_lock(), None);
     }
 
     #[test]

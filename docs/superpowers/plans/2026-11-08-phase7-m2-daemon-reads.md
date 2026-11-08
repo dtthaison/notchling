@@ -16,6 +16,7 @@
   - The socket lives at `<data dir>/notchlingd.sock`, mode 0600. Its folder is 0700, created with `platform::files::ensure_private_dir`.
   - Windows uses the named pipe `\\.\pipe\notchlingd-<user>`. A stub returning `Unsupported` is acceptable in M2 if it type-checks.
   - `NOTCHLING_DATA_ROOT` (the M1 fixture convention) and an explicit `--socket` override the paths for tests and dev.
+  - One daemon per data folder (ruled 2026-11-08). The socket's `flock` sits beside the socket. Over the real folders, a daemon whose `--socket` is elsewhere also locks `<data dir>/notchlingd.lock`, so a second daemon can't read the same folders through another socket. Under `NOTCHLING_DATA_ROOT` only the socket's lock is taken: the root is the test's own, and a test socket elsewhere leaves nothing in it.
 - **Wire format.** One JSON object per line (UTF-8, `\n`), each line at most 1 MiB. A longer line closes the connection.
   - Request: `{"id": <u64>, "op": "<name>", "args": {...}}`.
   - Reply: `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.
@@ -23,9 +24,10 @@
   - Error codes: `bad_request`, `unknown_op`, `forbidden`, `needs_approval`, `internal`.
   - The first op on a connection must be `hello` with `{"client": "app"|"cli"|"hook", "version": "<semver>", "api": 1}`. Its reply is `{"api": 1, "daemon": "<version>", "tier": "app"|"agent"}`.
 - **Tiers** (0007).
-  - The peer's executable path comes from `LOCAL_PEERPID` + `proc_pidpath` on macOS, `SO_PEERCRED` + `/proc/<pid>/exe` on Linux, and `GetNamedPipeClientProcessId` on Windows.
+  - The peer's executable path comes from `LOCAL_PEERTOKEN` + `proc_pidpath_audittoken` on macOS, `SO_PEERCRED` + `/proc/<pid>/exe` on Linux, and `GetNamedPipeClientProcessId` on Windows.
+  - The peer is read at accept and again at `hello` (and before each app-tier request). The app tier needs one process throughout: the same pid and pid version (macOS) or start time and file (Linux). This closes the connect-fork-exec race on macOS; on Linux it is best effort, since an exec before accept can't be seen (0007's note of 2026-11-08). The code signature joins the check with Developer ID in Phase 6.
   - The peer's uid must equal the daemon's uid; otherwise the connection is closed.
-  - The app tier needs an executable path in the daemon's allowlist. That is the installed app bundle's binary, or for dev a path in the env `NOTCHLING_APP_TIER_PATHS` read only at daemon start. Everything else is the agent tier.
+  - The app tier needs an executable path in the daemon's allowlist. That is the installed app bundle's binary, or for dev a path in the env `NOTCHLING_APP_TIER_PATHS` read only at daemon start, and only by a daemon running from a cargo target folder. `ensure_daemon` passes no `NOTCHLING_*` variable on. Everything else is the agent tier.
   - A copy of the app elsewhere is the agent tier.
 - **M2 ops.**
   - `hello`.
@@ -41,7 +43,7 @@
   - `notchling service install|uninstall|print [--dir <folder>]`.
   - Later milestones add `hook`, `secret`, `delegate` and `page`.
 - **Service files are pure functions.**
-  - macOS: a LaunchAgent plist with label `dev.notchling.daemon`, `KeepAlive` on crash, `RunAtLoad`, and logs in the data dir.
+  - macOS: a LaunchAgent plist with label `dev.notchling.daemon`, `KeepAlive` on crash, `RunAtLoad`, and logs in the data dir. `KeepAlive` stays `Crashed` rather than `SuccessfulExit = false` (ruled 2026-11-08, after the review's C2 fix): a stop and "already running" exit 0, a setup error exits non-zero and a restart loop wouldn't fix it, and a daemon a client restarts carries no tier variable, so launchd needn't restart it first.
   - Linux: a systemd user unit.
   - Windows: a Task Scheduler XML file.
   - `install` writes the file into `--dir` (default: the OS's real place) and prints the command that loads it. M2 never runs `launchctl`, `systemctl` or `schtasks` itself.
@@ -72,6 +74,7 @@
      - `install --dir` writes 0644 into the temp folder and prints the load command.
 3. **App on the daemon** (`crates/app`): Chat's sidebar and the notch take their rows from `sessions.list` and `sessions.changed` through the local-api client.
    - If the daemon can't be reached and can't be started, they fall back to reading the files directly, as M1 does, and the sidebar footer says "Daemon not running".
+   - Clients check the server before `hello`: the same uid, and on macOS a server file (from its audit token) that `spawn_allowed` accepts. Anything else is `ClientError::UntrustedServer`; the app reads the files and says "Daemon not trusted". Tests that serve from their own binary turn the check off (`ConnectOptions::check_server`); it is on by default.
    - Renders keep using fixtures with no daemon.
    - Tests: the client-backed source against an in-process server, and the fallback.
 4. **Docs**: ARCHITECTURE.md, the feature map, AGENTS.md (the `notchling` binary and how to run the daemon in dev), and `docs/dev-profile.md` (running the daemon against the dev profile).

@@ -18,7 +18,7 @@ use crate::wire::{ApiError, ClientKind, DaemonStatus, Tier};
 use serde_json::Value;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -72,10 +72,15 @@ pub trait Handler: Send + Sync + 'static {
 /// How long a connection may take, and how many there may be.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    /// Connections past this are closed on accept.
+    /// Connections past this are closed on accept. Counted at accept, so a burst can't pass it.
     pub max_clients: usize,
+    /// The last this many of `max_clients` are kept for the app tier: a connection that takes one
+    /// is closed unless its peer is the app, so agents filling the rest can't lock the app out.
+    pub app_reserved: usize,
     /// `hello` must arrive this soon after connecting.
     pub hello_within: Duration,
+    /// A client that follows no topic is closed after this long without a request.
+    pub idle_within: Duration,
     /// A line, once begun, must end this soon.
     pub line_within: Duration,
     /// A write to a client that doesn't read gives up after this.
@@ -90,7 +95,9 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             max_clients: 64,
+            app_reserved: 4,
             hello_within: Duration::from_secs(5),
+            idle_within: Duration::from_secs(60),
             line_within: Duration::from_secs(10),
             write_within: Duration::from_secs(10),
             queue: 256,
@@ -119,6 +126,40 @@ pub(crate) struct Shared {
     pub(crate) started: Instant,
     pub(crate) stop: AtomicBool,
     pub(crate) my_uid: u32,
+    /// Connections accepted and not yet ended, hello said or not: what `max_clients` counts.
+    pub(crate) open: AtomicUsize,
+}
+
+/// One of `max_clients`, taken at accept and given back when the connection's thread ends (or never
+/// starts), however it ends.
+pub(crate) struct Slot {
+    shared: Arc<Shared>,
+    /// Taken from the last `app_reserved`: only the app may keep it.
+    pub(crate) reserved: bool,
+}
+
+impl Slot {
+    /// A slot, or `None` when every one is taken. Only the accept loop takes slots (connections
+    /// only give them back), so reading the count and then adding to it can't overshoot.
+    fn take(shared: &Arc<Shared>) -> Option<Slot> {
+        let limits = shared.limits;
+        let open = shared.open.load(Ordering::SeqCst);
+        if open >= limits.max_clients {
+            return None;
+        }
+        shared.open.fetch_add(1, Ordering::SeqCst);
+        let reserved = open >= limits.max_clients.saturating_sub(limits.app_reserved);
+        Some(Slot {
+            shared: shared.clone(),
+            reserved,
+        })
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.shared.open.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Shared {
@@ -228,6 +269,7 @@ impl Server {
             started: Instant::now(),
             stop: AtomicBool::new(false),
             my_uid: crate::peer::current_uid(),
+            open: AtomicUsize::new(0),
         });
         Ok(Server {
             listener,
@@ -268,10 +310,12 @@ impl Server {
         while !self.shared.stopping() {
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    if self.shared.hub.len() >= self.shared.limits.max_clients {
+                    // Counted here, not when the connection's thread gets round to it, so a burst
+                    // of connects can't pass the cap.
+                    let Some(slot) = Slot::take(&self.shared) else {
                         let _ = stream.shutdown(std::net::Shutdown::Both);
                         continue;
-                    }
+                    };
                     // A socket accepted from a non-blocking listener may inherit the flag (BSD).
                     if stream.set_nonblocking(false).is_err() {
                         continue;
@@ -279,7 +323,7 @@ impl Server {
                     let shared = self.shared.clone();
                     let spawned = std::thread::Builder::new()
                         .name("notchling-api-conn".into())
-                        .spawn(move || crate::conn::serve(stream, shared));
+                        .spawn(move || crate::conn::serve(stream, shared, slot));
                     if spawned.is_err() {
                         // Out of threads: this client is dropped, the rest keep going.
                         continue;

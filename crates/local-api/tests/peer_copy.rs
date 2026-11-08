@@ -3,7 +3,7 @@
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use notchling_local_api::{
-    Allowlist, Client, ClientKind, Limits, OpSpec, Server, ServerConfig, Tier,
+    Allowlist, Client, ClientKind, ConnectOptions, Limits, OpSpec, Server, ServerConfig, Tier,
 };
 use notchling_local_api::{ApiError, Caller, Handler};
 use serde_json::Value;
@@ -31,7 +31,12 @@ fn peer_helper() {
     let Some(socket) = std::env::var_os(SOCKET_ENV) else {
         return;
     };
-    let c = Client::connect(Path::new(&socket), ClientKind::App, "0.1.0").unwrap();
+    // The parent serving the socket is a test binary, not a `notchling`: no server check.
+    let options = ConnectOptions {
+        check_server: false,
+        ..ConnectOptions::default()
+    };
+    let c = Client::connect_with(Path::new(&socket), ClientKind::App, "0.1.0", &options).unwrap();
     let tier = match c.tier() {
         Tier::App => "app",
         Tier::Agent => "agent",
