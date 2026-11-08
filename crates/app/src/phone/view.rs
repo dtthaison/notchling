@@ -65,7 +65,7 @@ impl PhonePanelView {
                 match asking {
                     Ok(Some(bridge)) => {
                         cx.background_executor()
-                            .spawn(async move { bridge.refresh(now_ms()) })
+                            .spawn(async move { bridge.refresh() })
                             .await;
                     }
                     Ok(None) => {}
@@ -95,7 +95,7 @@ impl PhonePanelView {
         let bridge = self.bridge.clone();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .spawn(async move { bridge.refresh(now_ms()) })
+                .spawn(async move { bridge.refresh() })
                 .await;
             this.update(cx, |_, cx| cx.notify()).ok();
         })
@@ -119,7 +119,7 @@ impl PhonePanelView {
                 .background_executor()
                 .spawn(async move {
                     let result = job(&bridge);
-                    bridge.refresh(now_ms());
+                    bridge.refresh();
                     result
                 })
                 .await;
@@ -173,7 +173,7 @@ fn section_title(text: &str, a: Appearance) -> Div {
 }
 
 /// A switch: a capsule with its knob at the end it's set to; dim and plain-cursored while disabled.
-fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
+pub(crate) fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
     let knob = div().size(px(14.0)).rounded_full().bg(gpui::white());
     let base = div()
         .id(id)

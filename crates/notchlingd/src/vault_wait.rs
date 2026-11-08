@@ -1,0 +1,273 @@
+//! What the vault service waits on: an approval (Deny / Allow Once / Always Allow) or a request's
+//! form, each answered by the app under an id.
+//!
+//! - Ids are 128 random bits from the OS ([`notchling_engine::vault::random_id`]): nobody can
+//!   answer one without having been sent it, and only the app follows the topic it is sent on.
+//!   No randomness, no id, and the wait is refused.
+//! - At most `max` wait at once, so agents can't pile them up.
+//! - Each keeps the event that announced it ([`Waiters::describe`]), so an app that connects
+//!   later still sees it ([`Waiters::pending`]).
+//! - A wait ends at its deadline, when `still` says stop (the app left, the vault went off), or
+//!   when [`Waiters::drain`] drops every answer channel (the daemon stops). All of those are a
+//!   "no": the caller gets `None`.
+
+use crate::vault_args::Decision;
+use notchling_engine::vault::{VaultEntry, VaultStore};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Mutex, Weak};
+use std::time::{Duration, Instant};
+
+/// Why a wait couldn't start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// `max` already wait.
+    Full,
+    /// The OS gave no randomness for an id.
+    NoId,
+}
+
+/// One open wait: where its answer goes, when it opened, and the event that announced it.
+struct Open<T> {
+    tx: SyncSender<T>,
+    order: u64,
+    event: Option<Value>,
+}
+
+/// The open waits, and how many have opened.
+struct Waiting<T> {
+    open: HashMap<String, Open<T>>,
+    opened: u64,
+}
+
+/// Open waits of one kind.
+pub struct Waiters<T> {
+    prefix: &'static str,
+    max: usize,
+    waiting: Mutex<Waiting<T>>,
+}
+
+/// One open wait: its id, and where its answer arrives.
+pub struct Ticket<T> {
+    pub id: String,
+    rx: Receiver<T>,
+}
+
+impl<T> Waiters<T> {
+    pub fn new(prefix: &'static str, max: usize) -> Waiters<T> {
+        Waiters {
+            prefix,
+            max,
+            waiting: Mutex::new(Waiting {
+                open: HashMap::new(),
+                opened: 0,
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Waiting<T>> {
+        self.waiting.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A new wait under a fresh id.
+    pub fn open(&self) -> Result<Ticket<T>, Refused> {
+        let mut waiting = self.lock();
+        if waiting.open.len() >= self.max {
+            return Err(Refused::Full);
+        }
+        let id = notchling_engine::vault::random_id(self.prefix).ok_or(Refused::NoId)?;
+        let (tx, rx) = sync_channel(1);
+        waiting.opened += 1;
+        let order = waiting.opened;
+        waiting.open.insert(
+            id.clone(),
+            Open {
+                tx,
+                order,
+                event: None,
+            },
+        );
+        Ok(Ticket { id, rx })
+    }
+
+    /// Keeps the event that announces the wait under `id`, for [`Waiters::pending`].
+    pub fn describe(&self, id: &str, event: &Value) {
+        if let Some(open) = self.lock().open.get_mut(id) {
+            open.event = Some(event.clone());
+        }
+    }
+
+    /// The events of the waits still open, oldest first.
+    pub fn pending(&self) -> Vec<Value> {
+        let waiting = self.lock();
+        let mut open: Vec<&Open<T>> = waiting.open.values().collect();
+        open.sort_by_key(|o| o.order);
+        open.into_iter().filter_map(|o| o.event.clone()).collect()
+    }
+
+    /// The app's answer; false when nothing waits under `id` (answered, ended or never opened).
+    pub fn answer(&self, id: &str, value: T) -> bool {
+        match self.lock().open.remove(id) {
+            Some(open) => open.tx.try_send(value).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Ends a wait without an answer.
+    pub fn close(&self, id: &str) {
+        self.lock().open.remove(id);
+    }
+
+    /// Ends every wait without an answer.
+    pub fn drain(&self) {
+        self.lock().open.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.lock().open.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Waits for `ticket`'s answer up to `within`, looking at `still` every `slice`; `None` for
+    /// no answer. The id is closed either way.
+    pub fn wait(
+        &self,
+        ticket: Ticket<T>,
+        within: Duration,
+        slice: Duration,
+        still: &dyn Fn() -> bool,
+    ) -> Option<T> {
+        let deadline = Instant::now() + within;
+        let answer = loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() || !still() {
+                break None;
+            }
+            match ticket.rx.recv_timeout(left.min(slice)) {
+                Ok(value) => break Some(value),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break None,
+            }
+        };
+        self.close(&ticket.id);
+        answer
+    }
+}
+
+/// What the switch going off clears: the values read while it was on, and every wait (which then
+/// ends with a no).
+pub(crate) struct OffHook {
+    pub(crate) store: Weak<VaultStore>,
+    pub(crate) approvals: Weak<Waiters<Decision>>,
+    pub(crate) requests: Weak<Waiters<Option<VaultEntry>>>,
+}
+
+impl OffHook {
+    pub(crate) fn run(&self) {
+        if let Some(store) = self.store.upgrade() {
+            store.forget();
+        }
+        if let Some(waiters) = self.approvals.upgrade() {
+            waiters.drain();
+        }
+        if let Some(waiters) = self.requests.upgrade() {
+            waiters.drain();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn ids_are_long_random_and_distinct() {
+        let w: Waiters<bool> = Waiters::new("vault-approval-", 8);
+        let a = w.open().unwrap();
+        let b = w.open().unwrap();
+        assert_ne!(a.id, b.id);
+        let hex = a.id.strip_prefix("vault-approval-").unwrap();
+        assert_eq!(hex.len(), 32);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn at_most_max_wait() {
+        let w: Waiters<bool> = Waiters::new("x-", 2);
+        let _a = w.open().unwrap();
+        let _b = w.open().unwrap();
+        assert_eq!(w.open().err(), Some(Refused::Full));
+    }
+
+    #[test]
+    fn an_answer_reaches_its_wait_once() {
+        let w: Arc<Waiters<bool>> = Arc::new(Waiters::new("x-", 2));
+        let ticket = w.open().unwrap();
+        let id = ticket.id.clone();
+        let answerer = {
+            let w = w.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(30));
+                (w.answer(&id, true), w.answer(&id, false))
+            })
+        };
+        let got = w.wait(
+            ticket,
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+            &|| true,
+        );
+        assert_eq!(got, Some(true));
+        assert_eq!(
+            answerer.join().unwrap(),
+            (true, false),
+            "the second finds nothing"
+        );
+        assert!(w.is_empty());
+        assert!(!w.answer("x-guessed", true));
+    }
+
+    #[test]
+    fn a_wait_ends_with_no_at_its_deadline_or_when_told() {
+        let w: Waiters<bool> = Waiters::new("x-", 2);
+        let t = w.open().unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            w.wait(
+                t,
+                Duration::from_millis(40),
+                Duration::from_millis(10),
+                &|| true
+            ),
+            None
+        );
+        assert!(started.elapsed() >= Duration::from_millis(40));
+        let t = w.open().unwrap();
+        assert_eq!(
+            w.wait(
+                t,
+                Duration::from_secs(60),
+                Duration::from_millis(10),
+                &|| false
+            ),
+            None
+        );
+        let t = w.open().unwrap();
+        w.drain();
+        assert_eq!(
+            w.wait(
+                t,
+                Duration::from_secs(60),
+                Duration::from_millis(10),
+                &|| true
+            ),
+            None
+        );
+        assert!(w.is_empty());
+    }
+}

@@ -3,6 +3,10 @@
 //! Everything OS-specific sits behind `cfg`; where an OS has no implementation yet the call returns
 //! [`Error::Unsupported`] so the caller can say so instead of silently doing nothing.
 
+// The pure matching is built and tested everywhere; only macOS asks the process table for now.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod app_procs;
+pub mod apps;
 pub mod awake;
 pub mod files;
 pub mod notify;

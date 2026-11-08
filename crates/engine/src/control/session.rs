@@ -117,6 +117,29 @@ pub fn plan_stop(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
     })
 }
 
+/// `claude respawn <id>` in the folder holding the job: restarts it on that folder's current login,
+/// after a limit switch (`LimitWatcher.respawn`). The conversation is kept.
+pub fn plan_respawn(id: &str, roots: &Roots) -> Plan {
+    Plan {
+        steps: vec![Step::Run(run(
+            Command::new(&["claude", "respawn", id])
+                .for_config_dir(config_dir_for_job(roots, id).as_deref()),
+            START_STOP_TIMEOUT_SECS,
+            Expect::ExitZero,
+        ))],
+        outcome: Outcome::Done,
+    }
+}
+
+/// The job's `state.json`, in the folder holding its current copy: it changes when the job runs
+/// again after a respawn.
+pub fn job_state_path(roots: &Roots, id: &str) -> PathBuf {
+    job_dir(roots, config_dir_for_job(roots, id).as_deref())
+        .join("jobs")
+        .join(id)
+        .join("state.json")
+}
+
 /// `claude rm <id>` in every folder holding a copy of the job. A session moved to another account
 /// left a stopped copy behind; remove that too, or it shows up again. Only the current copy's
 /// result counts: the others are best effort, and none of them waits on another (a current copy

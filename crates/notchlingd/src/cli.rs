@@ -53,6 +53,19 @@ pub enum Command {
     DelegateModels {
         args: Vec<String>,
     },
+    /// `notchling secrets [words]`: the saved secrets that fit, never values. `args` are what
+    /// follows, parsed by [`crate::vault_cli`] (so is each of the two below).
+    Secrets {
+        args: Vec<String>,
+    },
+    /// `notchling secret <a,b> -- <command…>`: runs the command with those secrets, output hidden.
+    Secret {
+        args: Vec<String>,
+    },
+    /// `notchling secret-request <name> [--kind --url --note --how --expires --reason]`.
+    SecretRequest {
+        args: Vec<String>,
+    },
     Version,
     Help,
 }
@@ -72,6 +85,11 @@ pub fn usage() -> &'static str {
      notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
      \u{20}                                           hand a job to another tool and wait (read-only unless --write)\n  \
      notchling delegate-models [codex|agy]       the models and efforts each tool offers\n  \
+     notchling secrets [words]                   the saved secrets that fit a URL, host or words (never values)\n  \
+     notchling secret <name>[,<name>…] -- <command> [args…]\n  \
+     \u{20}                                           run a command with secrets, its output hidden\n  \
+     notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason]\n  \
+     \u{20}                                           ask the user to add or update a secret, and wait\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -106,6 +124,21 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "delegate-models" => {
             return Ok(Command::DelegateModels {
+                args: args.collect(),
+            })
+        }
+        "secrets" => {
+            return Ok(Command::Secrets {
+                args: args.collect(),
+            })
+        }
+        "secret" => {
+            return Ok(Command::Secret {
+                args: args.collect(),
+            })
+        }
+        "secret-request" => {
+            return Ok(Command::SecretRequest {
                 args: args.collect(),
             })
         }
@@ -249,6 +282,34 @@ mod tests {
         let text = usage();
         assert!(
             text.contains("notchling delegate <codex|agy>") && text.contains("delegate-models")
+        );
+    }
+
+    #[test]
+    fn the_vault_commands_take_everything_after_them() {
+        assert_eq!(
+            p(&["secret", "gh,npm", "--", "curl", "--socket", "x"]),
+            Ok(Command::Secret {
+                args: ["gh,npm", "--", "curl", "--socket", "x"]
+                    .map(String::from)
+                    .to_vec()
+            })
+        );
+        assert_eq!(
+            p(&["secrets", "api.github.com"]),
+            Ok(Command::Secrets {
+                args: vec!["api.github.com".into()]
+            })
+        );
+        assert_eq!(
+            p(&["secret-request", "gh", "--note", "--odd"]),
+            Ok(Command::SecretRequest {
+                args: ["gh", "--note", "--odd"].map(String::from).to_vec()
+            })
+        );
+        let text = usage();
+        assert!(
+            text.contains("notchling secrets [words]") && text.contains("secret-request <name>")
         );
     }
 

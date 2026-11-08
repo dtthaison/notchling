@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod accounts;
 pub mod acting;
 pub mod actions;
 pub mod chat;
@@ -17,6 +18,7 @@ pub mod cli;
 pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod mac;
+pub mod machines;
 pub mod menu;
 pub mod notch;
 pub mod pages;
@@ -24,11 +26,14 @@ pub mod phone;
 pub mod search;
 pub mod session_source;
 pub mod sheets;
+pub mod switches;
 #[cfg(test)]
 mod testutil;
 pub mod tools;
 pub mod transcripts;
+pub mod vault;
 pub mod views;
+pub mod welcome;
 
 /// What `main` prints on a system the app isn't built for yet.
 pub const NOT_SUPPORTED: &str = "notchling-app: not supported yet on this system";

@@ -7,20 +7,20 @@
 //! no transport at all ([`Actions::fixed`], [`Actions::for_run`]).
 //!
 //! Every daemon run starts with acting off, whatever its files say (decision 0007's note of
-//! 2026-11-08). The user's choice is the app's to keep ([`Choice`], `actingOn` in the app's own
-//! `settings.json`): when the daemon says off and the user chose on, [`Actions::refresh`] sends
-//! `settings.set_acting` again, so a restarted daemon comes back to what the user chose.
+//! 2026-11-08), and the app never turns it back on by itself: [`Actions::refresh`] only reads. The
+//! user's choice (`actingOn` in the app's own `settings.json`, [`Choice`]) decides only whether the
+//! restart notice offers it ([`crate::switches::restart`]); only [`Actions::choose`], from a click
+//! in this app, sends `settings.set_acting`.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
-
-use notchling_engine::settings::Settings;
+use std::sync::{Arc, Mutex};
 
 use notchling_local_api::{Client, ClientError, ClientKind, ConnectOptions, SOCKET_NAME};
 use serde_json::{json, Value};
 
 use crate::acting::{self, ops, Acting, Request};
 use crate::chat::data::DataRoot;
+use crate::switches::restart::{Area, RestartNotice, Said};
 
 /// One call to the daemon; the socket in the app, a fake in tests.
 pub trait Transport: Send + Sync {
@@ -71,17 +71,17 @@ pub struct SettingsChoice {
 
 impl Choice for SettingsChoice {
     fn get(&self) -> bool {
-        Settings::open(&self.file)
-            .ok()
-            .and_then(|s| s.raw(ACTING_CHOICE_KEY).and_then(Value::as_bool))
-            .unwrap_or(false)
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .get(ACTING_CHOICE_KEY)
     }
 
     fn set(&self, on: bool) -> Result<(), String> {
-        let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
-        let mut values = store.values().clone();
-        values.insert(ACTING_CHOICE_KEY.into(), Value::Bool(on));
-        store.replace_all(values).map_err(|e| e.to_string())
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .set_choice(ACTING_CHOICE_KEY, on)
     }
 }
 
@@ -90,6 +90,7 @@ pub struct Actions {
     transport: Option<Box<dyn Transport>>,
     said: Mutex<Acting>,
     choice: Box<dyn Choice>,
+    restart: Option<Arc<RestartNotice>>,
 }
 
 impl Actions {
@@ -99,6 +100,7 @@ impl Actions {
             transport: Some(transport),
             said: Mutex::new(Acting::Off),
             choice: Box::new(NoChoice),
+            restart: None,
         }
     }
 
@@ -108,12 +110,19 @@ impl Actions {
         self
     }
 
+    /// Tells `notice` what the daemon says about acting and what the user chose.
+    pub fn with_restart(mut self, notice: Arc<RestartNotice>) -> Actions {
+        self.restart = Some(notice);
+        self
+    }
+
     /// No daemon behind it, showing `acting` as given: a render's.
     pub fn fixed(acting: Acting) -> Actions {
         Actions {
             transport: None,
             said: Mutex::new(acting),
             choice: Box::new(NoChoice),
+            restart: None,
         }
     }
 
@@ -149,36 +158,45 @@ impl Actions {
         }
     }
 
-    /// Asks the daemon whether acting is on (`daemon.status`). Blocking.
+    /// Asks the daemon whether acting is on (`daemon.status`). Blocking. Never turns it on: a
+    /// daemon that says off while the user chose on is only offered back by the restart notice.
     pub fn refresh(&self) -> Acting {
         let Some(transport) = &self.transport else {
             return self.said();
         };
-        let mut now = match transport.call(ops::DAEMON_STATUS, json!({})) {
+        let now = match transport.call(ops::DAEMON_STATUS, json!({})) {
             Ok(status) => acting::from_status(&status),
             Err(e) => acting::after_error(&e).unwrap_or_else(|| self.said()),
         };
-        // A daemon that started since (they all start off): the user's choice again.
-        if now == Acting::Off && self.choice.get() {
-            now = match transport.call(ops::SETTINGS_SET_ACTING, json!({"on": true})) {
-                Ok(reply) => acting::from_status(&reply),
-                Err(e) => acting::after_error(&e).unwrap_or(Acting::Off),
+        if let Some(notice) = &self.restart {
+            let said = match now {
+                Acting::On => Said::On,
+                Acting::Off => Said::Off,
+                Acting::Detached => Said::Detached,
             };
+            notice.observe(Area::Acting, said, self.choice.get());
         }
         self.set(now);
         now
     }
 
-    /// The user chose: keeps it in the app's settings, then tells the daemon. Blocking.
+    /// The user chose, with a click in this app: tells the daemon, then keeps the choice in the
+    /// app's settings. Blocking. The daemon goes first, so "off" always reaches it even when the
+    /// settings file can't be written.
     pub fn choose(&self, on: bool) -> Result<Acting, String> {
         let Some(transport) = &self.transport else {
             return Err(Acting::Detached.message().unwrap_or_default().to_owned());
         };
-        self.choice.set(on)?;
         match transport.call(ops::SETTINGS_SET_ACTING, json!({ "on": on })) {
             Ok(reply) => {
                 let now = acting::from_status(&reply);
                 self.set(now);
+                if let Some(notice) = &self.restart {
+                    notice.chose(Area::Acting, on);
+                }
+                if let Err(e) = self.choice.set(on) {
+                    eprintln!("acting: the choice isn't kept ({e})");
+                }
                 Ok(now)
             }
             Err(e) => {
@@ -237,6 +255,7 @@ impl Actions {
 mod tests {
     use super::*;
     use crate::acting::{Decision, OFF_MESSAGE};
+    use crate::switches::restart::{Area, RestartNotice};
     use notchling_local_api::{ApiError, ErrorCode};
     use std::sync::Arc;
 
@@ -317,46 +336,62 @@ mod tests {
     }
 
     #[test]
-    fn the_users_choice_is_asserted_again_when_the_daemon_says_off() {
-        // Every daemon run starts off; the app turns it back on when the user chose on.
-        let daemon_on = Arc::new(Mutex::new(false));
-        let on = daemon_on.clone();
-        let (actions, calls) = fake(move |op| match op {
-            "daemon.status" => Ok(json!({"acting": *on.lock().unwrap()})),
-            "settings.set_acting" => {
-                *on.lock().unwrap() = true;
-                Ok(json!({"acting": true}))
-            }
-            _ => Ok(json!({})),
+    fn a_remembered_choice_never_turns_acting_on_it_only_offers_the_notice() {
+        // Every daemon run starts off; the file says on. Nothing but the read is sent.
+        let (actions, calls) = fake(|op| match op {
+            "daemon.status" => Ok(json!({"acting": false})),
+            _ => Ok(json!({"acting": true})),
         });
-        let actions = actions.with_choice(Box::new(Chosen(Mutex::new(true))));
-        assert_eq!(actions.refresh(), Acting::On);
+        let notice = Arc::new(RestartNotice::default());
+        let actions = actions
+            .with_choice(Box::new(Chosen(Mutex::new(true))))
+            .with_restart(notice.clone());
+        assert_eq!(actions.refresh(), Acting::Off);
+        assert_eq!(actions.refresh(), Acting::Off);
         assert_eq!(
             calls.lock().unwrap().clone(),
             vec![
                 ("daemon.status".to_owned(), json!({})),
-                ("settings.set_acting".to_owned(), json!({"on": true}))
+                ("daemon.status".to_owned(), json!({}))
             ]
         );
-        // Already on: nothing more is sent.
-        assert_eq!(actions.refresh(), Acting::On);
-        assert_eq!(calls.lock().unwrap().len(), 3);
+        assert_eq!(notice.state().offer(), [Area::Acting]);
 
-        // The user chose off: an off daemon stays off, and nothing is asserted.
-        let (actions, calls) = fake(|_| Ok(json!({"acting": false})));
-        let actions = actions.with_choice(Box::new(Chosen(Mutex::new(false))));
-        assert_eq!(actions.refresh(), Acting::Off);
-        assert_eq!(calls.lock().unwrap().len(), 1);
-
-        // Choosing sends it and keeps it.
+        // The user turns it on here: sent, kept, and the notice goes.
         let (actions, calls) = fake(|_| Ok(json!({"acting": true})));
         let chosen = Arc::new(Chosen(Mutex::new(false)));
-        let actions = actions.with_choice(Box::new(SharedChoice(chosen.clone())));
+        let actions = actions
+            .with_choice(Box::new(SharedChoice(chosen.clone())))
+            .with_restart(notice.clone());
         assert_eq!(actions.choose(true), Ok(Acting::On));
         assert!(chosen.get());
+        assert_eq!(notice.state().offer(), []);
         assert_eq!(
             calls.lock().unwrap().last().cloned(),
             Some(("settings.set_acting".to_owned(), json!({"on": true})))
+        );
+    }
+
+    /// A choice that can't be kept.
+    struct Broken;
+
+    impl Choice for Broken {
+        fn get(&self) -> bool {
+            true
+        }
+        fn set(&self, _: bool) -> Result<(), String> {
+            Err("settings file can't be read".into())
+        }
+    }
+
+    #[test]
+    fn off_reaches_the_daemon_even_when_the_choice_cant_be_kept() {
+        let (actions, calls) = fake(|_| Ok(json!({"acting": false})));
+        let actions = actions.with_choice(Box::new(Broken));
+        assert_eq!(actions.choose(false), Ok(Acting::Off));
+        assert_eq!(
+            calls.lock().unwrap().clone(),
+            vec![("settings.set_acting".to_owned(), json!({"on": false}))]
         );
     }
 

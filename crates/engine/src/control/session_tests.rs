@@ -289,3 +289,29 @@ fn a_job_without_state_keeps_its_name_and_an_empty_cwd_means_home() {
         Some(r.tmp.path("home").to_string_lossy().as_ref())
     );
 }
+
+#[test]
+fn respawn_runs_claude_respawn_in_the_jobs_lane_and_watches_its_state_file() {
+    let r = rig("respawn");
+    r.tmp
+        .write("lane-b/jobs/ab12/state.json", r#"{"state":"idle"}"#);
+    let plan = plan_respawn("ab12", &r.roots);
+    let steps = runs(&plan);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].command.argv, ["claude", "respawn", "ab12"]);
+    assert_eq!(config(&steps[0].command), Some(Some(r.lane.clone())));
+    assert_eq!(steps[0].expect, Expect::ExitZero);
+    assert_eq!(
+        job_state_path(&r.roots, "ab12"),
+        r.tmp.path("lane-b/jobs/ab12/state.json")
+    );
+
+    r.tmp
+        .write("home/.claude/jobs/m1/state.json", r#"{"state":"idle"}"#);
+    let main = plan_respawn("m1", &r.roots);
+    assert_eq!(config(&runs(&main)[0].command), Some(None));
+    assert_eq!(
+        job_state_path(&r.roots, "m1"),
+        r.tmp.path("home/.claude/jobs/m1/state.json")
+    );
+}

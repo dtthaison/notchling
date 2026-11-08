@@ -38,6 +38,7 @@
 //! - [`owner`]: publishing as a page's owner, over an [`owner::HttpClient`] and an
 //!   [`owner::TokenSource`]; base58 link id to UUID ([`owner::uuid_from_short_id`]).
 //! - [`content`]: titles, the wrapper, folder names, facts in a tool result.
+//! - [`skill`]: the text of the `notchling-pages` skill, which `install` writes (E13).
 
 pub mod clock;
 pub mod content;
@@ -47,6 +48,7 @@ mod listpage;
 mod lock;
 pub mod owner;
 mod record;
+pub mod skill;
 
 pub use library::{find_in, safe_component, safe_relative, PageLibrary, PagesError};
 pub use listpage::html as list_page_html;

@@ -41,6 +41,12 @@ pub enum Command {
     SetAwake(AwakeMode),
     ToggleDisplay,
     Settings,
+    /// Notchling > About.
+    About,
+    /// Notchling > Welcome: the first-run view again.
+    Welcome,
+    /// Notchling > Handover: the checklist.
+    Handover,
     Quit,
 }
 
@@ -107,6 +113,14 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
             items: awake,
         },
         action("Settings…", Command::Settings, Some(','), false),
+        Entry::Submenu {
+            title: "About and Handover".to_owned(),
+            items: vec![
+                action("About Notchling", Command::About, None, false),
+                action("Welcome…", Command::Welcome, None, false),
+                action("Handover…", Command::Handover, None, false),
+            ],
+        },
         Entry::Separator,
         action("Quit Notchling", Command::Quit, Some('q'), false),
     ]
@@ -148,6 +162,7 @@ mod tests {
                 "Open Chat",
                 "Keep Mac Awake",
                 "Settings…",
+                "About and Handover",
                 "-",
                 "Quit Notchling"
             ]

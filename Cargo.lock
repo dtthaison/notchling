@@ -3683,6 +3683,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3726,7 +3727,9 @@ name = "notchling-platform"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "libc",
  "objc2",
+ "objc2-app-kit",
  "objc2-foundation",
  "objc2-user-notifications",
 ]

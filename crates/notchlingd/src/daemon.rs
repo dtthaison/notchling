@@ -8,33 +8,28 @@
 //! anyway (a process can end without touching a file, and a lane can appear). A list that differs
 //! from the last one goes out as `sessions.changed` with the whole new list.
 //!
+//! Every area's ops are built and served by [`crate::daemon_wiring`]; this module runs them: the
+//! locks, the socket, the session list and the loop.
+//!
 //! Start order: the single-instance locks, then the socket (so a second daemon is refused before it
 //! reads anything and a client that started this one finds it answering at once), and only then the
 //! first read of the list. `sessions.list` waits for that read, up to [`FIRST_LIST_WAIT`], and
 //! answers with what it has after that; the read then follows as `sessions.changed`.
 
-use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
-use crate::acting_ops::{ActingOps, Room};
-use crate::agy_ops::AgyOps;
-use crate::attach::{ClaudeAttacher, LiveLauncher};
-use crate::bridge_backend::APPROVAL_WAIT;
-use crate::bridge_ops::{BridgeOps, BridgeSetup};
-use crate::codex_ops::CodexOps;
+use crate::acting::{file_says_on, FILE_SAID_ON, SETTINGS_NAME};
+use crate::acting_ops::Room;
+pub use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
-use crate::pages_ops::{PagesOps, PagesSetup};
 use notchling_engine::bridge::net::ports as bridge_ports;
-use notchling_engine::control::launcher::claude_path;
-use notchling_engine::control::session::home_of;
-use notchling_engine::control::RealLauncher;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
-    ops, topics, Allowlist, ApiError, AuditEntry, AuditLog, Caller, Handler, Limits, OpSpec,
-    Server, ServerConfig, ServerHandle, Tier, APP_TIER_PATHS_ENV,
+    ops, topics, Allowlist, AuditEntry, AuditLog, Limits, Server, ServerConfig, ServerHandle,
+    APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -107,178 +102,6 @@ impl FirstScan {
             .wait_timeout_while(guard, within, |done| !*done)
             .unwrap_or_else(|e| e.into_inner());
         *guard
-    }
-}
-
-/// The ops: M2's session list (agent tier), with [`Ops::with_acting`] M3's ([`ActingOps`]), and
-/// with [`Ops::with_bridge`] M4's phone bridge ([`BridgeOps`], app tier).
-pub struct Ops {
-    sessions: Arc<Mutex<Value>>,
-    acting: Option<Arc<ActingOps>>,
-    bridge: Option<Arc<BridgeOps>>,
-    codex: Option<Arc<CodexOps>>,
-    agy: Option<Arc<AgyOps>>,
-    pages: Option<Arc<PagesOps>>,
-    /// The topics a client may follow: those of the ops this daemon has.
-    topic_list: Vec<&'static str>,
-    /// What `sessions.list` waits for, and for how long.
-    first: Arc<FirstScan>,
-    first_wait: Duration,
-}
-
-impl Ops {
-    pub fn new(sessions: Arc<Mutex<Value>>) -> Ops {
-        Ops {
-            sessions,
-            acting: None,
-            bridge: None,
-            codex: None,
-            agy: None,
-            pages: None,
-            topic_list: vec![topics::SESSIONS],
-            first: FirstScan::open(),
-            first_wait: FIRST_LIST_WAIT,
-        }
-    }
-
-    pub fn with_acting(sessions: Arc<Mutex<Value>>, acting: Arc<ActingOps>) -> Ops {
-        Ops {
-            acting: Some(acting),
-            ..Ops::new(sessions)
-        }
-        .with_topics()
-    }
-
-    pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
-        self.bridge = Some(bridge);
-        self.with_topics()
-    }
-
-    /// M5's Codex ops ([`CodexOps`]), and the `tools` topic they publish on.
-    pub fn with_codex(mut self, codex: Arc<CodexOps>) -> Ops {
-        self.codex = Some(codex);
-        self.with_topics()
-    }
-
-    fn with_topics(mut self) -> Ops {
-        let mut list = vec![topics::SESSIONS];
-        if self.acting.is_some() {
-            list.extend([topics::PROMPTS, topics::SETTINGS]);
-        }
-        if self.bridge.is_some() {
-            list.push(topics::BRIDGE);
-        }
-        if self.codex.is_some() || self.agy.is_some() {
-            list.push(topics::TOOLS);
-        }
-        self.topic_list = list;
-        self
-    }
-
-    /// M5's Antigravity ops ([`AgyOps`]), publishing on the `tools` topic too.
-    pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
-        self.agy = Some(agy);
-        self.with_topics()
-    }
-
-    /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
-    pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
-        self.pages = Some(pages);
-        self
-    }
-
-    /// `sessions.list` waits up to `wait` for `first`, then answers with what the list holds.
-    pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
-        self.first = first;
-        self.first_wait = wait;
-        self
-    }
-}
-
-impl Ops {
-    /// The list, and whether the first read was in. Only this client's thread waits. Past the wait
-    /// the list is what there is, and the first read follows as `sessions.changed` to a client that
-    /// subscribed.
-    fn sessions_list(&self) -> (Value, bool) {
-        let landed = self.first.wait(self.first_wait);
-        let list = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        (list, landed)
-    }
-}
-
-impl Handler for Ops {
-    /// `sessions.list` answered before the first read adds `"partial": true` beside `ok`; the
-    /// result itself stays a bare list, which every client reads as one.
-    fn call_with_extras(
-        &self,
-        caller: &Caller,
-        op: &str,
-        args: &Value,
-    ) -> (Result<Value, ApiError>, Map<String, Value>) {
-        if op != ops::SESSIONS_LIST {
-            return (self.call(caller, op, args), Map::new());
-        }
-        let (list, landed) = self.sessions_list();
-        let mut extras = Map::new();
-        if !landed {
-            extras.insert("partial".into(), Value::Bool(true));
-        }
-        (Ok(list), extras)
-    }
-
-    fn spec(&self, op: &str) -> Option<OpSpec> {
-        match op {
-            ops::SESSIONS_LIST => Some(OpSpec::AGENT),
-            op => self
-                .pages
-                .as_ref()
-                .and_then(|p| p.spec(op))
-                .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
-                .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
-                .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
-                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op))),
-        }
-    }
-
-    fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
-        if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
-            return bridge.call(op, args);
-        }
-        if let Some(codex) = self.codex.as_ref().filter(|c| c.spec(op).is_some()) {
-            return codex.call(op, args);
-        }
-        if let Some(agy) = self.agy.as_ref().filter(|a| a.spec(op).is_some()) {
-            return agy.call(op, args);
-        }
-        if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
-            return pages.call(op, args);
-        }
-        match (op, &self.acting) {
-            (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
-            (op, Some(acting)) => acting.call(caller, op, args),
-            (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
-        }
-    }
-
-    fn topics(&self) -> &[&str] {
-        &self.topic_list
-    }
-
-    /// The held prompts are the app's: their ids are what answers them. So are the bridge's
-    /// pairing requests.
-    fn topic_tier(&self, topic: &str) -> Tier {
-        match topic {
-            topics::PROMPTS | topics::BRIDGE => Tier::App,
-            _ => Tier::Agent,
-        }
-    }
-
-    fn acting(&self) -> Option<bool> {
-        self.acting.as_ref().map(|a| a.is_on())
     }
 }
 
@@ -420,28 +243,6 @@ impl Default for DaemonOptions {
     }
 }
 
-/// Where the bridge keeps its files: `AgentConsole` beside Notchling's data folder (the Swift
-/// app's, so paired phones carry over; `<root>/AgentConsole` under a fixture root), and photos in
-/// `AgentConsole/phone-images` beside the cache folder.
-fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
-    let beside = |dir: &std::path::Path| dir.parent().unwrap_or(dir).join("AgentConsole");
-    let data_dir = beside(&layout.data_dir);
-    let images_dir = match (layout.fixture, notchling_platform::paths::cache_dir()) {
-        (false, Some(cache)) => beside(&cache).join("phone-images"),
-        _ => data_dir.join("phone-images"),
-    };
-    BridgeSetup {
-        data_dir,
-        home: PathBuf::from(home_of(&layout.roots())),
-        images_dir,
-        projects_dir: layout.claude_dir.join("projects"),
-        lan_port: ports.0,
-        tunnel_port: ports.1,
-        loopback_only: false,
-        approval_wait: APPROVAL_WAIT,
-    }
-}
-
 /// Serves until `stop()` says so, then shuts the server down and removes the socket.
 pub fn run(
     layout: Layout,
@@ -474,44 +275,15 @@ pub fn run(
     // Empty until the first read, which comes after the socket answers (below).
     let sessions = Arc::new(Mutex::new(Value::Array(Vec::new())));
     let first_scan = FirstScan::pending();
-    // Off at every start, whatever a file says: only the app's `settings.set_acting` during this
-    // run turns it on (decision 0007's note: files at rest are not a tier boundary).
-    let acting = Arc::new(Acting::off());
     let room = Arc::new(LateRoom::default());
-    // The real terminal and launcher, used only while acting is on.
-    let claude = claude_path(std::path::Path::new(&home_of(&layout.roots())));
-    let acting_ops = Arc::new(
-        ActingOps::new(
-            acting.clone(),
-            sessions.clone(),
-            layout.roots(),
-            room.clone(),
-            Box::new(ClaudeAttacher::new(&claude)),
-        )
-        .with_launcher(
-            Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
-            Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
-        ),
-    );
-    // Codex turns (M5), behind the same switch: nothing starts until the app turns acting on.
-    let codex_ops = Arc::new(CodexOps::for_daemon(&layout, acting, room.clone(), &claude));
-    acting_ops.attach_codex(codex_ops.clone());
-    // Off at every start, like acting: no port is bound and nothing is written under
-    // `AgentConsole` until the app's `bridge.set` in this run.
-    let bridge = Arc::new(BridgeOps::new(
-        bridge_setup(&layout, options.bridge_ports),
-        sessions.clone(),
-        acting_ops.clone(),
-        room.clone(),
-    ));
-    // Off with acting: `agy` starts only on an acting op, and the copy of its list is made only
-    // when the list is read.
-    let agy = Arc::new(AgyOps::for_daemon(
+    // Every area's ops, each off at every start whatever a file says (decision 0007's note: files
+    // at rest are not a tier boundary): acting, the bridge and Milestone 6's three switches.
+    let wired = Wired::build(
         &layout,
-        acting_ops.acting_switch(),
+        sessions.clone(),
         room.clone(),
-    ));
-    acting_ops.attach_agy(agy.clone());
+        options.bridge_ports,
+    );
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -520,16 +292,12 @@ pub fn run(
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },
-        Arc::new(
-            Ops::with_acting(sessions.clone(), acting_ops.clone())
-                .with_bridge(bridge.clone())
-                .with_codex(codex_ops.clone())
-                .with_agy(agy.clone())
-                .with_pages(Arc::new(
-                    PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
-                ))
-                .with_first_scan(first_scan.clone(), options.first_list_wait),
-        ),
+        Arc::new(wired.ops(
+            &layout,
+            sessions.clone(),
+            first_scan.clone(),
+            options.first_list_wait,
+        )),
     )
     .map_err(|e| match e.kind() {
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),
@@ -543,6 +311,7 @@ pub fn run(
     }
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
     room.set(handle.clone());
+    wired.start();
     eprintln!(
         "notchling daemon {} serving {}",
         env!("CARGO_PKG_VERSION"),
@@ -570,7 +339,7 @@ pub fn run(
         }
         last_poll = Instant::now();
         scan(&mut lister, &options, &sessions, &handle);
-        agy.reap();
+        wired.agy.reap();
         // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
         if now != watched {
@@ -582,10 +351,7 @@ pub fn run(
     // Held hooks pass now rather than at their deadline; the bridge's ports close; a list still
     // waiting for the first read stops waiting.
     first_scan.finish();
-    acting_ops.close();
-    codex_ops.close();
-    agy.close();
-    bridge.close();
+    wired.close();
     handle.shutdown();
     match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),
@@ -618,7 +384,7 @@ fn wait_batch(rx: &Receiver<Batch>, wait: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notchling_local_api::ClientKind;
+    use notchling_local_api::{Caller, ClientKind, Handler, OpSpec, Tier};
     use serde_json::json;
 
     fn caller() -> Caller {

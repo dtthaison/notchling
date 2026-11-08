@@ -83,6 +83,66 @@ pub mod ops {
     pub const PAGES_LIST: &str = "pages.list";
     /// `{query}` → `{pages: [Page + describe], truncated}`.
     pub const PAGES_FIND: &str = "pages.find";
+
+    /// Milestone 6's installing into other tools (E13), app tier, behind the daemon's `install`
+    /// switch: while it is off `apply` and `remove` answer with the dry-run plan and the off
+    /// message, and write nothing. The shapes are in `notchlingd`'s `install_ops` module docs.
+    /// `{action?, what?, with_swift_hooks?}` → `{on, applied, plan}`; reads only.
+    pub const INSTALL_PLAN: &str = "install.plan";
+    /// `{what?, with_swift_hooks?}` → `{on, applied, plan, backup?}`.
+    pub const INSTALL_APPLY: &str = "install.apply";
+    /// `{what?}` → `{on, applied, plan, backup?}`.
+    pub const INSTALL_REMOVE: &str = "install.remove";
+    /// Milestone 6's switches (`notchlingd`'s `switches` module): `{switch, on}` (app tier) and a
+    /// read of all three (agent tier).
+    pub const SETTINGS_SET_SWITCH: &str = "settings.set_switch";
+    pub const SETTINGS_SWITCHES: &str = "settings.switches";
+
+    /// Milestone 6's Claude Code accounts and lanes (E8a), app tier, behind the `accounts` switch;
+    /// the shapes are in `notchlingd`'s `accounts_ops` module docs. `accounts.list` and
+    /// `lanes.list` read the daemon's own files while the switch is off.
+    pub const ACCOUNTS_LIST: &str = "accounts.list";
+    pub const ACCOUNTS_SWITCH: &str = "accounts.switch";
+    pub const ACCOUNTS_ADD_BEGIN: &str = "accounts.add.begin";
+    pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
+    pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
+    pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
+    /// `{ticket}`: the result of an accounts op that answered `{state: "working", ticket}`, after
+    /// up to 4 s; `{state: "working", ticket}` again while it still runs.
+    pub const ACCOUNTS_RESULT: &str = "accounts.result";
+    pub const LANES_LIST: &str = "lanes.list";
+    pub const LANES_CREATE: &str = "lanes.create";
+    pub const LANES_REMOVE: &str = "lanes.remove";
+    pub const LANES_SWITCH: &str = "lanes.switch";
+
+    /// Milestone 6's other providers (E8b: Codex, Antigravity, Claude Desktop), app tier, behind
+    /// the daemon's `accounts` switch; the shapes are in `notchlingd`'s `providers_ops` module
+    /// docs. While the switch is off all answer `forbidden` except `providers.list`, which lists
+    /// the saved names from the daemon's own files.
+    pub const PROVIDERS_LIST: &str = "providers.list";
+    pub const PROVIDERS_SWITCH: &str = "providers.switch";
+    pub const PROVIDERS_ADD_BEGIN: &str = "providers.add.begin";
+    pub const PROVIDERS_ADD_CANCEL: &str = "providers.add.cancel";
+    pub const PROVIDERS_REMOVE: &str = "providers.remove";
+    pub const PROVIDERS_USAGE: &str = "providers.usage";
+
+    /// Milestone 6's Secret Vault (E9), behind the daemon's `vault` switch; the shapes are in
+    /// `notchlingd`'s `vault_ops` module docs. Agent tier: `vault.find`, `vault.use` (an entry
+    /// marked ask-first waits for the app's approval) and `vault.request` (waits for the app's
+    /// form). App tier: the rest.
+    pub const VAULT_FIND: &str = "vault.find";
+    pub const VAULT_USE: &str = "vault.use";
+    pub const VAULT_REQUEST: &str = "vault.request";
+    pub const VAULT_LIST: &str = "vault.list";
+    pub const VAULT_SAVE: &str = "vault.save";
+    pub const VAULT_REMOVE: &str = "vault.remove";
+    /// `{id, decision: "deny" | "once" | "always"}`: the answer to a `vault.approval.pending`.
+    pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
+    /// `{id}`: the user closed a `vault.request.pending` form without saving.
+    pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
+    /// `{}` → `{approvals: [..], requests: [..]}`: the `vault.approval.pending` and
+    /// `vault.request.pending` events still waiting, oldest first, for an app that (re)connects.
+    pub const VAULT_PENDING: &str = "vault.pending";
 }
 
 /// Event topics and the events they carry.
@@ -100,6 +160,16 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
+    /// `{"switch": "accounts" | "vault" | "install", "on": bool}`, after `settings.set_switch`.
+    pub const SWITCH_CHANGED: &str = "settings.switch";
+    /// Claude Code accounts and lanes (app tier).
+    pub const ACCOUNTS: &str = "accounts";
+    /// `{accounts, active, lanes}` after a change.
+    pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
+    /// `{login, state: "added" | "failed" | "cancelled", account?, error?}`: a sign-in ended.
+    pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
+    /// `{ticket, op, ok, result?, error?}`: an accounts op that outlasted its call ended.
+    pub const ACCOUNTS_DONE: &str = "accounts.done";
     /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
     /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
@@ -120,6 +190,27 @@ pub mod topics {
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     /// The status after a change (`bridge.status`'s answer).
     pub const BRIDGE_CHANGED: &str = "bridge.changed";
+    /// Accounts of the other providers (app tier): a switch that outlasted its reply, an add flow
+    /// that moved, a refresh that finished.
+    pub const PROVIDERS: &str = "providers";
+    /// `{"provider", "reason": "sync" | "usage" | "switch" | "add" | "remove", ...}`; the app asks
+    /// `providers.list` again.
+    pub const PROVIDERS_CHANGED: &str = "providers.changed";
+
+    /// The Secret Vault (app tier). Never carries a value.
+    pub const VAULT: &str = "vault";
+    /// `{id, names, entries, command, folder, verified: {exe, pid, cwd, parents,
+    /// folder_matches}}`: an agent waits to use secrets marked ask-first. `command` and `folder`
+    /// are what it claims; `verified` is what the daemon checked with the kernel.
+    pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
+    /// `{id, decision}`: answered, timed out, or the app left.
+    pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";
+    /// `{id, request, entry, existing, changes}`: an agent asks the user to add or update one.
+    pub const VAULT_REQUEST_PENDING: &str = "vault.request.pending";
+    /// `{id, saved}`.
+    pub const VAULT_REQUEST_RESOLVED: &str = "vault.request.resolved";
+    /// `{names, value_changed}`: the list changed (a save, a remove, Always Allow).
+    pub const VAULT_CHANGED: &str = "vault.changed";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.
@@ -413,6 +504,9 @@ mod tests {
         }
         assert_eq!(ops::SETTINGS_SET_ACTING, "settings.set_acting");
         assert_eq!(ops::HOOK_REQUEST, "hook.request");
+        assert_eq!(ops::INSTALL_PLAN, "install.plan");
+        assert_eq!(ops::INSTALL_APPLY, "install.apply");
+        assert_eq!(ops::INSTALL_REMOVE, "install.remove");
         assert_eq!(topics::PROMPT_PENDING, "prompt.pending");
         assert_eq!(topics::PROMPT_RESOLVED, "prompt.resolved");
     }
