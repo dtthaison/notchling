@@ -1,4 +1,38 @@
-//! The design kit: tokens and parts shared by every view.
+//! The design kit: tokens and parts shared by every view (part U0).
+//!
+//! Ported from `legacy/macos/Sources/Notchling/DesignKit/ChatKit.swift`; the spec is
+//! `docs/chat-kit.md`. Two layers:
+//!
+//! - **Tokens**, pure data with no dependencies, tested on every system: [`Ink`] (colors by meaning,
+//!   light and dark), [`TypeRole`] (the type scale), [`metric`], [`Motion`], [`Icon`] (SF Symbol names
+//!   as data) and [`part`] (what each part looks like in each state). Only `ink` reads the palette.
+//! - **Widgets** over GPUI in [`ui`], macOS only for now (`LINT-GPUI-MACOS-ONLY`): buttons in the
+//!   kit's styles, session rows, options, pills, avatars, a field, a label, and [`ui::KitGallery`],
+//!   every part in every state for a render.
+//!
+//! Views use the tokens, never a raw color or size.
+
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod appearance;
+pub mod color;
+pub mod icon;
+pub mod ink;
+pub mod metric;
+pub mod motion;
+mod palette;
+pub mod part;
+pub mod typescale;
+#[cfg(target_os = "macos")]
+pub mod ui;
+
+pub use appearance::Appearance;
+pub use color::Color;
+pub use icon::{Icon, IconSize};
+pub use ink::{Ink, Status};
+pub use motion::{Curve, Motion};
+pub use part::{ButtonKind, PartState};
+pub use typescale::{TypeRole, TypeSpec, Weight};
 
 /// The crate's short name.
 pub fn crate_name() -> &'static str {

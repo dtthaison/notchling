@@ -1,0 +1,204 @@
+//! Every part in every state, for review in light and dark. Rendered by `notchling-app --render
+//! kit-gallery` (U10), never shown in the app.
+
+use gpui::{div, prelude::*, px, Context, Div, Render, SharedString, Subscription, Window};
+
+use super::widgets::{
+    avatar, button, claude_mark, field, label, option_row, session_row, status_pill,
+};
+use super::{window_appearance, KitStyled};
+use crate::metric::RADIUS_MD;
+use crate::part::{ButtonKind, PartState};
+use crate::{Appearance, Ink, Status, TypeRole};
+
+/// The gallery view. `appearance: None` follows the window (the system); `Some` forces one.
+pub struct KitGallery {
+    appearance: Option<Appearance>,
+    _appearance_changes: Subscription,
+}
+
+impl KitGallery {
+    /// Builds the gallery and redraws it when the system appearance changes.
+    pub fn new(
+        appearance: Option<Appearance>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let this = cx.weak_entity();
+        let changes = window.observe_window_appearance(move |_, cx| {
+            this.update(cx, |_, cx| cx.notify()).ok();
+        });
+        Self {
+            appearance,
+            _appearance_changes: changes,
+        }
+    }
+
+    /// The forced appearance, or the window's.
+    pub fn appearance(&self, window: &Window) -> Appearance {
+        self.appearance.unwrap_or_else(|| window_appearance(window))
+    }
+}
+
+fn id(part: &str, detail: &str) -> SharedString {
+    SharedString::from(format!("{part}-{detail}"))
+}
+
+fn section(title: &str, appearance: Appearance, content: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(label(title, TypeRole::Section, Ink::TextFaint, appearance))
+        .child(content)
+}
+
+fn buttons(a: Appearance) -> Div {
+    let states = [
+        PartState::Rest,
+        PartState::Hover,
+        PartState::Pressed,
+        PartState::Focused,
+        PartState::Disabled,
+    ];
+    div()
+        .flex()
+        .items_start()
+        .gap(px(16.0))
+        .children(ButtonKind::ALL.map(|kind| {
+            div().flex().flex_col().items_start().gap(px(6.0)).children(
+                states.map(|state| {
+                    button(id(kind.name(), state.name()), state.name(), kind, state, a)
+                }),
+            )
+        }))
+}
+
+fn rows(a: Appearance) -> Div {
+    let states = [
+        PartState::Rest,
+        PartState::Hover,
+        PartState::Pressed,
+        PartState::Selected,
+    ];
+    div()
+        .w(px(260.0))
+        .p(px(8.0))
+        .rounded(px(RADIUS_MD))
+        .fill(Ink::Sidebar, a)
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .children(states.map(|state| {
+            session_row(
+                id("row", state.name()),
+                "design system",
+                &state.name().to_lowercase(),
+                "2m",
+                Status::Needs,
+                state,
+                false,
+                a,
+            )
+        }))
+        .child(session_row(
+            id("row", "selected-focused"),
+            "design system",
+            "selected + focused",
+            "2m",
+            Status::Needs,
+            PartState::Selected,
+            true,
+            a,
+        ))
+}
+
+fn options(a: Appearance) -> Div {
+    let states = [PartState::Rest, PartState::Hover, PartState::Pressed];
+    div()
+        .w(px(300.0))
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .children(states.into_iter().enumerate().map(|(i, state)| {
+            option_row(
+                id("option", state.name()),
+                i + 1,
+                &format!("Option {}", state.name().to_lowercase()),
+                "What this choice means",
+                false,
+                state,
+                a,
+            )
+        }))
+        .child(option_row(
+            id("option", "ticked"),
+            4,
+            "Option ticked",
+            "A multi-select row that is on",
+            true,
+            PartState::Rest,
+            a,
+        ))
+}
+
+fn small_parts(a: Appearance) -> Div {
+    let names = [
+        "design system",
+        "task-status-check",
+        "referral",
+        "artifact-id-lookup",
+        "wifi",
+    ];
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(
+            div()
+                .flex()
+                .gap(px(8.0))
+                .children(Status::ALL.map(|status| status_pill(status, status.word(), a))),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .children(names.map(|name| avatar(name, 30.0, Some(Status::Needs), Ink::Window, a)))
+                .child(claude_mark(24.0, a)),
+        )
+        .child(div().w(px(220.0)).child(field("", "Search", false, a)))
+        .child(
+            div()
+                .w(px(220.0))
+                .child(field("focused", "Search", true, a)),
+        )
+}
+
+impl Render for KitGallery {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let a = self.appearance(window);
+        div()
+            .size_full()
+            .p(px(24.0))
+            .fill(Ink::Window, a)
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(18.0))
+            .child(label("Chat kit", TypeRole::Title, Ink::Text, a))
+            .child(section("Buttons", a, buttons(a)))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(24.0))
+                    .child(section("Session rows", a, rows(a)))
+                    .child(section("Options", a, options(a))),
+            )
+            .child(section("Pills, avatars, field", a, small_parts(a)))
+    }
+}
