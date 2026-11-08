@@ -56,6 +56,8 @@ pub const PAGE_HOOKS: &str = "page_hooks";
 pub const VAULT_SKILL: &str = "notchling-vault";
 
 #[cfg(test)]
+mod dup_tests;
+#[cfg(test)]
 mod edit_tests;
 #[cfg(test)]
 mod file_tests;

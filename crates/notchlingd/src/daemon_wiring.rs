@@ -336,6 +336,7 @@ impl Wired {
         let names = claude_store.clone();
         let stores = ProviderStores::for_daemon(
             layout,
+            &on,
             Arc::new(move || {
                 names
                     .saved_list()

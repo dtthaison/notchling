@@ -64,7 +64,8 @@ pub struct SystemProcs {
     pub home: PathBuf,
 }
 
-/// Real apps (macOS: `NSRunningApplication` to ask and quit, `open -b` to open).
+/// Real apps (macOS: the process table says what runs and when an app is gone,
+/// `NSRunningApplication` asks it to quit, `open -b` opens it).
 pub struct SystemApps;
 
 mod real {

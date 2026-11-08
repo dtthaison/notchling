@@ -78,3 +78,33 @@ impl Drop for CfString {
         unsafe { CFRelease(self.0) };
     }
 }
+
+/// libproc's `PROC_ALL_PIDS`; the `libc` crate doesn't name it.
+const PROC_ALL_PIDS: u32 = 1;
+
+/// Every process and the file it runs, from the kernel's process table (`proc_listpids`,
+/// `proc_pidpath`). Unlike the system's running-application list, which a process without a main
+/// run loop never hears updates to, this is read fresh on every call. `None` when the table can't
+/// be listed; a process whose path can't be read (it ended since the listing) is left out.
+pub fn process_paths() -> Option<Vec<(i32, String)>> {
+    const PID: usize = std::mem::size_of::<libc::pid_t>();
+    // SAFETY: a null buffer of size 0 asks only for the size of the list in bytes.
+    let size = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
+    let count = usize::try_from(size).ok().filter(|n| *n > 0)? / PID;
+    // Room for processes that start between the two calls.
+    let mut pids: Vec<libc::pid_t> = vec![0; count + 64];
+    let bytes = libc::c_int::try_from(pids.len() * PID).ok()?;
+    // SAFETY: `pids` is writable for `bytes` bytes.
+    let got = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, pids.as_mut_ptr().cast(), bytes) };
+    pids.truncate(usize::try_from(got).ok().filter(|n| *n > 0)? / PID);
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let mut table = Vec::with_capacity(pids.len());
+    for pid in pids.into_iter().filter(|p| *p > 0) {
+        // SAFETY: `buf` is writable for its full length.
+        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if let Some(len) = usize::try_from(n).ok().filter(|n| *n > 0) {
+            table.push((pid, String::from_utf8_lossy(&buf[..len]).into_owned()));
+        }
+    }
+    Some(table)
+}

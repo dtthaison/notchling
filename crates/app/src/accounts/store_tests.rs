@@ -241,3 +241,45 @@ fn a_refusal_is_kept_as_the_error_and_a_lost_daemon_detaches() {
     fixed.refresh(&Switches::all_on());
     assert!(fixed.begin_add_claude(&Switches::all_on()).is_err());
 }
+
+#[test]
+fn a_switch_the_daemon_is_still_running_is_followed_to_its_answer() {
+    let asked = Arc::new(Mutex::new(0u32));
+    let polls = asked.clone();
+    let (store, calls) = fake(move |op, args| match op {
+        "accounts.switch" => Ok(json!({"state": "working", "ticket": 7, "op": op})),
+        "accounts.result" => {
+            assert_eq!(args["ticket"], 7);
+            let mut n = polls.lock().unwrap();
+            *n += 1;
+            if *n < 2 {
+                Ok(json!({"state": "working", "ticket": 7}))
+            } else {
+                Ok(json!({"on": true, "active": "a2",
+                    "accounts": [{"id": "a2", "email": "ops@example.com"}]}))
+            }
+        }
+        _ => Ok(json!({})),
+    });
+    let on = Switches::all_on();
+    store.switch_claude(&on, "a2").unwrap();
+    assert_eq!(store.snapshot().claude.active.as_deref(), Some("a2"));
+    assert_eq!(
+        sent(&calls),
+        vec!["accounts.switch", "accounts.result", "accounts.result"]
+    );
+}
+
+#[test]
+fn a_late_refusal_is_the_error_shown() {
+    let (store, _) = fake(|op, _| match op {
+        "accounts.switch" => Ok(json!({"state": "working", "ticket": 3})),
+        _ => Err(ClientError::Api(ApiError::new(
+            ErrorCode::Failed,
+            "No saved login for this account.",
+        ))),
+    });
+    let e = store.switch_claude(&Switches::all_on(), "a9").unwrap_err();
+    assert_eq!(e, "No saved login for this account.");
+    assert_eq!(store.snapshot().error.as_deref(), Some(e.as_str()));
+}

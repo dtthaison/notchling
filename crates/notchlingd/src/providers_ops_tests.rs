@@ -11,15 +11,12 @@ use notchling_engine::accounts::antigravity::{
 use notchling_engine::accounts::codex::{CodexDeps, CodexPaths, CodexStore};
 use notchling_engine::accounts::desktop::{DesktopDeps, DesktopPaths, DesktopStore};
 use notchling_engine::accounts::generic_password::{FakeKeychain, Keychain};
-use notchling_engine::accounts::procs::{FakeApps, FakeProcs, ProcCall};
-use notchling_engine::providers::{
-    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, FakeHttp,
-    ProviderRegistry, ProviderState,
-};
+use notchling_engine::accounts::procs::{FakeApps, FakeProcs};
+use notchling_engine::providers::{FakeHttp, ProviderRegistry};
 use notchling_local_api::{ops, ErrorCode};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const NOW_FUTURE: f64 = 4_000_000_000.0;
@@ -46,7 +43,7 @@ fn jwt(claims: &Value) -> String {
 }
 
 /// A made-up Codex `auth.json`.
-fn codex_login(email: &str, user: &str, ws: &str) -> Vec<u8> {
+pub(crate) fn codex_login(email: &str, user: &str, ws: &str) -> Vec<u8> {
     let id = jwt(&json!({"email": email, "sub": "x",
         "https://api.openai.com/auth": {"chatgpt_account_id": ws, "chatgpt_user_id": user}}));
     let access = jwt(&json!({"exp": NOW_FUTURE}));
@@ -56,19 +53,19 @@ fn codex_login(email: &str, user: &str, ws: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-struct Rig {
-    root: PathBuf,
-    keychain: Arc<FakeKeychain>,
-    http: Arc<FakeHttp>,
-    procs: Arc<FakeProcs>,
-    apps: Arc<FakeApps>,
-    room: Arc<FakeRoom>,
-    flag: Arc<SwitchFlag>,
-    ops: ProvidersOps,
+pub(crate) struct Rig {
+    pub(crate) root: PathBuf,
+    pub(crate) keychain: Arc<FakeKeychain>,
+    pub(crate) http: Arc<FakeHttp>,
+    pub(crate) procs: Arc<FakeProcs>,
+    pub(crate) apps: Arc<FakeApps>,
+    pub(crate) room: Arc<FakeRoom>,
+    pub(crate) flag: Arc<SwitchFlag>,
+    pub(crate) ops: ProvidersOps,
 }
 
 impl Rig {
-    fn new(tag: &str, on: bool, procs: FakeProcs, apps: FakeApps) -> Rig {
+    pub(crate) fn new(tag: &str, on: bool, procs: FakeProcs, apps: FakeApps) -> Rig {
         let root = std::env::temp_dir().join(format!("nl-provops-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("codex")).unwrap();
@@ -130,11 +127,15 @@ impl Rig {
         }
     }
 
-    fn codex_auth(&self) -> PathBuf {
+    pub(crate) fn codex_auth(&self) -> PathBuf {
         self.root.join("codex/auth.json")
     }
 
-    fn call(&self, op: &str, args: Value) -> Result<Value, notchling_local_api::ApiError> {
+    pub(crate) fn call(
+        &self,
+        op: &str,
+        args: Value,
+    ) -> Result<Value, notchling_local_api::ApiError> {
         self.ops.call(op, &args)
     }
 
@@ -151,11 +152,11 @@ impl Rig {
         assert!(!self.root.join("state").exists(), "nothing written");
     }
 
-    fn events(&self) -> Vec<Value> {
+    pub(crate) fn events(&self) -> Vec<Value> {
         self.room.named("providers.changed")
     }
 
-    fn wait_for(&self, what: impl Fn(&Value) -> bool) -> Value {
+    pub(crate) fn wait_for(&self, what: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(found) = self.events().into_iter().find(|e| what(e)) {
@@ -177,7 +178,7 @@ impl Drop for Rig {
     }
 }
 
-fn no_secrets(value: &Value) {
+pub(crate) fn no_secrets(value: &Value) {
     let text = value.to_string();
     for secret in SECRETS {
         assert!(!text.contains(secret), "{secret} in {text}");
@@ -391,220 +392,6 @@ mod base64_for_tests {
         }
         out
     }
-}
-
-/// A provider whose switch takes a while, to see the reply give up and the event follow.
-struct Slow {
-    done: Arc<Mutex<bool>>,
-}
-
-impl AccountProvider for Slow {
-    fn id(&self) -> notchling_engine::providers::ProviderId {
-        "slow".into()
-    }
-    fn title(&self) -> &'static str {
-        "Slow"
-    }
-    fn capabilities(&self) -> Capabilities {
-        Capabilities::ADD_ACCOUNT
-    }
-    fn state(&self) -> ProviderState {
-        ProviderState::default()
-    }
-    fn sync(&self, _force: bool) {}
-    fn switch_to(&self, _id: &str) -> Result<(), AccountError> {
-        std::thread::sleep(Duration::from_millis(300));
-        *self.done.lock().unwrap() = true;
-        Ok(())
-    }
-    fn begin_add(&self) -> Result<AddStarted, AccountError> {
-        std::thread::sleep(Duration::from_millis(300));
-        Ok(AddStarted::default())
-    }
-    fn poll_add(&self) -> AddProgress {
-        AddProgress::Done
-    }
-    fn cancel_add(&self) {}
-    fn remove(&self, _id: &str) {}
-    fn switch_failure_title(&self) -> &'static str {
-        "Couldn't switch Slow"
-    }
-}
-
-fn slow_rig() -> (ProvidersOps, Arc<FakeRoom>, Arc<Mutex<bool>>) {
-    let done = Arc::new(Mutex::new(false));
-    let mut registry = ProviderRegistry::new();
-    registry.register(Arc::new(Slow { done: done.clone() }));
-    let room = Arc::new(FakeRoom::default());
-    let ops = ProvidersOps::new(
-        SwitchFlag::in_memory(ACCOUNTS, ACCOUNTS_OFF, true),
-        registry,
-        room.clone(),
-    );
-    ops.set_reply_wait(Duration::from_millis(30));
-    ops.set_add_timing(Duration::from_millis(10), Duration::from_secs(5));
-    (ops, room, done)
-}
-
-fn wait_event(room: &FakeRoom, what: impl Fn(&Value) -> bool) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(e) = room
-            .named("providers.changed")
-            .into_iter()
-            .find(|e| what(e))
-        {
-            return e;
-        }
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-#[test]
-fn a_slow_switch_answers_switching_and_ends_as_an_event_and_one_runs_at_a_time() {
-    let (ops, room, done) = slow_rig();
-    let args = json!({"provider": "slow", "id": "x"});
-    assert_eq!(
-        ops.call(ops::PROVIDERS_SWITCH, &args).unwrap(),
-        json!({"state": "switching"})
-    );
-    let second = ops.call(ops::PROVIDERS_SWITCH, &args).unwrap_err();
-    assert_eq!(second.code, ErrorCode::Failed);
-    assert!(second.message.contains("another account change"));
-    let end = wait_event(&room, |e| e["reason"] == "switch" && e["state"] == "done");
-    assert_eq!(end["provider"], "slow");
-    assert!(*done.lock().unwrap());
-    // The slot is free again.
-    let again = ops.call(ops::PROVIDERS_SWITCH, &args).unwrap();
-    assert!(again["state"] == "switching" || again["state"] == "switched");
-}
-
-#[test]
-fn a_slow_add_start_answers_starting_and_reports_progress_by_event() {
-    let (ops, room, _) = slow_rig();
-    let reply = ops
-        .call(ops::PROVIDERS_ADD_BEGIN, &json!({"provider": "slow"}))
-        .unwrap();
-    assert_eq!(reply, json!({"state": "starting"}));
-    wait_event(&room, |e| e["reason"] == "add" && e["state"] == "started");
-    wait_event(&room, |e| e["reason"] == "add" && e["state"] == "done");
-}
-
-#[test]
-fn adding_a_codex_account_reports_the_sign_in_page_then_done() {
-    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
-    let rig = Rig::new("add", true, procs, FakeApps::new());
-    let reply = rig
-        .call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
-        .unwrap();
-    assert_eq!(reply["state"], "waiting");
-    let login = rig.procs.login_state();
-    login.lock().unwrap().output = "Open https://auth.openai.com/oauth/authorize?z=1\n".into();
-    let waiting = rig.wait_for(|e| e["reason"] == "add" && e["state"] == "waiting");
-    assert_eq!(
-        waiting["sign_in_url"],
-        "https://auth.openai.com/oauth/authorize?z=1"
-    );
-    let scratch = rig
-        .procs
-        .calls()
-        .into_iter()
-        .find_map(|c| match c {
-            ProcCall::SpawnLogin(s) => Some(PathBuf::from(&s.env[0].1)),
-            _ => None,
-        })
-        .unwrap();
-    std::fs::write(
-        scratch.join("auth.json"),
-        codex_login("c@example.com", "u3", "w3"),
-    )
-    .unwrap();
-    login.lock().unwrap().exit = Some(0);
-    let done = rig.wait_for(|e| e["reason"] == "add" && e["state"] == "done");
-    no_secrets(&done);
-    assert!(rig.keychain.get("Notchling Codex", "u3:w3").is_some());
-    assert!(
-        !rig.codex_auth().exists(),
-        "the live login was never written"
-    );
-}
-
-#[test]
-fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
-    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
-    let rig = Rig::new("addoff", true, procs, FakeApps::new());
-    rig.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
-        .unwrap();
-    rig.flag.set(false);
-    std::thread::sleep(Duration::from_millis(60));
-    let calls = rig.keychain.calls().len();
-    let scratch = rig
-        .procs
-        .calls()
-        .into_iter()
-        .find_map(|c| match c {
-            ProcCall::SpawnLogin(s) => Some(PathBuf::from(&s.env[0].1)),
-            _ => None,
-        })
-        .unwrap();
-    std::fs::write(
-        scratch.join("auth.json"),
-        codex_login("c@example.com", "u3", "w3"),
-    )
-    .unwrap();
-    rig.procs.login_state().lock().unwrap().exit = Some(0);
-    std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(
-        rig.keychain.calls().len(),
-        calls,
-        "no Keychain call after the switch went off"
-    );
-    assert!(!rig.events().iter().any(|e| e["state"] == "done"));
-    // And a cancel is refused like any op.
-    assert_eq!(
-        rig.call(ops::PROVIDERS_ADD_CANCEL, json!({"provider": "codex"}))
-            .unwrap_err()
-            .code,
-        ErrorCode::Forbidden
-    );
-}
-
-#[test]
-fn a_waiting_add_flow_ends_when_accounts_turn_off_not_at_its_next_poll() {
-    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
-    let rig = Rig::new("addoffnow", true, procs, FakeApps::new());
-    // A poll so far away that only the switch's listener can end the wait in time.
-    rig.ops
-        .set_add_timing(Duration::from_secs(600), Duration::from_secs(900));
-    rig.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
-        .unwrap();
-    let started = Instant::now();
-    rig.flag.set(false);
-    let ended = rig.wait_for(|e| e["reason"] == "add" && e["state"] == "cancelled");
-    assert!(started.elapsed() < Duration::from_secs(5));
-    assert_eq!(ended["error"], ACCOUNTS_OFF);
-    no_secrets(&ended);
-    // The provider's own flow is left alone: cancelling it could write a login back.
-    assert!(!rig.procs.login_state().lock().unwrap().killed);
-}
-
-#[test]
-fn stopping_the_daemon_cancels_a_waiting_add_only_while_accounts_are_on() {
-    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
-    let rig = Rig::new("close", true, procs, FakeApps::new());
-    rig.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
-        .unwrap();
-    rig.ops.close();
-    assert!(rig.procs.login_state().lock().unwrap().killed);
-
-    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
-    let off = Rig::new("closeoff", true, procs, FakeApps::new());
-    off.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
-        .unwrap();
-    off.flag.set(false);
-    off.ops.close();
-    assert!(!off.procs.login_state().lock().unwrap().killed);
 }
 
 #[test]

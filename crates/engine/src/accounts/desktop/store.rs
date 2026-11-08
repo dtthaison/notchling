@@ -278,6 +278,15 @@ impl AccountProvider for DesktopStore {
     }
 
     /// Stops waiting and, if nobody signed in, puts the previous account back.
+    /// Stops waiting without putting the previous login back (that would write Desktop's files).
+    fn abandon_add(&self) -> Option<String> {
+        let mut inner = lock(&self.inner);
+        inner.adding = false;
+        inner.before_add.take().map(|_| {
+            "Claude Desktop was left signed out. Sign in there, or turn accounts on and switch to an account to put its login back.".to_string()
+        })
+    }
+
     fn cancel_add(&self) {
         let previous = {
             let mut inner = lock(&self.inner);

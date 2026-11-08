@@ -106,6 +106,7 @@ impl ClaudeAccounts {
         let oauth = self.login_for_lane(&mut state, &mut list, id)?;
         let profile = self.saved_profile(id)?;
         self.return_login(&lanes[i])?;
+        self.lane_login_is_saved(&lanes[i])?;
         self.env
             .lanes
             .set_login(&self.env.keys, &lanes[i], &oauth)
@@ -133,6 +134,7 @@ impl ClaudeAccounts {
             return Ok(false);
         };
         self.return_login(&lanes[i])?;
+        self.lane_login_is_saved(&lanes[i])?;
         self.env.lanes.remove_login(&self.env.keys, &lanes[i])?;
         // A folder that can't be removed stays; the lane is closed either way.
         let _ = self.env.lanes.remove_folder(&lanes[i], self.now_secs());
@@ -208,6 +210,24 @@ impl ClaudeAccounts {
             })
     }
 
+    /// Ok when the lane holds no login, or its `claudeAiOauth` is what the lane's account's saved
+    /// slot holds: only then may the lane's item be replaced or removed.
+    fn lane_login_is_saved(&self, lane: &Lane) -> Result<(), AccountError> {
+        let Some(oauth) = self.env.lanes.login(&self.env.keys, lane)? else {
+            return Ok(());
+        };
+        let saved = self
+            .saved_login(&lane.account_id)?
+            .and_then(|s| s.object("claudeAiOauth"));
+        if saved.as_ref() == Some(&oauth) {
+            return Ok(());
+        }
+        Err(err(format!(
+            "The {} lane's login couldn't be saved (it may be signed in to another account), so the lane was left as it is.",
+            lane.name
+        )))
+    }
+
     /// Copies a lane's login back to its account's saved slot. A login the profile endpoint says
     /// belongs to another account never goes back; one that can't be checked (expired, no answer)
     /// goes back as the Swift app did, since only Notchling writes a lane's item and Claude Code
@@ -226,10 +246,7 @@ impl ClaudeAccounts {
                 }
             }
         }
-        let current = saved
-            .object("claudeAiOauth")
-            .and_then(|o| o.str("refreshToken").map(String::from));
-        if current.as_deref() == oauth.str("refreshToken") {
+        if saved.object("claudeAiOauth").as_ref() == Some(&oauth) {
             return Ok(false);
         }
         saved.0.insert("claudeAiOauth".into(), oauth.into_value());

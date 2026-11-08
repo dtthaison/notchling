@@ -95,6 +95,10 @@ impl From<crate::lanes::LaneError> for AccountError {
 /// Everything the store reaches outside itself.
 pub struct ClaudeEnv {
     pub keys: Keys,
+    /// The same Keychain without the daemon's switch in front: used only to put Claude Code's
+    /// login back when a switch fails half way, so the item and `~/.claude.json` keep naming one
+    /// account even if the switch went off meanwhile.
+    pub undo_keys: Keys,
     pub http: Arc<dyn HttpClient>,
     pub now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// `~/.claude.json`.
@@ -114,7 +118,36 @@ struct State {
 
 pub struct ClaudeAccounts {
     env: ClaudeEnv,
+    /// Held for a whole operation, Keychain and network included.
     state: Mutex<State>,
+    /// The main login's account as the last operation left it, for [`ClaudeAccounts::snapshot`],
+    /// which must not wait behind a switch stuck on a Keychain prompt.
+    seen: Mutex<Option<String>>,
+}
+
+/// The operation lock. On release it publishes `active` to [`ClaudeAccounts::seen`].
+struct Op<'a> {
+    state: MutexGuard<'a, State>,
+    seen: &'a Mutex<Option<String>>,
+}
+
+impl std::ops::Deref for Op<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Op<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
+}
+
+impl Drop for Op<'_> {
+    fn drop(&mut self) {
+        *self.seen.lock().unwrap_or_else(|e| e.into_inner()) = self.state.active.clone();
+    }
 }
 
 impl ClaudeAccounts {
@@ -122,6 +155,7 @@ impl ClaudeAccounts {
         ClaudeAccounts {
             env,
             state: Mutex::new(State::default()),
+            seen: Mutex::new(None),
         }
     }
 
@@ -129,8 +163,11 @@ impl ClaudeAccounts {
         &self.env
     }
 
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> Op<'_> {
+        Op {
+            state: self.state.lock().unwrap_or_else(|e| e.into_inner()),
+            seen: &self.seen,
+        }
     }
 
     fn now(&self) -> i64 {
@@ -154,11 +191,12 @@ impl ClaudeAccounts {
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 
-    /// The list and the main login's account as last read; no Keychain, no network.
+    /// The list and the main login's account as last read; no Keychain, no network, and no
+    /// waiting for an operation under way.
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             accounts: self.saved_list(),
-            active: self.lock().active.clone(),
+            active: self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         }
     }
 
@@ -190,6 +228,7 @@ impl ClaudeAccounts {
                     lane.email, lane.name
                 )));
             }
+            self.live_is_saved(&state)?;
             self.activate(id)?;
             state.active = Some(id.to_string());
         }
@@ -333,6 +372,28 @@ impl ClaudeAccounts {
 
     // MARK: Switching
 
+    /// Ok when Claude Code has no login, or its `claudeAiOauth` reads back from the active
+    /// account's saved slot unchanged: only then may a switch replace it, since Claude Code renews
+    /// it in place and the live item can hold the only working refresh token.
+    fn live_is_saved(&self, state: &State) -> Result<(), AccountError> {
+        let live = self.env.keys.read_json(LIVE_SERVICE, &self.env.keys.user)?;
+        let Some(oauth) = live.and_then(|l| l.object("claudeAiOauth")) else {
+            return Ok(());
+        };
+        let saved = match &state.active {
+            Some(active) => self
+                .saved_login(active)?
+                .and_then(|s| s.object("claudeAiOauth")),
+            None => None,
+        };
+        if saved.as_ref() == Some(&oauth) {
+            return Ok(());
+        }
+        Err(err(
+            "Claude Code's current login couldn't be saved (Notchling can't tell which account it is), so the account wasn't changed. Run claude once so it names the account, then try again.",
+        ))
+    }
+
     fn activate(&self, id: &str) -> Result<(), AccountError> {
         let saved = self.saved_login(id)?;
         let (Some(oauth), Some(account)) = (
@@ -354,22 +415,28 @@ impl ClaudeAccounts {
             .and_then(|t| set_top_level(t.expose(), "claudeAiOauth", &value).ok())
             .or_else(|| set_top_level("{}", "claudeAiOauth", &value).ok())
             .ok_or_else(|| err("Couldn't update Claude Code's login."))?;
-        self.env
-            .keys
-            .write(LIVE_SERVICE, &user, &new)
-            .map_err(|e| {
-                err(format!(
-                    "Couldn't update Claude Code's login in the Keychain: {e}"
-                ))
-            })?;
+        if let Err(e) = self.env.keys.write(LIVE_SERVICE, &user, &new) {
+            // A write can land and then fail its read-back (the switch went off between them).
+            self.undo_live(&user, old.as_ref());
+            return Err(err(format!(
+                "Couldn't update Claude Code's login in the Keychain: {e}"
+            )));
+        }
         if let Err(why) = config::set_account(&self.env.config_file, &account) {
-            // Put the old login back, so the Keychain and ~/.claude.json name one account.
-            if let Some(old) = old {
-                let _ = self.env.keys.write(LIVE_SERVICE, &user, old.expose());
-            }
+            self.undo_live(&user, old.as_ref());
             return Err(err(why));
         }
         Ok(())
+    }
+
+    /// Puts Claude Code's item back as it was before a switch that failed half way, so it and
+    /// `~/.claude.json` name one account; through [`ClaudeEnv::undo_keys`], which the switch going
+    /// off doesn't stop.
+    fn undo_live(&self, user: &str, old: Option<&Secret>) {
+        let _ = match old {
+            Some(old) => self.env.undo_keys.write(LIVE_SERVICE, user, old.expose()),
+            None => self.env.undo_keys.delete(LIVE_SERVICE, user).map(|_| ()),
+        };
     }
 
     // MARK: Keychain and profile
@@ -419,5 +486,7 @@ fn upsert(list: &mut Vec<ClaudeAccount>, account: ClaudeAccount) {
 mod tests;
 #[cfg(test)]
 mod tests_lanes;
+#[cfg(test)]
+mod tests_safe;
 #[cfg(test)]
 mod tests_support;

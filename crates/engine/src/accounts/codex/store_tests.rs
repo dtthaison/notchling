@@ -12,27 +12,32 @@ use base64::Engine;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const NOW: f64 = 1_000_000.0;
-const FUTURE: f64 = NOW + 86_400.0;
+pub(super) const NOW: f64 = 1_000_000.0;
+pub(super) const FUTURE: f64 = NOW + 86_400.0;
 
-struct Rig {
-    root: PathBuf,
-    keychain: Arc<FakeKeychain>,
-    http: Arc<FakeHttp>,
-    procs: Arc<FakeProcs>,
-    apps: Arc<FakeApps>,
-    store: CodexStore,
+pub(super) struct Rig {
+    pub(super) root: PathBuf,
+    pub(super) keychain: Arc<FakeKeychain>,
+    pub(super) http: Arc<FakeHttp>,
+    pub(super) procs: Arc<FakeProcs>,
+    pub(super) apps: Arc<FakeApps>,
+    pub(super) store: CodexStore,
 }
 
 impl Rig {
-    fn new(tag: &str, procs: FakeProcs, apps: FakeApps) -> Rig {
+    pub(super) fn new(tag: &str, procs: FakeProcs, apps: FakeApps) -> Rig {
         let root = std::env::temp_dir().join(format!("nl-codex-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("codex")).unwrap();
         Rig::at(root, Arc::new(FakeKeychain::new()), procs, apps)
     }
 
-    fn at(root: PathBuf, keychain: Arc<FakeKeychain>, procs: FakeProcs, apps: FakeApps) -> Rig {
+    pub(super) fn at(
+        root: PathBuf,
+        keychain: Arc<FakeKeychain>,
+        procs: FakeProcs,
+        apps: FakeApps,
+    ) -> Rig {
         let (http, procs, apps) = (Arc::new(FakeHttp::new()), Arc::new(procs), Arc::new(apps));
         let store = CodexStore::new(
             CodexDeps {
@@ -57,21 +62,21 @@ impl Rig {
         }
     }
 
-    fn auth(&self) -> PathBuf {
+    pub(super) fn auth(&self) -> PathBuf {
         self.root.join("codex/auth.json")
     }
 
-    fn live(&self, login: &[u8]) {
+    pub(super) fn live(&self, login: &[u8]) {
         std::fs::write(self.auth(), login).unwrap();
     }
 
-    fn saved(&self, id: &str) -> Option<Vec<u8>> {
+    pub(super) fn saved(&self, id: &str) -> Option<Vec<u8>> {
         self.keychain
             .get(SERVICE, id)
             .and_then(|v| STANDARD.decode(v).ok())
     }
 
-    fn save(&self, id: &str, login: &[u8]) {
+    pub(super) fn save(&self, id: &str, login: &[u8]) {
         assert_eq!(
             self.keychain.write(SERVICE, id, &STANDARD.encode(login)),
             Ok(())

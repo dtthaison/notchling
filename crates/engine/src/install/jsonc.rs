@@ -86,6 +86,23 @@ impl Node {
     }
 }
 
+impl Node {
+    /// True when this value, or any object inside it, has a key twice. Claude Code takes the
+    /// last of two, [`Node::get`] the first, so an edit planned from one would miss the other.
+    pub fn has_repeated_key(&self) -> bool {
+        match &self.kind {
+            Kind::Object(members) => {
+                let mut seen = std::collections::HashSet::new();
+                members
+                    .iter()
+                    .any(|m| !seen.insert(m.key.as_str()) || m.value.has_repeated_key())
+            }
+            Kind::Array(items) => items.iter().any(Node::has_repeated_key),
+            Kind::Str(_) | Kind::Scalar => false,
+        }
+    }
+}
+
 /// Where the value starts: after a byte-order mark, if there is one.
 pub fn bom_len(text: &str) -> usize {
     if text.starts_with('\u{feff}') {

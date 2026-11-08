@@ -12,16 +12,16 @@ use crate::providers::{AccountProvider, AddProgress, FakeHttp};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-struct Rig {
-    root: PathBuf,
-    keychain: Arc<FakeKeychain>,
-    http: Arc<FakeHttp>,
-    apps: Arc<FakeApps>,
-    store: AntigravityStore,
+pub(super) struct Rig {
+    pub(super) root: PathBuf,
+    pub(super) keychain: Arc<FakeKeychain>,
+    pub(super) http: Arc<FakeHttp>,
+    pub(super) apps: Arc<FakeApps>,
+    pub(super) store: AntigravityStore,
 }
 
 impl Rig {
-    fn new(tag: &str, apps: FakeApps) -> Rig {
+    pub(super) fn new(tag: &str, apps: FakeApps) -> Rig {
         Rig::with_procs(tag, FakeProcs::new(), apps)
     }
 
@@ -59,19 +59,19 @@ impl Rig {
     }
 
     /// Antigravity's own item, as it would have written it.
-    fn set_live(&self, login: &str) {
+    pub(super) fn set_live(&self, login: &str) {
         self.keychain
             .write(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(login))
             .unwrap();
     }
 
-    fn live(&self) -> Option<String> {
+    pub(super) fn live(&self) -> Option<String> {
         self.keychain
             .get(LIVE_SERVICE, LIVE_ACCOUNT)
             .and_then(|v| decode_keyring(&v))
     }
 
-    fn save(&self, id: &str, login: &str) {
+    pub(super) fn save(&self, id: &str, login: &str) {
         assert_eq!(self.keychain.write(SERVICE, id, login), Ok(()));
     }
 }

@@ -260,3 +260,20 @@ fn remove_stop_asking_and_expiry() {
     assert!(store.entries().unwrap().is_empty());
     assert_eq!(item.values(), serde_json::json!({}));
 }
+
+#[test]
+fn remove_never_touches_a_value_the_daemons_list_doesnt_name() {
+    let (_temp, item, store) = store("remove-unlisted");
+    // A value the Swift app saved in the same item, under a name only its own list has.
+    *item.data.lock().unwrap() =
+        Some(br#"{"swift-only":{"username":"","secret":"fake-swift-0001"}}"#.to_vec());
+    let theirs = serde_json::json!({"swift-only": {"username": "", "secret": "fake-swift-0001"}});
+    assert!(!store.remove("swift-only").unwrap(), "not the daemon's");
+    assert_eq!(item.values(), theirs);
+    let gh = VaultEntry::new("gh", Kind::Token);
+    store
+        .save(&gh, Some(value("fake-gh-0003")), None, "t")
+        .unwrap();
+    assert!(store.remove("gh").unwrap());
+    assert_eq!(item.values(), theirs);
+}

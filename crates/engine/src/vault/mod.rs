@@ -34,6 +34,8 @@ mod tests_redact;
 mod tests_reminders;
 #[cfg(test)]
 mod tests_store;
+#[cfg(test)]
+mod tests_store_lock;
 
 pub use entry::{
     default_vars, prefix, valid_name, valid_var, Field, HostChange, Kind, PrefillChanges,

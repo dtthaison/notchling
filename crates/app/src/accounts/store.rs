@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use notchling_engine::limits::report::UsageReport;
 use notchling_local_api::{ClientError, SOCKET_NAME};
@@ -17,12 +18,15 @@ use serde_json::{json, Value};
 
 use super::wire::{
     parse_add, parse_claude_list, parse_cost, parse_lanes, parse_limits, parse_move_plan,
-    parse_outcome, parse_providers, parse_usage, AddProgress, Call, ClaudeList, CostReply, Lane,
-    LimitsStatus, MovePlan, Outcome, ProviderList,
+    parse_outcome, parse_providers, parse_usage, working_ticket, AddProgress, Call, ClaudeList,
+    CostReply, Lane, LimitsStatus, MovePlan, Outcome, ProviderList,
 };
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 use crate::switches::{self, Switch, Switches};
+
+/// How long an accounts op still running in the daemon is followed: past the Keychain's 120 s.
+const SETTLE_LIMIT: Duration = Duration::from_secs(150);
 
 /// The capability name a provider has when `providers.usage` reports for it.
 const USAGE: &str = "usage";
@@ -126,10 +130,25 @@ impl Accounts {
         }
     }
 
-    /// A call the switch allows; its failure is kept as the snapshot's error and returned.
+    /// A call the switch allows; its failure is kept as the snapshot's error and returned. An
+    /// accounts op the daemon is still running (a Keychain prompt can take two minutes) is
+    /// followed through `accounts.result` until it ends, so its answer or its error isn't lost.
     fn send(&self, switches: &Switches, call: &Call) -> Result<Value, String> {
         self.gate(switches)?;
-        self.call(call).map_err(|e| {
+        let mut reply = self.call(call);
+        let deadline = Instant::now() + SETTLE_LIMIT;
+        while let Ok(ticket) = reply.as_ref().map(working_ticket) {
+            let Some(ticket) = ticket else { break };
+            if Instant::now() >= deadline {
+                reply = Err(ClientError::Api(notchling_local_api::ApiError::new(
+                    notchling_local_api::ErrorCode::Failed,
+                    "The daemon is still working on it; the list updates when it's done.",
+                )));
+                break;
+            }
+            reply = self.call(&Call::accounts_result(ticket));
+        }
+        reply.map_err(|e| {
             let line = message(&e);
             if !switches::detaches(&e) {
                 self.update(|s| s.error = Some(line.clone()));
