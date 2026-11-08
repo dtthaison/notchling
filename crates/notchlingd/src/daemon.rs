@@ -33,6 +33,10 @@ use std::time::{Duration, Instant};
 /// How often the list is read again with no change seen.
 pub const RESCAN_EVERY: Duration = Duration::from_secs(5);
 
+/// How long `sessions.list` waits for the first read of the list. Under a client's call timeout
+/// ([`notchling_local_api::CALL_TIMEOUT`], 5 s), so the client hears an answer, not silence.
+pub const FIRST_LIST_WAIT: Duration = Duration::from_secs(4);
+
 /// Why the daemon didn't serve.
 #[derive(Debug)]
 pub enum DaemonError {
@@ -194,11 +198,16 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// How the daemon watches; tests shorten it.
-#[derive(Clone, Copy, Debug)]
+/// How the daemon watches and how long it waits; tests shorten these and can hold the first read.
+#[derive(Clone)]
 pub struct DaemonOptions {
     pub watch: WatchConfig,
     pub rescan_every: Duration,
+    /// How long `sessions.list` waits for the first read before it answers with what it has.
+    pub first_list_wait: Duration,
+    /// Runs before every read of the list. A test blocks the first read here to stand in for a
+    /// slow disk or a long list; nothing in the app sets it.
+    pub before_scan: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for DaemonOptions {
@@ -206,6 +215,8 @@ impl Default for DaemonOptions {
         DaemonOptions {
             watch: WatchConfig::default(),
             rescan_every: RESCAN_EVERY,
+            first_list_wait: FIRST_LIST_WAIT,
+            before_scan: None,
         }
     }
 }
@@ -239,6 +250,9 @@ pub fn run(
         std::env::current_exe().ok().as_deref(),
     );
     let mut lister = Lister::new(layout.clone());
+    if let Some(hold) = &options.before_scan {
+        hold();
+    }
     let first = poll_or_keep(|| lister.poll()).unwrap_or_else(|| Value::Array(Vec::new()));
     let sessions = Arc::new(Mutex::new(first));
     // Off at every start, whatever a file says: only the app's `settings.set_acting` during this
