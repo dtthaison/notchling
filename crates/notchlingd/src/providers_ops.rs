@@ -482,6 +482,18 @@ fn confirmation_json(c: &Confirmation) -> Value {
     })
 }
 
+/// Lists `provider`'s add flow as waiting, unless the daemon is already stopping. Under the same
+/// lock [`ProvidersOps::close`] reads the list with, after it set `closing`: so exactly one of
+/// them cancels the flow.
+fn enlist(sh: &Shared, provider: &str) -> bool {
+    let mut adding = lock(&sh.adding);
+    if sh.closing.load(Ordering::SeqCst) {
+        return false;
+    }
+    adding.insert(provider.to_string());
+    true
+}
+
 /// One add flow, on its own thread: start it, hand the reply its first answer, then look for the
 /// user's sign-in until it lands, is cancelled, fails, takes too long, the switch turns off or the
 /// daemon stops. Holds the provider's slot until it ends.
@@ -507,11 +519,15 @@ fn add_flow(
         }
     }
     let started = p.begin_add();
+    // Listed as waiting before the reply goes out, so a stop right after the reply cancels this
+    // flow; a stop that came while it started is seen here instead, and cancels it here once.
+    if started.is_ok() && !enlist(&sh, &provider) && sh.accounts.is_on() {
+        p.cancel_add();
+    }
     let _ = first.send(First::Started(started.clone()));
     let mut url = match started {
         Ok(started) => {
             event("started", json!({"sign_in_url": started.sign_in_url}));
-            lock(&sh.adding).insert(provider.clone());
             started.sign_in_url
         }
         Err(e) => {
