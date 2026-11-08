@@ -1,0 +1,13 @@
+// my settings
+{
+    "model": "opus", // the default
+    /* hooks I wrote
+       by hand */
+    "hooks": {
+        "PreToolUse": [
+            // lint first
+            { "matcher": "Bash", "hooks": [ { "type": "command", "command": "lint.sh" }, ], }, // trailing
+        ],
+        "Notification": [{ "hooks": [{ "type": "command", "command": "say done" }] }]
+    },
+}

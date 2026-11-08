@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "ask.sh", "timeout": 30, "statusMessage": "asking" }],
+        "comment": "mine"
+      }
+    ],
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "start.sh", "async": true }] }
+    ],
+    "FutureEvent": { "not": "a list" }
+  },
+  "extraTopLevel": [true, false, null]
+}

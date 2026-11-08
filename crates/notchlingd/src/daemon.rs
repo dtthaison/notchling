@@ -21,6 +21,7 @@ use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
+use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
@@ -572,6 +573,15 @@ pub fn run(
         switches.vault.clone(),
         room.clone(),
     ));
+    // Off at every start with the rest: nothing is written into settings.json or a skills folder
+    // until the app turns `install` on in this run.
+    let install = Arc::new(InstallOps::new(
+        InstallSetup::from_layout(
+            &layout,
+            std::env::current_exe().and_then(std::fs::canonicalize).ok(),
+        ),
+        switches.install.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -593,6 +603,7 @@ pub fn run(
                         .with_audit(AuditLog::new(layout.audit_path())),
                 ))
                 .with_group(accounts.clone())
+                .with_group(install)
                 .with_group(providers.clone())
                 .with_group(limits.clone())
                 .with_group(vault.clone())
