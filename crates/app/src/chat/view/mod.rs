@@ -8,6 +8,7 @@
 mod conversation;
 mod header;
 mod inspector;
+mod sheets;
 mod sidebar;
 
 use std::sync::mpsc::Receiver;
@@ -54,6 +55,8 @@ pub struct ChatView {
     daemon_note: Option<&'static str>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
+    /// New Session or Settings, over the window.
+    sheet: Option<sheets::Sheet>,
     _appearance_changes: Subscription,
 }
 
@@ -100,6 +103,7 @@ impl ChatView {
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
+            sheet: None,
             _appearance_changes: changes,
         };
         view.start_load(cx);
@@ -258,6 +262,7 @@ impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         div()
+            .relative()
             .size_full()
             .flex()
             .fill(Ink::Window, a)
@@ -274,5 +279,6 @@ impl Render for ChatView {
                     .child(composer(a)),
             )
             .child(inspector::render(self, a))
+            .children(sheets::render(self, a))
     }
 }

@@ -10,6 +10,7 @@ use objc2::MainThreadMarker;
 use super::dock;
 use super::tray::Tray;
 use super::window::{open_main_window, ShellView};
+use crate::actions::Actions;
 use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
@@ -29,6 +30,12 @@ struct Shell {
 }
 
 impl Global for Shell {}
+
+/// The actions Chat and the notch send to the daemon, shared, so both know what it said about
+/// acting. Not set in a render: there the views are given their own.
+pub struct AppActions(pub Arc<Actions>);
+
+impl Global for AppActions {}
 
 /// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
 /// root instead of the real folders; Chat and the notch read the same one.
@@ -57,6 +64,8 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let exe = std::env::current_exe().ok();
         let sessions = Arc::new(SessionSource::for_run(root.as_ref(), exe.as_deref()));
         let for_notch = sessions.clone();
+        let actions = Arc::new(Actions::for_run(root.as_ref()));
+        cx.set_global(AppActions(actions.clone()));
         cx.set_global(Shell {
             state,
             tray,
@@ -67,7 +76,7 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         cx.on_window_closed(update_dock).detach();
         // Not titled, so it never counts toward the Dock icon.
         if let Some(source) = notch {
-            crate::notch::panel::open(cx, source, for_notch);
+            crate::notch::panel::open(cx, source, for_notch, actions);
         }
     });
     0

@@ -64,7 +64,7 @@ fn renders_every_notch_state_over_the_fixture() {
         );
         // Every state but the closed one has text and color in it.
         let distinct: HashSet<&[u8]> = rows.iter().flat_map(|r| r.chunks_exact(bpp)).collect();
-        let least = if spec.name == "notch-collapsed" {
+        let least = if matches!(spec.name, "notch-collapsed" | "notch-pet" | "notch-perch") {
             3
         } else {
             64

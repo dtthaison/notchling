@@ -5,3 +5,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+
+# A port of the Swift session host (`agent-console-hostd`), with its socket contract. Built, never
+# installed: the Swift hostd keeps the LaunchAgent until the maintainer hands it over.
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notchling-engine = { path = "../engine" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
