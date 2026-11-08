@@ -3317,10 +3317,13 @@ dependencies = [
 name = "notchling-engine"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "libc",
  "notchling-platform",
+ "notchling-protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "unicode-properties",
 ]
 
