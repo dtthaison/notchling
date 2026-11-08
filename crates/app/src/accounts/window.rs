@@ -39,6 +39,22 @@ pub fn app_stores(cx: &App) -> (Arc<Accounts>, Arc<SwitchFeed>) {
 
 /// Opens the Accounts window (or brings the open one forward) on `provider`'s tab.
 pub fn open(cx: &mut App, provider: Option<&str>) -> Option<WindowHandle<AccountsView>> {
+    // One Accounts window: a second open would follow the same feed and double every refresh.
+    let open_one = cx
+        .windows()
+        .into_iter()
+        .find_map(|w| w.downcast::<AccountsView>());
+    if let Some(handle) = open_one {
+        let shown = handle.update(cx, |view, window, cx| {
+            if let Some(p) = provider {
+                view.show_provider(p, cx);
+            }
+            window.activate_window();
+        });
+        if shown.is_ok() {
+            return Some(handle);
+        }
+    }
     let (store, feed) = app_stores(cx);
     let bounds = Bounds::centered(None, size(px(WINDOW_SIZE.0), px(WINDOW_SIZE.1)), cx);
     let options = WindowOptions {
