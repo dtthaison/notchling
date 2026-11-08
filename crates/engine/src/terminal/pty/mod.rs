@@ -130,6 +130,8 @@ pub enum PtyError {
     },
     /// Reading, writing, resizing or waiting failed.
     Io(std::io::Error),
+    /// The program didn't take its input within the time allowed (it has stopped reading).
+    Timeout,
 }
 
 impl fmt::Display for PtyError {
@@ -140,6 +142,7 @@ impl fmt::Display for PtyError {
             PtyError::Spawn(e) => write!(f, "couldn't open a terminal: {e}"),
             PtyError::Start { step, error } => write!(f, "couldn't {step}: {error}"),
             PtyError::Io(e) => write!(f, "terminal: {e}"),
+            PtyError::Timeout => write!(f, "the program isn't reading its input"),
         }
     }
 }

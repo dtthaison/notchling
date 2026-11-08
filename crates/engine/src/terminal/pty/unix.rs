@@ -81,6 +81,17 @@ fn set_cloexec(fd: libc::c_int) -> Result<(), PtyError> {
     Ok(())
 }
 
+fn set_nonblocking(fd: libc::c_int) -> Result<(), PtyError> {
+    // SAFETY: plain fcntl calls on a descriptor we own.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags < 0 || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            return Err(PtyError::Spawn(last_error()));
+        }
+    }
+    Ok(())
+}
+
 /// A pipe whose two ends close on exec (`pipe2` where there is one).
 fn cloexec_pipe() -> Result<(Fd, Fd), PtyError> {
     let mut ends = [0 as libc::c_int; 2];
@@ -136,6 +147,9 @@ fn open_pty(size: &libc::winsize) -> Result<(Fd, Fd), PtyError> {
     let master = Fd(master);
     // Some systems ignore O_CLOEXEC here; the flag is checked, not assumed.
     set_cloexec(master.raw())?;
+    // Reads and writes wait with poll, so a child that stops reading can't block the caller for
+    // good. The slave, which the child gets, stays blocking.
+    set_nonblocking(master.raw())?;
     // SAFETY: master is a pty master.
     if unsafe { libc::grantpt(master.raw()) } != 0 || unsafe { libc::unlockpt(master.raw()) } != 0 {
         return Err(PtyError::Spawn(last_error()));
@@ -349,24 +363,57 @@ impl Pty {
         self.pid
     }
 
-    /// Blocks until there is output or the child's side closes.
-    pub fn read(&self, buf: &mut [u8]) -> Result<ReadOutcome, PtyError> {
+    /// One `read`: `None` when there is nothing to read right now (the master never blocks).
+    fn try_read(&self, buf: &mut [u8]) -> Result<Option<ReadOutcome>, PtyError> {
         loop {
             // SAFETY: buf is valid for buf.len() bytes and master stays open while self lives.
             let n = unsafe { libc::read(self.master, buf.as_mut_ptr().cast(), buf.len()) };
             if n > 0 {
-                return Ok(ReadOutcome::Data(n as usize));
+                return Ok(Some(ReadOutcome::Data(n as usize)));
             }
             if n == 0 {
-                return Ok(ReadOutcome::Closed);
+                return Ok(Some(ReadOutcome::Closed));
             }
             let error = last_error();
             match error.raw_os_error() {
                 Some(libc::EINTR) => continue,
+                Some(libc::EAGAIN) => return Ok(None),
                 // Linux reports the closed side as EIO.
-                Some(libc::EIO) => return Ok(ReadOutcome::Closed),
+                Some(libc::EIO) => return Ok(Some(ReadOutcome::Closed)),
                 _ => return Err(PtyError::Io(error)),
             }
+        }
+    }
+
+    /// Waits for `events` on the master for up to `ms` milliseconds (`-1`: as long as it takes);
+    /// false when the time ran out first. A hang-up counts as ready, so the next read or write
+    /// reports it.
+    fn wait_ready(&self, events: libc::c_short, ms: libc::c_int) -> Result<bool, PtyError> {
+        loop {
+            let mut pfd = libc::pollfd {
+                fd: self.master,
+                events,
+                revents: 0,
+            };
+            // SAFETY: one valid pollfd.
+            let ready = unsafe { libc::poll(&mut pfd, 1, ms) };
+            if ready >= 0 {
+                return Ok(ready > 0);
+            }
+            let error = last_error();
+            if error.raw_os_error() != Some(libc::EINTR) {
+                return Err(PtyError::Io(error));
+            }
+        }
+    }
+
+    /// Blocks until there is output or the child's side closes.
+    pub fn read(&self, buf: &mut [u8]) -> Result<ReadOutcome, PtyError> {
+        loop {
+            if let Some(outcome) = self.try_read(buf)? {
+                return Ok(outcome);
+            }
+            self.wait_ready(libc::POLLIN, -1)?;
         }
     }
 
@@ -376,20 +423,9 @@ impl Pty {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let ms = left.as_millis().min(i32::MAX as u128) as libc::c_int;
-            let mut pfd = libc::pollfd {
-                fd: self.master,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            // SAFETY: one valid pollfd.
-            let ready = unsafe { libc::poll(&mut pfd, 1, ms) };
-            if ready > 0 {
-                return self.read(buf);
-            }
-            if ready < 0 {
-                let error = last_error();
-                if error.raw_os_error() != Some(libc::EINTR) {
-                    return Err(PtyError::Io(error));
+            if self.wait_ready(libc::POLLIN, ms)? {
+                if let Some(outcome) = self.try_read(buf)? {
+                    return Ok(outcome);
                 }
             }
             if Instant::now() >= deadline {
@@ -398,7 +434,22 @@ impl Pty {
         }
     }
 
+    /// Writes it all, however long the child takes to read it. `ptyhost` calls this from a thread of
+    /// its own; anything that must not wait on the child uses [`Pty::write_all_timeout`].
     pub fn write_all(&self, bytes: &[u8]) -> Result<(), PtyError> {
+        self.write_until(bytes, None)
+    }
+
+    /// Writes it all, or gives up with [`PtyError::Timeout`] once `timeout` has passed without the
+    /// whole of it going in. A child that has stopped reading fills the tty's input queue, and a
+    /// blocking `write` would then wait for as long as the child lives.
+    pub fn write_all_timeout(&self, bytes: &[u8], timeout: Duration) -> Result<(), PtyError> {
+        self.write_until(bytes, Some(Instant::now() + timeout))
+    }
+
+    /// The master is non-blocking: a write takes what fits, and the rest waits for the pty to be
+    /// writable again, until `deadline` if there is one.
+    fn write_until(&self, bytes: &[u8], deadline: Option<Instant>) -> Result<(), PtyError> {
         let mut offset = 0;
         while offset < bytes.len() {
             let rest = &bytes[offset..];
@@ -409,10 +460,23 @@ impl Pty {
                 continue;
             }
             let error = last_error();
-            if n < 0 && error.raw_os_error() == Some(libc::EINTR) {
-                continue;
+            match error.raw_os_error() {
+                Some(libc::EINTR) if n < 0 => {}
+                Some(libc::EAGAIN) if n < 0 => {
+                    let ms = match deadline {
+                        None => -1,
+                        Some(deadline) => {
+                            let left = deadline.saturating_duration_since(Instant::now());
+                            if left.is_zero() {
+                                return Err(PtyError::Timeout);
+                            }
+                            left.as_millis().clamp(1, i32::MAX as u128) as libc::c_int
+                        }
+                    };
+                    self.wait_ready(libc::POLLOUT, ms)?;
+                }
+                _ => return Err(PtyError::Io(error)),
             }
-            return Err(PtyError::Io(error));
         }
         Ok(())
     }

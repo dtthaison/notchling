@@ -139,6 +139,41 @@ mod unix {
         wait_for(&mut terminal, &real.to_string_lossy());
     }
 
+    /// A program that has stopped reading (raw mode, never reads) fills the tty's input queue, and
+    /// the next write would block for as long as it lives.
+    #[test]
+    fn writing_to_a_child_that_never_reads_gives_up() {
+        use std::time::Instant;
+        let scratch = Scratch::new("pty-stuck");
+        let command = sh("stty raw -echo; echo ready; exec sleep 20", &scratch);
+        let mut terminal = Terminal::spawn(&command).expect("sh starts");
+        wait_for(&mut terminal, "ready");
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = terminal.write_timeout(&vec![b'x'; 1 << 20], Duration::from_millis(300));
+            let _ = done.send((result, started.elapsed()));
+            // Dropping the terminal ends the child.
+        });
+        let (result, took) = finished
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the write came back");
+        assert!(matches!(result, Err(PtyError::Timeout)), "{result:?}");
+        assert!(took < Duration::from_secs(3), "{took:?}");
+    }
+
+    /// A reader that keeps up is not timed out, however much is written.
+    #[test]
+    fn a_large_write_to_a_reading_child_completes() {
+        let scratch = Scratch::new("pty-big");
+        let command = sh("stty raw -echo; echo ready; exec cat > /dev/null", &scratch);
+        let mut terminal = Terminal::spawn(&command).expect("sh starts");
+        wait_for(&mut terminal, "ready");
+        terminal
+            .write_timeout(&vec![b'y'; 1 << 20], Duration::from_secs(10))
+            .expect("all of it went in");
+    }
+
     #[test]
     fn exit_status_and_terminate() {
         let scratch = Scratch::new("pty-exit");
