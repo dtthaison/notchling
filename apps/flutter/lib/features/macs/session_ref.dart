@@ -25,6 +25,13 @@ class SessionRef {
     return match == null ? null : SessionRef(match.group(1)!, match.group(2)!);
   }
 
+  /// The session a notification payload names: a qualified id, or a bare one, which an older notification carries
+  /// and which means the computer in use, [fallbackHost].
+  static SessionRef fromPayload(String payload, {required String fallbackHost}) => parse(payload) ?? SessionRef(fallbackHost, payload);
+
+  /// This ref, on [defaultHost] when it names no computer.
+  SessionRef onHostIfUnknown(String defaultHost) => host.isEmpty ? SessionRef(defaultHost, id) : this;
+
   @override
   bool operator ==(Object other) => other is SessionRef && other.host == host && other.id == id;
 

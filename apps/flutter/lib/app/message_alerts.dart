@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/protocol/models.dart';
+import '../features/macs/session_ref.dart';
 import 'alerts.dart';
 
 /// Claude said something new in a session. [text] is its first line. [quiet] is true when the same session was
@@ -56,8 +57,16 @@ class MessageAlertTracker {
 
 /// What the app announces: a session that needs the user, a new reply, or a finished turn.
 class AlertEvent {
-  const AlertEvent({required this.sessionId, required this.name, required this.body, required this.kind, this.quiet = false});
+  const AlertEvent({required this.sessionId, required this.name, required this.body, required this.kind, this.quiet = false, this.host = ''});
+
+  /// The computer that raised the alert: [sessionId] is that computer's own id, and means nothing on another one.
+  /// Empty only for an alert made before a computer is known.
+  final String host;
   final String sessionId;
+
+  /// The session this alert is about, with its computer.
+  SessionRef get session => SessionRef(host, sessionId);
+
   final String name;
   final String body;
   final AlertKind kind;
@@ -71,6 +80,7 @@ List<AlertEvent> buildAlertEvents({
   required List<MessageAlert> messages,
   required String needsBody,
   required String finishedBody,
+  String host = '',
 }) {
   final Map<String, AlertEvent> bySession = <String, AlertEvent>{};
   for (final MapEntry<String, AlertKind> entry in stateAlerts.entries) {
@@ -79,6 +89,7 @@ List<AlertEvent> buildAlertEvents({
     final PendingPrompt? prompt = s.pending;
     final String summary = prompt == null ? '' : (prompt.isPermission ? '${prompt.toolName}: ${prompt.summary}' : (prompt.questions.isNotEmpty ? prompt.questions.first.question : prompt.summary));
     bySession[s.id] = AlertEvent(
+      host: host,
       sessionId: s.id,
       name: s.name,
       kind: entry.value,
@@ -88,7 +99,7 @@ List<AlertEvent> buildAlertEvents({
   for (final MessageAlert m in messages) {
     final AlertEvent? existing = bySession[m.sessionId];
     if (existing != null && existing.kind == AlertKind.needsInput) continue;
-    bySession[m.sessionId] = AlertEvent(sessionId: m.sessionId, name: m.name, kind: AlertKind.message, body: m.text, quiet: m.quiet);
+    bySession[m.sessionId] = AlertEvent(host: host, sessionId: m.sessionId, name: m.name, kind: AlertKind.message, body: m.text, quiet: m.quiet);
   }
   return bySession.values.toList();
 }
