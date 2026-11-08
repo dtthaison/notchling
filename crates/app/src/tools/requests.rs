@@ -75,11 +75,15 @@ pub fn codex_send(id: &str, text: &str, pick: &Pick) -> Request {
     }
 }
 
-/// `codex.send` that starts a new session in `folder`.
-pub fn codex_send_draft(folder: &str, text: &str, pick: &Pick) -> Request {
+/// `codex.send` that starts a new session in `folder` from the draft row `draft`: the daemon
+/// echoes the draft in the event that names the session when that takes over its 4.5 s.
+pub fn codex_send_draft(draft: &str, folder: &str, text: &str, pick: &Pick) -> Request {
     Request {
         op: ops::CODEX_SEND,
-        args: with_pick(json!({ "draft_folder": folder, "text": text }), pick),
+        args: with_pick(
+            json!({ "draft_folder": folder, "text": text, "draft": draft }),
+            pick,
+        ),
     }
 }
 
@@ -170,6 +174,8 @@ pub struct AgyConversation {
     pub working: bool,
     pub load_error: Option<String>,
     pub conversation: Conversation,
+    /// The daemon sent only the newest items of a long session (it answers in one 1 MiB line).
+    pub truncated: bool,
 }
 
 /// Reads an `agy.conversation` reply; `None` when it isn't one.
@@ -194,6 +200,10 @@ pub fn parse_conversation(reply: &Value) -> Option<AgyConversation> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         conversation,
+        truncated: reply
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -209,10 +219,13 @@ pub fn sent_row(reply: &Value) -> Option<String> {
 pub enum Sent {
     Started,
     Queued(usize),
+    /// A new session Codex hasn't named yet: the real row comes in an event naming the draft.
+    Starting,
 }
 
 pub fn sent_state(reply: &Value) -> Sent {
     match reply.get("state").and_then(Value::as_str) {
+        Some("starting") => Sent::Starting,
         Some("queued") => Sent::Queued(
             reply
                 .get("waiting")
@@ -250,8 +263,9 @@ mod tests {
             effort: Some("high".into()),
         };
         assert_eq!(
-            codex_send_draft("/w/api", "start", &picked).args,
-            json!({"draft_folder": "/w/api", "text": "start", "model": "gpt-6.1-sol", "effort": "high"})
+            codex_send_draft("codex-new:u1", "/w/api", "start", &picked).args,
+            json!({"draft_folder": "/w/api", "text": "start", "draft": "codex-new:u1",
+                   "model": "gpt-6.1-sol", "effort": "high"})
         );
         let model_only = Pick {
             model: Some("m".into()),
@@ -261,6 +275,11 @@ mod tests {
             codex_send("codex:s1", "x", &model_only).args,
             json!({"id": "codex:s1", "text": "x", "model": "m"})
         );
+        assert_eq!(
+            sent_state(&json!({"state": "starting", "draft": "codex-new:u1"})),
+            Sent::Starting
+        );
+        assert_eq!(sent_row(&json!({"state": "starting"})), None);
         assert_eq!(codex_stop("codex:s1").op, "codex.stop");
         assert_eq!(codex_delete("codex:s1").args, json!({"id": "codex:s1"}));
     }
@@ -303,6 +322,12 @@ mod tests {
         let c = parse_conversation(&reply).unwrap();
         assert!(c.open && c.working && !c.loading);
         assert_eq!(c.conversation.activity.as_deref(), Some("Editing"));
+        assert!(!c.truncated, "an older daemon never says");
+        // A newer daemon's extra fields are read, and a long session says it was cut.
+        let cut = parse_conversation(&json!({"open": true, "truncated": true, "omitted": 40,
+            "conversation": {"items": []}}))
+        .unwrap();
+        assert!(cut.truncated);
         let closed = parse_conversation(&json!({"open": false})).unwrap();
         assert_eq!(closed.conversation, Conversation::default());
         assert_eq!(parse_conversation(&json!({"items": []})), None);

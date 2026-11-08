@@ -7,7 +7,11 @@ use crate::tools::acp::{Connection, Handler, Spawner, METHOD_NOT_FOUND};
 use crate::transcript::acp::Transcript;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+
+/// How many `agy` processes run at once, over all sessions.
+pub const MAX_OPEN: usize = 8;
 
 pub(super) type Job = Box<dyn FnOnce() + Send>;
 
@@ -47,6 +51,10 @@ pub(super) struct Inner {
     pub(super) now: Clock,
     pub(super) timing: Timing,
     pub(super) live: Mutex<HashMap<String, Arc<Live>>>,
+    /// How many processes may run at once ([`MAX_OPEN`] unless a test sets less).
+    pub(super) max_open: AtomicUsize,
+    /// Asked before each process is started: the daemon's `acting` switch (without it any may).
+    pub(super) may_start: OnceLock<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 pub(super) fn cancelled() -> Value {
@@ -72,9 +80,36 @@ impl Inner {
     pub(super) fn close(&self, id: &str) {
         let removed = self.lock_live().remove(id);
         if let Some(live) = removed {
+            self.cancel_waiting(&live, id);
             live.conn.close();
             self.sink.changed(id, Change::Closed);
         }
+    }
+
+    /// A session that goes away with a permission waiting in it: nothing can answer that any more,
+    /// so it ends as cancelled, before the session's `Closed`.
+    pub(super) fn cancel_waiting(&self, live: &Live, id: &str) {
+        let waiting = live.lock().permission.take();
+        if let Some(p) = waiting {
+            self.sink.changed(
+                id,
+                Change::PermissionResolved {
+                    rpc_id: p.rpc_text(),
+                    outcome: "cancelled".into(),
+                },
+            );
+        }
+    }
+
+    /// Whether another process may start: fewer than `max_open` are running.
+    fn make_room(&self, map: &HashMap<String, Arc<Live>>) -> Result<(), RunError> {
+        let max = self.max_open.load(Ordering::SeqCst);
+        if map.values().filter(|l| !l.conn.is_closed()).count() >= max {
+            return Err(RunError::Refused(format!(
+                "{max} {NAME} sessions are open already; close one first"
+            )));
+        }
+        Ok(())
     }
 
     pub(super) fn open(
@@ -121,6 +156,12 @@ impl Inner {
                 live.conn.close();
                 return Ok(existing);
             }
+            // Or the last room went to someone else while this one started.
+            if let Err(full) = self.make_room(&map) {
+                drop(map);
+                live.conn.close();
+                return Err(full);
+            }
             map.insert(id.to_string(), live.clone());
         }
         let (runner, l, session, cwd) = (
@@ -153,6 +194,10 @@ impl Inner {
     /// Starts the process and its reader; nothing is sent yet.
     pub(super) fn launch(self: &Arc<Self>, folder: &str) -> Result<Arc<Live>, RunError> {
         let binary = self.binary.clone().ok_or(RunError::NoBinary)?;
+        if self.may_start.get().is_some_and(|may| !may()) {
+            return Err(RunError::NotAllowed);
+        }
+        self.make_room(&self.lock_live())?;
         let spawned = self
             .spawner
             .spawn(&binary, &["acp".to_string()], folder)
@@ -423,6 +468,7 @@ impl Handler for Wire {
             if map.get(&id).is_some_and(|l| Arc::ptr_eq(l, &live)) {
                 map.remove(&id);
                 drop(map);
+                runner.cancel_waiting(&live, &id);
                 runner.sink.changed(&id, Change::Closed);
             }
         }

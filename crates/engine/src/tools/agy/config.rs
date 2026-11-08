@@ -164,29 +164,60 @@ impl Permission {
         self.options.iter().find(|o| o.id == id)
     }
 
-    /// What the tool would do, for a card: id, name, title, input, diff and the options.
+    /// What the tool would do, for a card: id, name, title, input, diff and the options. It goes
+    /// out as one line of the local API (1 MiB), so a big edit is cut: the first [`MAX_DIFF_LINES`]
+    /// lines (and [`MAX_DIFF_BYTES`] of them), each at most [`MAX_DIFF_LINE_CHARS`] characters,
+    /// then a `hunk` line saying how many were left out; the input, title and name are clipped
+    /// to [`MAX_TEXT_CHARS`].
     pub fn to_json(&self) -> Value {
-        let diff: Vec<Value> = self
-            .call
-            .diff
-            .iter()
-            .map(|d| {
-                json!({"kind": match d.kind {
-                    DiffKind::Add => "add",
-                    DiffKind::Remove => "remove",
-                    DiffKind::Context => "context",
-                    DiffKind::Hunk => "hunk",
-                }, "text": d.text})
-            })
-            .collect();
+        let mut diff: Vec<Value> = Vec::new();
+        let mut bytes = 0;
+        for d in &self.call.diff {
+            let text = clip(&d.text, MAX_DIFF_LINE_CHARS);
+            if diff.len() >= MAX_DIFF_LINES || bytes + text.len() > MAX_DIFF_BYTES {
+                break;
+            }
+            bytes += text.len();
+            diff.push(json!({"kind": match d.kind {
+                DiffKind::Add => "add",
+                DiffKind::Remove => "remove",
+                DiffKind::Context => "context",
+                DiffKind::Hunk => "hunk",
+            }, "text": text}));
+        }
+        let left = self.call.diff.len() - diff.len();
+        if left > 0 {
+            diff.push(json!({"kind": "hunk", "text": format!("… {left} more lines not shown")}));
+        }
         json!({
-            "rpcId": self.rpc_text(),
-            "toolName": self.call.name,
-            "title": self.call.title,
-            "input": self.call.input,
+            "rpcId": clip(&self.rpc_text(), MAX_TEXT_CHARS),
+            "toolName": clip(&self.call.name, MAX_TEXT_CHARS),
+            "title": clip(&self.call.title, MAX_TEXT_CHARS),
+            "input": clip(&self.call.input, MAX_TEXT_CHARS),
             "diff": diff,
-            "options": self.options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(),
+            "options": self.options.iter().take(MAX_OPTIONS).map(|o| json!({
+                "id": clip(&o.id, MAX_TEXT_CHARS),
+                "name": clip(&o.name, MAX_TEXT_CHARS),
+                "kind": clip(&o.kind, MAX_TEXT_CHARS),
+            })).collect::<Vec<_>>(),
         })
+    }
+}
+
+/// The most diff lines a permission card carries, and their text in all.
+pub const MAX_DIFF_LINES: usize = 400;
+pub const MAX_DIFF_BYTES: usize = 128 * 1024;
+/// The longest diff line, and the longest input, title or name, in characters.
+pub const MAX_DIFF_LINE_CHARS: usize = 1000;
+pub const MAX_TEXT_CHARS: usize = 4000;
+/// The most options listed.
+const MAX_OPTIONS: usize = 20;
+
+/// `text` cut to `max` characters, with `…` where it was.
+pub fn clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        None => text.to_string(),
+        Some((at, _)) => format!("{}…", &text[..at]),
     }
 }
 
@@ -247,6 +278,53 @@ mod tests {
             "4"
         );
         assert!(Permission::parse(&json!(1), &json!({"options": []})).is_none());
+    }
+
+    fn big_permission(diff_lines: usize, line: &str, input: &str) -> Permission {
+        let new: String = (0..diff_lines).map(|i| format!("{i} {line}\n")).collect();
+        let params = json!({
+            "toolCall": {"toolCallId": "c", "name": "edit_file", "kind": "edit",
+                "rawInput": {"CommandLine": input},
+                "content": [{"type": "diff", "path": "a.txt", "newText": new, "oldText": ""}]},
+            "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]});
+        Permission::parse(&json!("1"), &params).unwrap()
+    }
+
+    #[test]
+    fn a_huge_diff_is_cut_to_its_first_lines_and_a_marker() {
+        // 200,000 lines of 100 bytes: 20 MB, far over the local API's 1 MiB line.
+        let p = big_permission(200_000, &"y".repeat(100), "ls");
+        let card = p.to_json();
+        let size = card.to_string().len();
+        assert!(size < 300 * 1024, "{size} bytes");
+        let diff = card["diff"].as_array().unwrap();
+        assert_eq!(diff[0]["kind"], "add");
+        assert!(diff[0]["text"].as_str().unwrap().starts_with("0 y"));
+        let last = diff.last().unwrap();
+        assert_eq!(last["kind"], "hunk");
+        let marker = last["text"].as_str().unwrap();
+        assert!(marker.contains("more lines"), "{marker}");
+        // The marker counts what was left out.
+        let shown = diff.len() - 1;
+        assert!(marker.contains(&(200_000 - shown).to_string()), "{marker}");
+        // A diff that fits is untouched.
+        let small = big_permission(3, "z", "ls").to_json();
+        assert_eq!(small["diff"].as_array().unwrap().len(), 3);
+        assert!(small["diff"][2]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("2 z"));
+    }
+
+    #[test]
+    fn a_huge_line_input_and_title_are_cut_too() {
+        let p = big_permission(1, &"w".repeat(2_000_000), &"c".repeat(3_000_000));
+        let card = p.to_json();
+        assert!(card.to_string().len() < 300 * 1024);
+        assert!(card["diff"][0]["text"].as_str().unwrap().chars().count() <= 1100);
+        assert!(card["input"].as_str().unwrap().chars().count() <= 4100);
+        assert!(card["title"].as_str().unwrap().chars().count() <= 4100);
+        assert!(card["input"].as_str().unwrap().ends_with('…'));
     }
 
     #[test]

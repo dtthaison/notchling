@@ -25,8 +25,9 @@
 
 use crate::acting::{Acting, ACTING_OFF};
 use crate::agy_ops::AgyOps;
+use crate::codex_ops::CodexOps;
 use crate::hook_ops::Parents;
-use crate::prompts::{question_json, Kind, Prompt, PromptStore};
+use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
 use notchling_engine::reply::plan::{self, Plan, PlanError};
@@ -122,6 +123,13 @@ pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError::bad_request(message)
 }
 
+/// Whether `real` (a canonical path) is `/` or the home folder: a session the daemon starts for a
+/// caller never begins there, since its tool can write the folder it starts in.
+pub(crate) fn broad_folder(real: &std::path::Path, home: &std::path::Path) -> bool {
+    let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    real.parent().is_none() || real == home
+}
+
 /// Waits this many milliseconds (session control's pauses).
 pub type Pause = Box<dyn Fn(u64) + Send + Sync>;
 
@@ -162,6 +170,8 @@ pub struct ActingOps {
     /// Antigravity sessions (Milestone 5): what turning acting off must close, and whose waiting
     /// permissions `prompts.list` shows.
     agy: OnceLock<Arc<AgyOps>>,
+    /// Codex turns: what turning acting off must stop.
+    codex: OnceLock<Arc<CodexOps>>,
 }
 
 impl ActingOps {
@@ -187,6 +197,7 @@ impl ActingOps {
             stopping: Mutex::new(HashMap::new()),
             refused: Mutex::new(HashMap::new()),
             agy: OnceLock::new(),
+            codex: OnceLock::new(),
         }
     }
 
@@ -199,6 +210,11 @@ impl ActingOps {
     /// their permissions. Once.
     pub fn attach_agy(&self, agy: Arc<AgyOps>) {
         let _ = self.agy.set(agy);
+    }
+
+    /// The Codex ops, so acting off stops their turns and drops the messages waiting. Once.
+    pub fn attach_codex(&self, codex: Arc<CodexOps>) {
+        let _ = self.codex.set(codex);
     }
 
     /// Moves every stopping mark `by` into the past (tests).
@@ -260,7 +276,9 @@ impl ActingOps {
                 if let Some(agy) = self.agy.get() {
                     list.extend(agy.prompts());
                 }
-                Ok(Value::Array(list))
+                // One reply is one line of the local API: an oversized prompt is trimmed or left
+                // out rather than failing the list and hiding the rest.
+                Ok(Value::Array(fit_list(list)))
             }
             ops::SESSION_QUESTION => self.question(args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
@@ -288,6 +306,10 @@ impl ActingOps {
             // No `agy` stays running while the Swift app owns the sessions.
             if let Some(agy) = self.agy.get() {
                 agy.acting_off();
+            }
+            // Nor does a Codex turn run on, or the message waiting behind it start.
+            if let Some(codex) = self.codex.get() {
+                codex.acting_off();
             }
         }
         let data = json!({"acting": on});

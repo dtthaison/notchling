@@ -5,14 +5,16 @@
 //!
 //! | Op | Args | Reply |
 //! | --- | --- | --- |
-//! | `codex.send` | `{id \| draft_folder, text, model?, effort?}` | `{"id": "codex:<session>", "session", "state": "started"}`, or `"state": "queued", "waiting": n` behind the session's running turn |
+//! | `codex.send` | `{id \| draft_folder, text, model?, effort?, draft?}` | `{"id": "codex:<session>", "session", "state": "started"}`, or `"state": "queued", "waiting": n` behind the session's running turn, or `{"state": "starting", "draft"}` for a new session Codex hasn't named within 4.5 s |
 //! | `codex.stop` | `{id}` | `{"stopped": bool}`: SIGINT to the running turn; false when none runs |
-//! | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force` |
+//! | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force`; `{"deleted": false, "state": "deleting"}` when that takes over 4.5 s |
 //!
 //! `id` is a row id (`codex:<session>`). `draft_folder` starts a new session in that folder and
-//! the reply comes once `thread.started` names it. Events, on topic `tools`: `codex.turn {id,
-//! session, state: started | queued | ended | failed, waiting?, error?}` and `session.changed
-//! {id, session, row}` ([`topics`]).
+//! the reply comes once `thread.started` names it, or `starting` if that takes over 4.5 s (a call
+//! is given up at 5 s); `draft` (`codex-new:<uuid>`) is the app's row for it, echoed in the late
+//! events below. Events, on topic `tools`: `codex.turn {id, session, state: started | queued |
+//! ended | failed, waiting?, error?}` and `session.changed {id, session, row}` ([`topics`]); the
+//! ends of the jobs that outlast a reply are in `codex_slow.rs`.
 //!
 //! What a caller may name is narrow, since whoever holds the app tier for a moment shouldn't be
 //! able to point a sandboxed-but-writable agent anywhere or pass Codex options:
@@ -27,22 +29,25 @@
 //! - a prompt is at most 100 KB, and at most eight turns run at once.
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_ops::{bad, forbidden, text_arg, Room};
+use crate::acting_ops::{bad, broad_folder, forbidden, text_arg, Room};
 use crate::layout::Layout;
 use notchling_engine::control::{Command, Launcher, RealLauncher};
 use notchling_engine::sessions::AgentGroup;
 use notchling_engine::tools::codex::list::{find_rollout, session as row_of};
 use notchling_engine::tools::codex::models;
 use notchling_engine::tools::codex::plan::{
-    augmented_path, find_binary, valid_effort, valid_model, valid_session_id, Pick,
-    MAX_PROMPT_BYTES,
+    augmented_path, find_binary, find_fixture_binary, valid_effort, valid_model, valid_session_id,
+    Pick, MAX_PROMPT_BYTES,
 };
 use notchling_engine::tools::codex::process::{RealSpawner, ToolSpawner};
-use notchling_engine::tools::codex::runs::{CodexRuns, Request, Sent, TurnEvent, TurnSink};
+use notchling_engine::tools::codex::runs::{
+    CodexRuns, Request, SendError, Sent, TurnEvent, TurnSink,
+};
 use notchling_engine::transcript::codex::meta;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -51,6 +56,11 @@ pub const CODEX_OPS: [&str; 3] = [ops::CODEX_SEND, ops::CODEX_STOP, ops::CODEX_D
 
 /// A row id's prefix (`CodexSessions.agentID`).
 const ID_PREFIX: &str = "codex:";
+
+/// How long a reply waits for a new session to be named or a delete to finish. The client gives up
+/// at 5 s (`CALL_TIMEOUT`), so a slower job is answered `starting`/`deleting` here and reports its
+/// end as an event.
+const REPLY_WAIT: Duration = Duration::from_millis(4_500);
 
 /// How long `codex delete` may run, and how long a stopped turn is waited for first.
 const DELETE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -64,6 +74,8 @@ pub struct CodexSetup {
     pub home: PathBuf,
     /// Notchling's data folder, for `settings.json` (`codexNetwork`).
     pub data_dir: PathBuf,
+    /// True over a fixture root: only that root's own `.local/bin/codex` is run.
+    pub fixture: bool,
 }
 
 /// The `codex` command and the PATH its tools are found in; `None` when Codex isn't installed.
@@ -76,6 +88,8 @@ pub struct CodexOps {
     setup: CodexSetup,
     resolve: Resolver,
     room: Arc<dyn Room>,
+    /// How long a reply waits for a new session to be named or a delete to finish, in ms.
+    reply_wait_ms: AtomicU64,
 }
 
 impl CodexOps {
@@ -90,14 +104,22 @@ impl CodexOps {
             room: room.clone(),
             sessions_dir: setup.codex_home.join("sessions"),
         });
-        let home = setup.home.clone();
+        let found = setup.clone();
+        let runs = CodexRuns::new(spawner, PathBuf::new(), None, sink);
+        // Asked under the runs' lock right before a process starts, and again once it has: a
+        // start can't slip past `acting_off`.
+        let switch = acting.clone();
+        runs.set_may_start(Arc::new(move || switch.is_on()));
+        // The home the sessions are listed from, not whatever `CODEX_HOME` the daemon has.
+        runs.set_codex_home(setup.codex_home.clone());
         CodexOps {
             acting,
-            runs: CodexRuns::new(spawner, PathBuf::new(), None, sink),
+            runs,
             launcher,
             setup,
-            resolve: Box::new(move || system_codex(&home)),
+            resolve: Box::new(move || system_codex(&found)),
             room,
+            reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
         }
     }
 
@@ -115,6 +137,7 @@ impl CodexOps {
                 codex_home: layout.codex_dir(),
                 home: layout.home(),
                 data_dir: layout.data_dir.clone(),
+                fixture: layout.fixture,
             },
             Arc::new(RealSpawner),
             Arc::new(RealLauncher::with_claude(claude.to_path_buf())),
@@ -128,6 +151,12 @@ impl CodexOps {
         self
     }
 
+    /// How long a reply waits before it says the job is still going (tests shorten it).
+    pub fn set_reply_wait(&self, wait: Duration) {
+        let ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX);
+        self.reply_wait_ms.store(ms, Ordering::SeqCst);
+    }
+
     pub fn runs(&self) -> &CodexRuns {
         &self.runs
     }
@@ -139,6 +168,12 @@ impl CodexOps {
     /// The daemon is stopping: running turns are asked to stop, which Codex does cleanly, rather
     /// than left with a pipe nobody reads.
     pub fn close(&self) {
+        self.runs.stop_all();
+    }
+
+    /// Acting was turned off: running turns are asked to stop and what waited behind them is
+    /// dropped, since nothing may act while the Swift app owns the sessions.
+    pub fn acting_off(&self) {
         self.runs.stop_all();
     }
 
@@ -182,6 +217,7 @@ impl CodexOps {
             )));
         }
         let pick = self.pick(args)?;
+        let draft = Self::draft_arg(args, args.get("draft_folder").is_some())?;
         let (session, folder) = match (args.get("id"), args.get("draft_folder")) {
             (Some(_), None) => {
                 let session = Self::session_arg(args)?;
@@ -203,23 +239,17 @@ impl CodexOps {
         })?;
         self.runs.set_command(codex, Some(path));
         self.runs.set_network(self.network_allowed());
-        let sent = self
-            .runs
-            .send(Request {
-                text: text.to_string(),
-                session,
-                folder,
-                pick,
-            })
-            .map_err(|e| ApiError::new(ErrorCode::Failed, e.to_string()))?;
-        Ok(match sent {
-            Sent::Started { session } => {
-                json!({"id": row_id(&session), "session": session, "state": "started"})
-            }
-            Sent::Queued { session, waiting } => json!({
-                "id": row_id(&session), "session": session, "state": "queued", "waiting": waiting
-            }),
-        })
+        let request = Request {
+            text: text.to_string(),
+            session,
+            folder,
+            pick,
+        };
+        // A new session waits for Codex to name it, which can outlast the caller's 5 s.
+        if request.session.is_none() {
+            return self.send_new(request, draft);
+        }
+        self.runs.send(request).map(sent_json).map_err(send_error)
     }
 
     fn stop(&self, args: &Value) -> Result<Value, ApiError> {
@@ -234,39 +264,7 @@ impl CodexOps {
         }
         let (codex, path) = (self.resolve)()
             .ok_or_else(|| ApiError::new(ErrorCode::Failed, "Couldn't find the codex command."))?;
-        // The turn is stopped and its waiting messages dropped first, and given a moment to let go
-        // of the file `codex delete` removes.
-        if self.runs.forget(&session) {
-            let until = Instant::now() + STOP_SETTLE;
-            while self.runs.is_running(&session) && Instant::now() < until {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-        let command = Command::from_args(
-            &codex.to_string_lossy(),
-            &["delete".into(), "--force".into(), session.clone()],
-        )
-        .with_env("PATH", Some(&path));
-        let done = self
-            .launcher
-            .run(&command, DELETE_TIMEOUT)
-            .map_err(|e| ApiError::new(ErrorCode::Failed, e.to_string()))?;
-        if done.code != 0 {
-            let line = done.stderr.lines().rev().find(|l| !l.trim().is_empty());
-            return Err(ApiError::new(
-                ErrorCode::Failed,
-                line.map_or_else(
-                    || format!("codex delete exited with code {}.", done.code),
-                    |l| l.trim().to_string(),
-                ),
-            ));
-        }
-        self.room.publish(
-            topics::TOOLS,
-            topics::SESSION_CHANGED,
-            &json!({"id": row_id(&session), "session": session, "row": Value::Null, "deleted": true}),
-        );
-        Ok(json!({"deleted": true}))
+        self.delete_session(session, codex, path)
     }
 
     /// The folder a session runs in: the one its rollout records. A session whose turn is running
@@ -298,8 +296,7 @@ impl CodexOps {
         if !real.is_dir() {
             return Err(bad(format!("{folder} isn't a folder")));
         }
-        let home = std::fs::canonicalize(&self.setup.home).unwrap_or(self.setup.home.clone());
-        if real.parent().is_none() || real == home {
+        if broad_folder(&real, &self.setup.home) {
             return Err(bad(
                 "a new session never starts in the root or the home folder",
             ));
@@ -346,10 +343,25 @@ fn row_id(session: &str) -> String {
 }
 
 /// `codex` from the usual places or the process's PATH, and the PATH it runs with.
-fn system_codex(home: &Path) -> Option<(PathBuf, String)> {
+fn system_codex(setup: &CodexSetup) -> Option<(PathBuf, String)> {
     let path = std::env::var("PATH").unwrap_or_default();
-    let codex = find_binary(home, &path, Path::is_file)?;
-    Some((codex, augmented_path(&path, home)))
+    locate(setup, &path, Path::is_file)
+}
+
+/// The `codex` to run and its PATH, given the PATH the daemon has. Over a fixture root only that
+/// root's own `.local/bin/codex` counts: the machine's Codex would run against a fixture while
+/// naming the real login.
+fn locate(
+    setup: &CodexSetup,
+    path: &str,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<(PathBuf, String)> {
+    let codex = if setup.fixture {
+        find_fixture_binary(&setup.home, is_file)?
+    } else {
+        find_binary(&setup.home, path, is_file)?
+    };
+    Some((codex, augmented_path(path, &setup.home)))
 }
 
 /// Publishes a turn's events and the row it changes.
@@ -415,6 +427,10 @@ impl TurnSink for RoomSink {
         }
     }
 }
+
+#[path = "codex_slow.rs"]
+mod slow;
+use slow::{send_error, sent_json};
 
 #[cfg(test)]
 #[path = "codex_ops_tests.rs"]

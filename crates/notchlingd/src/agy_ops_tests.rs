@@ -72,6 +72,10 @@ fn civil(days: i64) -> (i64, i64, i64) {
 }
 
 struct Rig {
+    /// Antigravity's folder, with its summaries database.
+    root: PathBuf,
+    /// Where the daemon makes its copy of that database.
+    copies: PathBuf,
     ops: AgyOps,
     room: Arc<FakeRoom>,
     spawner: Arc<FakeSpawner>,
@@ -83,19 +87,24 @@ fn rig_with(on: bool, spawner: FakeSpawner, binary: Option<&str>) -> Rig {
     let room = Arc::new(FakeRoom::default());
     let acting = Arc::new(Acting::in_memory(on));
     let spawner = Arc::new(spawner);
+    let root = antigravity_root(&folder);
+    let copies = scratch("copy");
     let ops = AgyOps::new(
         acting.clone(),
         room.clone(),
         spawner.clone(),
         AgySetup {
-            root: antigravity_root(&folder),
-            copy_dir: scratch("copy"),
+            root: root.clone(),
+            copy_dir: copies.clone(),
+            home: scratch("home"),
             binary: binary.map(String::from),
             start_wait: Duration::from_secs(10),
             timing: Timing::default(),
         },
     );
     Rig {
+        root,
+        copies,
         ops,
         room,
         spawner,
@@ -508,61 +517,6 @@ fn options_pass_only_what_the_session_offers() {
 }
 
 #[test]
-fn turning_acting_off_closes_every_session_and_cancels_what_waited() {
-    let setup = setup(true, &[], json!([]));
-    let folder = scratch("work");
-    let agy = Arc::new(AgyOps::new(
-        setup.ops.acting_switch(),
-        setup.room.clone(),
-        Arc::new(FakeSpawner::replaying(RECORDING)),
-        AgySetup {
-            root: antigravity_root(&folder),
-            copy_dir: scratch("copy"),
-            binary: Some("/fake/agy".into()),
-            start_wait: Duration::from_secs(10),
-            timing: Timing::default(),
-        },
-    ));
-    setup.ops.attach_agy(agy.clone());
-    agy.call(SEND, &json!({"id": ROW, "text": "edit"})).unwrap();
-    let end = Instant::now() + Duration::from_secs(10);
-    while agy.prompts().is_empty() {
-        assert!(Instant::now() < end, "no permission came");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    // prompts.list shows it beside the hook's.
-    let listed = setup
-        .ops
-        .call(&app(), ops::PROMPTS_LIST, &json!({}))
-        .unwrap();
-    assert_eq!(listed.as_array().unwrap().len(), 1);
-    assert_eq!(listed[0]["tool"], "agy");
-
-    setup
-        .ops
-        .call(&app(), ops::SETTINGS_SET_ACTING, &json!({"on": false}))
-        .unwrap();
-    assert!(agy.prompts().is_empty());
-    let resolved = setup.room.named(PERMISSION_RESOLVED);
-    assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0]["outcome"], "cancelled");
-    assert_eq!(
-        refused(agy.call(SEND, &json!({"id": ROW, "text": "again"}))).1,
-        ACTING_OFF
-    );
-    assert_eq!(
-        refused(agy.call(
-            PERMISSION,
-            &json!({"id": ROW, "rpc_id": "1", "option_id": "allow"})
-        ))
-        .1,
-        ACTING_OFF
-    );
-    let state = agy.call(STATE, &json!({"id": ROW})).unwrap();
-    assert_eq!(state["open"], false, "the process is gone");
-}
-
-#[test]
 fn the_daemons_handler_routes_them_with_their_tiers() {
     use crate::daemon::Ops;
     use notchling_local_api::Handler;
@@ -577,3 +531,6 @@ fn the_daemons_handler_routes_them_with_their_tiers() {
         (ErrorCode::Forbidden, ACTING_OFF)
     );
 }
+
+#[path = "agy_ops_limits_tests.rs"]
+mod limits;

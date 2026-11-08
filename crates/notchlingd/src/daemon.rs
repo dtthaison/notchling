@@ -495,6 +495,7 @@ pub fn run(
     );
     // Codex turns (M5), behind the same switch: nothing starts until the app turns acting on.
     let codex_ops = Arc::new(CodexOps::for_daemon(&layout, acting, room.clone(), &claude));
+    acting_ops.attach_codex(codex_ops.clone());
     // Off at every start, like acting: no port is bound and nothing is written under
     // `AgentConsole` until the app's `bridge.set` in this run.
     let bridge = Arc::new(BridgeOps::new(

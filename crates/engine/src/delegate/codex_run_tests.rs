@@ -215,6 +215,31 @@ fn a_stop_signal_interrupts_the_turn_but_is_not_a_timeout() {
     assert_eq!(outcome.reply, "Line 3 looks off.", "what it said so far");
 }
 
+#[test]
+fn a_turn_that_ignores_the_interrupt_and_the_terminate_is_killed_so_the_timeout_holds() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::stubborn(&[STARTED]));
+    let mut options = rig.options(Tool::Codex, "stubborn");
+    options.timeout = Duration::from_millis(100);
+    let deps = rig.deps.clone();
+    let (done, outcome) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(run(&options, &deps));
+    });
+    let outcome = outcome.recv_timeout(Duration::from_secs(5));
+    let process = rig.codex.processes().remove(0);
+    // A run that never ends is let go, so a failure says so instead of hanging the suite.
+    process.release();
+    let outcome = outcome.expect("the run ended without a release: it was killed");
+    assert!(outcome.timed_out);
+    assert_eq!(
+        process.kills(),
+        1,
+        "SIGKILL after the SIGTERM went unheeded"
+    );
+    assert!(process.interrupts() >= 2, "interrupted, then terminated");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_turn_that_ignores_the_interrupt_is_terminated_a_little_later() {
@@ -232,6 +257,24 @@ fn a_turn_that_ignores_the_interrupt_is_terminated_a_little_later() {
         "it did not wait for the sleep"
     );
     assert_eq!(outcome.session.as_deref(), Some("019e-session-1"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_real_turn_that_traps_sigint_and_sigterm_is_killed() {
+    let mut rig = rig(AcpFake::new());
+    rig.deps.codex = Arc::new(ShScript {
+        script: format!("trap '' INT TERM; echo '{STARTED}'; exec sleep 30"),
+    });
+    let mut options = rig.options(Tool::Codex, "deaf");
+    options.timeout = Duration::from_millis(100);
+    let began = Instant::now();
+    let outcome = run(&options, &rig.deps);
+    assert!(outcome.timed_out);
+    assert!(
+        began.elapsed() < Duration::from_secs(10),
+        "it did not wait for the sleep"
+    );
 }
 
 #[cfg(unix)]

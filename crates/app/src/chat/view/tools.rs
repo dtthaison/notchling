@@ -20,7 +20,7 @@ use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::{held_prompt, HeldPrompt};
 use crate::tools::codex_picker::CodexPicker;
 use crate::tools::fetch_gate::{Ask, FetchGate};
-use crate::tools::live::ToolLive;
+use crate::tools::live::{Follow, ToolLive};
 use crate::tools::open_gate::OpenGate;
 use crate::tools::requests::{
     agy_cancel, agy_conversation, agy_open, agy_permission, agy_send, agy_send_draft,
@@ -62,6 +62,9 @@ pub struct ChatTools {
     pub opens: OpenGate,
     /// Messages the daemon queued behind a Codex turn, shown until that turn ends.
     pub queued: HashMap<String, Vec<String>>,
+    /// Draft rows whose first message the daemon is still starting a Codex session for, with the
+    /// text sent: the row follows the session when it is named, or gets the text back.
+    pub starting: HashMap<String, String>,
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
@@ -82,6 +85,7 @@ impl ChatTools {
             agy_config: Vec::new(),
             opens: OpenGate::default(),
             queued: HashMap::new(),
+            starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
             focus: cx.focus_handle(),
@@ -166,6 +170,10 @@ impl ChatView {
             return;
         };
         let id = session.agent.id.clone();
+        // The first message is still starting this session: another would start a second one.
+        if self.tools.starting.contains_key(&id) {
+            return;
+        }
         let text = self.tools.draft(&id).trim().to_owned();
         if text.is_empty() {
             return;
@@ -176,7 +184,7 @@ impl ChatView {
             Tool::Codex => {
                 let pick = self.tools.picks.get(&id).cloned().unwrap_or_default();
                 if draft {
-                    codex_send_draft(&session.agent.cwd, &text, &pick)
+                    codex_send_draft(&id, &session.agent.cwd, &text, &pick)
                 } else {
                     codex_send(&id, &text, &pick)
                 }
@@ -196,12 +204,18 @@ impl ChatView {
             move |view, result, cx| match result {
                 Ok(reply) => {
                     if session.tool == Tool::Codex {
-                        if let Sent::Queued(_) = sent_state(&reply) {
-                            view.tools
+                        match sent_state(&reply) {
+                            Sent::Queued(_) => view
+                                .tools
                                 .queued
                                 .entry(id.clone())
                                 .or_default()
-                                .push(sent_text.clone());
+                                .push(sent_text.clone()),
+                            // Not named yet: the draft follows it when the daemon says so.
+                            Sent::Starting => {
+                                view.tools.starting.insert(id.clone(), sent_text.clone());
+                            }
+                            Sent::Started => {}
                         }
                     }
                     // A draft's first message names the real row: follow it.
@@ -334,6 +348,7 @@ impl ChatView {
     pub(super) fn sync_tools(&mut self, cx: &mut Context<Self>) {
         let view = self.source.view();
         self.tools.live = view.tools;
+        self.follow_starting_drafts(cx);
         let Some(session) = self.selected_session().cloned() else {
             return;
         };
@@ -368,6 +383,48 @@ impl ChatView {
             self.tools.agy_fetched = Some((id.clone(), changes));
             self.fetch_agy(id, cx);
         }
+    }
+
+    /// A draft whose session was still starting when the daemon replied: once Codex names it the
+    /// row becomes the session's (if it is the one on show, it is shown), and if it never starts
+    /// the text goes back into the box with the reason.
+    fn follow_starting_drafts(&mut self, cx: &mut Context<Self>) {
+        if self.tools.starting.is_empty() {
+            return;
+        }
+        let drafts: Vec<String> = self.tools.starting.keys().cloned().collect();
+        for draft in drafts {
+            match self.tools.live.follow(&draft) {
+                Follow::Waiting => {}
+                Follow::Named(row) => {
+                    self.tools.starting.remove(&draft);
+                    if let Some(pick) = self.tools.picks.remove(&draft) {
+                        self.tools.picks.insert(row.clone(), pick);
+                    }
+                    if self.selected.as_deref() == Some(draft.as_str()) {
+                        self.selected = Some(row);
+                        self.loading = true;
+                        self.reload_now(cx);
+                    }
+                }
+                Follow::NotStarted(why) => {
+                    let Some(sent) = self.tools.starting.remove(&draft) else {
+                        continue;
+                    };
+                    let typed = self.tools.drafts.remove(&draft).unwrap_or_default();
+                    let back = if typed.is_empty() {
+                        sent
+                    } else {
+                        format!("{sent}\n\n{typed}")
+                    };
+                    self.tools.drafts.insert(draft.clone(), back);
+                    if self.selected.as_deref() == Some(draft.as_str()) {
+                        self.tools.error = Some(why);
+                    }
+                }
+            }
+        }
+        cx.notify();
     }
 
     /// Reads the row's conversation and options from the daemon, off the UI thread: one read at a

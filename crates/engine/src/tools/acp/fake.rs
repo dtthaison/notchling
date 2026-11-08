@@ -1,7 +1,7 @@
 //! A scripted tool process for tests: no child is started. Public (not `cfg(test)`) so the daemon's
 //! tests use it too, like `control::FakeLauncher`.
 
-use super::process::{Output, Spawned, Spawner, ToolProcess};
+use super::process::{Killer, Output, Spawned, Spawner, ToolProcess};
 use serde_json::Value;
 use std::io;
 use std::sync::mpsc::{channel, Sender};
@@ -105,7 +105,19 @@ impl ToolProcess for FakeProcess {
         Ok(())
     }
 
-    fn kill(&mut self) {
+    fn killer(&self) -> Arc<dyn Killer> {
+        Arc::new(FakeKiller {
+            handle: self.handle.clone(),
+        })
+    }
+}
+
+struct FakeKiller {
+    handle: FakeHandle,
+}
+
+impl Killer for FakeKiller {
+    fn kill(&self) {
         let mut killed = self
             .handle
             .inner

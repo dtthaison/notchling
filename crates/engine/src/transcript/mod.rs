@@ -24,6 +24,7 @@
 //! | [`chat::read`]`(path, is_main, limit)` | [`chat::ParseResult`]: the phone's message view (ConsoleCore `ChatTranscript`). |
 
 pub mod acp;
+pub mod bounded;
 pub mod chat;
 pub mod codex;
 pub mod conversation;

@@ -546,11 +546,25 @@ fn a_second_permission_cancels_the_first_instead_of_leaving_it_hanging() {
     assert_eq!(third["result"]["outcome"]["optionId"], "deny");
 }
 
-#[test]
-fn closing_everything_leaves_no_process() {
-    let rig = rig();
-    let process = loaded(&rig);
-    rig.runner.close_all();
-    assert!(process.killed());
-    assert!(!rig.runner.is_open(SESSION));
+fn ask(process: &FakeHandle, id: &str) {
+    process.push(
+        &json!({"jsonrpc":"2.0","method":"session/request_permission","id":id,
+        "params":{"toolCall":{"toolCallId":"c","name":"run_command","kind":"execute","title":"ls"},
+                  "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}),
+    );
 }
+
+/// Where in `events` the change `pred` picks first came, and that it came.
+fn index_of(events: &[Change], pred: impl Fn(&Change) -> bool) -> usize {
+    events
+        .iter()
+        .position(pred)
+        .unwrap_or_else(|| panic!("no such change in {events:?}"))
+}
+
+fn cancelled_a(c: &Change) -> bool {
+    matches!(c, Change::PermissionResolved { rpc_id, outcome } if rpc_id == "a" && outcome == "cancelled")
+}
+
+#[path = "runner_limits_tests.rs"]
+mod limits;

@@ -170,6 +170,87 @@ fn the_copy_is_made_fresh_each_time_and_a_missing_database_is_empty() {
 }
 
 #[test]
+fn a_young_copy_is_read_again_not_made_again_and_an_old_one_is_remade() {
+    let root = scratch("reuse-root");
+    let copies = scratch("reuse-copy");
+    let db = antigravity_db(&root);
+    let add = |id: &str| {
+        insert(
+            &db,
+            id,
+            id,
+            "",
+            "[]",
+            "IDLE",
+            "2026-11-07 10:00:00.000000+00:00",
+            0,
+        )
+    };
+    add("a");
+    let minute = Duration::from_secs(60);
+    assert_eq!(rows_cached(&root, &copies, NOW, minute).len(), 1);
+    add("b");
+    assert_eq!(
+        rows_cached(&root, &copies, NOW, minute).len(),
+        1,
+        "within the reuse time the copy is not made again"
+    );
+    // The reuse time is about the copy's age: no reuse (what `rows` does) remakes it.
+    assert_eq!(rows_cached(&root, &copies, NOW, Duration::ZERO).len(), 2);
+    assert_eq!(rows(&root, &copies, NOW).len(), 2);
+    // And a different copy folder is its own copy.
+    let other = scratch("reuse-other");
+    assert_eq!(rows_cached(&root, &other, NOW, minute).len(), 2);
+    for d in [&root, &copies, &other] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+#[test]
+fn calls_at_the_same_time_do_not_break_each_other() {
+    let root = scratch("race-root");
+    let copies = scratch("race-copy");
+    let db = antigravity_db(&root);
+    for n in 0..20 {
+        insert(
+            &db,
+            &format!("s{n}"),
+            "Title",
+            "",
+            "[]",
+            "IDLE",
+            "2026-11-07 10:00:00.000000+00:00",
+            0,
+        );
+    }
+    let threads: Vec<_> = (0..8)
+        .map(|n| {
+            let (root, copies) = (root.clone(), copies.clone());
+            std::thread::spawn(move || {
+                // Half remake the copy each time, half share it.
+                let reuse = if n % 2 == 0 {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs(60)
+                };
+                (0..10)
+                    .map(|_| rows_cached(&root, &copies, NOW, reuse).len())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    for t in threads {
+        assert!(
+            t.join().unwrap().iter().all(|n| *n == 20),
+            "a read never saw a half-made copy"
+        );
+    }
+    for d in [&root, &copies] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+#[test]
 fn dates_folders_and_titles() {
     assert_eq!(
         date("2026-11-05 16:57:03.335872+00:00"),

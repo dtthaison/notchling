@@ -16,7 +16,7 @@ impl Drop for Dir {
 
 struct Setup {
     dir: Dir,
-    ops: CodexOps,
+    ops: Arc<CodexOps>,
     spawner: Arc<FakeSpawner>,
     launcher: Arc<FakeLauncher>,
     room: Arc<FakeRoom>,
@@ -59,6 +59,7 @@ fn setup(tag: &str, on: bool) -> Setup {
             codex_home: home.join("codex"),
             home,
             data_dir: dir.join("data"),
+            fixture: false,
         },
         spawner.clone(),
         launcher.clone(),
@@ -72,7 +73,7 @@ fn setup(tag: &str, on: bool) -> Setup {
     }));
     Setup {
         dir: Dir(dir),
-        ops,
+        ops: Arc::new(ops),
         spawner,
         launcher,
         room,
@@ -120,34 +121,6 @@ fn bad_request(result: Result<Value, ApiError>) -> String {
     let (c, m) = code(result);
     assert_eq!(c, ErrorCode::BadRequest, "{m}");
     m
-}
-
-#[test]
-fn the_ops_are_app_tier_and_refused_while_acting_is_off() {
-    let s = setup("off", false);
-    for op in CODEX_OPS {
-        assert_eq!(s.ops.spec(op), Some(OpSpec::APP), "{op}");
-        let args = json!({"id": format!("codex:{SESSION}"), "text": "hi", "draft_folder": "/tmp"});
-        assert_eq!(
-            code(s.ops.call(op, &args)),
-            (ErrorCode::Forbidden, ACTING_OFF.to_string()),
-            "{op}"
-        );
-    }
-    assert_eq!(s.ops.spec("codex.nope"), None);
-    assert!(s.spawner.specs().is_empty(), "nothing started");
-    assert!(s.launcher.calls().is_empty(), "nothing ran");
-    assert!(s.room.events.lock().unwrap().is_empty());
-    // Turning it on lets the same call through.
-    s.acting.set(true);
-    s.spawner.push(FakeRun::ok(&[DONE]));
-    assert!(s
-        .call(
-            ops::CODEX_SEND,
-            json!({"id": format!("codex:{SESSION}"), "text": "hi"})
-        )
-        .is_ok());
-    s.idle();
 }
 
 #[test]
@@ -493,6 +466,66 @@ fn delete_runs_codex_delete_force_after_stopping_the_turn() {
 }
 
 #[test]
+fn turns_and_delete_run_with_the_codex_home_the_daemon_reads() {
+    let s = setup("codexhome", true);
+    let home = s.ops.setup.codex_home.to_string_lossy().into_owned();
+    s.spawner.push(FakeRun::ok(&[DONE]));
+    s.call(
+        ops::CODEX_SEND,
+        json!({"id": format!("codex:{SESSION}"), "text": "go"}),
+    )
+    .expect("sent");
+    s.idle();
+    assert!(
+        s.spawner.specs()[0]
+            .env
+            .contains(&("CODEX_HOME".to_string(), Some(home.clone()))),
+        "{:?}",
+        s.spawner.specs()[0].env
+    );
+    s.call(ops::CODEX_DELETE, json!({"id": format!("codex:{SESSION}")}))
+        .expect("deleted");
+    assert_eq!(
+        s.launcher.commands()[0].env.get("CODEX_HOME"),
+        Some(&Some(home)),
+        "codex delete removes the file from the home the daemon lists"
+    );
+}
+
+#[test]
+fn over_a_fixture_root_a_codex_elsewhere_on_the_machine_is_not_run() {
+    let root = std::env::temp_dir().join(format!("nl-codexops-fixture-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let only = |wanted: PathBuf| move |p: &Path| p == wanted;
+    let setup = |fixture| CodexSetup {
+        codex_home: root.join("codex"),
+        home: root.clone(),
+        data_dir: root.join("notchling"),
+        fixture,
+    };
+    let own = root.join(".local/bin/codex");
+    // The machine has /opt/homebrew/bin/codex (and the PATH names it): a real install, not the root's.
+    let found = locate(
+        &setup(true),
+        "/opt/homebrew/bin",
+        only(PathBuf::from("/opt/homebrew/bin/codex")),
+    );
+    assert_eq!(found, None);
+    let found = locate(&setup(true), "/usr/bin", only(own.clone()));
+    assert_eq!(found.map(|(codex, _)| codex), Some(own));
+    // Over the real folders the usual places still count.
+    let found = locate(
+        &setup(false),
+        "",
+        only(PathBuf::from("/opt/homebrew/bin/codex")),
+    );
+    assert_eq!(
+        found.map(|(codex, _)| codex),
+        Some(PathBuf::from("/opt/homebrew/bin/codex"))
+    );
+}
+
+#[test]
 fn a_delete_that_fails_says_what_codex_said() {
     let s = setup("deletefail", true);
     s.launcher.push_output(Ok(LaunchOutput {
@@ -534,7 +567,7 @@ fn the_daemon_routes_the_codex_ops_and_offers_the_tools_topic() {
     use crate::daemon::Ops;
     use notchling_local_api::Handler;
     let s = setup("route", false);
-    let codex = Arc::new(s.ops);
+    let codex = s.ops.clone();
     let daemon = Ops::new(Arc::new(std::sync::Mutex::new(json!([])))).with_codex(codex);
     assert!(daemon.topics().contains(&topics::TOOLS));
     assert_eq!(
@@ -550,3 +583,8 @@ fn the_daemon_routes_the_codex_ops_and_offers_the_tools_topic() {
         );
     }
 }
+
+#[path = "codex_acting_tests.rs"]
+mod acting_off;
+#[path = "codex_slow_tests.rs"]
+mod late;

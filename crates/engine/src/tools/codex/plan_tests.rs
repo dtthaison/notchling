@@ -157,6 +157,7 @@ fn a_turn_spec_drops_no_color_and_runs_in_the_folder() {
             folder: "/work",
             pick: &Pick::default(),
             network: true,
+            codex_home: None,
         },
         Some("/usr/bin"),
     );
@@ -169,6 +170,49 @@ fn a_turn_spec_drops_no_color_and_runs_in_the_folder() {
     assert!(spec
         .env
         .contains(&("PATH".to_string(), Some("/usr/bin".to_string()))));
+}
+
+#[test]
+fn a_turn_runs_with_the_codex_home_the_daemon_reads() {
+    let pick = Pick::default();
+    let turn = |codex_home| Turn {
+        prompt: "hi",
+        session: None,
+        folder: "/work",
+        pick: &pick,
+        network: true,
+        codex_home,
+    };
+    let spec = turn_spec(
+        Path::new("/bin/codex"),
+        &turn(Some(Path::new("/r/codex"))),
+        None,
+    );
+    assert!(spec
+        .env
+        .contains(&("CODEX_HOME".to_string(), Some("/r/codex".to_string()))));
+    // Without one the variable is left as the process has it.
+    let spec = turn_spec(Path::new("/bin/codex"), &turn(None), None);
+    assert!(spec.env.iter().all(|(key, _)| key != "CODEX_HOME"));
+}
+
+#[test]
+fn over_a_fixture_root_only_the_roots_own_codex_is_found() {
+    let root = Path::new("/r");
+    let only = |wanted: &'static str| move |p: &Path| p == Path::new(wanted);
+    assert_eq!(
+        find_fixture_binary(root, only("/r/.local/bin/codex")),
+        Some(PathBuf::from("/r/.local/bin/codex"))
+    );
+    // The machine's own installs are never run against a fixture.
+    for real in [
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+        "/r/.npm-global/bin/codex",
+        "/usr/bin/codex",
+    ] {
+        assert_eq!(find_fixture_binary(root, only(real)), None, "{real}");
+    }
 }
 
 #[test]

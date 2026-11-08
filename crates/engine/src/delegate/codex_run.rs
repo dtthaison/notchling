@@ -75,8 +75,16 @@ fn read_event(line: &str, seen: &mut Seen) {
     }
 }
 
+/// Where the watcher has got in stopping the process.
+enum Stage {
+    Running,
+    Interrupted(Instant),
+    Terminated(Instant),
+}
+
 /// Stops the process when the time is up or a stop is asked for: SIGINT first, SIGTERM if it is
-/// still running `terminate_after` later. Ends when `finished` is dropped.
+/// still running `terminate_after` later, SIGKILL if it still is `terminate_after` after that, so
+/// `--timeout` holds for a turn that traps both signals. Ends when `finished` is dropped.
 fn watch(
     process: Arc<dyn ToolProcess>,
     deps: &Deps,
@@ -85,30 +93,36 @@ fn watch(
     finished: std::sync::mpsc::Receiver<()>,
 ) {
     let deadline = Instant::now() + timeout;
-    let mut interrupted_at: Option<Instant> = None;
+    let mut stage = Stage::Running;
     loop {
         match finished.recv_timeout(TICK) {
             Err(RecvTimeoutError::Timeout) => {}
             _ => return,
         }
         let now = Instant::now();
-        match interrupted_at {
-            None => {
+        stage = match stage {
+            Stage::Running => {
                 let due = now >= deadline;
                 if due || deps.stop.load(Ordering::SeqCst) {
                     if due {
                         timed_out.store(true, Ordering::SeqCst);
                     }
                     process.interrupt();
-                    interrupted_at = Some(now);
+                    Stage::Interrupted(now)
+                } else {
+                    Stage::Running
                 }
             }
-            Some(at) if now.duration_since(at) >= deps.terminate_after => {
+            Stage::Interrupted(at) if now.duration_since(at) >= deps.terminate_after => {
                 process.terminate();
+                Stage::Terminated(now)
+            }
+            Stage::Terminated(at) if now.duration_since(at) >= deps.terminate_after => {
+                process.kill();
                 return;
             }
-            Some(_) => {}
-        }
+            other => other,
+        };
     }
 }
 

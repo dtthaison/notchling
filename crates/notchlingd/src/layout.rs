@@ -122,9 +122,11 @@ impl Layout {
             .join("antigravity-cli")
     }
 
-    /// Where the copy of Antigravity's summaries database is made: ours, never Antigravity's.
+    /// Where the copy of Antigravity's summaries database is made: ours, never Antigravity's, and
+    /// the daemon's own folder (`<data dir>/daemon`, where its search index is too), not the Swift
+    /// app's `<data dir>/antigravity`, whose `summaries.db` it would otherwise delete and rewrite.
     pub fn antigravity_copy_dir(&self) -> PathBuf {
-        self.data_dir.join("antigravity")
+        self.data_dir.join("daemon").join("antigravity")
     }
 
     /// The folder holding the socket, its lock and the audit log.
@@ -181,7 +183,13 @@ mod tests {
             real.antigravity_dir(),
             PathBuf::from("/Users/me/.gemini/antigravity-cli")
         );
+        // Not `<data dir>/antigravity`, where the Swift app copies the same database under the same
+        // file names: the daemon's own folder, like its search index.
         assert_eq!(
+            real.antigravity_copy_dir(),
+            real.data_dir.join("daemon").join("antigravity")
+        );
+        assert_ne!(
             real.antigravity_copy_dir(),
             real.data_dir.join("antigravity")
         );
@@ -192,7 +200,7 @@ mod tests {
         );
         assert_eq!(
             fixture.antigravity_copy_dir(),
-            PathBuf::from("/r/notchling/antigravity")
+            PathBuf::from("/r/notchling/daemon/antigravity")
         );
     }
 
