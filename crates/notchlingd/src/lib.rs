@@ -29,6 +29,7 @@
 //! ([`limits_ops`]) behind `accounts`, and the Secret Vault ([`vault_ops`]) behind `vault`, with
 //! its command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
 
+mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
@@ -68,6 +69,8 @@ pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;
 
+#[cfg(test)]
+mod accounts_late_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]

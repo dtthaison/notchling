@@ -52,7 +52,7 @@ pub(crate) fn slot(id: &str, email: &str, n: &str) -> String {
 pub(crate) struct World {
     pub(crate) d: Dir,
     pub(crate) flag: Arc<SwitchFlag>,
-    room: Arc<FakeRoom>,
+    pub(crate) room: Arc<FakeRoom>,
     pub(crate) ops: AccountsOps,
 }
 

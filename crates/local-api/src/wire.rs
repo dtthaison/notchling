@@ -107,6 +107,9 @@ pub mod ops {
     pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
     pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
     pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
+    /// `{ticket}`: the result of an accounts op that answered `{state: "working", ticket}`, after
+    /// up to 4 s; `{state: "working", ticket}` again while it still runs.
+    pub const ACCOUNTS_RESULT: &str = "accounts.result";
     pub const LANES_LIST: &str = "lanes.list";
     pub const LANES_CREATE: &str = "lanes.create";
     pub const LANES_REMOVE: &str = "lanes.remove";
@@ -162,6 +165,8 @@ pub mod topics {
     pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
     /// `{login, state: "added" | "failed" | "cancelled", account?, error?}`: a sign-in ended.
     pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
+    /// `{ticket, op, ok, result?, error?}`: an accounts op that outlasted its call ended.
+    pub const ACCOUNTS_DONE: &str = "accounts.done";
     /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
     /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |

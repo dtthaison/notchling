@@ -55,6 +55,11 @@ impl Call {
         )
     }
 
+    /// The result of an accounts op that answered `{state: "working", ticket}`.
+    pub fn accounts_result(ticket: u64) -> Call {
+        Call::new(ops::ACCOUNTS_RESULT, json!({ "ticket": ticket }))
+    }
+
     pub fn lanes_list() -> Call {
         Call::new(ops::LANES_LIST, json!({}))
     }
@@ -433,6 +438,14 @@ pub struct AddProgress {
     pub url: Option<String>,
     pub email: Option<String>,
     pub error: Option<String>,
+}
+
+/// The ticket of an accounts op still running in the daemon (`{state: "working", ticket}`): its
+/// result comes from `accounts.result`.
+pub fn working_ticket(v: &Value) -> Option<u64> {
+    (text(v, "state").as_deref() == Some("working"))
+        .then(|| v.get("ticket").and_then(Value::as_u64))
+        .flatten()
 }
 
 pub fn parse_add(v: &Value) -> Option<AddProgress> {
