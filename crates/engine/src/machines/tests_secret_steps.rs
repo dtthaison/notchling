@@ -26,6 +26,18 @@ fn claude_login_fix_opens_the_form_when_the_vault_lacks_the_token() {
     let (fix, _) = ctx.fix(None);
     let outcome = (plan.run)(&fix);
     assert!(!outcome.ok);
+    // the app opens no form: the line and the sheet send the user to the Secret Vault
+    assert_eq!(
+        outcome.message,
+        "Add claude-worker in the Secret Vault, then Set up again to send it."
+    );
+    assert!(
+        plan.display.starts_with(
+            "Ask you to add claude-worker in the Secret Vault, if it is not there yet."
+        ),
+        "{}",
+        plan.display
+    );
     assert!(runner.calls().is_empty());
     let forms = ctx.opener.forms();
     assert_eq!(forms.len(), 1);
@@ -71,6 +83,16 @@ fn issues_token_fix_opens_the_creation_flow_when_the_vault_lacks_it() {
     let (fix, _) = ctx.fix(None);
     let outcome = (plan.run)(&fix);
     assert!(!outcome.ok);
+    assert_eq!(
+        outcome.message,
+        "Opened GitHub's token page. Create the token, add it in the Secret Vault as m1-github-issues, then Set up again to send it."
+    );
+    assert!(!plan.display.contains("form"), "{}", plan.display);
+    assert!(
+        plan.display.contains("the Secret Vault"),
+        "{}",
+        plan.display
+    );
     assert!(runner.calls().is_empty());
     let pages = ctx.opener.pages();
     assert_eq!(pages.len(), 1);

@@ -60,7 +60,7 @@ pub fn claude_login(m: &Machine) -> SetupStep {
         &usage,
         m,
         &format!(
-            "Open the vault form for {}, if it is not in the vault yet.",
+            "Ask you to add {} in the Secret Vault, if it is not there yet.",
             usage.name
         ),
     );
@@ -69,7 +69,7 @@ pub fn claude_login(m: &Machine) -> SetupStep {
         if !has_value(&*ctx.step.secrets, &usage.name) {
             ctx.step.opener.open_form(&request);
             return FixOutcome::fail(format!(
-                "Opened the form for {}. Save it, then Set up again to send it.",
+                "Add {} in the Secret Vault, then Set up again to send it.",
                 usage.name
             ));
         }
@@ -97,7 +97,7 @@ pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
         &usage,
         m,
         &format!(
-            "Open GitHub's token page, pre-filled, and the vault form for {}, if it is not in the vault yet.",
+            "Open GitHub's token page, pre-filled, and ask you to add the token in the Secret Vault as {}, if it is not there yet.",
             usage.name
         ),
     );
@@ -112,7 +112,7 @@ pub fn issues_token(m: &Machine, job: &SdWorkerSettings) -> SetupStep {
                 all_repos,
                 ctx.step.now,
             );
-            return FixOutcome::fail(format!("Opened GitHub's token page and the form for {}. Create the token, save it, then Set up again to send it.", usage.name));
+            return FixOutcome::fail(format!("Opened GitHub's token page. Create the token, add it in the Secret Vault as {}, then Set up again to send it.", usage.name));
         }
         deliver(&usage, ctx)
     });

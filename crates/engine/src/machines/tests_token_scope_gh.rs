@@ -170,6 +170,11 @@ fn the_fix_opens_the_token_flow_for_the_machines_secret() {
     };
     assert!(!plan.needs_admin);
     assert!(plan.display.contains("m1-github-issues"));
+    assert!(
+        plan.display.contains("the Secret Vault") && !plan.display.contains("form"),
+        "{}",
+        plan.display
+    );
     // The worker takes jobs, changes labels and comments, so the token needs Issues read and write.
     assert!(
         plan.display.contains("Issues: read and write"),
@@ -187,7 +192,7 @@ fn the_fix_opens_the_token_flow_for_the_machines_secret() {
     assert!(
         outcome
             .message
-            .ends_with("Fix the token, save it, then Check again."),
+            .ends_with("Opened GitHub's token page. Fix the token, save it in the Secret Vault as m1-github-issues, then Check again."),
         "{}",
         outcome.message
     );

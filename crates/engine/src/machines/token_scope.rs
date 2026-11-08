@@ -36,7 +36,7 @@ pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
         format!("Open GitHub's token page for {} (Issues: read and write, Metadata: read, nothing else) ", repos.join(", "))
     };
     let display = format!(
-        "{scope}and the vault form for {}. The new token is saved in the vault and never shown.",
+        "{scope}and ask you to save the new token in the Secret Vault as {}. It is never shown.",
         job.issues_secret
     );
     let (secret, machine) = (job.issues_secret.clone(), m.name.clone());
@@ -50,9 +50,9 @@ pub fn step(m: &super::registry::Machine, job: &SdWorkerSettings) -> SetupStep {
             all_repos,
             ctx.step.now,
         );
-        // Only the page and the form open here. The step is not done until a check passes, so this
+        // Only the page opens here (the form is the vault's own). The step is not done until a check passes, so this
         // is not ok: Set up all stops at it (and the window shows the line as guidance).
-        FixOutcome::fail(format!("Opened GitHub's token page and the vault form for {secret}. Fix the token, save it, then Check again."))
+        FixOutcome::fail(format!("Opened GitHub's token page. Fix the token, save it in the Secret Vault as {secret}, then Check again."))
     });
     let job = job.clone();
     SetupStep::new(
