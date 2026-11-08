@@ -79,6 +79,12 @@ pub fn rollouts(
     out
 }
 
+/// The first eight characters of an id, for a row with no title. Characters, not bytes: an id from
+/// a file can hold anything, and cutting inside a multi-byte character panics.
+fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
 /// A rollout as a sidebar row: `codex:<id>`, titled by the first thing typed, Working while its last
 /// turn is open, else Idle. `None` when the file has no session line yet.
 pub fn session(path: &Path) -> Option<Agent> {
@@ -97,7 +103,7 @@ pub fn session(path: &Path) -> Option<Agent> {
         name: meta
             .title
             .clone()
-            .unwrap_or_else(|| format!("Codex {}", &meta.id[..meta.id.len().min(8)])),
+            .unwrap_or_else(|| format!("Codex {}", short_id(&meta.id))),
         project: cwd.rsplit('/').next().unwrap_or("").to_owned(),
         group: if working {
             AgentGroup::Working
@@ -183,6 +189,35 @@ mod tests {
         );
         assert_eq!(rollouts(&tmp.0, None, now_ms, 1), [b]);
         assert!(rollouts(&tmp.0.join("missing"), None, now_ms, 30).is_empty());
+    }
+
+    #[test]
+    fn an_untitled_rollout_with_a_multibyte_id_is_named_without_panicking() {
+        // Byte 8 of this id falls inside a two-byte character: `&id[..8]` panics there.
+        let id = "abcdefgéèà-tail";
+        assert!(!id.is_char_boundary(8));
+        let tmp = Tmp::new();
+        let path = tmp.0.join("2026/11/08/rollout-2026-11-08T08-00-00-x.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"timestamp\":\"2026-11-08T08:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"cwd\":\"/work/app\"}}}}\n"
+            ),
+        )
+        .unwrap();
+        let row = session(&path).expect("a row");
+        assert_eq!(row.id, format!("codex:{id}"));
+        assert_eq!(row.name, "Codex abcdefgé");
+    }
+
+    #[test]
+    fn the_short_id_is_eight_characters_whatever_their_width() {
+        assert_eq!(short_id("01a1ae55-0254"), "01a1ae55");
+        assert_eq!(short_id("abc"), "abc");
+        assert_eq!(short_id(""), "");
+        assert_eq!(short_id("ééééééééé"), "éééééééé");
+        assert_eq!(short_id("日本語日本語日本語"), "日本語日本語日本");
     }
 
     #[test]
