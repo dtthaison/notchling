@@ -38,6 +38,28 @@ pub mod ops {
     pub const SESSION_QUESTION: &str = "session.question";
     pub const HOOK_REQUEST: &str = "hook.request";
 
+    /// Milestone 5's Codex ops (E6a), app tier and refused while acting is off:
+    /// `codex.send {id | draft_folder, text, model?, effort?, draft?}`, `codex.stop {id}`,
+    /// `codex.delete {id}`. A new session or a delete that takes over 4.5 s is answered
+    /// `starting` / `deleting` and ends as an event.
+    pub const CODEX_SEND: &str = "codex.send";
+    pub const CODEX_STOP: &str = "codex.stop";
+    pub const CODEX_DELETE: &str = "codex.delete";
+
+    /// Milestone 5's Antigravity CLI ops (E6b), the shapes in `notchlingd`'s `agy_ops` module
+    /// docs. `agy.sessions` is agent tier; the rest app tier. The ones that start, type into or
+    /// answer `agy` are refused while acting is off; `agy.state` and `agy.conversation` are reads.
+    pub const AGY_SESSIONS: &str = "agy.sessions";
+    pub const AGY_STATE: &str = "agy.state";
+    /// `{id, peek?}` → `{id, open, loading, working, loadError, conversation}`: what the open
+    /// runner holds; an empty conversation with `open: false` for a session it doesn't.
+    pub const AGY_CONVERSATION: &str = "agy.conversation";
+    pub const AGY_OPEN: &str = "agy.open";
+    pub const AGY_SEND: &str = "agy.send";
+    pub const AGY_CANCEL: &str = "agy.cancel";
+    pub const AGY_SET_OPTION: &str = "agy.set_option";
+    pub const AGY_PERMISSION: &str = "agy.permission";
+
     /// Milestone 4's phone bridge, app tier. The bridge is off at every start; `bridge.set
     /// {"on": bool}` and `bridge.status` answer `{state, port, fingerprint, ...}`.
     pub const BRIDGE_SET: &str = "bridge.set";
@@ -52,6 +74,15 @@ pub mod ops {
     pub const BRIDGE_REVOKE: &str = "bridge.revoke";
     /// `{enabled, configured, connected, last_connection, listening, hostname}`.
     pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
+
+    /// Milestone 5's pages library and session index, agent tier, reads that work whatever the
+    /// `acting` switch says. The shapes are in `notchlingd`'s `pages_ops` module docs.
+    /// `{text?, limit?}` → `{pages: [Page], sessions: [Session], indexing}`.
+    pub const SEARCH_QUERY: &str = "search.query";
+    /// `{}` → `{pages: [Page], truncated}`.
+    pub const PAGES_LIST: &str = "pages.list";
+    /// `{query}` → `{pages: [Page + describe], truncated}`.
+    pub const PAGES_FIND: &str = "pages.find";
 }
 
 /// Event topics and the events they carry.
@@ -69,6 +100,19 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
+    /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
+    pub const TOOLS: &str = "tools";
+    /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
+    /// "failed", "waiting"?, "error"?}`.
+    pub const CODEX_TURN: &str = "codex.turn";
+    /// `{"id", "session", "row": <a sessions.list row> | null, "deleted"?: true}`: a session
+    /// another tool runs changed (its row is given as `sessions.list` would, or `null` when it is
+    /// gone).
+    pub const SESSION_CHANGED: &str = "session.changed";
+    /// On `prompts`: an Antigravity permission waiting or answered, each also sent as
+    /// `prompt.pending` / `prompt.resolved` (the id is `agy-perm:<row id>:<rpc id>`).
+    pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
+    pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
     /// The phone bridge (app tier).
     pub const BRIDGE: &str = "bridge";
     /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at

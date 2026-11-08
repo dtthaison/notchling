@@ -9,6 +9,8 @@
 //! views over a fixture). The GPUI view and the panel are
 //! macOS only (`LINT-GPUI-MACOS-ONLY`).
 
+#[cfg(target_os = "macos")]
+pub mod agy_card;
 pub mod answer;
 #[cfg(target_os = "macos")]
 pub mod answering;

@@ -90,7 +90,8 @@ pub fn collapse(text: &str) -> String {
     out.trim_end_matches(' ').to_string()
 }
 
-/// Where the query's words sit in a snippet, as byte ranges into it, for drawing them bold.
+/// Where the query's words sit in a snippet, as byte ranges into it, for drawing them bold. The
+/// ranges are sorted and disjoint (overlapping or touching ones are joined).
 /// Empty when lowercasing the snippet changes its length in characters (the ranges would not
 /// line up). The words are matched as given, so pass them lowercase.
 pub fn highlights<W: AsRef<str>>(snippet: &str, words: &[W]) -> Vec<Range<usize>> {
@@ -119,6 +120,19 @@ pub fn highlights<W: AsRef<str>>(snippet: &str, words: &[W]) -> Vec<Range<usize>
             }
         }
     }
+    merge(ranges)
+}
+
+/// The ranges in order, with any that overlap or touch joined, so none lies inside another: a
+/// word that is part of another ("b" in "bridge") would otherwise mark the same bytes twice.
+fn merge(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     ranges.sort_by_key(|r| (r.start, r.end));
-    ranges
+    let mut out: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match out.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => out.push(range),
+        }
+    }
+    out
 }

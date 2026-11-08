@@ -5,6 +5,8 @@
 pub mod banner;
 pub mod new_session;
 pub mod renders;
+#[cfg(target_os = "macos")]
+pub mod second_opinion_view;
 pub mod settings;
 #[cfg(target_os = "macos")]
 pub mod settings_view;

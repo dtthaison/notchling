@@ -37,6 +37,7 @@ use notchling_local_api::{
 use serde_json::Value;
 
 use crate::chat::data::DataRoot;
+use crate::tools::live::ToolLive;
 
 /// Starts a daemon for a socket; swapped in tests.
 pub type Starter = Arc<dyn Fn(&Path) -> Result<Started, ClientError> + Send + Sync>;
@@ -80,6 +81,14 @@ pub struct SourceConfig {
     pub check_server: bool,
 }
 
+/// The `notchling` binary (the daemon, and its `delegate` and other commands) beside the running
+/// executable `exe`: the app is `notchling-app`, and both sit in one folder, in a bundle's
+/// `Contents/MacOS` and in cargo's target folder alike. `None` for a path without a parent.
+pub fn notchling_binary(exe: &Path) -> Option<PathBuf> {
+    exe.parent()
+        .map(|dir| dir.join(format!("notchling{}", std::env::consts::EXE_SUFFIX)))
+}
+
 /// The configuration for the running app over `root`, or `None` when it must read files only: a
 /// fixture root never touches a daemon. `exe` is the running executable; the daemon to start is
 /// the `notchling` beside it.
@@ -87,8 +96,7 @@ pub fn config_for(root: &DataRoot, exe: Option<&Path>) -> Option<SourceConfig> {
     if root.fixture.is_some() {
         return None;
     }
-    let start = exe.and_then(Path::parent).map(|dir| {
-        let binary = dir.join(format!("notchling{}", std::env::consts::EXE_SUFFIX));
+    let start = exe.and_then(notchling_binary).map(|binary| {
         let starter: Starter = Arc::new(move |socket| ensure_daemon(&binary, socket));
         starter
     });
@@ -125,6 +133,9 @@ pub struct View {
     /// The prompts the daemon holds (`prompt.pending`'s data), oldest first; `None` while they
     /// aren't followed, when the Swift hook's `requests/` are read instead.
     pub prompts: Option<Vec<Value>>,
+    /// What the `tools` topic has said about Codex and Antigravity sessions; empty without a
+    /// daemon.
+    pub tools: ToolLive,
     pub link: Link,
     /// Counts every change of rows or link, so a caller can tell something moved.
     pub generation: u64,
@@ -156,6 +167,7 @@ pub const DAEMON_UNTRUSTED_NOTE: &str = "Daemon not trusted";
 struct State {
     agents: Option<Vec<Agent>>,
     prompts: Option<Vec<Value>>,
+    tools: ToolLive,
     link: Link,
     generation: u64,
 }
@@ -183,7 +195,7 @@ impl Shared {
         }
     }
 
-    /// Applies one event: the rows, or a prompt held or let go.
+    /// Applies one event: the rows, a prompt held or let go, or a tool's turn or session.
     fn apply(&self, event: Event) {
         match event.event.as_str() {
             topics::SESSIONS_CHANGED => {
@@ -203,7 +215,22 @@ impl Shared {
                     self.set_prompts(prompts);
                 }
             }
+            topics::CODEX_TURN | topics::SESSION_CHANGED => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.tools.apply(&event) {
+                    state.generation += 1;
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The daemon is gone: nothing it said about the tools holds.
+    fn reset_tools(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.tools != ToolLive::default() {
+            state.tools = ToolLive::default();
+            state.generation += 1;
         }
     }
 
@@ -229,6 +256,7 @@ impl SessionSource {
                 state: Mutex::new(State {
                     agents: None,
                     prompts: None,
+                    tools: ToolLive::default(),
                     link,
                     generation: 0,
                 }),
@@ -265,6 +293,7 @@ impl SessionSource {
         View {
             agents: state.agents.clone(),
             prompts: state.prompts.clone(),
+            tools: state.tools.clone(),
             link: state.link,
             generation: state.generation,
         }
@@ -309,6 +338,7 @@ fn run(config: SourceConfig, shared: &Shared) {
             return;
         }
         shared.set_prompts(None);
+        shared.reset_tools();
         shared.set(link, None);
         // The short wait after a lost connection, longer after each failed attempt.
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
@@ -345,6 +375,11 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Err(ClientError::Api(_)) => false,
         Err(e) => return Err(e),
     };
+    // The other tools' turns and sessions (M5); a daemon without them has nothing to say.
+    match client.subscribe(&[topics::TOOLS]) {
+        Ok(_) | Err(ClientError::Api(_)) => {}
+        Err(e) => return Err(e),
+    }
     let mut agents = client.sessions::<Agent>()?;
     let mut prompts = match followed {
         true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {

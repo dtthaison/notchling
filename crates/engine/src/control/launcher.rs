@@ -86,11 +86,17 @@ pub struct FakeLauncher {
     calls: Mutex<Vec<Call>>,
     outputs: Mutex<std::collections::VecDeque<Result<LaunchOutput, LaunchError>>>,
     pty: Mutex<std::collections::VecDeque<Result<bool, LaunchError>>>,
+    delay: Mutex<Duration>,
 }
 
 impl FakeLauncher {
     pub fn new() -> Self {
         FakeLauncher::default()
+    }
+
+    /// Every `run` takes this long to answer (a slow command).
+    pub fn set_delay(&self, delay: Duration) {
+        *lock(&self.delay) = delay;
     }
 
     /// The next `run` answers this.
@@ -126,6 +132,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl Launcher for FakeLauncher {
     fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
         lock(&self.calls).push(Call::Run(command.clone(), timeout));
+        let delay = *lock(&self.delay);
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
         lock(&self.outputs)
             .pop_front()
             .unwrap_or_else(|| Ok(LaunchOutput::ok("")))

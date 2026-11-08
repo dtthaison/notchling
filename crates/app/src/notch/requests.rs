@@ -14,6 +14,8 @@ use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::snapshot::{question, PendingQuestion, QuestionItem};
 use serde_json::{Map, Value};
 
+use crate::tools::agy_permission::AgyPermission;
+
 /// The hook waits 290 s for a decision; a request older than this is gone or about to be.
 pub const STALE_SECS: f64 = 300.0;
 
@@ -37,6 +39,9 @@ pub struct HookRequest {
     pub summary: String,
     /// Claude Code offered an "always allow" rule.
     pub can_always_allow: bool,
+    /// An Antigravity permission's own options and preview (the daemon's `tool: "agy"` prompts);
+    /// `None` for Claude Code's, which Allow, Always and Deny answer.
+    pub agy: Option<AgyPermission>,
 }
 
 impl HookRequest {
@@ -80,6 +85,7 @@ impl HookRequest {
             tool_name: tool_name.to_owned(),
             summary,
             can_always_allow,
+            agy: None,
         })
     }
 
@@ -139,6 +145,7 @@ impl HookRequest {
                 .get("canAlwaysAllow")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            agy: AgyPermission::from_prompt(p),
             id,
             session_id,
             kind,

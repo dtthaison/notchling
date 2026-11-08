@@ -2,18 +2,21 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 /// Seconds since the Unix epoch.
 pub type Timestamp = f64;
 
 /// One step of a session as Chat shows it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatItem {
     pub id: String,
     pub kind: ItemKind,
     pub date: Option<Timestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ItemKind {
     User {
         text: String,
@@ -44,7 +47,8 @@ pub enum ItemKind {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolKind {
     Shell,
     Read,
@@ -59,7 +63,7 @@ pub enum ToolKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -100,7 +104,8 @@ impl ToolCall {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DiffKind {
     Add,
     Remove,
@@ -108,14 +113,15 @@ pub enum DiffKind {
     Hunk,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiffLine {
     pub kind: DiffKind,
     pub text: String,
     pub number: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
     InProgress,
@@ -134,7 +140,7 @@ impl TaskStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskEntry {
     pub id: String,
     pub subject: String,
@@ -142,7 +148,8 @@ pub struct TaskEntry {
 }
 
 /// The receipt for a session: where it runs and what it did.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionFacts {
     pub branch: Option<String>,
     pub model: Option<String>,
@@ -158,7 +165,7 @@ pub struct SessionFacts {
 }
 
 /// A Bash call Claude Code ran with `run_in_background`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackgroundShell {
     pub id: String,
     pub command: String,
@@ -168,7 +175,10 @@ pub struct BackgroundShell {
     pub started: Option<Timestamp>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Serializable, since the daemon's `agy.conversation` carries one to the app: a field a newer
+/// daemon adds decodes as its default on an older reader.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Conversation {
     pub items: Vec<ChatItem>,
     pub tasks: Vec<TaskEntry>,
@@ -215,5 +225,69 @@ impl ItemKind {
             text: text.to_string(),
             symbol: symbol.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_conversation_round_trips_through_json_and_missing_fields_default() {
+        let mut call = ToolCall::new(
+            "t1",
+            "Edit",
+            ToolKind::Edit,
+            "a.rs".into(),
+            "/w/a.rs".into(),
+        );
+        call.diff.push(DiffLine {
+            kind: DiffKind::Add,
+            text: "let x = 1;".into(),
+            number: Some(3),
+        });
+        call.output = Some("ok".into());
+        call.finished = true;
+        let conversation = Conversation {
+            items: vec![
+                ChatItem {
+                    id: "u1".into(),
+                    kind: ItemKind::user("hi"),
+                    date: Some(1.5),
+                },
+                ChatItem {
+                    id: "t".into(),
+                    kind: ItemKind::Tools(vec![call]),
+                    date: None,
+                },
+                ChatItem {
+                    id: "e".into(),
+                    kind: ItemKind::TurnEnd {
+                        seconds: 2.0,
+                        model: Some("m".into()),
+                    },
+                    date: None,
+                },
+            ],
+            tasks: vec![TaskEntry {
+                id: "1".into(),
+                subject: "s".into(),
+                status: TaskStatus::InProgress,
+            }],
+            activity: Some("Editing".into()),
+            queued: vec!["next".into()],
+            ..Conversation::default()
+        };
+        let json = serde_json::to_value(&conversation).unwrap();
+        assert_eq!(json["items"][0]["kind"]["type"], "user");
+        assert_eq!(json["items"][1]["kind"]["type"], "tools");
+        assert_eq!(json["items"][1]["kind"]["data"][0]["kind"], "edit");
+        assert_eq!(json["tasks"][0]["status"], "in_progress");
+        let back: Conversation = serde_json::from_value(json).unwrap();
+        assert_eq!(back, conversation);
+        // A reader older than the writer: unknown fields are skipped, missing ones default.
+        let partial: Conversation =
+            serde_json::from_value(serde_json::json!({"items": [], "later": 1})).unwrap();
+        assert_eq!(partial, Conversation::default());
     }
 }

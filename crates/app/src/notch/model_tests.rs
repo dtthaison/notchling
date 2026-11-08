@@ -50,6 +50,7 @@ fn permission(session: &str) -> HookRequest {
         tool_name: "Bash".into(),
         summary: "rm -rf build".into(),
         can_always_allow: true,
+        agy: None,
     }
 }
 
@@ -386,4 +387,26 @@ fn an_answered_card_hides_until_the_files_catch_up() {
     m.mark_answered("j");
     assert_eq!(m.card("j"), None, "a question by its tool use id");
     m.mark_answered("nobody");
+}
+
+#[test]
+fn an_answer_hides_the_prompt_it_answered_and_not_one_that_came_after() {
+    let mut m = model(vec![agent("j", AgentGroup::NeedsInput)]);
+    m.requests.insert("j".into(), permission("j"));
+    // The key is taken when the button is pressed...
+    let key = m.answer_key("j").expect("a prompt to answer");
+    assert_eq!(key, "r1");
+    // ...and a newer prompt for the same session arrives before the reply comes back.
+    let mut newer = permission("j");
+    newer.id = "r2".into();
+    m.requests.insert("j".into(), newer);
+    m.mark_answered_key(&key);
+    assert!(m.answered.contains("r1"));
+    assert!(
+        matches!(m.card("j"), Some(Card::Permission(r)) if r.id == "r2"),
+        "the newer prompt still shows"
+    );
+    assert_eq!(m.answer_key("j").as_deref(), Some("r2"));
+    // Nothing to answer, nothing to key.
+    assert_eq!(m.answer_key("nobody"), None);
 }

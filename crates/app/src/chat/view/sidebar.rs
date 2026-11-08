@@ -74,8 +74,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 PartState::Rest
             };
             let status_line = match row.tool {
-                Tool::Codex => format!("Codex · {}", row.status_line),
                 Tool::Claude => row.status_line.clone(),
+                other => format!("{} · {}", other.name(), row.status_line),
             };
             list = list.child(
                 session_row(

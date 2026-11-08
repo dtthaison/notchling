@@ -16,6 +16,7 @@ use notchling_kit::{Color, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 
+use super::agy_card::agy_permission_height;
 use super::answer::QuestionDraft;
 use super::answering::{permission_height, question_height};
 use super::cards::{bubble, needs_box, tag, text, A};
@@ -114,7 +115,10 @@ impl NotchView {
         let status = self.status_text(gate);
         let height = match &card {
             Card::Question(q) => question_height(q, self.draft.tab, status),
-            Card::Permission(r) => permission_height(r, status),
+            Card::Permission(r) => match &r.agy {
+                Some(agy) => agy_permission_height(agy, status),
+                None => permission_height(r, status),
+            },
         };
         Some((card, height))
     }
@@ -392,7 +396,7 @@ impl NotchView {
         if let Some((card, _)) = self.card(id) {
             let element = match &card {
                 Card::Question(q) => self.question_card(id, q, Some(&agent.name), cx),
-                Card::Permission(r) => self.permission_card(id, r, Some(&agent.name), cx),
+                Card::Permission(r) => self.permission_card(r, Some(&agent.name), cx),
             };
             return Some(
                 div()
@@ -452,7 +456,7 @@ impl NotchView {
         let lines = m.snapshot(id).map(|s| s.lines.as_slice()).unwrap_or(&[]);
         let card = self.card(id).map(|(card, _)| match card {
             Card::Question(q) => self.question_card(id, &q, None, cx),
-            Card::Permission(r) => self.permission_card(id, &r, None, cx),
+            Card::Permission(r) => self.permission_card(&r, None, cx),
         });
         let needs = agent
             .detail

@@ -1,7 +1,7 @@
 //! E1: session search, the pure half: what a transcript line contributes to the index, how a
 //! query matches and ranks sessions, and the snippet shown around a match. Ported from the Swift
-//! app's `SessionSearch.swift` and `PageLibrary.find`. The background index (reading files,
-//! caching, watching mtimes) and the panel are not here.
+//! app's `SessionSearch.swift` and `PageLibrary.find`. The index that reads the files and caches
+//! them is [`index`] (E7); the panel is the app's.
 //!
 //! # Public API
 //!
@@ -48,6 +48,7 @@
 //!   lowercased text; [`highlights`] returns nothing if lowercasing changed the snippet's length.
 
 mod builder;
+pub mod index;
 mod meta;
 mod pages;
 mod rank;

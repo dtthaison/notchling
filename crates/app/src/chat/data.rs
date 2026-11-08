@@ -13,14 +13,41 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
-use crate::notch::source::{DataRoot as NotchRoot, Source, DATA_ROOT_ENV};
+use crate::notch::source::{
+    DataRoot as NotchRoot, Source, ANTIGRAVITY_DIR, APP_DIR, DATA_ROOT_ENV,
+};
+use crate::tools::foreign::AgyList;
+use crate::tools::requests::RowTool;
 use crate::transcripts::Locator;
+
+pub use super::loader::{Loaded, Loader};
 
 /// Which tool a session belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Claude,
     Codex,
+    /// Antigravity CLI: its rows come from a copy of its summaries database, and its conversation
+    /// from the daemon (`agy.conversation`), since the files are protobuf.
+    Antigravity,
+}
+
+impl Tool {
+    pub fn of(row_id: &str) -> Tool {
+        match RowTool::of(row_id) {
+            RowTool::Claude => Tool::Claude,
+            RowTool::Codex => Tool::Codex,
+            RowTool::Agy => Tool::Antigravity,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tool::Claude => "Claude Code",
+            Tool::Codex => "Codex",
+            Tool::Antigravity => "Antigravity",
+        }
+    }
 }
 
 /// The folders with none scanned twice. A lane's `projects` is a symlink to the main one, so
@@ -60,6 +87,8 @@ pub struct DataRoot {
     pub data_dir: PathBuf,
     /// Read as `~/.codex`: Codex's `sessions/`.
     pub codex_dir: PathBuf,
+    /// Read as `~/.gemini/antigravity-cli`, through a copy of its summaries database.
+    pub antigravity_dir: PathBuf,
     /// The user's home, for `~` in paths.
     pub home: PathBuf,
     /// A fixture root: transcript paths in it may be relative to this folder, its rows never age
@@ -75,20 +104,40 @@ impl DataRoot {
             claude_dir: home.join(".claude"),
             data_dir: paths::data_dir()?,
             codex_dir: home.join(".codex"),
+            antigravity_dir: home.join(ANTIGRAVITY_DIR),
             home,
             fixture: None,
         })
     }
 
-    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`.
+    /// A fixture root: `<root>/claude`, `<root>/notchling`, `<root>/codex`,
+    /// `<root>/antigravity-cli`.
     pub fn fixture(root: &Path) -> DataRoot {
         DataRoot {
             claude_dir: root.join("claude"),
             data_dir: root.join("notchling"),
             codex_dir: root.join("codex"),
+            antigravity_dir: root.join("antigravity-cli"),
             home: root.to_path_buf(),
             fixture: Some(root.to_path_buf()),
         }
+    }
+
+    /// The app's own folder under the data folder, for what only the app keeps: the second
+    /// opinions and its copy of Antigravity's database. Beside `daemon/` (the daemon's) and apart
+    /// from the Swift app's files in the data folder itself, which a Swift app running next to
+    /// this one keeps writing.
+    pub fn app_dir(&self) -> PathBuf {
+        self.data_dir.join(APP_DIR)
+    }
+
+    /// The Antigravity list, read through a copy in our own folder: the one the notch reads too,
+    /// so the two make one read between them.
+    pub fn new_agy_list(&self) -> AgyList {
+        AgyList::shared(
+            self.antigravity_dir.clone(),
+            self.app_dir().join("antigravity"),
+        )
     }
 
     /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
@@ -138,6 +187,8 @@ impl DataRoot {
         let root = NotchRoot {
             claude_dir: self.claude_dir.clone(),
             data_dir: self.data_dir.clone(),
+            codex_dir: self.codex_dir.clone(),
+            antigravity_dir: self.antigravity_dir.clone(),
             fixture: self.fixture.clone(),
         };
         match self.fixture {
@@ -190,17 +241,17 @@ impl DataRoot {
     }
 
     /// Every session, needs input first, then working, then done, newest first in each: Claude
-    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
-    /// Each Claude row's transcript is found the way the notch finds it (`Locator`). The monitor
-    /// and the locator keep what polls need between them: ended terminal sessions, and rows with no
-    /// transcript yet.
+    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days)
+    /// and Antigravity's summaries (14 days). Each Claude row's transcript is found the way the
+    /// notch finds it (`Locator`). The monitor and the locator keep what polls need between them:
+    /// ended terminal sessions, and rows with no transcript yet.
     pub fn sessions_with(
         &self,
         monitor: &mut Monitor,
         locator: &mut Locator,
         now_ms: i64,
     ) -> Vec<Session> {
-        self.sessions_from(monitor, locator, None, now_ms)
+        self.sessions_from(monitor, locator, &mut self.new_agy_list(), None, now_ms)
     }
 
     /// [`DataRoot::sessions_with`] with Claude Code's rows given: the daemon's list
@@ -209,6 +260,7 @@ impl DataRoot {
         &self,
         monitor: &mut Monitor,
         locator: &mut Locator,
+        agy: &mut AgyList,
         claude: Option<Vec<Agent>>,
         now_ms: i64,
     ) -> Vec<Session> {
@@ -236,6 +288,11 @@ impl DataRoot {
                 });
             }
         }
+        out.extend(agy.rows(now_ms).into_iter().map(|agent| Session {
+            agent,
+            tool: Tool::Antigravity,
+            transcript: None,
+        }));
         out.sort_by(|a, b| {
             a.agent
                 .group
@@ -255,6 +312,8 @@ impl DataRoot {
         match session.tool {
             Tool::Claude => conversation::read(&path),
             Tool::Codex => codex::read(&path),
+            // The daemon's, fetched by the view; never read from Antigravity's files.
+            Tool::Antigravity => Conversation::default(),
         }
     }
 
@@ -272,78 +331,6 @@ impl DataRoot {
                 now_secs,
             ),
             _ => Vec::new(),
-        }
-    }
-}
-
-/// One read of everything Chat shows.
-#[derive(Clone, Debug)]
-pub struct Loaded {
-    pub sessions: Vec<Session>,
-    /// The session the conversation is of: the one asked for if it is listed, else the first.
-    pub selected: Option<String>,
-    pub conversation: Conversation,
-    pub subagents: Vec<Subagent>,
-    pub now_ms: i64,
-}
-
-/// Reads a data root again and again, keeping what polls need between them: the monitor's memory of
-/// ended terminal sessions (they show as Exited) and which rows had no transcript. Owns no view
-/// state, so a view can send it to the background executor and take it back.
-pub struct Loader {
-    root: DataRoot,
-    monitor: Monitor,
-    locator: Locator,
-}
-
-impl Loader {
-    pub fn new(root: DataRoot) -> Loader {
-        Loader {
-            monitor: root.new_monitor(),
-            locator: root.new_locator(),
-            root,
-        }
-    }
-
-    /// The sessions, and the conversation and subagents of `selected` (else the first session).
-    /// `now_ms` is the clock.
-    pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
-        self.load_from(selected, None, now_ms)
-    }
-
-    /// [`Loader::load`] with Claude Code's rows from the daemon when it gave any.
-    pub fn load_from(
-        &mut self,
-        selected: Option<&str>,
-        claude: Option<Vec<Agent>>,
-        now_ms: i64,
-    ) -> Loaded {
-        let sessions =
-            self.root
-                .sessions_from(&mut self.monitor, &mut self.locator, claude, now_ms);
-        let selected = selected
-            .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
-            .map(str::to_owned)
-            .or_else(|| sessions.first().map(|s| s.agent.id.clone()));
-        let session = selected
-            .as_deref()
-            .and_then(|id| sessions.iter().find(|s| s.agent.id == id));
-        let (conversation, subagents) = match session {
-            Some(session) => {
-                let conversation = self.root.conversation(session);
-                let subagents = self
-                    .root
-                    .subagents(session, &conversation, now_ms as f64 / 1000.0);
-                (conversation, subagents)
-            }
-            None => (Conversation::default(), Vec::new()),
-        };
-        Loaded {
-            sessions,
-            selected,
-            conversation,
-            subagents,
-            now_ms,
         }
     }
 }
@@ -368,11 +355,28 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_is_copied_into_the_apps_own_folder_and_read_once_for_chat_and_the_notch() {
+        let root = DataRoot::fixture(Path::new("/f"));
+        let list = root.new_agy_list();
+        // Not data/antigravity, which the Swift app copies over, and not daemon/, the daemon's.
+        assert_eq!(list.copy_dir, PathBuf::from("/f/notchling/app/antigravity"));
+        assert_eq!(
+            list.copy_dir,
+            NotchRoot::fixture(Path::new("/f")).antigravity_copy_dir()
+        );
+        // The notch's source and Chat's loader hold the one list.
+        let notch = root.notch_source();
+        assert!(notch.agy_list().is_same_list(&list));
+        assert!(Loader::new(root).agy_list().is_same_list(&list));
+    }
+
+    #[test]
     fn real_root_leaves_paths_alone() {
         let root = DataRoot {
             claude_dir: "/Users/me/.claude".into(),
             data_dir: "/Users/me/Library/Application Support/Notchling".into(),
             codex_dir: "/Users/me/.codex".into(),
+            antigravity_dir: "/Users/me/.gemini/antigravity-cli".into(),
             home: "/Users/me".into(),
             fixture: None,
         };
@@ -439,66 +443,12 @@ mod tests {
         );
     }
 
-    /// A fixture root with one live terminal session (this process's pid, so it is alive wherever
-    /// the tests run) and its transcript; the returned path is the session's file.
-    fn terminal_world(s: &crate::testutil::Scratch) -> PathBuf {
-        s.write(
-            "claude/projects/-work-app/term-1.jsonl",
-            "{\"type\":\"user\",\"timestamp\":\"2026-11-08T08:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n",
-        );
-        let pid = std::process::id();
-        s.write(
-            &format!("claude/sessions/{pid}.json"),
-            &format!(
-                r#"{{"sessionId":"term-1","pid":{pid},"cwd":"/work/app","status":"idle","name":"terminal one","startedAt":1794160000000}}"#
-            ),
-        )
-    }
-
-    #[test]
-    fn a_loader_keeps_its_monitor_so_an_ended_terminal_session_shows_as_exited() {
-        let s = crate::testutil::Scratch::new("loader-exited");
-        let file = terminal_world(&s);
-        let mut loader = Loader::new(DataRoot::fixture(s.path()));
-
-        let first = loader.load(None, 1_000);
-        let row = first.sessions.iter().find(|r| r.agent.id == "term-1");
-        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Idle"));
-
-        // The terminal closes: its session file goes away.
-        std::fs::remove_file(&file).unwrap();
-        let second = loader.load(first.selected.as_deref(), 2_000);
-        let row = second.sessions.iter().find(|r| r.agent.id == "term-1");
-        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Exited"));
-        // Its conversation is still readable by id.
-        assert!(!second.conversation.items.is_empty());
-    }
-
-    #[test]
-    fn a_loader_selects_the_asked_session_else_the_first_listed() {
-        let s = crate::testutil::Scratch::new("loader-select");
-        terminal_world(&s);
-        let mut loader = Loader::new(DataRoot::fixture(s.path()));
-        assert_eq!(loader.load(None, 1_000).selected.as_deref(), Some("term-1"));
-        assert_eq!(
-            loader.load(Some("gone"), 1_000).selected.as_deref(),
-            Some("term-1")
-        );
-        assert_eq!(
-            loader.load(Some("term-1"), 1_000).selected.as_deref(),
-            Some("term-1")
-        );
-        let empty = crate::testutil::Scratch::new("loader-empty");
-        let none = Loader::new(DataRoot::fixture(empty.path())).load(Some("x"), 1_000);
-        assert_eq!(none.selected, None);
-        assert!(none.sessions.is_empty() && none.conversation.items.is_empty());
-    }
-
     fn real_stand_in() -> Option<DataRoot> {
         Some(DataRoot {
             claude_dir: "/Users/me/.claude".into(),
             data_dir: "/Users/me/Library/Application Support/Notchling".into(),
             codex_dir: "/Users/me/.codex".into(),
+            antigravity_dir: "/Users/me/.gemini/antigravity-cli".into(),
             home: "/Users/me".into(),
             fixture: None,
         })

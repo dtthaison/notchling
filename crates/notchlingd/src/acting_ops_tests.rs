@@ -472,3 +472,39 @@ fn an_answer_with_no_held_prompt_is_typed_page_by_page() {
     ));
     assert_eq!(c, ErrorCode::BadRequest, "no question to answer");
 }
+
+#[test]
+fn prompts_list_trims_an_oversized_prompt_instead_of_failing() {
+    let s = setup(true, &[], json!([]));
+    let write = |session: &str, file: &str, fill: &str| {
+        json!({"hook_event_name": "PermissionRequest", "session_id": session,
+            "tool_name": "Write", "cwd": "/w",
+            "tool_input": {"file_path": file, "content": fill.repeat(900_000)}})
+    };
+    // Two Writes of a 900 KB file (the hook line cap is 1 MiB) and an ordinary prompt: together
+    // they would not fit one reply.
+    let (big, _rx1) = s
+        .ops
+        .prompts()
+        .open(write("s1", "/w/big.txt", "x"), None, 1)
+        .unwrap();
+    let (_b2, _rx2) = s
+        .ops
+        .prompts()
+        .open(write("s2", "/w/b2.txt", "y"), None, 2)
+        .unwrap();
+    let small = json!({"hook_event_name": "PermissionRequest", "session_id": "s3",
+        "tool_name": "Bash", "cwd": "/w", "tool_input": {"command": "ls"}});
+    let (_p, _rx3) = s.ops.prompts().open(small, None, 3).unwrap();
+    let list = s
+        .ops
+        .call(&app(), ops::PROMPTS_LIST, &json!({}))
+        .expect("the list still answers");
+    let size = serde_json::to_string(&list).unwrap().len();
+    assert!(size < 1 << 20, "{size} bytes");
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 3, "every prompt is still there");
+    let trimmed = rows.iter().find(|p| p["id"] == json!(big.id)).unwrap();
+    assert_eq!(trimmed["trimmed"], true);
+    assert_eq!(trimmed["summary"], "/w/big.txt");
+}

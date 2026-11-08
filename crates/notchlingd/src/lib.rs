@@ -5,6 +5,13 @@
 //! - `notchling service install|uninstall|print [--dir]` writes the per-OS service file
 //!   ([`service`]) and prints the command that loads it; it never runs that command.
 //!
+//! - `notchling pages [words]` and `notchling page <link|id|words>` look up saved Artifact pages
+//!   ([`pages_cli`]); the daemon serves `search.query`, `pages.list` and `pages.find` ([`pages_ops`]).
+//!
+//! - `notchling delegate <codex|agy> … -- <prompt>` and `notchling delegate-models` hand a job to
+//!   another tool ([`delegate_cli`] over `notchling_engine::delegate`). They need no daemon and are
+//!   not behind `acting`.
+//!
 //! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
 //!   permission or question and prints the answer; anything else, or any trouble, passes.
 //!
@@ -14,17 +21,24 @@
 
 pub mod acting;
 pub mod acting_ops;
+pub mod agy_ops;
+pub mod agy_sink;
 pub mod attach;
 pub mod bridge_backend;
 pub mod bridge_ops;
 pub mod cli;
 pub mod clients;
+pub mod codex_ops;
 pub mod control_ops;
 pub mod daemon;
+pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
+pub mod late_reply;
 pub mod layout;
+pub mod pages_cli;
+pub mod pages_ops;
 pub mod prompts;
 pub mod service;
 pub mod signals;
@@ -39,6 +53,8 @@ mod daemon_tests;
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod pages_ops_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
@@ -68,6 +84,16 @@ pub fn run(command: Command) -> i32 {
             Some(l) => clients::sessions(&l.socket, json),
             None => 1,
         },
+        Command::Pages { query, socket } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, true),
+            None => 1,
+        },
+        Command::Page { query, socket } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, false),
+            None => 1,
+        },
+        Command::Delegate { args } => delegate_cli::run(&args),
+        Command::DelegateModels { args } => delegate_cli::models(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {

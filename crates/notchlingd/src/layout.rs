@@ -74,11 +74,59 @@ impl Layout {
         })
     }
 
+    /// Codex's home: `<root>/codex` under a fixture root; otherwise `CODEX_HOME` (an absolute
+    /// path) or `~/.codex`.
+    pub fn codex_dir(&self) -> PathBuf {
+        self.codex_dir_with(std::env::var_os("CODEX_HOME").as_deref())
+    }
+
+    pub fn codex_dir_with(&self, codex_home: Option<&OsStr>) -> PathBuf {
+        let home = self.claude_dir.parent().unwrap_or(&self.claude_dir);
+        if self.fixture {
+            return self
+                .data_dir
+                .parent()
+                .unwrap_or(&self.data_dir)
+                .join("codex");
+        }
+        match codex_home.map(PathBuf::from) {
+            Some(custom) if custom.is_absolute() => custom,
+            _ => home.join(".codex"),
+        }
+    }
+
+    /// Read as the home folder (`~`): the parent of `~/.claude`.
+    pub fn home(&self) -> PathBuf {
+        self.claude_dir
+            .parent()
+            .unwrap_or(&self.claude_dir)
+            .to_path_buf()
+    }
+
     pub fn roots(&self) -> Roots {
         Roots {
             main_dir: self.claude_dir.clone(),
             lanes_file: self.data_dir.join("lanes.json"),
         }
+    }
+
+    /// `~/.gemini/antigravity-cli`, which is only ever read through a copy. A fixture root keeps it
+    /// at `<root>/gemini/antigravity-cli`, beside `claude`.
+    pub fn antigravity_dir(&self) -> PathBuf {
+        let home = self
+            .claude_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        home.join(if self.fixture { "gemini" } else { ".gemini" })
+            .join("antigravity-cli")
+    }
+
+    /// Where the copy of Antigravity's summaries database is made: ours, never Antigravity's, and
+    /// the daemon's own folder (`<data dir>/daemon`, where its search index is too), not the Swift
+    /// app's `<data dir>/antigravity`, whose `summaries.db` it would otherwise delete and rewrite.
+    pub fn antigravity_copy_dir(&self) -> PathBuf {
+        self.data_dir.join("daemon").join("antigravity")
     }
 
     /// The folder holding the socket, its lock and the audit log.
@@ -126,6 +174,60 @@ mod tests {
         );
         assert_eq!(l.audit_path(), l.data_dir.join("audit.jsonl"));
         assert!(!l.fixture && !l.socket_given);
+    }
+
+    #[test]
+    fn antigravity_is_read_from_the_gemini_folder_and_copied_into_ours() {
+        let real = Layout::resolve(None, None, real).unwrap();
+        assert_eq!(
+            real.antigravity_dir(),
+            PathBuf::from("/Users/me/.gemini/antigravity-cli")
+        );
+        // Not `<data dir>/antigravity`, where the Swift app copies the same database under the same
+        // file names: the daemon's own folder, like its search index.
+        assert_eq!(
+            real.antigravity_copy_dir(),
+            real.data_dir.join("daemon").join("antigravity")
+        );
+        assert_ne!(
+            real.antigravity_copy_dir(),
+            real.data_dir.join("antigravity")
+        );
+        let fixture = Layout::resolve(None, Some(OsStr::new("/r")), || None).unwrap();
+        assert_eq!(
+            fixture.antigravity_dir(),
+            PathBuf::from("/r/gemini/antigravity-cli")
+        );
+        assert_eq!(
+            fixture.antigravity_copy_dir(),
+            PathBuf::from("/r/notchling/daemon/antigravity")
+        );
+    }
+
+    #[test]
+    fn codex_lives_in_codex_home_else_dot_codex_and_beside_a_fixture_root() {
+        let real = Layout::resolve(None, None, real).unwrap();
+        assert_eq!(real.codex_dir_with(None), PathBuf::from("/Users/me/.codex"));
+        assert_eq!(
+            real.codex_dir_with(Some(OsStr::new("/elsewhere/codex"))),
+            PathBuf::from("/elsewhere/codex")
+        );
+        // A relative CODEX_HOME is not followed.
+        assert_eq!(
+            real.codex_dir_with(Some(OsStr::new("codex"))),
+            PathBuf::from("/Users/me/.codex")
+        );
+        assert_eq!(real.home(), PathBuf::from("/Users/me"));
+        // A fixture root never reaches the real folders, whatever the environment says.
+        let fixture = Layout::resolve(None, Some(OsStr::new("/r")), real_none).unwrap();
+        assert_eq!(
+            fixture.codex_dir_with(Some(OsStr::new("/Users/me/.codex"))),
+            PathBuf::from("/r/codex")
+        );
+    }
+
+    fn real_none() -> Option<(PathBuf, PathBuf)> {
+        None
     }
 
     #[test]

@@ -29,6 +29,7 @@ rustls-native-certs = "0.8.5"
 regex = "1"
 # Chat pictures go to the phone as JPEG (E15). Swift used ImageIO; HEIC has no decoder here.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 
 [dev-dependencies]
 # Test certificates only, and an independent WebSocket client to talk to the bridge.
