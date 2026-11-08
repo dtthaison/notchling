@@ -10,6 +10,7 @@ import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../connection/connection.dart';
+import '../macs/computers.dart';
 import 'chat_cache.dart';
 
 /// Widths the phone asks the Mac for: a thumbnail under a message, and the full-screen view.
@@ -57,7 +58,7 @@ class ChatPictureLoader {
 }
 
 final Provider<ChatPictureLoader> chatPictureLoaderProvider = Provider<ChatPictureLoader>((Ref ref) {
-  final ChatCache cache = ref.watch(chatCacheProvider);
+  final ChatCache cache = ref.watch(scopedChatCacheProvider);
   return ChatPictureLoader(cache, () => ref.read(bridgeClientProvider));
 });
 

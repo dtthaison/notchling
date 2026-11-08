@@ -12,6 +12,11 @@ serde_json = "1"
 # The terminal screen's combining characters (general category), as Swift's `properties.generalCategory`.
 unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
 notchling-platform = { path = "../platform" }
+# The bridge (E5a) answers in the generated `agentconsole.v1` types.
+notchling-protocol = { path = "../protocol" }
+# Stable message ids (SHA-256, as the Swift app's `stableUUID`) and photo chunks (base64).
+sha2 = "0.10"
+base64 = "0.22"
 # The phone bridge's transport (bridge::net): TLS with ring's provider (not aws-lc-rs), the Swift
 # app's PKCS#12 identity, and RS256 for Cloudflare Access tokens.
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }

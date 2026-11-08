@@ -8,6 +8,7 @@
 mod conversation;
 mod header;
 mod inspector;
+mod phone;
 mod sheets;
 mod sidebar;
 
@@ -15,7 +16,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui::{div, prelude::*, px, Context, Div, Render, ScrollHandle, Subscription, Window};
+use gpui::{div, prelude::*, px, Context, Div, Entity, Render, ScrollHandle, Subscription, Window};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
@@ -25,6 +26,8 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::data::{DataRoot, Loaded, Loader, Session};
 use crate::chat::reload::{watch_config, ReloadGate};
+use crate::phone::bridge::Bridge;
+use crate::phone::view::PhonePanelView;
 use crate::session_source::SessionSource;
 
 /// How often the view looks for watch batches.
@@ -57,6 +60,12 @@ pub struct ChatView {
     conversation_scroll: ScrollHandle,
     /// New Session or Settings, over the window.
     sheet: Option<sheets::Sheet>,
+    /// The phone bridge the Phone button and its panel read.
+    bridge: Arc<Bridge>,
+    /// The Phone panel, while it is open.
+    phone: Option<Entity<PhonePanelView>>,
+    /// Whether the Phone button's dot is lit, so a change redraws it.
+    phone_dot: bool,
     _appearance_changes: Subscription,
 }
 
@@ -104,6 +113,9 @@ impl ChatView {
             watch,
             conversation_scroll: ScrollHandle::new(),
             sheet: None,
+            bridge: phone::app_bridge(cx),
+            phone: None,
+            phone_dot: false,
             _appearance_changes: changes,
         };
         view.start_load(cx);
@@ -203,6 +215,11 @@ impl ChatView {
                 cx.notify();
             }
         }
+        let dot = self.bridge_on();
+        if dot != self.phone_dot {
+            self.phone_dot = dot;
+            cx.notify();
+        }
         if let Some((_, batches)) = &self.watch {
             while batches.try_recv().is_ok() {
                 self.gate.changed();
@@ -274,11 +291,12 @@ impl Render for ChatView {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(header::render(self, a))
+                    .child(header::render(self, a, cx))
                     .child(conversation::render(self, a))
                     .child(composer(a)),
             )
             .child(inspector::render(self, a))
             .children(sheets::render(self, a))
+            .children(phone::render(self.phone.as_ref(), a, cx))
     }
 }

@@ -10,13 +10,17 @@ import '../../app/widgets/common.dart';
 import '../../app/widgets/motion.dart';
 import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+import '../macs/computer_heading.dart';
+import '../macs/computers.dart';
+import '../macs/macs_notifier.dart';
+import '../macs/session_ref.dart';
 import 'archive_store.dart';
+import 'session_list_parts.dart';
 import 'new_session_sheet.dart';
 import '../chat/takeover_flow.dart';
 import 'session_row.dart';
 import 'takeover_row_button.dart';
 import 'sessions_notifier.dart';
-import 'status_style.dart';
 
 /// Which sessions have their subagent rows open. Remembered while the app runs.
 final NotifierProvider<ExpandedSessionsNotifier, Set<String>>
@@ -48,36 +52,63 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   String _query = '';
   String? _project;
 
-  void _select(Session session) {
-    ref.read(selectedSessionIdProvider.notifier).select(session.id);
-    widget.onOpenChat?.call();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final SessionsState sessions = ref.watch(sessionsProvider);
-    final Set<String> archived = hiddenSessionIds(
-      ref.watch(archivedSessionsProvider),
-      sessions.sessions,
-    );
+    final MacsState macs = ref.watch(macsProvider);
+    final String active = macs.active?.id ?? '';
+    // One computer: the list is the computer in use's, with bare ids, as before. Several: every computer's,
+    // with host-qualified ids. Either way what the phone keeps (pick, open rows, archive) is per computer.
+    final bool perComputer = macs.macs.length > 1;
+    final List<ComputerSessions> all = perComputer ? ref.watch(allComputersSessionsProvider) : const <ComputerSessions>[];
+    final Map<String, int> archive = ref.watch(archivedSessionsProvider);
+    SessionRef refOf(String id) => perComputer ? (SessionRef.parse(id) ?? SessionRef(active, id)) : SessionRef(active, id);
+    String keyOf(Session session) {
+      final SessionRef at = refOf(session.id);
+      return storageKey(macs.scopeOf(at.host), at.id);
+    }
+
+    final SessionsState sessions = perComputer ? mergeComputerSessions(all) : ref.watch(sessionsProvider);
+    final Set<String> archived = perComputer
+        ? <String>{
+            for (final ComputerSessions c in all)
+              for (final String id in hiddenSessionIdsIn(archive, ref.watch(computerSessionsProvider(c.computer.id)).sessions, c.scope))
+                SessionRef(c.computer.id, id).qualified,
+          }
+        : hiddenSessionIdsIn(archive, sessions.sessions, macs.scopeOf(active));
+    // Open rows are kept by qualified id; one computer's list wants its own, bare.
+    final Set<String> expanded = <String>{
+      for (final String key in ref.watch(expandedSessionsProvider))
+        if (perComputer || active.isEmpty)
+          key
+        else if (SessionRef.parse(key) case final SessionRef r when r.host == active)
+          r.id,
+    };
     return SessionsView(
       state: sessions,
-      expanded: ref.watch(expandedSessionsProvider),
-      selectedId: ref.watch(selectedSessionIdProvider),
+      computers: <ComputerHeading>[
+        for (final ComputerSessions c in all) ComputerHeading(id: c.computer.id, name: c.computer.name, status: c.status),
+      ],
+      expanded: expanded,
+      selectedId: perComputer ? ref.watch(selectedSessionProvider)?.qualified : ref.watch(selectedSessionIdProvider),
       archived: archived,
       query: _query,
       project: _project,
       onQuery: (String value) => setState(() => _query = value),
       onProject: (String? value) => setState(() => _project = value),
-      onSelect: _select,
-      onToggleExpand: (String id) =>
-          ref.read(expandedSessionsProvider.notifier).toggle(id),
-      onRefresh: () => ref.read(sessionsProvider.notifier).refresh(),
+      onSelect: (Session session) {
+        ref.read(selectedSessionProvider.notifier).select(refOf(session.id));
+        widget.onOpenChat?.call();
+      },
+      onToggleExpand: (String id) => ref.read(expandedSessionsProvider.notifier).toggle(refOf(id).qualified),
+      onRefresh: () => perComputer
+          ? Future.wait(<Future<void>>[for (final ComputerSessions c in all) ref.read(computerSessionsProvider(c.computer.id).notifier).refresh()])
+          : ref.read(sessionsProvider.notifier).refresh(),
       onNewSession: () => unawaited(showNewSessionSheet(context)),
       onArchive: (Session session) {
         final AppL10n l10n = AppL10n.of(context);
         final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-        ref.read(archivedSessionsProvider.notifier).archive(session.id);
+        final String key = keyOf(session);
+        ref.read(archivedSessionsProvider.notifier).archive(key);
         messenger
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -87,7 +118,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
                 label: l10n.undo,
                 onPressed: () => ref
                     .read(archivedSessionsProvider.notifier)
-                    .restore(session.id),
+                    .restore(key),
               ),
             ),
           );
@@ -116,9 +147,13 @@ class SessionsView extends StatelessWidget {
     required this.onArchive,
     required this.onTakeover,
     this.archived = const <String>{},
+    this.computers = const <ComputerHeading>[],
     this.now,
   });
 
+  /// The paired computers. With two or more, each gets a heading with its own sessions under it, and every
+  /// session id here is host-qualified ([SessionRef.qualified]). With one, the list looks as it always did.
+  final List<ComputerHeading> computers;
   final SessionsState state;
   final Set<String> expanded;
   final String? selectedId;
@@ -213,13 +248,13 @@ class SessionsView extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: Space.lg),
               children: <Widget>[
-                _ProjectChip(
+                ProjectChip(
                   label: l10n.allProjects,
                   selected: project == null,
                   onTap: () => onProject(null),
                 ),
                 for (final String name in projects)
-                  _ProjectChip(
+                  ProjectChip(
                     label: name,
                     selected: project == name,
                     onTap: () => onProject(project == name ? null : name),
@@ -239,6 +274,8 @@ class SessionsView extends StatelessWidget {
     );
     Widget fill(Widget child) => SizedBox(height: stateHeight, child: child);
     int rowIndex = 0;
+    List<Widget> rows(Map<SessionState, List<Session>> groups) => _rows(context, groups, clock, () => rowIndex++);
+    final bool perComputer = computers.length > 1;
     final List<Widget> content;
     if (state.phase == LoadPhase.loading && state.sessions.isEmpty) {
       content = <Widget>[fill(const SkeletonRows())];
@@ -251,7 +288,7 @@ class SessionsView extends StatelessWidget {
           ),
         ),
       ];
-    } else if (state.sessions.isEmpty) {
+    } else if (state.sessions.isEmpty && !perComputer) {
       content = <Widget>[
         fill(
           StateMessage(
@@ -266,7 +303,7 @@ class SessionsView extends StatelessWidget {
           ),
         ),
       ];
-    } else if (groups.isEmpty) {
+    } else if (groups.isEmpty && (!perComputer || query.isNotEmpty || project != null)) {
       content = <Widget>[
         fill(
           StateMessage(
@@ -279,17 +316,54 @@ class SessionsView extends StatelessWidget {
       ];
     } else {
       content = <Widget>[
+        if (!perComputer)
+          ...rows(groups)
+        else
+          // Several computers: a heading per computer, then its own groups. Ids here are host-qualified.
+          for (final ComputerHeading computer in computers) ...<Widget>[
+            ComputerHeader(
+              computer: computer,
+              count: visible.where((Session s) => SessionRef.parse(s.id)?.host == computer.id).length,
+            ),
+            ...switch (groupSessions(visible.where((Session s) => SessionRef.parse(s.id)?.host == computer.id).toList(), query: query)) {
+              final Map<SessionState, List<Session>> own when own.isEmpty => <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.lg + Space.sm, Space.sm, Space.lg, 0),
+                    child: Text(l10n.computerNoSessions, style: kit.meta.copyWith(color: kit.textMuted)),
+                  ),
+                ],
+              final Map<SessionState, List<Session>> own => rows(own),
+            },
+          ],
+        const SizedBox(height: Space.xl),
+      ];
+    }
+
+    return RefreshIndicator(
+      color: kit.accent,
+      backgroundColor: kit.card,
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: <Widget>[header, ...content],
+      ),
+    );
+  }
+
+  /// The state groups and their rows. [nextIndex] numbers the rows for the entrance cascade.
+  List<Widget> _rows(BuildContext context, Map<SessionState, List<Session>> groups, DateTime clock, int Function() nextIndex) {
+      return <Widget>[
         for (final MapEntry<SessionState, List<Session>> group
             in groups.entries) ...<Widget>[
-          _GroupHeader(state: group.key, count: group.value.length),
+          SessionGroupHeader(state: group.key, count: group.value.length),
           for (final Session session in group.value) ...<Widget>[
             FlipOnMove(
               key: ValueKey<String>('row-${session.id}'),
               child: Entrance(
                 // The first screenful cascades in, 40 ms apart; later rows (scrolled to, searched) come at once.
-                delay: Duration(milliseconds: 40 * math.min(rowIndex++, 9)),
+                delay: Duration(milliseconds: 40 * math.min(nextIndex(), 9)),
                 rise: 12,
-                child: _SwipeRow(
+                child: SessionSwipeRow(
                   session: session,
                   onArchive: () => onArchive(session),
                   onTakeover: canTakeOver(session)
@@ -315,19 +389,7 @@ class SessionsView extends StatelessWidget {
             ),
           ],
         ],
-        const SizedBox(height: Space.xl),
       ];
-    }
-
-    return RefreshIndicator(
-      color: kit.accent,
-      backgroundColor: kit.card,
-      onRefresh: onRefresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: <Widget>[header, ...content],
-      ),
-    );
   }
 
   /// Long-press: what the swipes do, as a menu (swipes are not discoverable).
@@ -376,204 +438,6 @@ class SessionsView extends StatelessWidget {
                 Navigator.of(sheet).pop();
                 onArchive(session);
               },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProjectChip extends StatelessWidget {
-  const _ProjectChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final Kit kit = Kit.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(right: Space.sm),
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: label,
-        excludeSemantics: true,
-        onTap: onTap,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 40, maxWidth: 200),
-            padding: const EdgeInsets.symmetric(horizontal: Space.md),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected ? kit.selection : kit.raised,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: selected
-                    ? kit.accent.withValues(alpha: 0.5)
-                    : kit.hairline,
-              ),
-            ),
-            child: Center(
-              widthFactor: 1,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: kit.label.copyWith(
-                  color: selected ? kit.accentText : kit.text,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Swipe right: take a view-only session over. Swipe left: archive. Both also exist inside the session (the
-/// Tiếp quản button, the chat), since swipes are not discoverable.
-class _SwipeRow extends StatelessWidget {
-  const _SwipeRow({
-    required this.session,
-    required this.child,
-    required this.onArchive,
-    this.onTakeover,
-  });
-  final Session session;
-  final Widget child;
-  final VoidCallback onArchive;
-  final VoidCallback? onTakeover;
-
-  @override
-  Widget build(BuildContext context) {
-    final Kit kit = Kit.of(context);
-    final AppL10n l10n = AppL10n.of(context);
-    return Dismissible(
-      key: ValueKey<String>('swipe-${session.id}'),
-      direction: onTakeover == null
-          ? DismissDirection.endToStart
-          : DismissDirection.horizontal,
-      dismissThresholds: const <DismissDirection, double>{
-        DismissDirection.startToEnd: 0.35,
-        DismissDirection.endToStart: 0.35,
-      },
-      confirmDismiss: (DismissDirection direction) async {
-        if (direction == DismissDirection.startToEnd) {
-          onTakeover?.call();
-          return false;
-        }
-        return true;
-      },
-      onDismissed: (DismissDirection direction) => onArchive(),
-      background: _SwipeBackground(
-        color: kit.accent,
-        foreground: kit.onAccent,
-        icon: Icons.login,
-        label: l10n.takeoverShort,
-        alignment: Alignment.centerLeft,
-      ),
-      secondaryBackground: _SwipeBackground(
-        color: kit.raised,
-        foreground: kit.text,
-        icon: Icons.archive_outlined,
-        label: l10n.archive,
-        alignment: Alignment.centerRight,
-      ),
-      child: ColoredBox(color: kit.window, child: child),
-    );
-  }
-}
-
-class _SwipeBackground extends StatelessWidget {
-  const _SwipeBackground({
-    required this.color,
-    required this.foreground,
-    required this.icon,
-    required this.label,
-    required this.alignment,
-  });
-  final Color color;
-  final Color foreground;
-  final IconData icon;
-  final String label;
-  final Alignment alignment;
-
-  @override
-  Widget build(BuildContext context) {
-    final Kit kit = Kit.of(context);
-    return Container(
-      alignment: alignment,
-      margin: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 1),
-      padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(Radii.md),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 20, color: foreground),
-          const SizedBox(width: Space.sm),
-          Text(label, style: kit.label.copyWith(color: foreground)),
-        ],
-      ),
-    );
-  }
-}
-
-class _GroupHeader extends StatelessWidget {
-  const _GroupHeader({required this.state, required this.count});
-  final SessionState state;
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    final AppL10n l10n = AppL10n.of(context);
-    final Kit kit = Kit.of(context);
-    return Semantics(
-      header: true,
-      label: '${state.label(l10n)}, $count session',
-      excludeSemantics: true,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          Space.lg + Space.sm,
-          Space.lg,
-          Space.lg,
-          Space.xs,
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(state.icon, size: 13, color: state.color(kit)),
-            const SizedBox(width: 6),
-            Text(state.label(l10n).toUpperCase(), style: kit.section),
-            const SizedBox(width: Space.sm),
-            AnimatedSwitcher(
-              duration: motionDuration(context, Motion.sheet),
-              transitionBuilder: (Widget child, Animation<double> a) =>
-                  FadeTransition(
-                    opacity: a,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.6),
-                        end: Offset.zero,
-                      ).animate(a),
-                      child: child,
-                    ),
-                  ),
-              child: Text(
-                '$count',
-                key: ValueKey<int>(count),
-                style: kit.section,
-              ),
             ),
           ],
         ),

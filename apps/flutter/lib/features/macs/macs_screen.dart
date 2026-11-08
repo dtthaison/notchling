@@ -9,7 +9,9 @@ import '../../app/theme/tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/pairing/mac_profile.dart';
 import '../../l10n/app_localizations.dart';
+import '../connection/connection.dart';
 import '../pairing/pairing_screen.dart';
+import 'computer_heading.dart';
 import 'macs_notifier.dart';
 
 /// The paired Macs: switch the active one, add another, remove one.
@@ -54,6 +56,9 @@ class MacsScreen extends ConsumerWidget {
                   ]),
                   const SizedBox(height: Space.xs),
                   Text('${mac.lastGoodHost ?? mac.hosts.first}:${mac.port}', style: Kit.of(context).codeSm),
+                  const SizedBox(height: Space.xs),
+                  // Each computer has its own token and connection; this is its own link, not the one in use.
+                  ComputerLinkLabel(status: ref.watch(computerStatusProvider(mac.id))),
                   const SizedBox(height: Space.md),
                   Wrap(spacing: Space.sm, runSpacing: Space.sm, children: <Widget>[
                     if (mac.id != state.activeId) SecondaryButton(label: l10n.macsUse, onPressed: () => unawaited(ref.read(macsProvider.notifier).setActive(mac.id))),
