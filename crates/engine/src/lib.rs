@@ -12,6 +12,7 @@ pub mod sessions;
 pub mod settings;
 pub mod terminal;
 pub mod transcript;
+pub mod viz;
 
 /// The crate's short name.
 pub fn crate_name() -> &'static str {

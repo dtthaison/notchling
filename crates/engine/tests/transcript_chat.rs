@@ -1,5 +1,6 @@
 //! Ports of ConsoleCore's ChatTranscriptTests and ChatRichTests: the phone's message view of a
-//! transcript. (Pictures, the page cache and message UUIDs are not part of this port.)
+//! transcript. (Pictures are in `transcript_chat_images.rs`; the page cache and message UUIDs are
+//! not part of this port.)
 
 mod common;
 

@@ -74,15 +74,24 @@ impl Uploads {
         id
     }
 
-    /// Appends the next piece: in order, at most [`MAX_CHUNK_BYTES`], never past the size.
+    /// Uploads in progress.
+    pub fn pending(&self) -> usize {
+        lock(&self.uploads).len()
+    }
+
+    /// Appends the next piece: in order, at most [`MAX_CHUNK_BYTES`], never past the size. An upload
+    /// older than [`EXPIRES_AFTER_MS`] is freed and counts as unknown, so a phone cannot keep a
+    /// half-photo alive by trickling pieces in.
     pub fn append(
         &self,
         id: &str,
         connection_id: u64,
         sequence: i64,
         chunk: &[u8],
+        now_ms: f64,
     ) -> Result<(), UploadError> {
         let mut uploads = lock(&self.uploads);
+        uploads.retain(|_, u| now_ms - u.started_ms < EXPIRES_AFTER_MS);
         let upload = uploads
             .get_mut(id)
             .filter(|u| u.connection_id == connection_id)
@@ -99,8 +108,9 @@ impl Uploads {
         Ok(())
     }
 
-    pub fn finish(&self, id: &str, connection_id: u64) -> Result<Upload, UploadError> {
+    pub fn finish(&self, id: &str, connection_id: u64, now_ms: f64) -> Result<Upload, UploadError> {
         let mut uploads = lock(&self.uploads);
+        uploads.retain(|_, u| now_ms - u.started_ms < EXPIRES_AFTER_MS);
         if uploads.get(id).map(|u| u.connection_id) != Some(connection_id) {
             return Err(UploadError::Unknown);
         }
@@ -160,15 +170,35 @@ impl ImageStore {
     }
 
     /// Saves the photo as `phone-<8 hex>.<ext>`, mode 0600 in a 0700 folder, after pruning old ones.
+    ///
+    /// The name is made here, never taken from the phone, and `ext` must be 1 to 8 letters or digits,
+    /// so the file cannot land outside the folder. A name that is taken is not overwritten.
     pub fn save(&self, data: &[u8], ext: &str, now_ms: f64) -> std::io::Result<PathBuf> {
+        let plain = (1..=8).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric());
+        if !plain {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the file extension must be plain",
+            ));
+        }
         create_private_dir(&self.directory)?;
         self.prune(now_ms);
-        let seed = format!("image|{now_ms}|{}", data.len());
-        let name = unique_id(&seed).replace('-', "")[..8].to_ascii_lowercase();
-        let path = self.directory.join(format!("phone-{name}.{ext}"));
-        let mut file = new_private_file(&path)?;
-        file.write_all(data)?;
-        Ok(path)
+        for attempt in 0..4 {
+            let seed = format!("image|{now_ms}|{}|{attempt}", data.len());
+            let name = unique_id(&seed).replace('-', "")[..8].to_ascii_lowercase();
+            let path = self.directory.join(format!("phone-{name}.{ext}"));
+            let mut file = match new_private_file(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            };
+            if let Err(error) = file.write_all(data) {
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+            return Ok(path);
+        }
+        Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
     }
 
     fn prune(&self, now_ms: f64) {

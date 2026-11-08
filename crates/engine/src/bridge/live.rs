@@ -7,11 +7,13 @@
 //! acting ops, so the acting switch applies: while it's off, nothing is typed, answered, started or
 //! taken over. [`ActingOff`] is that state on its own.
 //!
-//! Not here yet (Task 3, E15): viz specs, web snapshots, chat pictures and the device-window
-//! stream answer with an error until their parts are ported.
+//! The phone extras (E15) are [`Extras`]: viz specs, chat pictures, web snapshots and the
+//! device-window stream. Capture (a page, a window) is behind traits whose default answers
+//! "not supported on this computer".
 
 use super::backend::BridgeBackend;
 use super::connection::{lock, Connection};
+use super::extras::{wire_image, Extras};
 use super::foreign::{self, AcpPermission, ForeignRow, Tool};
 use super::model::*;
 use super::wire::BridgeFailure;
@@ -129,15 +131,24 @@ pub struct LiveBackend<S: Sources, A: Acting> {
     pub acting: A,
     /// When each Antigravity permission was first seen, so its `created` stays put between pushes.
     prompt_seen: Mutex<HashMap<String, f64>>,
+    pub(super) extras: Extras,
 }
 
 impl<S: Sources, A: Acting> LiveBackend<S, A> {
+    /// With [`Extras::real`]: the real viz engine and picture encoder, no page or window capture.
     pub fn new(sources: S, acting: A) -> LiveBackend<S, A> {
         LiveBackend {
             sources,
             acting,
             prompt_seen: Mutex::new(HashMap::new()),
+            extras: Extras::real(notchling_platform::paths::home().unwrap_or_default()),
         }
+    }
+
+    /// Replaces the extras (the daemon's capture, a test's fakes).
+    pub fn with_extras(mut self, extras: Extras) -> LiveBackend<S, A> {
+        self.extras = extras;
+        self
     }
 
     fn first_seen(&self, row_id: &str, rpc_id: &str, now_ms: f64) -> f64 {
@@ -216,7 +227,7 @@ impl<S: Sources, A: Acting> LiveBackend<S, A> {
         ))
     }
 
-    fn find(&self, id: &str) -> Result<Session, BridgeFailure> {
+    pub(super) fn find(&self, id: &str) -> Result<Session, BridgeFailure> {
         self.sessions()
             .into_iter()
             .find(|s| s.id == id)
@@ -262,7 +273,12 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
             None => session.transcript_path.clone(),
         };
         let path = path.ok_or_else(|| BridgeFailure::not_found("Chưa tìm thấy transcript."))?;
-        let read = chat::read(&path, subagent_id.is_none(), chat::DEFAULT_LIMIT);
+        let read = chat::read_in(
+            &path,
+            subagent_id.is_none(),
+            chat::DEFAULT_LIMIT,
+            &self.extras.home,
+        );
         Ok(read.messages.iter().map(chat_message).collect())
     }
 
@@ -275,19 +291,21 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
         }
     }
 
-    fn viz(&self, session_id: &str, _include_entity: bool) -> Result<BridgeViz, BridgeFailure> {
-        if foreign::parse(session_id).is_some() {
-            return Err(BridgeFailure::invalid(
-                "Codex và Antigravity chưa có tab hình.",
-            ));
-        }
-        Err(BridgeFailure::invalid("Máy này chưa có tab hình."))
+    fn chat_image(
+        &self,
+        session_id: &str,
+        image_id: &str,
+        max_width: i64,
+    ) -> Result<Vec<u8>, BridgeFailure> {
+        self.picture(session_id, image_id, max_width)
     }
 
-    fn web_snapshot(&self, url: &str, _width: i64) -> Result<Vec<u8>, BridgeFailure> {
-        Err(BridgeFailure::not_reachable(format!(
-            "Máy này chưa chụp được {url}."
-        )))
+    fn viz(&self, session_id: &str, include_entity: bool) -> Result<BridgeViz, BridgeFailure> {
+        self.viz_bundle(session_id, include_entity)
+    }
+
+    fn web_snapshot(&self, url: &str, width: i64) -> Result<Vec<u8>, BridgeFailure> {
+        self.extras.snapshots.snapshot(url, width)
     }
 
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
@@ -351,11 +369,17 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
         self.sources.request_approval(device_name, platform)
     }
 
-    fn start_phone(&self, _: &Arc<Connection>, _: &PhoneOptions) -> Result<(), BridgeFailure> {
-        Err(BridgeFailure::invalid("Máy này chưa phát được màn hình."))
+    fn start_phone(
+        &self,
+        connection: &Arc<Connection>,
+        options: &PhoneOptions,
+    ) -> Result<(), BridgeFailure> {
+        self.extras.streamer.start(connection, options)
     }
 
-    fn stop_phone(&self, _: &Arc<Connection>) {}
+    fn stop_phone(&self, connection: &Arc<Connection>) {
+        self.extras.streamer.stop(connection);
+    }
 }
 
 /// What Notchling knows about a Claude Code session, for the list and the chat header
@@ -431,7 +455,7 @@ pub fn chat_message(message: &chat::ChatMessage) -> ChatMessage {
         time: message.timestamp * 1000.0,
         tool_summary: message.tool_summary.clone(),
         queued: message.queued,
-        images: Vec::new(),
+        images: message.images.iter().map(wire_image).collect(),
         kind: match message.kind {
             chat::ChatKind::Text => None,
             chat::ChatKind::Shell => Some(wire::ChatKind::Shell),

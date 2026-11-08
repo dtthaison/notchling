@@ -2,12 +2,15 @@
 //! subagent transcript, with tool runs collapsed to one summary message carrying its steps, `!` shell
 //! commands with their output, compaction notices, and the user's queued messages marked as waiting.
 //!
-//! Not ported: pictures (`ChatImages`), message UUIDs (a message's `id` is its seed text, which is
-//! stable across reads; hash it where a UUID is needed) and the paging cache (`ChatTranscriptCache`).
+//! Pictures (`ChatImages`) are described in [`images`]: a message lists them, the bytes are read on
+//! demand. Not ported: message UUIDs (a message's `id` is its seed text, which is stable across
+//! reads; hash it where a UUID is needed) and the paging cache (`ChatTranscriptCache`).
 
+pub mod images;
 mod steps;
 mod window;
 
+use images::ImageRef;
 pub use steps::{cap_output, result_text, step, tagged, DiffRow, DiffRowKind, ToolStep};
 pub use window::{read_window, strip_base64};
 
@@ -56,6 +59,8 @@ pub struct ChatMessage {
     pub steps: Vec<ToolStep>,
     /// On `Shell` messages: what the command printed.
     pub output: Option<String>,
+    /// Pictures: pasted ones on the user's message, a tool's under its row, files the text names.
+    pub images: Vec<ImageRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -76,8 +81,14 @@ pub struct SourceLine {
 
 /// Reads the last 2 MB of a main or subagent transcript into chat messages (the newest `limit`).
 pub fn read(path: &str, is_main: bool, limit: usize) -> ParseResult {
+    let home = notchling_platform::paths::home().unwrap_or_default();
+    read_in(path, is_main, limit, &home)
+}
+
+/// [`read`] with the folder whose pictures a message may name by file (`home`, besides `/tmp`).
+pub fn read_in(path: &str, is_main: bool, limit: usize, home: &std::path::Path) -> ParseResult {
     match read_window(path, TAIL_BYTES) {
-        Some(lines) => parse_source(&lines, is_main, path, limit),
+        Some(lines) => parse_source(&lines, is_main, path, limit, home),
         None => ParseResult::default(),
     }
 }
@@ -98,7 +109,8 @@ pub fn parse(lines: &[String], is_main: bool, path: &str, limit: usize) -> Parse
             text: t.clone(),
         })
         .collect();
-    parse_source(&source, is_main, path, limit)
+    let home = notchling_platform::paths::home().unwrap_or_default();
+    parse_source(&source, is_main, path, limit, &home)
 }
 
 struct Draft {
@@ -112,6 +124,7 @@ struct Draft {
     kind: ChatKind,
     steps: Vec<ToolStep>,
     output: Option<String>,
+    images: Vec<ImageRef>,
 }
 
 impl Draft {
@@ -127,6 +140,7 @@ impl Draft {
             kind: ChatKind::Text,
             steps: Vec::new(),
             output: None,
+            images: Vec::new(),
         }
     }
 }
@@ -152,6 +166,8 @@ struct State {
     tally_steps: Vec<ToolStep>,
     tally_index: HashMap<String, usize>,
     flushed_steps: HashMap<String, (usize, usize)>,
+    /// Pictures the current tool run's results carried.
+    tally_images: Vec<ImageRef>,
 }
 
 impl State {
@@ -166,12 +182,20 @@ impl State {
             );
             d.tool_summary = Some(summary);
             d.steps = std::mem::take(&mut self.tally_steps);
+            d.images = std::mem::take(&mut self.tally_images);
             for (index, step) in d.steps.iter().enumerate() {
                 self.flushed_steps
                     .insert(step.id.clone(), (self.drafts.len(), index));
             }
             self.drafts.push(d);
+        } else if !self.tally_images.is_empty() {
+            // Pictures with no tool row of their own (the row was already written): under the last message.
+            let pictures = std::mem::take(&mut self.tally_images);
+            if let Some(last) = self.drafts.last_mut() {
+                last.images.extend(pictures);
+            }
         }
+        self.tally_images.clear();
         self.tally_steps.clear();
         self.tally_index.clear();
         self.tally = ToolTally::default();
@@ -201,6 +225,7 @@ impl State {
         seed: String,
         offset: u64,
         merge: bool,
+        images: Vec<ImageRef>,
     ) {
         self.flush_tools();
         if merge {
@@ -215,11 +240,13 @@ impl State {
                     }
                     last.text.push_str(&text);
                 }
+                last.images.extend(images);
                 return;
             }
         }
-        self.drafts
-            .push(Draft::new(ChatRole::User, text, timestamp, seed, offset));
+        let mut draft = Draft::new(ChatRole::User, text, timestamp, seed, offset);
+        draft.images = images;
+        self.drafts.push(draft);
     }
 
     fn was_taken(&self, text: &str, near: Timestamp) -> bool {
@@ -250,14 +277,20 @@ fn fnv(text: &str) -> u64 {
     })
 }
 
-fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -> ParseResult {
+fn parse_source(
+    lines: &[SourceLine],
+    is_main: bool,
+    path: &str,
+    limit: usize,
+    home: &std::path::Path,
+) -> ParseResult {
     let mut st = State::default();
     let mut malformed = 0;
     let mut latest_model: Option<String> = None;
 
     for (index, source) in lines.iter().enumerate() {
         // A line with pictures is big because of the base64; that is cut out first, then the size is judged.
-        let text = strip_base64(&source.text);
+        let (text, stripped) = images::strip_base64_blocks(&source.text);
         if text.len() > MAX_LINE_BYTES {
             continue;
         }
@@ -302,6 +335,7 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
                             seed,
                             source.offset,
                             false,
+                            Vec::new(),
                         );
                         st.taken.push((content, timestamp));
                     }
@@ -332,8 +366,13 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
                     _ => {}
                 }
                 let text = collapse_pastes(&text).trim().to_string();
+                let pictures: Vec<ImageRef> =
+                    images::refs(attachment.get("prompt"), source.offset, &stripped)
+                        .into_iter()
+                        .map(|(image, _)| image)
+                        .collect();
                 if !(origin.is_none() || origin == Some("human"))
-                    || text.is_empty()
+                    || (text.is_empty() && pictures.is_empty())
                     || text.starts_with('<')
                 {
                     continue;
@@ -344,7 +383,14 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
                 }
                 let seed = str_of(&object, "uuid")
                     .map_or_else(|| format!("{path}:a{index}"), String::from);
-                st.add_user(text.clone(), timestamp, seed, source.offset, false);
+                st.add_user(
+                    text.clone(),
+                    timestamp,
+                    seed,
+                    source.offset,
+                    false,
+                    pictures,
+                );
                 st.taken.push((text, timestamp));
                 continue;
             }
@@ -439,6 +485,16 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
             }
         }
         let text = collapse_pastes(&text).trim().to_string();
+        // Pictures: pasted ones belong to the message, a tool's belong under its row, files named in the text too.
+        let (own, tool_pictures): (Vec<_>, Vec<_>) =
+            images::refs(message.get("content"), source.offset, &stripped)
+                .into_iter()
+                .partition(|(_, in_tool_result)| !in_tool_result);
+        let (text, marked) = images::file_markers(&text, home);
+        let mut pictures: Vec<ImageRef> = own.into_iter().map(|(image, _)| image).collect();
+        pictures.extend(marked);
+        st.tally_images
+            .extend(tool_pictures.into_iter().map(|(image, _)| image));
 
         // A `!` command and what it printed, as Claude Code logs them.
         if role == "user" {
@@ -469,7 +525,10 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
             }
         }
         // Injected wrappers (<command-name>, <system-reminder>) and interrupt markers are not chat.
-        if text.is_empty() || text.starts_with('<') || text.starts_with("[Request interrupted") {
+        if (text.is_empty() && pictures.is_empty())
+            || text.starts_with('<')
+            || text.starts_with("[Request interrupted")
+        {
             continue;
         }
 
@@ -478,7 +537,7 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
             if st.was_taken(&text, timestamp) {
                 continue;
             }
-            st.add_user(text, timestamp, seed, source.offset, true);
+            st.add_user(text, timestamp, seed, source.offset, true, pictures);
             continue;
         }
         st.flush_tools();
@@ -487,16 +546,15 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
             .last_mut()
             .filter(|d| d.role == ChatRole::Assistant && d.kind == ChatKind::Text)
         {
-            last.text.push_str("\n\n");
-            last.text.push_str(&text);
+            if !text.is_empty() {
+                last.text.push_str("\n\n");
+                last.text.push_str(&text);
+            }
+            last.images.extend(pictures);
         } else {
-            st.drafts.push(Draft::new(
-                ChatRole::Assistant,
-                text,
-                timestamp,
-                seed,
-                source.offset,
-            ));
+            let mut draft = Draft::new(ChatRole::Assistant, text, timestamp, seed, source.offset);
+            draft.images = pictures;
+            st.drafts.push(draft);
         }
     }
     st.flush_tools();
@@ -529,6 +587,7 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
             kind: d.kind,
             steps: d.steps,
             output: d.output,
+            images: d.images,
         })
         .collect();
     ParseResult {
