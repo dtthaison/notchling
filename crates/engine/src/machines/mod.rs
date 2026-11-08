@@ -18,3 +18,33 @@ pub mod registry;
 pub mod runner;
 pub mod shell;
 pub mod step;
+pub mod steps_machine;
+pub mod steps_secret;
+mod steps_xcode;
+pub mod token_creation;
+pub mod token_scope;
+mod token_scope_net;
+pub mod usage;
+
+#[cfg(test)]
+pub mod fakes;
+#[cfg(test)]
+mod tests_machine_steps;
+#[cfg(test)]
+mod tests_machine_tools;
+#[cfg(test)]
+mod tests_registry;
+#[cfg(test)]
+mod tests_runner;
+#[cfg(test)]
+mod tests_secret_steps;
+#[cfg(test)]
+mod tests_secrets;
+#[cfg(test)]
+mod tests_shell;
+#[cfg(test)]
+mod tests_token_scope;
+#[cfg(test)]
+mod tests_token_scope_gh;
+#[cfg(test)]
+mod tests_token_scope_view;
