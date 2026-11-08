@@ -124,7 +124,7 @@ Phase 5's parts that need no credential exist, in `tools/agents/` (Python standa
 
 Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), Flutter for the phone, and the engine as an always-on service.
 
-**The target's Rust tree is a skeleton.** Since Phase 4 the Cargo workspace (`Cargo.toml`, Rust 1.99.1 pinned in `rust-toolchain.toml`, `deny.toml`) holds the eight crates in the layout below. Seven are stubs: each builds, has one test, and does nothing else. `crates/protocol` has the bridge protocol's generated types. No GPUI yet; it comes with part U0 in Milestone 1. The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is on branch `spike/gpui-phase1` (and in git history) and never goes into `main`.
+**The target's Rust tree is a skeleton.** Since Phase 4 the Cargo workspace (`Cargo.toml`, Rust 1.99.1 pinned in `rust-toolchain.toml`, `deny.toml`) holds the eight crates in the layout below. Seven are stubs: each builds, has one test, and does nothing else. `crates/protocol` has the bridge protocol's generated types. No GPUI yet; it comes with part U0 in Milestone 1. The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is only in git history (`git show e8c8cd2:spike/gpui/`; its branch `spike/gpui-phase1` was deleted on 2026-11-08, so records 0001 and 0008 point at a branch that no longer exists) and never goes into `main`.
 
 ```
   GPUI desktop app      hook            command line             phone, and apps on
@@ -180,7 +180,7 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 | `protocol/` | Spec (`README.md`), JSON Schema, fixtures | Exists |
 | `docs/`, `tools/`, `viz/` | Docs; the guard, setup and protocol tools (`tools/protocol/gen.py`, the generator), the agents' scripts (`tools/agents/`: triage, preflight, push wrapper, review) and the release tools (`tools/release/`: version, fragments, appcast); the web page behind the phone's Visualize tab | Exist |
 | `changes/` | Changelog fragments, one per pull request that changes app code, folded into `CHANGELOG.md` at each Stable; `README.md` is the guide | Exists (Phase 6) |
-| `spike/` | The GPUI spike's results (`RESULTS.md`); its code stays on branch `spike/gpui-phase1` | Exists |
+| `spike/` | The GPUI spike's results (`RESULTS.md`); its code is in history at `e8c8cd2:spike/gpui/` | Exists |
 
 ### Swift and Rust side by side
 
