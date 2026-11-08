@@ -72,10 +72,23 @@ class AlertPrefsNotifier extends Notifier<AlertPrefs> {
   static const String _keepAliveKey = 'prefs.keepalive';
   static const String _mutedKey = 'prefs.muted';
 
+  Future<void>? _loading;
+
   @override
   AlertPrefs build() {
-    unawaited(_load());
+    _loading = _load();
     return const AlertPrefs();
+  }
+
+  /// Forgets the mutes of the computer whose storage scope is [scope], when that computer is removed. Waits for
+  /// the saved mutes to load first, so they can't come back over the change.
+  Future<void> removeScope(String scope) async {
+    await _loading;
+    if (!ref.mounted) return;
+    final Set<String> kept = <String>{for (final String key in state.muted) if (!keyInScope(scope, key)) key};
+    if (kept.length == state.muted.length) return;
+    state = state.copyWith(muted: kept);
+    await _store.write(_mutedKey, jsonEncode(kept.toList()));
   }
 
   SecretStore get _store => ref.read(secretStoreProvider);

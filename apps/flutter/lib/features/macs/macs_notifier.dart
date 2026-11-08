@@ -3,10 +3,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/alerts.dart';
 import '../../app/providers.dart';
 import '../../core/net/ws_transport.dart';
 import '../../core/pairing/mac_profile.dart';
 import '../../core/pairing/mac_store.dart';
+import '../chat/chat_cache.dart';
+import '../sessions/archive_store.dart';
 
 class MacsState {
   const MacsState({this.macs = const <MacProfile>[], this.activeId, this.loaded = false, this.scopes = const <String, String>{}});
@@ -107,13 +110,22 @@ class MacsNotifier extends Notifier<MacsState> {
     await _store.setActive(id);
   }
 
+  /// Removes a computer and everything the phone kept for it: its token (in its profile), storage scope, chat
+  /// cache, archive and mutes. Its connection closes with it. Nothing of any other computer is touched.
   Future<void> remove(String id) async {
+    final String scope = state.scopeOf(id);
     final List<MacProfile> macs = state.macs.where((MacProfile m) => m.id != id).toList();
     final String? active = state.activeId == id ? (macs.isEmpty ? null : macs.first.id) : state.activeId;
     // The empty scope is never handed on: another computer must not read the removed one's bare keys.
     final Map<String, String> scopes = <String, String>{...state.scopes}..remove(id);
     state = MacsState(macs: macs, activeId: active, loaded: true, scopes: scopes);
+    // The stored things go before the profile: if the app stops half way, the computer is still listed and can be
+    // removed again, instead of leaving files nobody can find.
+    await ref.read(chatCacheProvider).deleteScope(scope);
+    await ref.read(archivedSessionsProvider.notifier).removeScope(scope);
+    await ref.read(alertPrefsProvider.notifier).removeScope(scope);
     await _store.save(macs, activeId: active);
+    if (active == null) await _store.clearActive();
     await _saveScopes(scopes);
   }
 

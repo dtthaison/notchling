@@ -46,6 +46,10 @@ class SessionRef {
 /// is what a phone paired before 0012 used for its Mac, otherwise `<scope>/<id>`.
 String storageKey(String scope, String sessionId) => scope.isEmpty ? sessionId : '$scope/$sessionId';
 
+/// Whether a phone-side storage [key] (see [storageKey]) belongs to the computer whose storage scope is [scope]:
+/// `<scope>/…` for a scope, and for the empty scope every key that carries no host (a bare id).
+bool keyInScope(String scope, String key) => scope.isEmpty ? SessionRef.parse(key) == null : key.startsWith('$scope/');
+
 /// [session] with its id replaced, for lists that hold sessions of several computers.
 Session withSessionId(Session session, String id) => Session(
       id: id,

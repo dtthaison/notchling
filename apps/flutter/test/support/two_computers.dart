@@ -50,12 +50,14 @@ FakeWs computerSocket() => FakeWs(onSend: (FakeWs socket, Map<String, Object?> m
     });
 
 /// Both computers paired with [active] in use, each reached through its own fake socket. [secrets] starts the
-/// phone from stored state; [extra] replaces a store or a provider.
+/// phone from stored state; [cache] and [archive] are the stores to look into afterwards; [extra] replaces a store or a provider.
 ProviderContainer pairedComputers(
   FakeWs a,
   FakeWs b, {
   MacProfile active = macA,
   MemorySecretStore? secrets,
+  MemoryChatCache? cache,
+  MemoryArchiveStore? archive,
   List<Override> extra = const <Override>[],
 }) {
   final MemorySecretStore store = secrets ??
@@ -64,8 +66,8 @@ ProviderContainer pairedComputers(
         ..values['macs.active'] = active.id);
   final ProviderContainer container = ProviderContainer(overrides: <Override>[
     secretStoreProvider.overrideWithValue(store),
-    chatCacheProvider.overrideWithValue(MemoryChatCache()),
-    archiveStoreProvider.overrideWithValue(MemoryArchiveStore()),
+    chatCacheProvider.overrideWithValue(cache ?? MemoryChatCache()),
+    archiveStoreProvider.overrideWithValue(archive ?? MemoryArchiveStore()),
     wsConnectorProvider.overrideWithValue((Endpoint endpoint) async => endpoint.host == '10.0.0.2' ? b : a),
     networkChangesProvider.overrideWithValue(const Stream<void>.empty()),
     ...extra,
