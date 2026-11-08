@@ -173,7 +173,7 @@ fn section_title(text: &str, a: Appearance) -> Div {
 }
 
 /// A switch: a capsule with its knob at the end it's set to; dim and plain-cursored while disabled.
-fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
+pub(crate) fn switch(id: &'static str, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
     let knob = div().size(px(14.0)).rounded_full().bg(gpui::white());
     let base = div()
         .id(id)
