@@ -11,6 +11,8 @@
 //! - Secrets travel only on a process's stdin or in GitHub's Authorization header, and every text a
 //!   machine sent is masked ([`masks`]) before anyone sees it.
 
+pub mod actions;
+mod actions_util;
 pub mod engine;
 pub mod engine_check;
 pub mod engine_fix;
@@ -18,12 +20,17 @@ pub mod engine_plan;
 pub mod forms;
 pub mod github;
 pub mod masks;
+pub mod merge;
+pub mod merge_ops;
+pub mod morning;
 pub mod offers;
+pub mod poller;
 pub mod process;
 pub mod registry;
 pub mod roots;
 pub mod runner;
 pub mod shell;
+pub mod status;
 pub mod step;
 pub mod steps_machine;
 pub mod steps_secret;
@@ -35,6 +42,16 @@ pub mod usage;
 
 #[cfg(test)]
 pub mod fakes;
+#[cfg(test)]
+pub mod fakes_jobs;
+#[cfg(test)]
+mod tests_actions;
+#[cfg(test)]
+mod tests_actions_files;
+#[cfg(test)]
+mod tests_actions_gh;
+#[cfg(test)]
+mod tests_actions_read;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
@@ -50,6 +67,20 @@ mod tests_machine_steps;
 #[cfg(test)]
 mod tests_machine_tools;
 #[cfg(test)]
+mod tests_merge;
+#[cfg(test)]
+mod tests_merge_b;
+#[cfg(test)]
+mod tests_merge_c;
+#[cfg(test)]
+mod tests_merge_git;
+#[cfg(test)]
+mod tests_merge_git_b;
+#[cfg(test)]
+mod tests_morning;
+#[cfg(test)]
+mod tests_poller;
+#[cfg(test)]
 mod tests_registry;
 #[cfg(test)]
 mod tests_runner;
@@ -59,6 +90,8 @@ mod tests_secret_steps;
 mod tests_secrets;
 #[cfg(test)]
 mod tests_shell;
+#[cfg(test)]
+mod tests_status;
 #[cfg(test)]
 mod tests_token_scope;
 #[cfg(test)]
