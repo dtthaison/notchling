@@ -2,8 +2,8 @@
 //! test swaps in [`FakeLauncher`] and no test ever runs a real session.
 
 use super::plan::{Command, PtyScript};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,8 @@ impl Launcher for FakeLauncher {
 /// that host lives. Input is always null.
 pub struct RealLauncher {
     claude: PathBuf,
+    /// Where the output files go: the system's temp folder unless a test names another.
+    temp_dir: PathBuf,
 }
 
 /// `claude` is `<home>/.local/bin/claude` when that is a file, else `/usr/local/bin/claude`. The
@@ -164,9 +166,7 @@ const DROPPED_ENV: [&str; 1] = ["NO_COLOR"];
 impl RealLauncher {
     /// `claude` is found by [`claude_path`].
     pub fn new(home: &Path) -> Self {
-        RealLauncher {
-            claude: claude_path(home),
-        }
+        RealLauncher::with_claude(claude_path(home))
     }
 
     /// The `claude` this launcher runs.
@@ -175,7 +175,16 @@ impl RealLauncher {
     }
 
     pub fn with_claude(path: PathBuf) -> Self {
-        RealLauncher { claude: path }
+        RealLauncher {
+            claude: path,
+            temp_dir: std::env::temp_dir(),
+        }
+    }
+
+    /// Puts the output files in `dir` instead of the system's temp folder.
+    pub fn with_temp_dir(mut self, dir: PathBuf) -> Self {
+        self.temp_dir = dir;
+        self
     }
 
     fn program(&self, name: &str) -> PathBuf {
@@ -187,20 +196,80 @@ impl RealLauncher {
     }
 }
 
-static OUT_COUNTER: AtomicU64 = AtomicU64::new(0);
+/// Creates `path` for writing and reading back, owner-only (0600), and only if nothing is there: `O_EXCL` refuses an
+/// existing file or link, and `O_NOFOLLOW` a link even where `O_EXCL` alone would not be checked.
+fn create_exclusive(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(path)
+}
+
+/// A name nobody can guess: `RandomState` is keyed from the operating system's randomness.
+fn random_name() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u64(u64::from(std::process::id()));
+    format!("{:016x}", hasher.finish())
+}
+
+/// One run's output files: standard output and standard error, both new, both 0600, under names made
+/// of random digits. A name already taken is tried again with another.
+struct OutputFiles {
+    out: (File, PathBuf),
+    err: (File, PathBuf),
+}
+
+impl OutputFiles {
+    fn create(dir: &Path) -> std::io::Result<OutputFiles> {
+        for _ in 0..8 {
+            let stem = format!("notchling-{}", random_name());
+            let out_path = dir.join(format!("{stem}.out"));
+            let err_path = dir.join(format!("{stem}.err"));
+            let out = match create_exclusive(&out_path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            };
+            match create_exclusive(&err_path) {
+                Ok(err) => {
+                    return Ok(OutputFiles {
+                        out: (out, out_path),
+                        err: (err, err_path),
+                    })
+                }
+                Err(e) => {
+                    drop(out);
+                    let _ = std::fs::remove_file(&out_path);
+                    if e.kind() != std::io::ErrorKind::AlreadyExists {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "no unused name for an output file",
+        ))
+    }
+}
 
 impl Launcher for RealLauncher {
     fn run(&self, command: &Command, timeout: Duration) -> Result<LaunchOutput, LaunchError> {
         let Some(name) = command.argv.first() else {
             return Err(LaunchError::Spawn("empty command".to_string()));
         };
-        let file = std::env::temp_dir().join(format!(
-            "notchling-{}-{}.out",
-            std::process::id(),
-            OUT_COUNTER.fetch_add(1, Ordering::SeqCst)
-        ));
-        let result = self.run_to_file(name, command, timeout, &file);
-        let _ = std::fs::remove_file(&file);
+        let files =
+            OutputFiles::create(&self.temp_dir).map_err(|e| LaunchError::Spawn(e.to_string()))?;
+        let (out_path, err_path) = (files.out.1.clone(), files.err.1.clone());
+        let result = self.run_to_files(name, command, timeout, files);
+        // Whatever happened, including a timeout, nothing is left behind.
+        let _ = std::fs::remove_file(&out_path);
+        let _ = std::fs::remove_file(&err_path);
         result
     }
 
@@ -210,17 +279,26 @@ impl Launcher for RealLauncher {
 }
 
 impl RealLauncher {
-    fn run_to_file(
+    fn run_to_files(
         &self,
         name: &str,
         command: &Command,
         timeout: Duration,
-        file: &Path,
+        files: OutputFiles,
     ) -> Result<LaunchOutput, LaunchError> {
-        let err_file = file.with_extension("err");
-        let out = std::fs::File::create(file).map_err(|e| LaunchError::Spawn(e.to_string()))?;
-        let err =
-            std::fs::File::create(&err_file).map_err(|e| LaunchError::Spawn(e.to_string()))?;
+        let OutputFiles {
+            out: (out, _),
+            err: (err, _),
+        } = files;
+        // Read back through our own handles, not by path: a link swapped in at the path afterwards
+        // must not make this read some other file. The offset is shared with the child's, so it is
+        // rewound first.
+        let (mut out_reader, mut err_reader) = (
+            out.try_clone()
+                .map_err(|e| LaunchError::Spawn(e.to_string()))?,
+            err.try_clone()
+                .map_err(|e| LaunchError::Spawn(e.to_string()))?,
+        );
         let mut process = std::process::Command::new(self.program(name));
         process
             .args(&command.argv[1..])
@@ -255,17 +333,22 @@ impl RealLauncher {
                 Err(e) => return Err(LaunchError::Spawn(e.to_string())),
             }
         };
-        let read = |path: &Path| {
-            String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
-        };
-        let result = LaunchOutput {
+        Ok(LaunchOutput {
             code: status.code().unwrap_or(-1),
-            output: read(file),
-            stderr: read(&err_file),
-        };
-        let _ = std::fs::remove_file(&err_file);
-        Ok(result)
+            output: read_back(&mut out_reader),
+            stderr: read_back(&mut err_reader),
+        })
     }
+}
+
+/// Everything the child wrote to its output file, from the start.
+fn read_back(file: &mut File) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(0)).is_ok() {
+        let _ = file.read_to_end(&mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[cfg(all(test, unix))]
@@ -299,6 +382,96 @@ mod tests {
         .for_config_dir(Some("/lanes/a"));
         let got = real().run(&command, Duration::from_secs(10)).expect("runs");
         assert_eq!(got.output.trim(), "[unset][/lanes/a][unset]");
+    }
+
+    /// The files in `dir`, with their modes, while a slow command runs through a launcher that keeps
+    /// its output there.
+    fn files_while_running(dir: &Path) -> Vec<(PathBuf, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        let launcher = real().with_temp_dir(dir.to_path_buf());
+        let runner = std::thread::spawn(move || {
+            launcher.run(&Command::new(&["/bin/sleep", "1"]), Duration::from_secs(10))
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut seen = Vec::new();
+        while seen.len() < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            seen = std::fs::read_dir(dir)
+                .expect("dir")
+                .flatten()
+                .filter_map(|e| {
+                    let mode = e.metadata().ok()?.permissions().mode() & 0o777;
+                    Some((e.path(), mode))
+                })
+                .collect();
+        }
+        runner.join().expect("thread").expect("ran");
+        seen
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nl-launcher-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// The output files hold whatever `claude` printed (a job's name, a prompt, an error with a path
+    /// in it), so they are the owner's alone: mode 0600, not 0644.
+    #[test]
+    fn the_output_files_are_private_to_the_owner() {
+        let dir = scratch("mode");
+        let files = files_while_running(&dir);
+        assert_eq!(files.len(), 2, "{files:?}");
+        for (file, mode) in &files {
+            assert_eq!(*mode, 0o600, "{}", file.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `notchling-<pid>-<n>.out` could be guessed, and a link planted at the guess followed.
+    #[test]
+    fn the_output_file_names_cannot_be_guessed() {
+        let dir = scratch("names");
+        let pid = std::process::id().to_string();
+        let first = files_while_running(&dir);
+        let second = files_while_running(&dir);
+        for (file, _) in first.iter().chain(&second) {
+            let name = file.file_name().expect("name").to_string_lossy();
+            assert!(!name.contains(&pid), "{name} is built from the pid");
+        }
+        assert!(
+            first
+                .iter()
+                .all(|(f, _)| second.iter().all(|(g, _)| f != g)),
+            "a name was used twice: {first:?} {second:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Nothing is left behind, even by a command that was killed at the timeout.
+    #[test]
+    fn the_output_files_are_removed_after_a_timeout_too() {
+        let dir = scratch("cleanup");
+        let launcher = real().with_temp_dir(dir.clone());
+        let slow = Command::new(&["/bin/sleep", "5"]);
+        assert!(launcher.run(&slow, Duration::from_millis(200)).is_err());
+        assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file already at the path (or a link planted there) is never opened.
+    #[test]
+    fn an_existing_file_or_symlink_is_not_opened() {
+        let dir = scratch("exclusive");
+        let victim = dir.join("victim");
+        std::fs::write(&victim, b"precious").expect("write");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&victim, &link).expect("link");
+        assert!(create_exclusive(&link).is_err());
+        assert!(create_exclusive(&victim).is_err());
+        assert_eq!(std::fs::read(&victim).expect("read"), b"precious");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
