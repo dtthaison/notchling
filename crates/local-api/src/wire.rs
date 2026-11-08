@@ -39,8 +39,9 @@ pub mod ops {
     pub const HOOK_REQUEST: &str = "hook.request";
 
     /// Milestone 5's Codex ops (E6a), app tier and refused while acting is off:
-    /// `codex.send {id | draft_folder, text, model?, effort?}`, `codex.stop {id}`,
-    /// `codex.delete {id}`.
+    /// `codex.send {id | draft_folder, text, model?, effort?, draft?}`, `codex.stop {id}`,
+    /// `codex.delete {id}`. A new session or a delete that takes over 4.5 s is answered
+    /// `starting` / `deleting` and ends as an event.
     pub const CODEX_SEND: &str = "codex.send";
     pub const CODEX_STOP: &str = "codex.stop";
     pub const CODEX_DELETE: &str = "codex.delete";
