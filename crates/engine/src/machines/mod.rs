@@ -12,9 +12,44 @@
 //!   machine sent is masked ([`masks`]) before anyone sees it.
 
 pub mod github;
+pub mod mac_facts;
 pub mod masks;
 pub mod process;
 pub mod registry;
+pub mod repo_common;
 pub mod runner;
+pub mod service_files;
 pub mod shell;
 pub mod step;
+pub mod steps_push;
+pub mod steps_replace;
+pub mod steps_repo;
+pub mod steps_sd;
+pub mod steps_sd_check;
+pub mod steps_sd_service;
+pub mod worker_json;
+
+#[cfg(test)]
+pub mod fakes_b;
+#[cfg(test)]
+mod tests_repo;
+#[cfg(test)]
+mod tests_repo_push;
+#[cfg(test)]
+mod tests_repo_replace;
+#[cfg(test)]
+mod tests_repo_replace_b;
+#[cfg(test)]
+mod tests_repo_shell;
+#[cfg(test)]
+mod tests_safety_b;
+#[cfg(test)]
+mod tests_sd;
+#[cfg(test)]
+mod tests_sd_check;
+#[cfg(test)]
+mod tests_sd_service;
+#[cfg(test)]
+mod tests_sd_service_b;
+#[cfg(test)]
+mod tests_sd_worker;
