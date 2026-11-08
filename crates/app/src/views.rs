@@ -49,9 +49,11 @@ pub fn spec(name: &str) -> Option<&'static ViewSpec> {
     every().find(|v| v.name == name)
 }
 
-/// Every renderable view: these, then each part's own (the notch's).
+/// Every renderable view: these, then each part's own (the notch's, the sheets').
 pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
-    ALL.iter().chain(crate::notch::renders::VIEWS.iter())
+    ALL.iter()
+        .chain(crate::notch::renders::VIEWS.iter())
+        .chain(crate::sheets::renders::VIEWS.iter())
 }
 
 #[cfg(test)]

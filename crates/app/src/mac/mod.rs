@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod dock;
+pub mod gate;
 pub mod render;
 pub mod shell;
 pub mod tray;

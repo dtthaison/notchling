@@ -9,12 +9,21 @@
 //! views over a fixture). The GPUI view and the panel are
 //! macOS only (`LINT-GPUI-MACOS-ONLY`).
 
+pub mod answer;
+#[cfg(target_os = "macos")]
+pub mod answering;
+#[cfg(target_os = "macos")]
+pub mod backdrop;
 #[cfg(target_os = "macos")]
 pub mod cards;
 pub mod layout;
 pub mod model;
 #[cfg(target_os = "macos")]
 pub mod panel;
+pub mod perch;
+pub mod pet;
+#[cfg(target_os = "macos")]
+pub mod pet_view;
 pub mod renders;
 pub mod requests;
 pub mod source;
