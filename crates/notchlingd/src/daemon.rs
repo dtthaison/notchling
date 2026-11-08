@@ -13,6 +13,7 @@
 //! first read of the list. `sessions.list` waits for that read, up to [`FIRST_LIST_WAIT`], and
 //! answers with what it has after that; the read then follows as `sessions.changed`.
 
+use crate::accounts_ops::AccountsOps;
 use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::{ActingOps, Room};
 use crate::agy_ops::AgyOps;
@@ -20,9 +21,11 @@ use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
-use crate::install_ops::{InstallOps, InstallSetup, SwitchFlag};
+use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
+use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
+use crate::switches::{SwitchOps, Switches};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -120,7 +123,8 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
-    install: Option<Arc<InstallOps>>,
+    /// Milestone 6's areas ([`Ops::with_group`]).
+    groups: Vec<Arc<dyn OpGroup>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
     /// What `sessions.list` waits for, and for how long.
@@ -137,7 +141,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
-            install: None,
+            groups: Vec::new(),
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -174,8 +178,24 @@ impl Ops {
         if self.codex.is_some() || self.agy.is_some() {
             list.push(topics::TOOLS);
         }
+        for topic in self.groups.iter().flat_map(|g| g.topics().iter().copied()) {
+            if !list.contains(&topic) {
+                list.push(topic);
+            }
+        }
         self.topic_list = list;
         self
+    }
+
+    /// A group of ops served beside these (Milestone 6's switches, accounts, vault, install), and
+    /// the topics it publishes on.
+    pub fn with_group(mut self, group: Arc<dyn OpGroup>) -> Ops {
+        self.groups.push(group);
+        self.with_topics()
+    }
+
+    fn group(&self, op: &str) -> Option<&Arc<dyn OpGroup>> {
+        self.groups.iter().find(|g| g.spec(op).is_some())
     }
 
     /// M5's Antigravity ops ([`AgyOps`]), publishing on the `tools` topic too.
@@ -187,12 +207,6 @@ impl Ops {
     /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
         self.pages = Some(pages);
-        self
-    }
-
-    /// M6's installing into other tools ([`InstallOps`], app tier, behind the `install` switch).
-    pub fn with_install(mut self, install: Arc<InstallOps>) -> Ops {
-        self.install = Some(install);
         self
     }
 
@@ -246,11 +260,11 @@ impl Handler for Ops {
                 .pages
                 .as_ref()
                 .and_then(|p| p.spec(op))
-                .or_else(|| self.install.as_ref().and_then(|i| i.spec(op)))
                 .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
-                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op))),
+                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op)))
+                .or_else(|| self.group(op).and_then(|g| g.spec(op))),
         }
     }
 
@@ -267,8 +281,8 @@ impl Handler for Ops {
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
             return pages.call(op, args);
         }
-        if let Some(install) = self.install.as_ref().filter(|i| i.spec(op).is_some()) {
-            return install.call(op, args);
+        if let Some(group) = self.group(op) {
+            return group.call(caller, op, args);
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
@@ -286,7 +300,11 @@ impl Handler for Ops {
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
             topics::PROMPTS | topics::BRIDGE => Tier::App,
-            _ => Tier::Agent,
+            _ => self
+                .groups
+                .iter()
+                .find_map(|g| g.topic_tier(topic))
+                .unwrap_or(Tier::Agent),
         }
     }
 
@@ -525,15 +543,23 @@ pub fn run(
         room.clone(),
     ));
     acting_ops.attach_agy(agy.clone());
-    // Off at every start, like acting: nothing is written into settings.json or a skills folder
-    // until an app-tier call turns the switch on. (The switch is a stand-in until m6-accounts'
-    // named switches land; nothing turns it on yet.)
+    // Milestone 6's switches, all off at every start like acting: no login, vault value or
+    // install target is touched until the app turns one on in this run.
+    let switches = Arc::new(Switches::off());
+    let accounts = Arc::new(AccountsOps::for_daemon(
+        &layout,
+        switches.accounts.clone(),
+        room.clone(),
+    ));
+    accounts.attach_acting(acting_ops.clone());
+    // Off at every start with the rest: nothing is written into settings.json or a skills folder
+    // until the app turns `install` on in this run.
     let install = Arc::new(InstallOps::new(
         InstallSetup::from_layout(
             &layout,
             std::env::current_exe().and_then(std::fs::canonicalize).ok(),
         ),
-        SwitchFlag::off(),
+        switches.install.clone(),
     ));
     let server = Server::bind(
         ServerConfig {
@@ -551,7 +577,12 @@ pub fn run(
                 .with_pages(Arc::new(
                     PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
                 ))
-                .with_install(install)
+                .with_group(Arc::new(
+                    SwitchOps::new(switches.clone(), room.clone())
+                        .with_audit(AuditLog::new(layout.audit_path())),
+                ))
+                .with_group(accounts.clone())
+                .with_group(install)
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )

@@ -2,6 +2,8 @@
 
 use crate::daemon::Ops;
 use crate::install_ops::*;
+use crate::op_group::OpGroup;
+use crate::switches::{SwitchFlag, INSTALL, INSTALL_OFF};
 use notchling_engine::install::{hook_command, ToolRoots};
 use notchling_local_api::{ops, ErrorCode, Handler, OpSpec};
 use notchling_platform::paths::Os;
@@ -97,8 +99,7 @@ fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
 }
 
 fn ops_for(setup: InstallSetup, on: bool) -> (InstallOps, Arc<SwitchFlag>) {
-    let switch = SwitchFlag::off();
-    switch.set(on);
+    let switch = SwitchFlag::in_memory(INSTALL, INSTALL_OFF, on);
     let stamp = Mutex::new(1_794_000_000_000u64);
     let ops = InstallOps::new(setup, switch.clone()).with_clock(Box::new(move || {
         let mut s = stamp.lock().unwrap();
@@ -118,7 +119,7 @@ fn data(text: &str) -> Value {
 
 #[test]
 fn the_switch_starts_off_and_the_ops_are_app_tier() {
-    assert!(!SwitchFlag::off().is_on());
+    assert!(!SwitchFlag::off(INSTALL, INSTALL_OFF).is_on());
     let dir = Dir::new("spec");
     let (ops, _) = ops_for(rig(&dir, None), false);
     for op in [ops::INSTALL_PLAN, ops::INSTALL_APPLY, ops::INSTALL_REMOVE] {
@@ -126,9 +127,10 @@ fn the_switch_starts_off_and_the_ops_are_app_tier() {
     }
     assert_eq!(ops.spec("install.other"), None);
     // The daemon's ops hand them out too, and an agent-tier caller is not let in by the spec.
-    let handler = Ops::new(Arc::new(Mutex::new(json!([])))).with_install(Arc::new(
-        InstallOps::new(rig(&dir, None), SwitchFlag::off()),
-    ));
+    let handler = Ops::new(Arc::new(Mutex::new(json!([])))).with_group(Arc::new(InstallOps::new(
+        rig(&dir, None),
+        SwitchFlag::off(INSTALL, INSTALL_OFF),
+    )));
     assert_eq!(handler.spec(ops::INSTALL_APPLY), Some(OpSpec::APP));
 }
 
@@ -137,7 +139,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
     let dir = Dir::new("plan");
     let (ops, _) = ops_for(rig(&dir, Some(USER_SETTINGS)), false);
     let before = dir.tree();
-    let reply = ops.call(ops::INSTALL_PLAN, &json!({})).unwrap();
+    let reply = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap();
     assert_eq!(reply["on"], false);
     assert_eq!(reply["applied"], false);
     assert!(reply.get("message").is_none());
@@ -160,7 +162,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
 
     // The same for a removal plan.
     let reply = ops
-        .call(ops::INSTALL_PLAN, &json!({"action": "remove"}))
+        .run(ops::INSTALL_PLAN, &json!({"action": "remove"}))
         .unwrap();
     assert_eq!(reply["plan"]["action"], "remove");
     assert_eq!(reply["plan"]["changed"], false);
@@ -172,12 +174,12 @@ fn apply_and_remove_with_the_switch_off_answer_the_dry_run_and_write_nothing() {
     let (ops, _) = ops_for(rig(&dir, Some(USER_SETTINGS)), false);
     let before = dir.tree();
     for op in [ops::INSTALL_APPLY, ops::INSTALL_REMOVE] {
-        let reply = ops.call(op, &json!({})).unwrap();
+        let reply = ops.run(op, &json!({})).unwrap();
         assert_eq!(reply["applied"], false, "{op}");
         assert_eq!(reply["on"], false, "{op}");
         assert_eq!(
             reply["message"],
-            "install is off: the Swift app owns the hooks until the maintainer turns this on"
+            "install is off: the Swift app owns hooks and skills until the maintainer turns this on"
         );
         assert_eq!(reply["message"], INSTALL_OFF);
         assert!(reply["plan"]["hooks"]["file"]
@@ -188,13 +190,13 @@ fn apply_and_remove_with_the_switch_off_answer_the_dry_run_and_write_nothing() {
         assert_eq!(settings_text(&dir), USER_SETTINGS);
     }
     // The dry run is the plan the call would have carried out.
-    let apply = ops.call(ops::INSTALL_APPLY, &json!({})).unwrap();
+    let apply = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(
         apply["plan"]["hooks"]["changes"].as_array().unwrap().len(),
         5
     );
     assert_eq!(apply["plan"]["action"], "install");
-    let remove = ops.call(ops::INSTALL_REMOVE, &json!({})).unwrap();
+    let remove = ops.run(ops::INSTALL_REMOVE, &json!({})).unwrap();
     assert_eq!(remove["plan"]["action"], "remove");
 }
 
@@ -203,7 +205,7 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
     let dir = Dir::new("on");
     let (ops, switch) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
     assert!(switch.is_on());
-    let reply = ops.call(ops::INSTALL_APPLY, &json!({})).unwrap();
+    let reply = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(reply["applied"], true);
     assert_eq!(reply["on"], true);
     assert!(reply.get("message").is_none());
@@ -247,12 +249,12 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
         .all(|s| s["error"].is_null()));
 
     // Again: nothing to do, no second backup.
-    let again = ops.call(ops::INSTALL_APPLY, &json!({})).unwrap();
+    let again = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap();
     assert_eq!(again["applied"], true);
     assert_eq!(again["plan"]["changed"], false);
     assert!(again.get("backup").is_none());
 
-    let removed = ops.call(ops::INSTALL_REMOVE, &json!({})).unwrap();
+    let removed = ops.run(ops::INSTALL_REMOVE, &json!({})).unwrap();
     assert_eq!(removed["applied"], true);
     assert_eq!(settings_text(&dir), USER_SETTINGS);
     assert!(!dir.path("home/.claude/skills/notchling-delegate").exists());
@@ -264,14 +266,14 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
 fn what_narrows_the_call_and_a_bad_one_is_refused() {
     let dir = Dir::new("what");
     let (ops, _) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
-    ops.call(ops::INSTALL_APPLY, &json!({"what": ["page_hooks"]}))
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["page_hooks"]}))
         .unwrap();
     let v = data(&settings_text(&dir));
     assert!(v["hooks"].get("PermissionRequest").is_none());
     assert_eq!(v["hooks"]["PostToolUse"][0]["matcher"], "Artifact");
     assert!(!dir.path("home/.claude/skills").exists());
 
-    ops.call(ops::INSTALL_APPLY, &json!({"what": ["notchling-pages"]}))
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["notchling-pages"]}))
         .unwrap();
     assert!(dir
         .path("home/.claude/skills/notchling-pages/SKILL.md")
@@ -284,11 +286,11 @@ fn what_narrows_the_call_and_a_bad_one_is_refused() {
         json!({"what": [7]}),
         json!({"with_swift_hooks": "yes"}),
     ] {
-        let e = ops.call(ops::INSTALL_APPLY, &bad).unwrap_err();
+        let e = ops.run(ops::INSTALL_APPLY, &bad).unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest, "{bad}");
     }
     let e = ops
-        .call(ops::INSTALL_PLAN, &json!({"action": "sideways"}))
+        .run(ops::INSTALL_PLAN, &json!({"action": "sideways"}))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::BadRequest);
 }
@@ -297,7 +299,7 @@ fn what_narrows_the_call_and_a_bad_one_is_refused() {
 fn the_swift_apps_hook_blocks_an_install_unless_told_and_never_a_removal() {
     let dir = Dir::new("swift");
     let (ops, _) = ops_for(rig(&dir, Some(SWIFT_HOOK)), true);
-    let plan = ops.call(ops::INSTALL_PLAN, &json!({})).unwrap();
+    let plan = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap();
     assert!(plan["plan"]["blocked"]
         .as_str()
         .unwrap()
@@ -311,18 +313,18 @@ fn the_swift_apps_hook_blocks_an_install_unless_told_and_never_a_removal() {
         .ends_with("Notchling' --hook"));
 
     let before = dir.tree();
-    let e = ops.call(ops::INSTALL_APPLY, &json!({})).unwrap_err();
+    let e = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
     assert!(e.message.contains("Swift app"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), SWIFT_HOOK);
     // Skills alone are not held up by it.
-    ops.call(ops::INSTALL_APPLY, &json!({"what": ["notchling-pages"]}))
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["notchling-pages"]}))
         .unwrap();
 
     // A removal never touches theirs.
     let removed = ops
-        .call(
+        .run(
             ops::INSTALL_REMOVE,
             &json!({"what": ["prompt_hooks", "page_hooks"]}),
         )
@@ -331,7 +333,7 @@ fn the_swift_apps_hook_blocks_an_install_unless_told_and_never_a_removal() {
     assert_eq!(settings_text(&dir), SWIFT_HOOK);
 
     // Told to go ahead, ours is added beside theirs; theirs stays.
-    ops.call(ops::INSTALL_APPLY, &json!({"with_swift_hooks": true}))
+    ops.run(ops::INSTALL_APPLY, &json!({"with_swift_hooks": true}))
         .unwrap();
     let v = data(&settings_text(&dir));
     assert_eq!(v["hooks"]["PermissionRequest"].as_array().unwrap().len(), 2);
@@ -346,7 +348,7 @@ fn a_broken_settings_file_is_reported_refused_and_never_written() {
     let dir = Dir::new("broken");
     let broken = "{ \"env\": { \"API_TOKEN\": \"sk-ant-api03-NEVERSHOWN\" } oops";
     let (ops, _) = ops_for(rig(&dir, Some(broken)), true);
-    let plan = ops.call(ops::INSTALL_PLAN, &json!({})).unwrap();
+    let plan = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap();
     assert_eq!(plan["plan"]["hooks"]["state"], "refused");
     assert!(plan["plan"]["hooks"]["refused"]
         .as_str()
@@ -354,7 +356,7 @@ fn a_broken_settings_file_is_reported_refused_and_never_written() {
         .contains("not valid JSON"));
     assert_eq!(plan["plan"]["hooks"]["changed"], false);
     let before = dir.tree();
-    let e = ops.call(ops::INSTALL_APPLY, &json!({})).unwrap_err();
+    let e = ops.run(ops::INSTALL_APPLY, &json!({})).unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
     assert_eq!(dir.tree(), before, "no backup, no skills, nothing");
     assert_eq!(settings_text(&dir), broken);
@@ -368,7 +370,7 @@ fn nothing_of_the_users_own_file_is_in_a_reply() {
     let dir = Dir::new("quiet");
     let (ops, _) = ops_for(rig(&dir, Some(USER_SETTINGS)), true);
     for op in [ops::INSTALL_PLAN, ops::INSTALL_APPLY, ops::INSTALL_REMOVE] {
-        let reply = ops.call(op, &json!({})).unwrap().to_string();
+        let reply = ops.run(op, &json!({})).unwrap().to_string();
         assert!(!reply.contains("NEVERSHOWN"), "{op}");
         assert!(
             !reply.contains("guard-bash"),
@@ -389,7 +391,7 @@ fn a_skill_folder_that_is_not_ours_is_skipped_with_its_reason() {
     )
     .unwrap();
     let reply = ops
-        .call(ops::INSTALL_APPLY, &json!({"what": ["notchling-delegate"]}))
+        .run(ops::INSTALL_APPLY, &json!({"what": ["notchling-delegate"]}))
         .unwrap();
     let skills = reply["plan"]["skills"].as_array().unwrap();
     let claude = skills.iter().find(|s| s["tool"] == "claude").unwrap();
@@ -413,7 +415,7 @@ fn a_missing_settings_file_is_made_and_a_missing_binary_is_a_clean_failure() {
     let dir = Dir::new("fresh");
     let (ops, _) = ops_for(rig(&dir, None), true);
     let reply = ops
-        .call(ops::INSTALL_APPLY, &json!({"what": ["prompt_hooks"]}))
+        .run(ops::INSTALL_APPLY, &json!({"what": ["prompt_hooks"]}))
         .unwrap();
     assert_eq!(reply["plan"]["hooks"]["state"], "missing");
     assert!(reply.get("backup").is_none());
@@ -422,7 +424,7 @@ fn a_missing_settings_file_is_made_and_a_missing_binary_is_a_clean_failure() {
     let mut setup = rig(&dir, None);
     setup.binary = None;
     let (ops, _) = ops_for(setup, true);
-    let e = ops.call(ops::INSTALL_PLAN, &json!({})).unwrap_err();
+    let e = ops.run(ops::INSTALL_PLAN, &json!({})).unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
 }
 
@@ -440,7 +442,7 @@ fn a_vault_skill_can_be_added_from_where_it_is_made() {
     };
     let (ops, _) = ops_for(setup, true);
     let ops = ops.with_skill(vault);
-    ops.call(ops::INSTALL_APPLY, &json!({"what": ["notchling-vault"]}))
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["notchling-vault"]}))
         .unwrap();
     assert!(dir
         .path("home/.claude/skills/notchling-vault/SKILL.md")

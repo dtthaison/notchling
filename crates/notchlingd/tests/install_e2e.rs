@@ -133,7 +133,7 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
         assert_eq!(reply["applied"], false, "{op}");
         assert_eq!(
             reply["message"],
-            "install is off: the Swift app owns the hooks until the maintainer turns this on",
+            "install is off: the Swift app owns hooks and skills until the maintainer turns this on",
             "{op}"
         );
     }

@@ -18,7 +18,7 @@
 //!
 //! ```json
 //! {"on": false, "applied": false,
-//!  "message": "install is off: the Swift app owns the hooks until the maintainer turns this on",
+//!  "message": "install is off: the Swift app owns hooks and skills until the maintainer turns this on",
 //!  "backup": "/…/settings.json.notchling-backup-1794150245123",
 //!  "plan": {"action": "install", "changed": true, "blocked": null,
 //!    "hooks": {"file": "/…/settings.json", "state": "present", "read_only": false,
@@ -43,44 +43,21 @@
 //!   with a message; the file is then as it was. Nothing from the file reaches a message.
 
 use crate::layout::Layout;
+use crate::op_group::OpGroup;
+use crate::switches::{SwitchFlag, INSTALL_OFF};
 use notchling_engine::delegate::skill::{content as delegate_text, SkillTool};
 use notchling_engine::install::{
     self, Action, FileError, FilePlan, Found, SkillPlan, SkillSpec, ToolRoots, Want, Wanted,
 };
 use notchling_engine::pages::skill::content as pages_text;
 use notchling_engine::tools::codex::models;
-use notchling_local_api::{ops, ApiError, ErrorCode, OpSpec};
+use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
 use notchling_platform::paths::Os;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// What `install.apply` and `install.remove` answer while the switch is off.
-pub const INSTALL_OFF: &str =
-    "install is off: the Swift app owns the hooks until the maintainer turns this on";
-
 pub const INSTALL_OPS: [&str; 3] = [ops::INSTALL_PLAN, ops::INSTALL_APPLY, ops::INSTALL_REMOVE];
-
-// STAND-IN, to be replaced: m6-accounts adds `crate::switches::SwitchFlag` (named switches, set by
-// an app-tier `settings.set_switch`). When it lands, delete this type and `use` that one: the
-// ops only ever ask `is_on()`, and are given the flag by their constructor.
-pub struct SwitchFlag(AtomicBool);
-
-impl SwitchFlag {
-    /// Off: how every daemon run starts.
-    pub fn off() -> Arc<SwitchFlag> {
-        Arc::new(SwitchFlag(AtomicBool::new(false)))
-    }
-
-    pub fn is_on(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    pub fn set(&self, on: bool) -> bool {
-        self.0.swap(on, Ordering::SeqCst) != on
-    }
-}
 
 /// Where everything is and what is installed.
 pub struct InstallSetup {
@@ -218,11 +195,8 @@ impl InstallOps {
         self
     }
 
-    pub fn spec(&self, op: &str) -> Option<OpSpec> {
-        INSTALL_OPS.contains(&op).then_some(OpSpec::APP)
-    }
-
-    pub fn call(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
+    /// The three ops without a caller (the group's `call` is this): tests drive it directly.
+    pub fn run(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
         let request = self.request(op, args)?;
         let plan = self.plan(&request)?;
         let on = self.switch.is_on();
@@ -381,6 +355,16 @@ impl InstallOps {
                 errors.join("; ")
             )))
         }
+    }
+}
+
+impl OpGroup for InstallOps {
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        INSTALL_OPS.contains(&op).then_some(OpSpec::APP)
+    }
+
+    fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        self.run(op, args)
     }
 }
 

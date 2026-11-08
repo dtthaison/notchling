@@ -93,6 +93,24 @@ pub mod ops {
     pub const INSTALL_APPLY: &str = "install.apply";
     /// `{what?}` → `{on, applied, plan, backup?}`.
     pub const INSTALL_REMOVE: &str = "install.remove";
+    /// Milestone 6's switches (`notchlingd`'s `switches` module): `{switch, on}` (app tier) and a
+    /// read of all three (agent tier).
+    pub const SETTINGS_SET_SWITCH: &str = "settings.set_switch";
+    pub const SETTINGS_SWITCHES: &str = "settings.switches";
+
+    /// Milestone 6's Claude Code accounts and lanes (E8a), app tier, behind the `accounts` switch;
+    /// the shapes are in `notchlingd`'s `accounts_ops` module docs. `accounts.list` and
+    /// `lanes.list` read the daemon's own files while the switch is off.
+    pub const ACCOUNTS_LIST: &str = "accounts.list";
+    pub const ACCOUNTS_SWITCH: &str = "accounts.switch";
+    pub const ACCOUNTS_ADD_BEGIN: &str = "accounts.add.begin";
+    pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
+    pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
+    pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
+    pub const LANES_LIST: &str = "lanes.list";
+    pub const LANES_CREATE: &str = "lanes.create";
+    pub const LANES_REMOVE: &str = "lanes.remove";
+    pub const LANES_SWITCH: &str = "lanes.switch";
 }
 
 /// Event topics and the events they carry.
@@ -110,6 +128,14 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
+    /// `{"switch": "accounts" | "vault" | "install", "on": bool}`, after `settings.set_switch`.
+    pub const SWITCH_CHANGED: &str = "settings.switch";
+    /// Claude Code accounts and lanes (app tier).
+    pub const ACCOUNTS: &str = "accounts";
+    /// `{accounts, active, lanes}` after a change.
+    pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
+    /// `{login, state: "added" | "failed" | "cancelled", account?, error?}`: a sign-in ended.
+    pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
     /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
     /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
