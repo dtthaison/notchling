@@ -9,16 +9,22 @@
 
 use super::access::AccessConfig;
 use super::address::LocalAddresses;
-use super::core::Core;
+use super::core::{Core, CoreParts};
 use super::devices::{read_devices, PairedDevice};
 use super::identity::BridgeIdentity;
 use super::jwt::{Clock, Fetch};
 use super::server::{Kind, Limits, Listener};
-use super::{BridgeHandler, PairApprover};
+use crate::bridge::BridgeBackend;
 use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+/// How often the hub pushes what changed (Swift `BridgeHub`'s timer).
+pub const TICK: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Debug)]
 pub struct BridgeConfig {
@@ -31,11 +37,15 @@ pub struct BridgeConfig {
     /// The `.local` name offered after the addresses.
     pub local_host: Option<String>,
     pub limits: Limits,
+    /// `session.new` opens only folders inside it.
+    pub home: PathBuf,
+    /// Where phone photos are saved (`~/Library/Caches/AgentConsole/phone-images` on the Mac).
+    pub images_dir: PathBuf,
 }
 
 impl BridgeConfig {
     /// The defaults: every interface on 47821, loopback on 47822.
-    pub fn new(data_dir: PathBuf) -> BridgeConfig {
+    pub fn new(data_dir: PathBuf, home: PathBuf, images_dir: PathBuf) -> BridgeConfig {
         let host = host_name();
         BridgeConfig {
             data_dir,
@@ -53,6 +63,8 @@ impl BridgeConfig {
                 }
             }),
             limits: Limits::default(),
+            home,
+            images_dir,
         }
     }
 
@@ -102,6 +114,8 @@ struct Running {
     lan: Listener,
     tunnel: Listener,
     fingerprint: String,
+    ticking: Arc<AtomicBool>,
+    ticker: Option<JoinHandle<()>>,
 }
 
 enum State {
@@ -112,8 +126,7 @@ enum State {
 
 pub struct Bridge {
     config: BridgeConfig,
-    handler: Arc<dyn BridgeHandler>,
-    approver: Arc<dyn PairApprover>,
+    backend: Arc<dyn BridgeBackend>,
     fetch: Fetch,
     now: Clock,
     state: Mutex<State>,
@@ -123,15 +136,13 @@ impl Bridge {
     /// Off.
     pub fn new(
         config: BridgeConfig,
-        handler: Arc<dyn BridgeHandler>,
-        approver: Arc<dyn PairApprover>,
+        backend: Arc<dyn BridgeBackend>,
         fetch: Fetch,
         now: Clock,
     ) -> Bridge {
         Bridge {
             config,
-            handler,
-            approver,
+            backend,
             fetch,
             now,
             state: Mutex::new(State::Off),
@@ -192,10 +203,13 @@ impl Bridge {
         let tls = identity.server_config().map_err(|e| e.to_string())?;
         let core = Arc::new(Core::new(
             &bridge_dir,
-            self.handler.clone(),
-            self.approver.clone(),
-            self.fetch.clone(),
-            self.now.clone(),
+            CoreParts {
+                backend: self.backend.clone(),
+                home: self.config.home.clone(),
+                images_dir: self.config.images_dir.clone(),
+                fetch: self.fetch.clone(),
+                now: self.now.clone(),
+            },
         ));
         let limits = self.config.limits;
         let bind = |addr: SocketAddr, kind: Kind| {
@@ -212,11 +226,26 @@ impl Bridge {
             Err(e) => return Err(e),
         };
         let tunnel = bind(self.config.tunnel, Kind::Tunnel)?;
+        let ticking = Arc::new(AtomicBool::new(true));
+        let ticker = {
+            let (core, ticking) = (core.clone(), ticking.clone());
+            std::thread::Builder::new()
+                .name("bridge-hub".into())
+                .spawn(move || {
+                    while ticking.load(Ordering::SeqCst) {
+                        std::thread::sleep(TICK);
+                        core.tick();
+                    }
+                })
+                .map_err(|e| format!("the bridge can't start its timer: {e}"))?
+        };
         Ok(Running {
             core,
             lan,
             tunnel,
             fingerprint: identity.fingerprint,
+            ticking,
+            ticker: Some(ticker),
         })
     }
 
@@ -232,7 +261,7 @@ impl Bridge {
                 "port": r.lan.port(),
                 "fingerprint": r.fingerprint,
                 "tunnelPort": r.tunnel.port(),
-                "connections": r.core.connections().len(),
+                "connections": r.core.connections(),
             }),
         }
     }
@@ -323,8 +352,12 @@ impl Drop for Bridge {
     }
 }
 
-fn stop(running: Running) {
+fn stop(mut running: Running) {
     running.core.codes.cancel();
+    running.ticking.store(false, Ordering::SeqCst);
+    if let Some(ticker) = running.ticker.take() {
+        let _ = ticker.join();
+    }
     running.lan.stop();
     running.tunnel.stop();
 }
@@ -335,4 +368,4 @@ fn device_json(d: &PairedDevice) -> Value {
 
 #[cfg(test)]
 #[path = "bridge_tests.rs"]
-mod tests;
+pub(crate) mod tests;

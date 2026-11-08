@@ -1,5 +1,6 @@
 use super::*;
-use crate::bridge::net::core::tests::{FakeApprover, FakeHandler};
+use crate::bridge::net::core::tests::parts;
+use crate::bridge::net::core::CoreParts;
 use crate::bridge::net::crypto::sha256_hex;
 use crate::bridge::net::frame::masked;
 use crate::bridge::net::identity::tests::make_swift_identity;
@@ -7,6 +8,7 @@ use crate::bridge::net::identity::BridgeIdentity;
 use crate::bridge::net::jwt::tests::{
     claims, good_claims, jwks, FetchLog, TestClock, TestKey, AUDIENCE, TEAM,
 };
+use crate::bridge::test_support::FakeBackend;
 use crate::sessions::testutil::TempDir;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -38,7 +40,7 @@ use std::path::PathBuf;
 
 struct Rig {
     _dir: TempDir,
-    handler: Arc<FakeHandler>,
+    core: Arc<Core>,
     lan: Listener,
     tunnel: Listener,
     fingerprint: String,
@@ -59,14 +61,14 @@ impl Rig {
         let bridge = swift_folder(&dir);
         let key = TestKey::a("k1");
         let clock = now_clock();
-        let handler = Arc::new(FakeHandler::default());
         let log = FetchLog::new(vec![jwks(&[&key])]);
+        let backend = Arc::new(FakeBackend::default());
         let core = Arc::new(Core::new(
             &bridge,
-            handler.clone(),
-            Arc::new(FakeApprover::default()),
-            log.fetch(),
-            clock.clock(),
+            CoreParts {
+                fetch: log.fetch(),
+                ..parts(backend, &dir.path("home"), clock.clock())
+            },
         ));
         let identity = BridgeIdentity::load(&bridge).unwrap();
         let local = |port| SocketAddr::from(([127, 0, 0, 1], port));
@@ -77,10 +79,10 @@ impl Rig {
             limits(),
         )
         .unwrap();
-        let tunnel = Listener::start(local(0), Kind::Tunnel, core, limits()).unwrap();
+        let tunnel = Listener::start(local(0), Kind::Tunnel, core.clone(), limits()).unwrap();
         Rig {
             _dir: dir,
-            handler,
+            core,
             lan,
             tunnel,
             fingerprint: identity.fingerprint,
@@ -207,14 +209,21 @@ fn a_tunnel_phone_says_hello_and_reaches_the_router() {
         reply["data"]["device"]["id"],
         "6D0F2A58-3B77-4C0E-9A41-5E8B1C7D2F90"
     );
-    phone
-        .write_all(&masked(frame::TEXT, br#"{"id":2,"op":"ping"}"#, true))
-        .unwrap();
-    assert_eq!(read_text(&mut phone), r#"echo {"id":2,"op":"ping"}"#);
-    assert_eq!(
-        rig.handler.opened.load(std::sync::atomic::Ordering::SeqCst),
-        1
-    );
+    assert_eq!(ping(&mut phone, 2)["ok"], true, "the router answers");
+    assert_eq!(rig.core.connections(), 1);
+}
+
+/// A `ping` op; its answer.
+fn ping(s: &mut TcpStream, id: u32) -> serde_json::Value {
+    s.write_all(&masked(
+        frame::TEXT,
+        format!(r#"{{"id":{id},"op":"ping"}}"#).as_bytes(),
+        true,
+    ))
+    .unwrap();
+    let reply: serde_json::Value = serde_json::from_str(&read_text(s)).unwrap();
+    assert_eq!(reply["id"], id);
+    reply
 }
 
 #[test]
@@ -269,17 +278,14 @@ fn a_frame_of_256_kb_plus_one_is_refused_and_others_carry_on() {
     rig.hello(&mut big, IPHONE_TOKEN);
     let text = vec![b'a'; frame::MAX_MESSAGE_BYTES + 1];
     let _ = big.write_all(&masked(frame::TEXT, &text, true));
-    assert_eq!(close_code(&mut big), 1009);
+    let (op, payload) = read_frame(&mut big);
+    assert_eq!(op, frame::CLOSE, "no answer first: the router never saw it");
+    assert_eq!(u16::from_be_bytes([payload[0], payload[1]]), 1009);
     assert!(closed(&mut big));
-    other
-        .write_all(&masked(frame::TEXT, b"still here", true))
-        .unwrap();
-    assert_eq!(read_text(&mut other), "echo still here");
-    let messages = rig.handler.messages.lock().unwrap().clone();
     assert_eq!(
-        messages,
-        vec!["still here"],
-        "the big one never reached the router"
+        ping(&mut other, 3)["ok"],
+        true,
+        "the other phone carries on"
     );
 }
 
@@ -432,9 +438,11 @@ fn a_phone_paired_with_the_swift_app_connects_over_tls_with_the_same_fingerprint
     let reply = ws_hello(&mut phone, PIXEL_TOKEN);
     assert_eq!(reply["ok"], true);
     assert_eq!(reply["data"]["device"]["name"], "Pixel 9 / work");
-    phone.send(tungstenite::Message::text("over tls")).unwrap();
+    phone
+        .send(tungstenite::Message::text(r#"{"id":2,"op":"ping"}"#))
+        .unwrap();
     match phone.read().unwrap() {
-        tungstenite::Message::Text(t) => assert_eq!(t.as_str(), "echo over tls"),
+        tungstenite::Message::Text(t) => assert!(t.as_str().contains(r#""ok":true"#), "{t}"),
         other => panic!("{other:?}"),
     }
     assert!(
@@ -457,7 +465,7 @@ fn stopping_closes_the_port_and_every_phone() {
     let Rig {
         lan: l,
         tunnel: t,
-        handler,
+        core,
         ..
     } = rig;
     l.stop();
@@ -466,9 +474,8 @@ fn stopping_closes_the_port_and_every_phone() {
     assert!(TcpStream::connect(("127.0.0.1", tunnel)).is_err());
     assert!(TcpStream::connect(("127.0.0.1", lan)).is_err());
     let deadline = Instant::now() + Duration::from_secs(3);
-    while handler.closed.load(std::sync::atomic::Ordering::SeqCst) == 0 && Instant::now() < deadline
-    {
+    while core.connections() > 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(handler.closed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(core.connections(), 0, "the router heard it close");
 }

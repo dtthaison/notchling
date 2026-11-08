@@ -8,17 +8,17 @@
 //! and one that missed two is dropped. None of it waits on another phone.
 
 use super::address;
-use super::connection::{Connection, ConnectionIo, Sent};
 use super::core::Core;
 use super::frame::{self, Event, FrameDecoder};
 use super::http::{self, HeadParse, HeadReader, Upgrade};
 use super::wire::{PlainWire, TlsWire, Wire};
+use crate::bridge::{Connection, ConnectionIo};
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -292,11 +292,11 @@ fn run(
     let address = tunnel
         .clone()
         .unwrap_or_else(|| address::canonical(peer.ip()));
-    let connection = Arc::new(Connection::new(&address, outbox.clone(), tunnel.is_some()));
-    core.add(connection.clone());
+    let io: Arc<dyn ConnectionIo> = outbox.clone();
+    let connection = core.connect(&address, tunnel.is_some(), io);
     frames(wire.as_ref(), &leftover, &connection, &outbox, core);
     connection.close();
-    core.remove(&connection);
+    core.closed(&connection);
 }
 
 /// Reads the request head within `timeout`; on a bad or late one, answers and returns `None`.
@@ -339,15 +339,16 @@ fn frames(
     leftover: &[u8],
     connection: &Arc<Connection>,
     outbox: &Outbox,
-    core: &Core,
+    core: &Arc<Core>,
 ) {
+    let handlers = Arc::new(Handlers::default());
     let mut decoder = FrameDecoder::default();
     let mut events = decoder.feed(leftover);
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         for event in events.drain(..) {
             match event {
-                Event::Text(text) => core.handle(connection, &text),
+                Event::Text(text) => handlers.run(core, connection, text),
                 Event::Binary(_) => {} // binary frames from phones are not part of the protocol
                 Event::Ping(payload) => outbox.push(Out::Raw(frame::encode(frame::PONG, &payload))),
                 Event::Pong(_) => outbox.missed.store(0, Ordering::SeqCst),
@@ -370,6 +371,48 @@ fn frames(
         }
     }
 }
+
+/// Text frames being answered for one phone. The router may block (a `pair` waits for the person
+/// at the computer, a reply waits for the terminal), so each frame runs on its own thread, as the
+/// Swift bridge's `Task`s did; past [`MAX_HANDLERS`] at once the reader waits, and so does the phone.
+#[derive(Default)]
+struct Handlers {
+    running: Mutex<usize>,
+    done: Condvar,
+}
+
+/// Frames of one phone handled at once.
+const MAX_HANDLERS: usize = 8;
+
+impl Handlers {
+    fn run(self: &Arc<Self>, core: &Arc<Core>, connection: &Arc<Connection>, text: String) {
+        {
+            let mut running = lock(&self.running);
+            while *running >= MAX_HANDLERS {
+                running = self.done.wait(running).unwrap_or_else(|e| e.into_inner());
+            }
+            *running += 1;
+        }
+        let (me, core2, connection2) = (self.clone(), core.clone(), connection.clone());
+        let spawned = std::thread::Builder::new()
+            .name("bridge-frame".into())
+            .spawn(move || {
+                core2.handle(&connection2, &text);
+                me.finished();
+            });
+        if spawned.is_err() {
+            self.finished();
+            connection.close();
+        }
+    }
+
+    fn finished(&self) {
+        *lock(&self.running) -= 1;
+        self.done.notify_one();
+    }
+}
+
+type Sent = Box<dyn FnOnce() + Send>;
 
 enum Out {
     Text(String),
@@ -444,8 +487,8 @@ impl Outbox {
 }
 
 impl ConnectionIo for Outbox {
-    fn send_text(&self, text: &str) {
-        self.push(Out::Text(text.to_string()));
+    fn send_text(&self, text: String) {
+        self.push(Out::Text(text));
     }
     fn send_binary(&self, data: Vec<u8>, sent: Sent) {
         self.push(Out::Binary(data, sent));

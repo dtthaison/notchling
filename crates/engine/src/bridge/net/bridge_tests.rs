@@ -1,7 +1,8 @@
 use super::*;
-use crate::bridge::net::core::tests::{no_fetch, FakeApprover, FakeHandler};
+use crate::bridge::net::core::tests::no_fetch;
 use crate::bridge::net::jwt::tests::TestClock;
 use crate::bridge::net::server::tests::{swift_folder, tls_phone_at, ws_hello, IPHONE_TOKEN};
+use crate::bridge::test_support::FakeBackend;
 use crate::sessions::testutil::TempDir;
 use std::net::TcpStream;
 use std::path::Path;
@@ -18,7 +19,10 @@ pub(crate) fn free_ports() -> (u16, u16) {
 }
 
 pub(crate) fn test_config(data_dir: PathBuf, lan: u16, tunnel: u16) -> BridgeConfig {
-    let mut config = BridgeConfig::new(data_dir).with_ports(lan, tunnel);
+    // Home and the photo folder sit beside the data folder, in the test's own temp folder.
+    let parent = data_dir.parent().unwrap_or(&data_dir).to_path_buf();
+    let mut config = BridgeConfig::new(data_dir, parent.join("home"), parent.join("phone-images"))
+        .with_ports(lan, tunnel);
     config.lan.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
     config.name = "Test Mac".into();
     config.local_host = Some("test-mac.local".into());
@@ -28,8 +32,7 @@ pub(crate) fn test_config(data_dir: PathBuf, lan: u16, tunnel: u16) -> BridgeCon
 fn bridge(data_dir: PathBuf, lan: u16, tunnel: u16) -> Bridge {
     Bridge::new(
         test_config(data_dir, lan, tunnel),
-        Arc::new(FakeHandler::default()),
-        Arc::new(FakeApprover::default()),
+        Arc::new(FakeBackend::default()),
         no_fetch(),
         TestClock::new(crate::bridge::net::files::now_ms()).clock(),
     )
@@ -221,5 +224,9 @@ fn a_phone_pairs_with_the_code_and_revoke_drops_it() {
         true,
         "the Swift app's phones still connect"
     );
-    assert_eq!(bridge.status()["connections"], 1);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while bridge.status()["connections"] != 1 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(bridge.status()["connections"], 1, "the revoked one is gone");
 }

@@ -39,7 +39,9 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// last digit is dropped.
 pub fn hex_bytes(text: &str) -> Vec<u8> {
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             std::str::from_utf8(pair)
                 .ok()

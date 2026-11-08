@@ -10,11 +10,12 @@
 //! - Both speak RFC 6455 by hand ([`http`], [`frame`]): a head bounded in size and time (a slow
 //!   client is answered 408), messages capped at 256 KB (1009), every refusal a real status.
 //! - Each phone has its own reader and writer threads ([`server`]), so a slow or hostile phone
-//!   stalls nobody else.
-//! - Before `hello` or `pair`, [`core::Core`] answers; after it, every text frame goes to the
-//!   [`BridgeHandler`] (the router). Paired phones live in the Swift app's `devices.json`
-//!   ([`devices`]), tokens compared in constant time; pairing codes are one-time ([`pairing`]);
-//!   failed logins back off per address ([`limiter`]); changes are audited ([`audit`]).
+//!   stalls nobody else. Its text frames go to the router (E5a, [`crate::bridge::Router`]), each
+//!   on a thread of its own as the Swift bridge's `Task`s, a few at a time per phone.
+//! - [`core::Core`] holds the router, the hub and the stores it uses: paired phones in the Swift
+//!   app's `devices.json` ([`devices`]), tokens compared in constant time; one-time pairing codes
+//!   ([`pairing`]); a backoff per address for failed logins ([`limiter`]); the audit log
+//!   ([`audit`]). [`parts`] fits them to the router's traits.
 //! - [`bridge::Bridge`] is the switch: off binds nothing and writes nothing.
 
 pub mod access;
@@ -22,7 +23,6 @@ pub mod address;
 pub mod app_url;
 pub mod audit;
 pub mod bridge;
-pub mod connection;
 pub mod core;
 pub mod crypto;
 pub mod devices;
@@ -34,14 +34,14 @@ pub mod identity;
 pub mod jwt;
 pub mod limiter;
 pub mod pairing;
+pub mod parts;
 pub mod server;
 mod wire;
 
-pub use bridge::{Bridge, BridgeConfig};
-pub use connection::{Connection, ConnectionIo};
+#[cfg(test)]
+mod e2e_tests;
 
-/// `agentconsole.v1`'s `version` field.
-pub const WIRE_VERSION: u32 = 1;
+pub use bridge::{Bridge, BridgeConfig};
 
 /// The two ports, as the Swift app has them. A busy port is reported, never replaced.
 pub mod ports {
@@ -49,24 +49,6 @@ pub mod ports {
     pub const LAN: u16 = 47821;
     /// Plain HTTP on 127.0.0.1 only, for cloudflared.
     pub const TUNNEL: u16 = 47822;
-}
-
-/// What the transport hands a phone to once it has said `hello` with a paired token, or paired.
-/// The router (E5a) implements it; the transport has already answered `hello` and `pair`.
-pub trait BridgeHandler: Send + Sync {
-    /// The phone is authenticated; the hello or pair reply has gone out.
-    fn opened(&self, _connection: &std::sync::Arc<Connection>) {}
-    /// One text frame (at most 256 KB, valid UTF-8). Replies go out through
-    /// [`Connection::send_text`]; this runs on the phone's own reader thread.
-    fn message(&self, connection: &std::sync::Arc<Connection>, text: &str);
-    /// The connection is gone (closed, broken, revoked, or the bridge stopped).
-    fn closed(&self, _connection: &std::sync::Arc<Connection>) {}
-}
-
-/// Asks the person at the computer whether a phone that gave the right code may pair. Blocks the
-/// pairing phone's thread only. Answers false when nobody can answer.
-pub trait PairApprover: Send + Sync {
-    fn approve(&self, name: &str, platform: &str) -> bool;
 }
 
 #[cfg(test)]

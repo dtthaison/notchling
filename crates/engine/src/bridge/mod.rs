@@ -57,6 +57,7 @@
 //! - Answers are written with sorted keys and whole numbers without a fraction, as Swift's
 //!   `JSONSerialization` wrote them, because the generated types keep times as `f64`.
 
+pub mod agents;
 pub mod backend;
 pub mod connection;
 pub mod foreign;
