@@ -20,6 +20,7 @@ use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
 use crate::layout::Layout;
+use crate::pages_ops::{PagesOps, PagesSetup};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -115,6 +116,7 @@ pub struct Ops {
     acting: Option<Arc<ActingOps>>,
     bridge: Option<Arc<BridgeOps>>,
     codex: Option<Arc<CodexOps>>,
+    pages: Option<Arc<PagesOps>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
     /// What `sessions.list` waits for, and for how long.
@@ -129,6 +131,7 @@ impl Ops {
             acting: None,
             bridge: None,
             codex: None,
+            pages: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -166,6 +169,12 @@ impl Ops {
             list.push(topics::TOOLS);
         }
         self.topic_list = list;
+        self
+    }
+
+    /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
+    pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
+        self.pages = Some(pages);
         self
     }
 
@@ -216,9 +225,10 @@ impl Handler for Ops {
         match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
             op => self
-                .acting
+                .pages
                 .as_ref()
-                .and_then(|a| a.spec(op))
+                .and_then(|p| p.spec(op))
+                .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op))),
         }
@@ -230,6 +240,9 @@ impl Handler for Ops {
         }
         if let Some(codex) = self.codex.as_ref().filter(|c| c.spec(op).is_some()) {
             return codex.call(op, args);
+        }
+        if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
+            return pages.call(op, args);
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
@@ -489,6 +502,7 @@ pub fn run(
             Ops::with_acting(sessions.clone(), acting_ops.clone())
                 .with_bridge(bridge.clone())
                 .with_codex(codex_ops.clone())
+                .with_pages(Arc::new(PagesOps::new(PagesSetup::from_layout(&layout))))
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )

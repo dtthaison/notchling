@@ -138,6 +138,31 @@ Add the CLI client `notchling pages [words]` and `notchling page <link|id|words>
 
 The hook handling for Artifact events (record a publish, refuse a whole-page read of a saved link, and point a failed read at the local copy) is written as pure functions with fixture tests. It is not wired into `notchling hook` until E13.
 
+#### As built: the op contracts
+
+The ops are agent tier, answer whatever the `acting` switch says, and never write the Swift app's folders. The full text, with every field, is the module doc of `crates/notchlingd/src/pages_ops.rs`; the names are in `notchling_local_api::ops` (`SEARCH_QUERY`, `PAGES_LIST`, `PAGES_FIND`).
+
+```text
+search.query {text?: string, limit?: int}
+  -> {"pages": [Page], "sessions": [Session], "indexing": bool}
+pages.list {}
+  -> {"pages": [Page], "truncated": bool}
+pages.find {query: string}
+  -> {"pages": [Page + {"describe": string}], "truncated": bool}
+
+Page    = {"id": string|null, "title", "url", "project", "account", "updated": secs, "version",
+           "folder", "file", "source", "path": string|null}
+Session = {"key": "claude:<id>"|"codex:<id>"|"agy:<id>", "tool": "claude"|"codex"|"agy",
+           "session_id", "title", "folder", "path", "config_dir": string|null, "modified": secs,
+           "snippet": string|null, "highlights": [[start, end]], "score": number}
+```
+
+- `Page.path` is the local copy, absolute (what the pages window loads); `null` for a damaged entry. Pages come newest first.
+- `search.query`: pages need every word in title, project, account or link (a pasted link or id finds its page), words in the title first, at most 20 (6 for an empty `text`); sessions need every word in title, folder or text, at most `limit` (default 30, 6 for empty text, capped at 200). `highlights` are byte ranges into `snippet`.
+- A refresh of the index runs in the background (8 s apart); `indexing` says one is running. The first query waits up to 2 s for the first.
+- Return on a session opens Chat with `Session.key`.
+- `notchling pages [words]` and `notchling page <link|id|words>` print what `--pages` and `--page` print, read the library themselves when no daemon answers, and exit 1 with `No saved page matches "<query>".` on stderr when nothing is found.
+
 ### 4. U3 and U4, the search panel and the pages window
 
 U3, the search panel, in `crates/app`:
