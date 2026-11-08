@@ -1,5 +1,7 @@
 use super::*;
 use crate::tools::acp::fake::{FakeHandle, FakeSpawner};
+#[cfg(unix)]
+use crate::tools::acp::RealSpawner;
 use crate::tools::acp::{Spawner, METHOD_NOT_FOUND};
 use std::sync::mpsc::{channel, Sender};
 use std::time::Duration;
@@ -221,4 +223,87 @@ fn a_broken_pipe_ends_the_connection_like_a_death() {
     conn.notify("session/cancel", json!({}));
     assert_eq!(done(&a), Err("Antigravity stopped.".to_string()));
     assert_eq!(heard(&rx), Heard::Exit(None));
+}
+
+/// A real child that never reads its input, with a prompt too big for the pipe in flight: the
+/// writer thread is blocked in `write` and holds the process's lock.
+#[cfg(unix)]
+struct Stuck {
+    conn: Connection,
+    writer: std::sync::mpsc::Receiver<Result<Value, String>>,
+}
+
+#[cfg(unix)]
+fn stuck() -> Stuck {
+    let spawner = RealSpawner::new(&std::env::temp_dir());
+    let args = vec!["-c".to_string(), "exec sleep 60".to_string()];
+    let spawned = spawner
+        .spawn("/bin/sh", &args, &std::env::temp_dir().to_string_lossy())
+        .unwrap();
+    let conn = Connection::new(spawned, "Antigravity");
+    let (tx, _rx) = channel();
+    conn.start(Arc::new(Recorder(Mutex::new(tx))));
+    let (done_tx, writer) = channel();
+    let sender = conn.clone();
+    std::thread::spawn(move || {
+        sender.request(
+            "session/prompt",
+            json!({"text": "x".repeat(8 << 20)}),
+            Box::new(move |r| {
+                let _ = done_tx.send(r);
+            }),
+        );
+    });
+    // Long enough for the write to fill the pipe and block.
+    std::thread::sleep(Duration::from_millis(300));
+    Stuck { conn, writer }
+}
+
+/// Runs `f` on another thread and says whether it returned within `limit`.
+#[cfg(unix)]
+fn returns_within(limit: Duration, f: impl FnOnce() + Send + 'static) -> bool {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        f();
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(limit).is_ok()
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_ends_a_process_that_is_not_reading_and_frees_the_blocked_write() {
+    let s = stuck();
+    let conn = s.conn.clone();
+    assert!(
+        returns_within(Duration::from_secs(3), move || conn.close()),
+        "close waited on the blocked write"
+    );
+    assert!(s.conn.is_closed());
+    // Killing the child broke the pipe, so the write came back and its request failed.
+    assert_eq!(
+        s.writer.recv_timeout(Duration::from_secs(5)).unwrap(),
+        Err("Antigravity was closed.".to_string())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_message_behind_a_blocked_write_gives_up_and_ends_the_connection() {
+    let s = stuck();
+    let conn = s.conn.clone();
+    // A cancel while the prompt is still stuck in the pipe: it can't be written either, and
+    // waits for the writer only a few seconds before the process is given up on.
+    assert!(
+        returns_within(Duration::from_secs(10), move || {
+            conn.notify("session/cancel", json!({}));
+        }),
+        "the cancel waited on the blocked write for good"
+    );
+    assert!(s.conn.is_closed());
+    assert!(s
+        .writer
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .is_err());
 }

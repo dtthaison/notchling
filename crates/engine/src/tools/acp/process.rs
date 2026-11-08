@@ -24,12 +24,20 @@ pub enum Output {
     Closed(Option<String>),
 }
 
+/// Ends a process from any thread, including while another thread is blocked writing to it.
+pub trait Killer: Send + Sync {
+    /// Ends the process. An [`Output::Closed`] follows, and a blocked write fails.
+    fn kill(&self);
+}
+
 /// A running tool.
 pub trait ToolProcess: Send {
-    /// Writes `line` and a newline.
+    /// Writes `line` and a newline. It blocks while the process isn't reading and the pipe is
+    /// full, which is why ending the process goes through a [`Killer`] that needs no lock the
+    /// writer holds.
     fn write_line(&mut self, line: &str) -> io::Result<()>;
-    /// Ends the process. An [`Output::Closed`] follows.
-    fn kill(&mut self);
+    /// The handle that ends this process.
+    fn killer(&self) -> Arc<dyn Killer>;
 }
 
 /// A started process and its output.
@@ -211,16 +219,26 @@ impl ToolProcess for RealProcess {
         stdin.flush()
     }
 
-    fn kill(&mut self) {
-        self.stdin = None;
-        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+    fn killer(&self) -> Arc<dyn Killer> {
+        Arc::new(ChildKiller(self.child.clone()))
+    }
+}
+
+/// Kills the child. It takes only the child's own lock, which the waiter holds for a moment at a
+/// time, never the writer's: the dead child's pipe then breaks the blocked write.
+struct ChildKiller(Arc<Mutex<Child>>);
+
+impl Killer for ChildKiller {
+    fn kill(&self) {
+        let mut child = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let _ = child.kill();
     }
 }
 
 impl Drop for RealProcess {
     fn drop(&mut self) {
-        self.kill();
+        self.stdin = None;
+        ChildKiller(self.child.clone()).kill();
     }
 }
 
@@ -319,10 +337,10 @@ mod tests {
     fn killing_a_real_child_ends_it() {
         let spawner = RealSpawner::new(&std::env::temp_dir());
         let args = vec!["-c".to_string(), "exec sleep 30".to_string()];
-        let mut spawned = spawner
+        let spawned = spawner
             .spawn("/bin/sh", &args, &std::env::temp_dir().to_string_lossy())
             .unwrap();
-        spawned.process.kill();
+        spawned.process.killer().kill();
         let end = spawned
             .output
             .recv_timeout(Duration::from_secs(10))

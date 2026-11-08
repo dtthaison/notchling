@@ -5,11 +5,17 @@
 //! Callbacks (`Done`, the handler) run on that thread, or on the caller's thread when the
 //! connection is already closed. They must not be called with a lock held that they take themselves.
 
-use super::process::{Output, Spawned, ToolProcess};
+use super::process::{Killer, Output, Spawned, ToolProcess};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
+use std::time::{Duration, Instant};
+
+/// How long a message waits for another thread's write to finish before the process is given up
+/// on. A write only takes this long when the agent isn't reading its input (it hangs, or isn't
+/// listening), and under the local API's call timeout so the op that asked still answers.
+const WRITER_WAIT: Duration = Duration::from_secs(3);
 
 /// Runs with a request's result (`result` object, `{}` when it had none) or its error text.
 pub type Done = Box<dyn FnOnce(Result<Value, String>) + Send>;
@@ -34,7 +40,11 @@ struct Inner {
     /// The tool's name, for error messages.
     name: String,
     state: Mutex<State>,
+    /// Held for the length of a write, which blocks while the agent isn't reading.
     process: Mutex<Box<dyn ToolProcess>>,
+    /// Ends the process without the writer's lock, so a blocked write fails instead of holding
+    /// up `close`.
+    killer: Arc<dyn Killer>,
     output: Mutex<Option<Receiver<Output>>>,
     handler: OnceLock<Arc<dyn Handler>>,
 }
@@ -48,6 +58,7 @@ struct State {
 impl Connection {
     /// Wraps a started process; nothing is read until [`Connection::start`].
     pub fn new(spawned: Spawned, name: &str) -> Connection {
+        let killer = spawned.process.killer();
         Connection {
             inner: Arc::new(Inner {
                 name: name.to_string(),
@@ -57,6 +68,7 @@ impl Connection {
                     closed: false,
                 }),
                 process: Mutex::new(spawned.process),
+                killer,
                 output: Mutex::new(Some(spawned.output)),
                 handler: OnceLock::new(),
             }),
@@ -164,15 +176,32 @@ impl Inner {
         let Ok(line) = serde_json::to_string(message) else {
             return false;
         };
-        let mut process = self.process.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut process) = self.writer() else {
+            return false;
+        };
         process.write_line(&line).is_ok()
     }
 
+    /// The writer's lock, waiting a little for a write in progress; `None` when it stays busy
+    /// ([`WRITER_WAIT`]) or the connection closes meanwhile.
+    fn writer(&self) -> Option<MutexGuard<'_, Box<dyn ToolProcess>>> {
+        let until = Instant::now() + WRITER_WAIT;
+        loop {
+            match self.process.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+                Err(TryLockError::WouldBlock) => {
+                    if Instant::now() >= until || self.lock_state().closed {
+                        return None;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+
     fn kill(&self) {
-        self.process
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .kill();
+        self.killer.kill();
     }
 
     fn handle(&self, line: &str) {
