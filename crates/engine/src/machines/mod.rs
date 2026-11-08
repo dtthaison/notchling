@@ -20,6 +20,7 @@ pub mod masks;
 pub mod offers;
 pub mod process;
 pub mod registry;
+pub mod roots;
 pub mod runner;
 pub mod shell;
 pub mod step;
