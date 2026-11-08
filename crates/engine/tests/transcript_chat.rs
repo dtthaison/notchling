@@ -146,6 +146,86 @@ fn lines_over_100kb_are_skipped() {
 }
 
 #[test]
+fn a_line_is_judged_by_its_size_without_the_base64_pictures() {
+    // A screenshot makes a line big only because of its base64; ChatTranscript cuts that out first, so
+    // the message with the picture is still shown.
+    let scratch = Scratch::new("chat-image");
+    let picture = "A".repeat(150_000);
+    let with_picture = format!(
+        r#"{{"type":"user","uuid":"p1","message":{{"role":"user","content":[{{"type":"text","text":"look at this"}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{picture}"}}}}]}}}}"#
+    );
+    assert!(with_picture.len() > 100_000);
+    let path = write_lines(
+        &scratch,
+        &[
+            assistant_line("before", "u1"),
+            with_picture,
+            assistant_line("after", "u3"),
+        ],
+        "image.jsonl",
+    );
+    let result = chat::read(&path, true, 200);
+    let texts: Vec<&str> = result.messages.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(texts, ["before", "look at this", "after"]);
+    assert_eq!(result.malformed_lines, 0);
+}
+
+#[test]
+fn a_line_still_big_after_the_pictures_are_cut_is_skipped() {
+    let scratch = Scratch::new("chat-image-big");
+    let big = format!(
+        r#"{{"type":"user","uuid":"p1","message":{{"role":"user","content":[{{"type":"text","text":"{}"}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"QUJD"}}}}]}}}}"#,
+        "z".repeat(150_000)
+    );
+    let path = write_lines(&scratch, &[assistant_line("kept", "u1"), big], "big.jsonl");
+    let texts: Vec<String> = chat::read(&path, true, 200)
+        .messages
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(texts, ["kept"]);
+}
+
+#[test]
+fn a_window_that_starts_inside_a_long_line_reads_that_line_whole() {
+    // Swift backs up to where the line starts instead of dropping it (a long line: a screenshot, say).
+    let scratch = Scratch::new("chat-window");
+    let long = assistant_line(&"x".repeat(5_000), "long");
+    let path = write_lines(
+        &scratch,
+        &[
+            assistant_line("first", "u1"),
+            long.clone(),
+            assistant_line("last", "u3"),
+        ],
+        "window.jsonl",
+    );
+    // Starts 1500 bytes before the end: inside the long line.
+    let lines = chat::read_window(&path, 1_500).expect("window");
+    assert_eq!(lines.len(), 2, "the long line and the last one");
+    assert_eq!(lines[0].text, long);
+    assert_eq!(
+        lines[0].offset,
+        (assistant_line("first", "u1").len() + 1) as u64
+    );
+    assert!(lines[1].text.contains("last"));
+}
+
+#[test]
+fn a_window_that_starts_on_a_line_start_drops_nothing() {
+    let scratch = Scratch::new("chat-window-aligned");
+    let second = assistant_line("second", "u2");
+    let path = write_lines(
+        &scratch,
+        &[assistant_line("first", "u1"), second.clone()],
+        "aligned.jsonl",
+    );
+    let lines = chat::read_window(&path, second.len() as u64 + 1).expect("window");
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, second);
+}
+
+#[test]
 fn returns_only_the_last_200_messages() {
     let scratch = Scratch::new("chat");
     let lines: Vec<String> = (0..250)

@@ -242,3 +242,34 @@ fn missing_folders_give_an_empty_list() {
     assert!(poll(&mut Monitor::default(), &w.roots, &[]).is_empty());
     let _ = (alive(1), no_host(1));
 }
+
+// The default liveness probe: `kill(pid, 0) == 0 || errno == EPERM`, as AgentMonitor.isAlive.
+#[cfg(unix)]
+mod default_probe {
+    use super::Probes;
+
+    #[test]
+    fn this_process_is_alive() {
+        assert!((Probes::from_proc().is_alive)(std::process::id()));
+    }
+
+    #[test]
+    fn a_reaped_child_is_dead() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("0")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        child.wait().expect("wait");
+        assert!(!(Probes::from_proc().is_alive)(pid));
+    }
+
+    #[test]
+    fn pid_zero_and_pids_beyond_the_pid_range_are_dead() {
+        // kill(0, 0) and kill(-n, 0) would probe process groups, not a process.
+        let alive = Probes::from_proc().is_alive;
+        assert!(!alive(0));
+        assert!(!alive(u32::MAX));
+        assert!(!alive(i32::MAX as u32 + 1));
+    }
+}

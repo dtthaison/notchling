@@ -10,12 +10,13 @@
 //!   as "Exited" with a resume target, and remembering which lane each session ran in
 //!   ([`Monitor::config_dir_for_session`]).
 //! - [`Probes`]: what files can't tell: whether a pid is alive and which app hosts a terminal.
-//!   [`Probes::from_proc`] is the default (Linux `/proc`; elsewhere it assumes alive).
+//!   [`Probes::from_proc`] is the default (`kill(pid, 0)` on Unix; elsewhere it assumes alive).
 //! - [`Agent`], [`AgentGroup`], [`AgentTarget`]: the row.
 //! - [`job_dirs`] / [`config_dir_for_job`]: which config folder holds a job (the current copy first), to
 //!   run `claude attach|rm` there with `CLAUDE_CONFIG_DIR`.
-//! - [`job_transcript`], [`project_folder`], [`Successors`]: a job's transcript path, across a git
-//!   worktree and `/clear`. (`TranscriptReader` in Swift; the transcript module reads the file itself.)
+//! - A job's transcript path, across a git worktree and `/clear`, is [`crate::transcript::locate`]
+//!   (`TranscriptReader` in Swift): [`Agent::transcript_path`] follows the worktree, and
+//!   `locate::successor` follows `/clear`.
 //! - [`command_job`]: template "exec" jobs, the command shortened and where its output goes.
 //! - [`launch_flags`], [`resume_arguments`]: the pure parts of moving a session to another account.
 //!
@@ -36,7 +37,6 @@ pub mod iso;
 pub mod jobs;
 pub mod lanes;
 pub mod monitor;
-pub mod successor;
 
 #[cfg(test)]
 mod jobs_tests;
@@ -49,7 +49,6 @@ pub use agent::{Agent, AgentGroup, AgentTarget};
 pub use jobs::{config_dir_for_job, job_dirs, launch_flags, resume_arguments};
 pub use lanes::{config_dirs, read_lanes, ConfigDir, Lane, Roots};
 pub use monitor::{Monitor, Probes};
-pub use successor::{job_transcript, project_folder, Successors};
 
 /// One poll with a fresh [`Monitor`]: every job and live session across the main folder and the lanes.
 pub fn list(roots: &Roots, probes: &Probes, now_ms: i64) -> Vec<Agent> {

@@ -361,7 +361,8 @@ impl Parser {
                 }
                 if let Some(last) = info.get("last_token_usage").filter(|t| t.is_object()) {
                     let n = |k: &str| last.get(k).map_or(0, count_of);
-                    self.facts.context_tokens = n("input_tokens") + n("output_tokens");
+                    self.facts.context_tokens =
+                        n("input_tokens").saturating_add(n("output_tokens"));
                 }
             }
             Some("error") => {

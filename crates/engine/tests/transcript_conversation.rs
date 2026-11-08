@@ -137,6 +137,21 @@ fn one_compaction_shows_once() {
 }
 
 #[test]
+fn huge_token_counts_saturate_instead_of_overflowing() {
+    // Two messages whose counts add past u64; a negative count is zero.
+    let line = |id: &str, usage: &str| {
+        format!(
+            r#"{{"type":"assistant","timestamp":"2026-11-01T10:00:02.000Z","message":{{"id":"{id}","model":"m","content":[{{"type":"text","text":"hi"}}],"usage":{usage}}}}}"#
+        )
+    };
+    let big = r#"{"input_tokens":18446744073709551615,"cache_read_input_tokens":10,"cache_creation_input_tokens":-3,"output_tokens":18446744073709551615}"#;
+    let c = read_lines_as_file(&[&line("a", big), &line("b", big)]);
+    assert_eq!(c.facts.input_tokens, u64::MAX);
+    assert_eq!(c.facts.output_tokens, u64::MAX);
+    assert_eq!(c.facts.context_tokens, u64::MAX);
+}
+
+#[test]
 fn context_is_the_latest_request() {
     // The last message's input (with cache) and output, not the session's total.
     let c = conversation::read(&s(&notchling_fixture("conversation.jsonl")));

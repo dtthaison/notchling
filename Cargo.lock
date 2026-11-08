@@ -3315,6 +3315,8 @@ dependencies = [
 name = "notchling-engine"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "notchling-platform",
  "serde",
  "serde_json",
 ]

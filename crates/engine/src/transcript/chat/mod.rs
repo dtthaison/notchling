@@ -6,8 +6,10 @@
 //! stable across reads; hash it where a UUID is needed) and the paging cache (`ChatTranscriptCache`).
 
 mod steps;
+mod window;
 
 pub use steps::{cap_output, result_text, step, tagged, DiffRow, DiffRowKind, ToolStep};
+pub use window::{read_window, strip_base64};
 
 use super::model::Timestamp;
 use super::tail::MAX_LINE_BYTES;
@@ -16,8 +18,6 @@ use super::text::{collapse_pastes, prefix_chars};
 use super::util::{date_field, parse_object, str_of};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 
 pub const TAIL_BYTES: u64 = 2_000_000;
 pub const MAX_TEXT_CHARACTERS: usize = 3000;
@@ -83,42 +83,9 @@ pub fn read(path: &str, is_main: bool, limit: usize) -> ParseResult {
 }
 
 /// The last `bytes` of the file as lines, starting at a line boundary: a read that begins inside a line
-/// drops that partial line. None when the file can't be read.
+/// backs up to where that line starts (see [`read_window`]). None when the file can't be read.
 pub fn tail(path: &str, bytes: u64) -> Option<Vec<String>> {
     read_window(path, bytes).map(|l| l.into_iter().map(|s| s.text).collect())
-}
-
-/// The last `bytes` of the file as whole lines with their offsets; empty lines are left out.
-pub fn read_window(path: &str, bytes: u64) -> Option<Vec<SourceLine>> {
-    let mut file = File::open(path).ok()?;
-    let size = file.seek(SeekFrom::End(0)).ok()?;
-    let start = size.saturating_sub(bytes);
-    // Read one byte earlier to learn whether `start` is the beginning of a line.
-    let from = start.saturating_sub(1);
-    file.seek(SeekFrom::Start(from)).ok()?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data).ok()?;
-    let mut base = from;
-    let mut aligned = true;
-    if start > 0 {
-        aligned = data.first() == Some(&b'\n');
-        data.remove(0);
-        base += 1;
-    }
-    let mut lines = Vec::new();
-    let mut offset = base;
-    for (i, raw) in data.split(|&b| b == b'\n').enumerate() {
-        let line_offset = offset;
-        offset += raw.len() as u64 + 1;
-        if raw.is_empty() || (i == 0 && start > 0 && !aligned) {
-            continue;
-        }
-        lines.push(SourceLine {
-            offset: line_offset,
-            text: String::from_utf8_lossy(raw).into_owned(),
-        });
-    }
-    Some(lines)
 }
 
 /// Parses lines given directly (offsets are their positions); `limit` keeps the newest messages.
@@ -289,10 +256,12 @@ fn parse_source(lines: &[SourceLine], is_main: bool, path: &str, limit: usize) -
     let mut latest_model: Option<String> = None;
 
     for (index, source) in lines.iter().enumerate() {
-        if source.text.len() > MAX_LINE_BYTES {
+        // A line with pictures is big because of the base64; that is cut out first, then the size is judged.
+        let text = strip_base64(&source.text);
+        if text.len() > MAX_LINE_BYTES {
             continue;
         }
-        let Some(map) = parse_object(source.text.as_bytes()) else {
+        let Some(map) = parse_object(text.as_bytes()) else {
             malformed += 1;
             continue;
         };

@@ -152,6 +152,29 @@ fn chunks_join_until_another_kind_or_a_new_turn() {
 }
 
 #[test]
+fn huge_token_counts_saturate_instead_of_overflowing() {
+    let mut t = Transcript::default();
+    let huge = json!({"inputTokens": i64::MAX, "cachedReadTokens": 5, "outputTokens": i64::MAX});
+    t.end_turn(Some("end_turn"), Some(&huge), 1.0);
+    t.end_turn(Some("end_turn"), Some(&huge), 2.0);
+    let facts = t.facts();
+    assert_eq!(facts.input_tokens, u64::MAX, "saturated, not wrapped");
+    assert_eq!(facts.output_tokens, 2 * i64::MAX as u64);
+    assert_eq!(facts.context_tokens, u64::MAX);
+}
+
+#[test]
+fn negative_token_counts_count_as_zero() {
+    let mut t = Transcript::default();
+    let odd = json!({"inputTokens": -50, "cachedReadTokens": -5, "outputTokens": 7});
+    t.end_turn(Some("end_turn"), Some(&odd), 1.0);
+    let facts = t.facts();
+    assert_eq!(facts.input_tokens, 0);
+    assert_eq!(facts.output_tokens, 7);
+    assert_eq!(facts.context_tokens, 7);
+}
+
+#[test]
 fn diff_trims_shared_lines() {
     let d = acp::diff(Some("a\nb\nc\nd\ne\nf\ng\nh\n"), "a\nb\nc\nd\nX\nf\ng\nh\n");
     use DiffKind::*;
