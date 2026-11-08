@@ -247,19 +247,38 @@ fn an_answer_checks_each_page_types_its_keys_and_submits_on_review() {
     assert!(plan::answer(&[], &none).is_empty());
 }
 
-/// The Swift source, when this checkout still has it.
-fn swift(rel: &str) -> Option<String> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Sources")
-        .join(rel);
-    let text = std::fs::read_to_string(&path).ok();
-    if text.is_none() {
-        println!(
-            "no {}: the Swift app is gone, nothing to compare",
+/// Where the Swift sources are, from this crate.
+fn swift_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../legacy/macos/Sources")
+}
+
+/// A Swift source file under `root`. A missing one fails the test: with `legacy/` gone the
+/// comparison used to be skipped and the test passed having checked nothing. The Rust values above
+/// stay pinned as literals either way; whoever removes `legacy/` removes
+/// `the_swift_source_still_says_the_same` in the same change, on purpose.
+fn swift_from(root: &std::path::Path, rel: &str) -> String {
+    let path = root.join(rel);
+    std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "{} is missing ({error}). This test compares the Rust reply code with the Swift app \
+             while both exist; when the Swift app is removed on purpose, delete \
+             `the_swift_source_still_says_the_same` and the Swift comparison in this file's docs.",
             path.display()
-        );
-    }
-    text
+        )
+    })
+}
+
+#[test]
+#[should_panic(expected = "is missing")]
+fn a_missing_swift_source_fails_instead_of_passing_without_comparing() {
+    swift_from(
+        std::path::Path::new("/nonexistent/legacy/macos/Sources"),
+        "Notchling/Agents/ReplySender.swift",
+    );
+}
+
+fn swift(rel: &str) -> String {
+    swift_from(&swift_root(), rel)
 }
 
 fn has(source: &str, file: &str, snippets: &[&str]) {
@@ -273,9 +292,7 @@ fn has(source: &str, file: &str, snippets: &[&str]) {
 
 #[test]
 fn the_swift_source_still_says_the_same() {
-    let Some(sender) = swift("Notchling/Agents/ReplySender.swift") else {
-        return;
-    };
+    let sender = swift("Notchling/Agents/ReplySender.swift");
     has(
         &sender,
         "ReplySender.swift",
@@ -305,9 +322,7 @@ fn the_swift_source_still_says_the_same() {
             r#"answers[item.question] = labels.joined(separator: ", ")"#,
         ],
     );
-    let Some(dialog) = swift("Notchling/Agents/ReplySender+Dialog.swift") else {
-        return;
-    };
+    let dialog = swift("Notchling/Agents/ReplySender+Dialog.swift");
     has(
         &dialog,
         "ReplySender+Dialog.swift",
@@ -326,9 +341,7 @@ fn the_swift_source_still_says_the_same() {
                 wait(master, screen, timeout: 4) { !dialogOpen($0) }"#,
         ],
     );
-    let Some(paste) = swift("ConsoleCore/MessageSending.swift") else {
-        return;
-    };
+    let paste = swift("ConsoleCore/MessageSending.swift");
     has(
         &paste,
         "MessageSending.swift",
