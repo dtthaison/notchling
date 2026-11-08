@@ -3490,6 +3490,7 @@ dependencies = [
  "notchling-platform",
  "p12",
  "rcgen",
+ "rusqlite",
  "serde_json",
 ]
 

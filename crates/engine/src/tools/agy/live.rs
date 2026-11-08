@@ -176,7 +176,11 @@ impl Inner {
     }
 
     /// `initialize`, offering no file system and no terminal; `then` runs with whether it worked.
-    pub(super) fn initialize(self: &Arc<Self>, live: &Arc<Live>, then: Box<dyn FnOnce(bool) + Send>) {
+    pub(super) fn initialize(
+        self: &Arc<Self>,
+        live: &Arc<Live>,
+        then: Box<dyn FnOnce(bool) + Send>,
+    ) {
         let params = json!({
             "protocolVersion": 1,
             "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
@@ -424,4 +428,3 @@ impl Handler for Wire {
         }
     }
 }
-

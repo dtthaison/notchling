@@ -24,6 +24,7 @@
 //! The hook is who its process is, never what it says: see [`crate::hook_ops`].
 
 use crate::acting::{Acting, ACTING_OFF};
+use crate::agy_ops::AgyOps;
 use crate::hook_ops::Parents;
 use crate::prompts::{question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
@@ -38,7 +39,7 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// The longest a hook is held (the Swift hook's `waitSeconds`), under Claude Code's 300 s timeout.
@@ -158,6 +159,9 @@ pub struct ActingOps {
     /// Folders `session.new` was refused as untrusted, canonical, and when: `folder.trust` takes
     /// only these ([`crate::control_ops`]).
     pub(crate) refused: Mutex<HashMap<PathBuf, Instant>>,
+    /// Antigravity sessions (Milestone 5): what turning acting off must close, and whose waiting
+    /// permissions `prompts.list` shows.
+    agy: OnceLock<Arc<AgyOps>>,
 }
 
 impl ActingOps {
@@ -182,7 +186,19 @@ impl ActingOps {
             parent_of: Box::new(crate::hook::parent_pid),
             stopping: Mutex::new(HashMap::new()),
             refused: Mutex::new(HashMap::new()),
+            agy: OnceLock::new(),
         }
+    }
+
+    /// The switch, shared with the ops of Milestone 5 that act on their own sessions.
+    pub fn acting_switch(&self) -> Arc<Acting> {
+        self.acting.clone()
+    }
+
+    /// The Antigravity ops, so acting off closes their sessions and `prompts.list` includes
+    /// their permissions. Once.
+    pub fn attach_agy(&self, agy: Arc<AgyOps>) {
+        let _ = self.agy.set(agy);
     }
 
     /// Moves every stopping mark `by` into the past (tests).
@@ -238,9 +254,14 @@ impl ActingOps {
         match op {
             ops::SETTINGS_GET_ACTING => Ok(json!({"acting": self.acting.is_on()})),
             ops::SETTINGS_SET_ACTING => self.set_acting(args),
-            ops::PROMPTS_LIST => Ok(Value::Array(
-                self.prompts.list().iter().map(Prompt::to_json).collect(),
-            )),
+            ops::PROMPTS_LIST => {
+                let mut list: Vec<Value> =
+                    self.prompts.list().iter().map(Prompt::to_json).collect();
+                if let Some(agy) = self.agy.get() {
+                    list.extend(agy.prompts());
+                }
+                Ok(Value::Array(list))
+            }
             ops::SESSION_QUESTION => self.question(args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(args),
@@ -263,6 +284,10 @@ impl ActingOps {
             // Every held hook passes now, not at its deadline: nobody may decide them any more.
             for prompt in self.prompts.drain() {
                 self.resolved(&prompt, "pass", "acting_off");
+            }
+            // No `agy` stays running while the Swift app owns the sessions.
+            if let Some(agy) = self.agy.get() {
+                agy.acting_off();
             }
         }
         let data = json!({"acting": on});

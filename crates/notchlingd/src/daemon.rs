@@ -15,6 +15,7 @@
 
 use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::{ActingOps, Room};
+use crate::agy_ops::{self, AgyOps};
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
@@ -24,6 +25,7 @@ use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
+use notchling_engine::tools::acp::RealSpawner;
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
@@ -113,6 +115,7 @@ pub struct Ops {
     sessions: Arc<Mutex<Value>>,
     acting: Option<Arc<ActingOps>>,
     bridge: Option<Arc<BridgeOps>>,
+    agy: Option<Arc<AgyOps>>,
     /// What `sessions.list` waits for, and for how long.
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -124,6 +127,7 @@ impl Ops {
             sessions,
             acting: None,
             bridge: None,
+            agy: None,
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
         }
@@ -138,6 +142,12 @@ impl Ops {
 
     pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
         self.bridge = Some(bridge);
+        self
+    }
+
+    /// M5's Antigravity ops ([`AgyOps`]).
+    pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
+        self.agy = Some(agy);
         self
     }
 
@@ -191,13 +201,17 @@ impl Handler for Ops {
                 .acting
                 .as_ref()
                 .and_then(|a| a.spec(op))
-                .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op))),
+                .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
+                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op))),
         }
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
             return bridge.call(op, args);
+        }
+        if let Some(agy) = self.agy.as_ref().filter(|a| a.spec(op).is_some()) {
+            return agy.call(op, args);
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
@@ -452,6 +466,21 @@ pub fn run(
         acting_ops.clone(),
         room.clone(),
     ));
+    // Off with acting: `agy` starts only on an acting op, and the copy of its list is made only
+    // when the list is read.
+    let home = PathBuf::from(home_of(&layout.roots()));
+    let agy = Arc::new(AgyOps::new(
+        acting_ops.acting_switch(),
+        room.clone(),
+        Arc::new(RealSpawner::new(&home)),
+        agy_ops::setup_for(
+            layout.antigravity_dir(),
+            layout.antigravity_copy_dir(),
+            &home,
+            layout.fixture,
+        ),
+    ));
+    acting_ops.attach_agy(agy.clone());
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -463,6 +492,7 @@ pub fn run(
         Arc::new(
             Ops::with_acting(sessions.clone(), acting_ops.clone())
                 .with_bridge(bridge.clone())
+                .with_agy(agy.clone())
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -505,6 +535,7 @@ pub fn run(
         }
         last_poll = Instant::now();
         scan(&mut lister, &options, &sessions, &handle);
+        agy.reap();
         // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
         if now != watched {
@@ -517,6 +548,7 @@ pub fn run(
     // waiting for the first read stops waiting.
     first_scan.finish();
     acting_ops.close();
+    agy.close();
     bridge.close();
     handle.shutdown();
     match thread.join() {
