@@ -264,6 +264,65 @@ fn the_conversation_read_works_with_acting_off_and_follows_the_open_runner() {
 }
 
 #[test]
+fn a_long_conversation_comes_back_as_its_newest_items_and_says_so() {
+    // A session of 1,500 exchanges of 1 KB each: 3 MB of conversation, over the 1 MiB line.
+    let responder: notchling_engine::tools::acp::fake::Responder =
+        Arc::new(|m: &Value, p: &FakeHandle| {
+            let reply =
+                |result: Value| p.push(&json!({"jsonrpc": "2.0", "id": m["id"], "result": result}));
+            let update = |kind: &str, text: String| {
+                p.push(
+                    &json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "sessionId": SESSION,
+                    "update": {"sessionUpdate": kind, "content": {"type": "text", "text": text}}}}),
+                );
+            };
+            match m["method"].as_str() {
+                Some("initialize") => reply(json!({"protocolVersion": 1})),
+                Some("session/load") => {
+                    for n in 0..1_500 {
+                        update(
+                            "user_message_chunk",
+                            format!("question {n} {}", "q".repeat(1000)),
+                        );
+                        update(
+                            "agent_message_chunk",
+                            format!("answer {n} {}", "a".repeat(1000)),
+                        );
+                    }
+                    reply(json!({}));
+                }
+                _ => {}
+            }
+        });
+    let rig = rig_with(
+        true,
+        FakeSpawner::with_responder(responder),
+        Some("/fake/agy"),
+    );
+    rig.loaded();
+    let read = rig.call(CONVERSATION, json!({"id": ROW})).unwrap();
+    let size = read.to_string().len();
+    assert!(size < 600 * 1024, "{size} bytes");
+    assert_eq!(read["truncated"], true);
+    let omitted = read["omitted"].as_u64().unwrap() as usize;
+    let conversation: notchling_engine::transcript::model::Conversation =
+        serde_json::from_value(read["conversation"].clone()).unwrap();
+    assert_eq!(conversation.items.len() + omitted, 3_000);
+    let last = conversation.items.last().unwrap();
+    assert!(
+        matches!(&last.kind, notchling_engine::transcript::model::ItemKind::Assistant { text } if text.starts_with("answer 1499")),
+        "the newest item is kept"
+    );
+    // A short one says it was not cut.
+    let short = rig_with(true, FakeSpawner::replaying(RECORDING), Some("/fake/agy"));
+    short.loaded();
+    let read = short.call(CONVERSATION, json!({"id": ROW})).unwrap();
+    assert_eq!(read["truncated"], false);
+    assert_eq!(read["omitted"], 0);
+}
+
+#[test]
 fn open_runs_agy_in_the_sessions_own_folder_and_refuses_one_it_does_not_know() {
     let rig = rig(true);
     for bad_id in ["agy:nope", "agy:", "agy:../x", "claude:abc", "x"] {
@@ -386,6 +445,49 @@ fn cancel_stops_the_turn_and_cancels_what_waits() {
     assert_eq!(resolved["outcome"], "cancelled");
     assert!(!process.requests("session/cancel").is_empty());
     assert!(rig.ops.prompts().is_empty());
+}
+
+#[test]
+fn a_permission_with_a_huge_edit_goes_out_trimmed_in_its_events_and_lists() {
+    let rig = rig(true);
+    let process = rig.loaded();
+    // About 900 KB of new text: it passes the 1 MiB line the agent's output is read in, and is far
+    // over what a card, an event or `prompts.list` may carry.
+    let new: String = (0..15_000)
+        .map(|i| format!("line {i} {}\n", "z".repeat(50)))
+        .collect();
+    process.push(
+        &json!({"jsonrpc": "2.0", "method": "session/request_permission", "id": "big",
+        "params": {
+            "toolCall": {"toolCallId": "c", "name": "edit_file", "kind": "edit",
+                "title": "File big.txt", "rawInput": {"CommandLine": "c".repeat(200_000)},
+                "content": [{"type": "diff", "path": "big.txt", "newText": new, "oldText": ""}]},
+            "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]}}),
+    );
+    let pending = rig.wait(PERMISSION_PENDING);
+    let limit = 300 * 1024;
+    assert!(pending.to_string().len() < limit, "the event is one line");
+    let diff = pending["diff"].as_array().unwrap();
+    assert_eq!(diff.last().unwrap()["kind"], "hunk");
+    assert!(diff.last().unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .contains("more lines"));
+    assert!(pending["input"].as_str().unwrap().len() < 8_000);
+    let listed = rig.ops.prompts();
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].to_string().len() < limit);
+    // The state read carries the same trimmed card.
+    let state = rig.call(STATE, json!({"id": ROW})).unwrap();
+    assert!(state["permission"].to_string().len() < limit);
+    // It can still be answered by its ids.
+    let answer = rig
+        .call(
+            PERMISSION,
+            json!({"id": ROW, "rpc_id": "big", "option_id": "allow"}),
+        )
+        .unwrap();
+    assert_eq!(answer["outcome"], "allow_once");
 }
 
 #[test]

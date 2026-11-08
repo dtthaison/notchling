@@ -125,21 +125,22 @@ impl Shared {
     }
 
     /// `prompt.pending`'s shape (as a hook prompt's) plus `tool`, `rpcId`, `options` and `diff`.
+    /// The card's own text is used, which [`Permission::to_json`] keeps small enough for the
+    /// local API's line however big the edit is.
     pub fn prompt_json(&self, session: &str, p: &Permission, folder: &str) -> Value {
         let card = p.to_json();
-        let summary = if p.call.title.is_empty() {
-            p.call.name.clone()
-        } else {
-            p.call.title.clone()
+        let summary = match card["title"].as_str() {
+            Some(title) if !title.is_empty() => card["title"].clone(),
+            _ => card["toolName"].clone(),
         };
         let mut data = json!({
             "id": prompt_id(session, &p.rpc_text()),
             "sessionId": row_id(session),
             "tool": "agy",
             "kind": "permission",
-            "toolName": p.call.name,
+            "toolName": card["toolName"],
             "summary": summary,
-            "input": p.call.input,
+            "input": card["input"],
             "canAlwaysAllow": p.options.iter().any(|o| o.kind == "allow_always"),
             "question": null,
             "cwd": folder,

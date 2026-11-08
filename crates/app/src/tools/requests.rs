@@ -170,6 +170,8 @@ pub struct AgyConversation {
     pub working: bool,
     pub load_error: Option<String>,
     pub conversation: Conversation,
+    /// The daemon sent only the newest items of a long session (it answers in one 1 MiB line).
+    pub truncated: bool,
 }
 
 /// Reads an `agy.conversation` reply; `None` when it isn't one.
@@ -194,6 +196,10 @@ pub fn parse_conversation(reply: &Value) -> Option<AgyConversation> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         conversation,
+        truncated: reply
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -303,6 +309,12 @@ mod tests {
         let c = parse_conversation(&reply).unwrap();
         assert!(c.open && c.working && !c.loading);
         assert_eq!(c.conversation.activity.as_deref(), Some("Editing"));
+        assert!(!c.truncated, "an older daemon never says");
+        // A newer daemon's extra fields are read, and a long session says it was cut.
+        let cut = parse_conversation(&json!({"open": true, "truncated": true, "omitted": 40,
+            "conversation": {"items": []}}))
+        .unwrap();
+        assert!(cut.truncated);
         let closed = parse_conversation(&json!({"open": false})).unwrap();
         assert_eq!(closed.conversation, Conversation::default());
         assert_eq!(parse_conversation(&json!({"items": []})), None);

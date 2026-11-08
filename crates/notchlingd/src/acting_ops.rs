@@ -27,7 +27,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::agy_ops::AgyOps;
 use crate::codex_ops::CodexOps;
 use crate::hook_ops::Parents;
-use crate::prompts::{question_json, Kind, Prompt, PromptStore};
+use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
 use notchling_engine::reply::plan::{self, Plan, PlanError};
@@ -276,7 +276,9 @@ impl ActingOps {
                 if let Some(agy) = self.agy.get() {
                     list.extend(agy.prompts());
                 }
-                Ok(Value::Array(list))
+                // One reply is one line of the local API: an oversized prompt is trimmed or left
+                // out rather than failing the list and hiding the rest.
+                Ok(Value::Array(fit_list(list)))
             }
             ops::SESSION_QUESTION => self.question(args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),

@@ -7,7 +7,7 @@
 //! | --- | --- | --- | --- | --- |
 //! | `agy.sessions` | agent | no | `{}` | `[{id: "agy:<id>", name, project, cwd, sinceMs, working}]` (the summaries copy, plus sessions started here the copy doesn't list yet) |
 //! | `agy.state` | app | no | `{id}` | `{id, open, loading, loadError, working, title, folder, config, commands, permission}` |
-//! | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
+//! | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation, truncated, omitted}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`. A long one is its newest items within about 512 KB (`truncated: true`, `omitted` = how many older items were left out), since a reply is one 1 MiB line. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
 //! | `agy.open` | app | yes | `{id}` | `{id, loading: true}`: starts `agy acp` in the session's own folder and loads it |
 //! | `agy.send` | app | yes | `{id, text}` or `{draft_folder, text}` | `{id, sent: true}`; a draft starts the session first |
 //! | `agy.cancel` | app | yes | `{id}` | `{cancelled: true}` |
@@ -52,6 +52,9 @@ pub const PERMISSION: &str = ops::AGY_PERMISSION;
 
 pub const PERMISSION_PENDING: &str = topics::AGY_PERMISSION_PENDING;
 pub const PERMISSION_RESOLVED: &str = topics::AGY_PERMISSION_RESOLVED;
+
+/// The most an `agy.conversation` reply carries of the conversation, as JSON.
+const CONVERSATION_BYTES: usize = 512 * 1024;
 
 /// The ops that start, type into or answer `agy`: refused while acting is off.
 pub const ACTING_OPS: [&str; 5] = [OPEN, SEND, CANCEL, SET_OPTION, PERMISSION];
@@ -287,8 +290,9 @@ impl AgyOps {
             r.conversation(&session)
         };
         let open = held.is_some();
-        let conversation =
-            serde_json::to_value(held.unwrap_or_default()).map_err(|e| failed(e.to_string()))?;
+        // One line of the local API is 1 MiB: a long session comes back as its newest items.
+        let (held, omitted) = held.unwrap_or_default().bounded(CONVERSATION_BYTES);
+        let conversation = serde_json::to_value(held).map_err(|e| failed(e.to_string()))?;
         Ok(json!({
             "id": row_id(&session),
             "open": open,
@@ -296,6 +300,8 @@ impl AgyOps {
             "loadError": r.load_error(&session),
             "working": r.is_working(&session),
             "conversation": conversation,
+            "truncated": omitted > 0,
+            "omitted": omitted,
         }))
     }
 
