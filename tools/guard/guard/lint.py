@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from guard.source import strip_code, strip_comments
+from guard.tomldeps import lines_naming_outside_macos
 from guard.zones import glob_regex
 
 EXCLUDE = ("legacy/macos/Tests/**", "legacy/macos/Demo/**", "tools/**", "apps/flutter/test/**")
@@ -100,6 +101,14 @@ def _defaults_migrated(path: str, lines: List[str], repo: Path) -> Found:
     return out
 
 
+def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
+    """A line that makes `gpui` a dependency under any table but the macOS target's: by key (`gpui = `,
+    `gpui.workspace = true`, `"gpui" = `), by table (`[dependencies.gpui]`), by rename (`package = "gpui"`),
+    or in the root manifest's `[workspace.dependencies]` (which can't be per target). The manifest is
+    read as TOML (`guard.tomldeps`), not matched line by line."""
+    return lines_naming_outside_macos(lines, "gpui")
+
+
 # What tools/protocol/gen.py writes, and nobody splits. Exact paths: a mark inside a file would let any file opt out.
 GENERATED_FILES = frozenset({
     "crates/protocol/src/generated.rs",
@@ -144,6 +153,11 @@ RULES: List[Rule] = [
          ("legacy/macos/Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
          ("legacy/macos/Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
          ("legacy/macos/Sources/Notchling/A.swift", "// never osascript\n")),
+    Rule("LINT-GPUI-MACOS-ONLY", "gpui is a dependency only under [target.'cfg(target_os = \"macos\")'.dependencies] "
+         "(Linux needs system libraries CI doesn't install yet; Windows is unverified)",
+         ("Cargo.toml", "crates/**/Cargo.toml"), _gpui_macos_only,
+         ("crates/kit/Cargo.toml", '[dependencies]\ngpui = { version = "=0.2.2", features = ["runtime_shaders"] }\n'),
+         ("crates/kit/Cargo.toml", '[target.\'cfg(target_os = "macos")\'.dependencies]\ngpui = { version = "=0.2.2" }\n')),
     Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
          ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(1000),
          ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1001), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1000)),

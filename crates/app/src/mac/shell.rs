@@ -1,0 +1,131 @@
+//! The menu bar app: the tray item, the Dock presence and the main window (Chat), wired together.
+
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use gpui::{App, Application, Global, WindowId};
+use objc2::MainThreadMarker;
+
+use super::dock;
+use super::tray::Tray;
+use super::window::{open_main_window, ShellView};
+use crate::chat::data::DataRoot;
+use crate::chat::view::ChatView;
+use crate::dock::{policy_for, Policy};
+use crate::menu::{Command, MenuState};
+
+/// The app's state while it runs.
+struct Shell {
+    state: MenuState,
+    tray: Option<Tray>,
+    /// Our titled windows: the ones that earn a Dock icon.
+    titled: HashSet<WindowId>,
+    /// Where Chat reads from; `None` when the environment names no home folder.
+    root: Option<DataRoot>,
+}
+
+impl Global for Shell {}
+
+/// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
+/// root instead of the real folders; Chat and the notch read the same one.
+pub fn run(data_root: Option<PathBuf>) -> i32 {
+    let root = DataRoot::for_run(data_root.as_deref());
+    let notch = root.as_ref().map(DataRoot::notch_source);
+    Application::new().run(move |cx: &mut App| {
+        dock::register(cx);
+        dock::apply(policy_for(0));
+        dock::set_main_menu(cx, policy_for(0));
+        let state = MenuState::default();
+        let tray = MainThreadMarker::new().map(|mtm| {
+            let async_cx = cx.to_async();
+            Tray::install(
+                mtm,
+                &state,
+                Box::new(move |command| {
+                    async_cx.update(|cx| handle(command, cx)).ok();
+                }),
+            )
+        });
+        if tray.is_none() {
+            eprintln!("no menu bar item: not on the main thread");
+        }
+        cx.set_global(Shell {
+            state,
+            tray,
+            titled: HashSet::new(),
+            root,
+        });
+        cx.on_window_closed(update_dock).detach();
+        // Not titled, so it never counts toward the Dock icon.
+        if let Some(source) = notch {
+            crate::notch::panel::open(cx, source);
+        }
+    });
+    0
+}
+
+/// What a menu entry does. Accounts and Settings open Chat until their own parts land.
+fn handle(command: Command, cx: &mut App) {
+    match command {
+        Command::OpenChat | Command::Accounts | Command::Settings => open_chat(cx),
+        Command::SetAwake(mode) => {
+            let shell = cx.global_mut::<Shell>();
+            shell.state.awake = mode;
+            refresh_tray(shell);
+        }
+        Command::ToggleDisplay => {
+            let shell = cx.global_mut::<Shell>();
+            shell.state.keep_display_on = !shell.state.keep_display_on;
+            refresh_tray(shell);
+        }
+        Command::Quit => cx.quit(),
+    }
+}
+
+fn refresh_tray(shell: &Shell) {
+    if let Some(tray) = &shell.tray {
+        tray.update(&shell.state);
+    }
+}
+
+/// Brings the Chat window forward, opening it first if it isn't open.
+fn open_chat(cx: &mut App) {
+    let open: Vec<_> = cx.windows();
+    let existing = open
+        .iter()
+        .find(|w| cx.global::<Shell>().titled.contains(&w.window_id()))
+        .copied();
+    match existing {
+        Some(handle) => {
+            handle
+                .update(cx, |_, window, _| window.activate_window())
+                .ok();
+        }
+        None => {
+            let root = cx.global::<Shell>().root.clone();
+            let id = match root {
+                Some(root) => open_main_window(cx, |window, cx| ChatView::new(root, window, cx))
+                    .map(|h| h.window_id()),
+                None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
+                    .map(|h| h.window_id()),
+            };
+            if let Some(id) = id {
+                cx.global_mut::<Shell>().titled.insert(id);
+            }
+        }
+    }
+    update_dock(cx);
+}
+
+/// A Dock icon, ⌘Tab and the main menu while a titled window is open; menu bar only otherwise.
+fn update_dock(cx: &mut App) {
+    let open: HashSet<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
+    let shell = cx.global_mut::<Shell>();
+    shell.titled.retain(|id| open.contains(id));
+    let policy = policy_for(shell.titled.len());
+    dock::apply(policy);
+    dock::set_main_menu(cx, policy);
+    if policy == Policy::Regular {
+        cx.activate(true);
+    }
+}

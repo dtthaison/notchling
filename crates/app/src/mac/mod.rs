@@ -1,0 +1,25 @@
+//! The macOS app over GPUI and AppKit: the menu bar item, the Dock presence, the main window, and
+//! `--render`, which captures a view's window to a PNG (GPUI has no offscreen path; spike S4).
+
+pub mod capture;
+pub mod dock;
+pub mod render;
+pub mod shell;
+pub mod tray;
+pub mod views;
+pub mod window;
+
+use crate::cli::Command;
+
+/// Runs a command; the exit code.
+pub fn run(command: Command) -> i32 {
+    match command {
+        Command::Run { data_root } => shell::run(data_root),
+        Command::Render {
+            view,
+            out,
+            data_root,
+        } => render::run(&view, &out, data_root.as_deref()),
+        Command::Version | Command::Help => 0,
+    }
+}
