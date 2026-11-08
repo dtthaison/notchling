@@ -9,9 +9,12 @@ use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const ALLOWED_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "heic"];
+/// The largest picture file read for the phone. Swift read any size; a screenshot is a few MB,
+/// and the phone gets a downscaled JPEG anyway.
+pub const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 /// A line holding a picture is read whole up to this size.
 const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -62,6 +65,8 @@ impl ImageRef {
 pub enum ImageError {
     NotFound,
     NotAllowed,
+    /// A file over [`MAX_FILE_BYTES`].
+    TooLarge,
 }
 
 /// What a line's picture was before its base64 was cut out.
@@ -219,18 +224,21 @@ pub fn refs(
 /// or /tmp. Paths are checked after symlinks and `..` are resolved. Unix paths only: on Windows
 /// nothing named in the text is shown yet.
 pub fn is_allowed_file(path: &str, home: &Path) -> bool {
+    allowed_file(path, home).is_some()
+}
+
+/// [`is_allowed_file`]'s answer as the resolved path, which is what gets read.
+pub fn allowed_file(path: &str, home: &Path) -> Option<PathBuf> {
     if !path.starts_with('/') {
-        return false;
+        return None;
     }
-    let Ok(resolved) = std::fs::canonicalize(path) else {
-        return false;
-    };
+    let resolved = std::fs::canonicalize(path).ok()?;
     let extension = resolved
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     if !ALLOWED_EXTENSIONS.contains(&extension.as_str()) {
-        return false;
+        return None;
     }
     let mut roots = vec![
         Path::new("/tmp").to_path_buf(),
@@ -240,8 +248,9 @@ pub fn is_allowed_file(path: &str, home: &Path) -> bool {
         roots.push(home);
     }
     // `Path::starts_with` compares whole components, so /tmpfoo is not under /tmp.
-    roots.iter().any(|root| resolved.starts_with(root))
-        && std::fs::metadata(&resolved).is_ok_and(|m| m.is_file())
+    let allowed = roots.iter().any(|root| resolved.starts_with(root))
+        && std::fs::metadata(&resolved).is_ok_and(|m| m.is_file());
+    allowed.then_some(resolved)
 }
 
 fn marker_pattern() -> Option<&'static regex::Regex> {
@@ -407,10 +416,8 @@ fn jpeg_size<R: Read + Seek>(reader: &mut R) -> Option<(i64, i64)> {
 /// was read.
 pub fn data(image: &ImageRef, transcript: &Path, home: &Path) -> Result<Vec<u8>, ImageError> {
     if let Some(path) = &image.path {
-        if !is_allowed_file(path, home) {
-            return Err(ImageError::NotAllowed);
-        }
-        return std::fs::read(path).map_err(|_| ImageError::NotFound);
+        let resolved = allowed_file(path, home).ok_or(ImageError::NotAllowed)?;
+        return read_allowed(&resolved);
     }
     let (Some(offset), Some(index)) = (image.line_offset, image.block_index) else {
         return Err(ImageError::NotFound);
@@ -431,6 +438,48 @@ pub fn data(image: &ImageRef, transcript: &Path, home: &Path) -> Result<Vec<u8>,
     base64::engine::general_purpose::STANDARD
         .decode(base64)
         .map_err(|_| ImageError::NotFound)
+}
+
+/// The bytes of a file [`allowed_file`] resolved. The path could have changed since that check, so
+/// the file is opened without following a link and judged by the open handle: a regular file of at
+/// most [`MAX_FILE_BYTES`], read through a cap in case it grows. A FIFO opens without waiting for a
+/// writer and is refused.
+pub fn read_allowed(resolved: &Path) -> Result<Vec<u8>, ImageError> {
+    let file = match open_no_follow(resolved) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ImageError::NotFound),
+        // A link put there since the check (ELOOP), or no permission.
+        Err(_) => return Err(ImageError::NotAllowed),
+    };
+    let meta = file.metadata().map_err(|_| ImageError::NotFound)?;
+    if !meta.is_file() {
+        return Err(ImageError::NotAllowed);
+    }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(ImageError::TooLarge);
+    }
+    let mut data = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut data)
+        .map_err(|_| ImageError::NotFound)?;
+    if data.len() as u64 > MAX_FILE_BYTES {
+        return Err(ImageError::TooLarge);
+    }
+    Ok(data)
+}
+
+#[cfg(unix)]
+fn open_no_follow(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_no_follow(path: &Path) -> std::io::Result<File> {
+    File::open(path)
 }
 
 /// The line starting at `offset`, without its newline. A line is read in pieces until its newline.

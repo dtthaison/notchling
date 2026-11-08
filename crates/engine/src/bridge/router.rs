@@ -78,6 +78,11 @@ impl Router {
         self.uploads.pending()
     }
 
+    /// Frees uploads past their expiry; the transport runs it on the hub's tick.
+    pub fn sweep_uploads(&self) {
+        self.uploads.sweep(self.now_ms());
+    }
+
     /// Answers one text frame. Blocks until the backend has (a `pair` waits for the person at the
     /// computer), so the transport calls it off its reading thread; frames of one connection may be
     /// handled at the same time.

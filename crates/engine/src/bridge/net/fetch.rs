@@ -1,10 +1,10 @@
 //! The one request the bridge makes: a blocking HTTPS GET of a Cloudflare Access team's signing
-//! keys (`AccessKeySet.liveFetch`). TLS through rustls with the OS's root certificates, a 5 s
-//! connect and read limit, 1 MB at most. It runs on the handshaking phone's thread, never another's,
+//! keys (`AccessKeySet.liveFetch`). TLS through rustls with the OS's root certificates, 5 s each
+//! for the name lookup, the connect (every address together) and each read or write, 1 MB at most. It runs on the handshaking phone's thread, never another's,
 //! and only for a request that carries Cloudflare's headers while internet access is on.
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,12 +38,14 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
     let name =
         rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
     let conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| e.to_string())?;
-    let addr = (host, 443)
-        .to_socket_addrs()
-        .map_err(|e| e.to_string())?
-        .next()
-        .ok_or("no address")?;
-    let sock = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|e| e.to_string())?;
+    let lookup_host = host.to_string();
+    let addrs = resolve_within(TIMEOUT, move || {
+        (lookup_host.as_str(), 443)
+            .to_socket_addrs()
+            .map(Iterator::collect)
+            .map_err(|e| e.to_string())
+    })?;
+    let sock = connect_within(&addrs, TIMEOUT)?;
     sock.set_read_timeout(Some(TIMEOUT))
         .map_err(|e| e.to_string())?;
     sock.set_write_timeout(Some(TIMEOUT))
@@ -67,6 +69,40 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
         }
     }
     parse_response(&body)
+}
+
+/// The first of `addrs` that answers, all of them together within `within`.
+fn connect_within(addrs: &[SocketAddr], within: Duration) -> Result<TcpStream, String> {
+    let deadline = std::time::Instant::now() + within;
+    let mut last = "no address".to_string();
+    for addr in addrs {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err("connecting took too long".into());
+        }
+        match TcpStream::connect_timeout(addr, left) {
+            Ok(sock) => return Ok(sock),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
+}
+
+/// The addresses `lookup` finds, or an error once `within` has passed. The system resolver has no
+/// timeout of its own, so it runs on a thread of its own, left to finish alone if it hangs.
+fn resolve_within(
+    within: Duration,
+    lookup: impl FnOnce() -> Result<Vec<SocketAddr>, String> + Send + 'static,
+) -> Result<Vec<SocketAddr>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("bridge-dns".into())
+        .spawn(move || {
+            let _ = tx.send(lookup());
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv_timeout(within)
+        .map_err(|_| "the name lookup took too long".to_string())?
 }
 
 /// The body of a `200` answer (plain or chunked); an error for anything else.
@@ -124,6 +160,22 @@ mod tests {
         assert_eq!(parse_response(chunked).unwrap(), b"{\"k\":1}");
         assert!(parse_response(b"HTTP/1.1 404 Not Found\r\n\r\n").is_err());
         assert!(parse_response(b"junk").is_err());
+    }
+
+    #[test]
+    fn a_name_lookup_that_hangs_gives_up_at_its_deadline() {
+        let started = std::time::Instant::now();
+        let slow = || {
+            std::thread::sleep(Duration::from_secs(3));
+            Ok(vec![])
+        };
+        assert!(resolve_within(Duration::from_millis(100), slow).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let addr: std::net::SocketAddr = "192.0.2.1:443".parse().unwrap();
+        assert_eq!(
+            resolve_within(Duration::from_secs(1), move || Ok(vec![addr])),
+            Ok(vec![addr])
+        );
     }
 
     #[test]

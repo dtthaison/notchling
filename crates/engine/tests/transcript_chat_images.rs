@@ -330,6 +330,65 @@ fn a_reference_to_a_line_that_is_not_a_picture_finds_nothing() {
 
 #[cfg(unix)]
 #[test]
+fn a_file_over_the_cap_is_refused() {
+    let home = Scratch::new("data-huge");
+    let tmp = TmpFolder::new("huge");
+    let path = scratch_file(&tmp.0, "huge.png", &png(64, 64, 100));
+    let (_, refs) = images::file_markers(&format!("[Image: source: {path}]"), &home.dir);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open")
+        .set_len(images::MAX_FILE_BYTES + 1)
+        .expect("grow");
+    assert_eq!(
+        images::data(&refs[0], &home.path("t.jsonl"), &home.dir).map(|d| d.len()),
+        Err(ImageError::TooLarge)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_swapped_in_after_the_check_is_refused_without_waiting() {
+    let home = Scratch::new("data-fifo");
+    let tmp = TmpFolder::new("fifo");
+    let path = scratch_file(&tmp.0, "pipe.png", &png(64, 64, 100));
+    let resolved = images::allowed_file(&path, &home.dir).expect("allowed");
+    std::fs::remove_file(&resolved).expect("remove");
+    let name = std::ffi::CString::new(resolved.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: a valid C string.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reading = resolved.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(images::read_allowed(&reading));
+    });
+    let answer = rx.recv_timeout(std::time::Duration::from_secs(2));
+    if answer.is_err() {
+        // Free the blocked reader before failing.
+        let _ = std::fs::OpenOptions::new().write(true).open(&resolved);
+    }
+    assert_eq!(
+        answer.expect("answered without waiting for a writer"),
+        Err(ImageError::NotAllowed)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_swapped_in_after_the_check_is_not_followed() {
+    let home = Scratch::new("data-swap");
+    let secret = scratch_file(&home.path("outside"), "secret.png", b"secret");
+    let tmp = TmpFolder::new("swap");
+    let path = scratch_file(&tmp.0, "note.png", &png(64, 64, 100));
+    let resolved = images::allowed_file(&path, &home.path("nowhere")).expect("allowed");
+    std::fs::remove_file(&resolved).expect("remove");
+    std::os::unix::fs::symlink(&secret, &resolved).expect("link");
+    assert_eq!(images::read_allowed(&resolved), Err(ImageError::NotAllowed));
+}
+
+#[cfg(unix)]
+#[test]
 fn a_file_is_checked_again_at_fetch_time() {
     let home = Scratch::new("data-file");
     let tmp = TmpFolder::new("fetch");

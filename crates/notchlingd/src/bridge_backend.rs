@@ -203,6 +203,10 @@ impl DaemonActing {
 }
 
 impl Acting for DaemonActing {
+    fn is_on(&self) -> bool {
+        self.ops.is_on()
+    }
+
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
         let id = self.row_of(session)?;
         self.call(ops::SESSION_REPLY, json!({"id": id, "text": text}))

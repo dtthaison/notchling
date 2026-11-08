@@ -5,6 +5,7 @@
 use super::files::{iso8601, parse_iso8601, write_private, FileLock};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The file's name in the bridge folder.
 pub const FILE_NAME: &str = "remote-log.jsonl";
@@ -68,19 +69,33 @@ impl AuditEntry {
 
 pub struct AuditLog {
     file: PathBuf,
+    /// Set by [`AuditLog::halt`]; held through a write, so none outlasts the halt.
+    halted: Mutex<bool>,
 }
 
 impl AuditLog {
     pub fn new(file: PathBuf) -> AuditLog {
-        AuditLog { file }
+        AuditLog {
+            file,
+            halted: Mutex::new(false),
+        }
     }
 
     pub fn file(&self) -> &Path {
         &self.file
     }
 
+    /// No more lines, from now on: the bridge is going off. Waits for a write in progress.
+    pub fn halt(&self) {
+        *self.halted.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    }
+
     /// Appends one line. A failure is returned for the caller to report; the op itself goes on.
     pub fn append(&self, entry: &AuditEntry) -> std::io::Result<()> {
+        let halted = self.halted.lock().unwrap_or_else(|e| e.into_inner());
+        if *halted {
+            return Err(std::io::Error::other("the bridge is off"));
+        }
         let _lock = FileLock::acquire(&self.file)?;
         let mut data = match std::fs::read(&self.file) {
             Ok(d) => d,

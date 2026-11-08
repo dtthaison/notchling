@@ -15,7 +15,7 @@ use crate::lock::{lock_path_for, InstanceLock};
 use crate::tier::Allowlist;
 use crate::transport::{self, Listener};
 use crate::wire::{ApiError, ClientKind, DaemonStatus, Tier};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -67,6 +67,17 @@ pub trait Handler: Send + Sync + 'static {
     fn spec(&self, op: &str) -> Option<OpSpec>;
     /// Runs an op the server has already checked.
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError>;
+    /// [`Handler::call`], plus fields for the reply line beside `ok` (never over `id`, `ok` or
+    /// `err`). Additive: a client ignores keys it doesn't know. The daemon's `sessions.list` says
+    /// `partial` here when it answered before its first read of the list.
+    fn call_with_extras(
+        &self,
+        caller: &Caller,
+        op: &str,
+        args: &Value,
+    ) -> (Result<Value, ApiError>, Map<String, Value>) {
+        (self.call(caller, op, args), Map::new())
+    }
     /// The topics `events.subscribe` accepts.
     fn topics(&self) -> &[&str] {
         &[]

@@ -262,6 +262,47 @@ fn a_tunnel_pairing_is_audited_by_the_clients_own_address() {
 }
 
 #[test]
+fn once_halted_a_hello_pair_or_revoke_in_flight_writes_nothing() {
+    let rig = Rig::new();
+    let (device, token) = rig.core.devices.register("phone", "ios", START).unwrap();
+    let devices = rig.core.devices.file().to_path_buf();
+    let before = std::fs::read(&devices).unwrap();
+    let code_text = rig.core.codes.issue(START).unwrap().code;
+    // Bridge-off has begun: what was already on its way must not write.
+    rig.core.halt();
+    let (hello, _) = rig.connect("192.168.1.20");
+    rig.core.handle(
+        &hello,
+        &format!(r#"{{"id":1,"op":"hello","token":"{token}"}}"#),
+    );
+    let (pairing, pair_io) = rig.connect("192.168.1.21");
+    rig.core.handle(&pairing, &pair(&code_text, "late"));
+    assert_eq!(code(&pair_io, 0), "internal", "{:?}", pair_io.texts());
+    assert!(rig.core.revoke(&device.id).is_err());
+    assert_eq!(
+        std::fs::read(&devices).unwrap(),
+        before,
+        "devices.json untouched"
+    );
+    assert!(!rig.core.audit.file().exists(), "no audit line");
+}
+
+#[test]
+fn the_tick_sweeps_an_upload_left_idle_past_its_expiry() {
+    let rig = Rig::new();
+    let (connection, io, _) = rig.login();
+    rig.core.handle(
+        &connection,
+        r#"{"id":2,"op":"session.image.begin","sessionId":"s1","bytes":1000}"#,
+    );
+    assert_eq!(rig.core.router.pending_uploads(), 1, "{:?}", io.texts());
+    rig.clock
+        .advance(crate::bridge::uploads::EXPIRES_AFTER_MS as i64 + 1);
+    rig.core.tick();
+    assert_eq!(rig.core.router.pending_uploads(), 0);
+}
+
+#[test]
 fn the_tick_pushes_sessions_to_a_subscriber() {
     let rig = Rig::new();
     let (connection, io, _) = rig.login();

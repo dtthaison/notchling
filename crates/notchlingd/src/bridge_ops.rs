@@ -117,6 +117,8 @@ impl BridgeOps {
                     ApiError::bad_request("bridge.set takes {\"on\": true|false}")
                 })?;
                 if !on {
+                    // Halted first: a pair approved just before the refusal can't write either.
+                    self.bridge.halt();
                     self.approvals.refuse_all();
                 }
                 let status = self.bridge.set(on);
@@ -150,6 +152,7 @@ impl BridgeOps {
 
     /// The daemon is stopping: phones waiting to pair are refused and the ports close.
     pub fn close(&self) {
+        self.bridge.halt();
         self.approvals.refuse_all();
         self.bridge.set(false);
     }

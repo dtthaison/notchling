@@ -227,6 +227,11 @@ impl Router {
         body: &Body,
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
+        // The photo only ever reaches the session as an acting call: while acting is off, none of
+        // it is taken in.
+        if !self.backend.acting_on() {
+            return Err(BridgeFailure::invalid(super::live::ACTING_OFF));
+        }
         let session_id = require(body, "sessionId")?;
         let bytes = int(body, "bytes")
             .filter(|b| *b > 0 && *b as usize <= MAX_BYTES)

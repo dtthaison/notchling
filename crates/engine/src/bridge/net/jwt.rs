@@ -3,7 +3,9 @@
 //!
 //! Keys are cached per team for an hour. A token whose `kid` isn't cached makes one refetch, but
 //! never more often than every 30 s, so a client sending random `kid`s can't make the computer
-//! hammer Cloudflare. A failed fetch keeps serving the keys it has.
+//! hammer Cloudflare. A failed fetch keeps serving the keys it has only while they are under an
+//! hour old; past that every tunnel token is refused until a fetch succeeds (fails closed, as
+//! Swift's `AccessKeySet` does).
 
 use super::crypto::base64_decode;
 use ring::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA256};

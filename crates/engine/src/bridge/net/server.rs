@@ -2,15 +2,23 @@
 //! cloudflared): one accept thread each, and per phone a reader thread and a writer thread.
 //!
 //! A phone must finish its TLS handshake and request head within the head timeout (5 s) or it is
-//! answered 408 and dropped. After the upgrade every frame goes through [`FrameDecoder`]; a frame
-//! off the rules or over 256 KB closes that phone with the right code. Writes go through a bounded
-//! queue: a phone that stops reading fills it and is dropped. Every 20 s each phone gets a ping,
-//! and one that missed two is dropped. None of it waits on another phone.
+//! answered 408 and dropped, and must send `hello` or `pair` within the auth timeout (10 s) of
+//! connecting or it is closed; answering pings doesn't count. A `pair` waiting for the person at
+//! the computer is past that point, and so is a phone that said hello, which may then stay idle
+//! as long as it answers pings (as with the Swift bridge). One LAN address holds at most four
+//! sockets that haven't logged in, on top of the 64 per port.
+//!
+//! After the upgrade every frame goes through [`FrameDecoder`]; a frame off the rules or over
+//! 256 KB closes that phone with the right code. Writes go through a bounded queue: a phone that
+//! stops reading fills it and is marked dropped, and the watcher thread closes its socket, so the
+//! hub's push never waits on it. Every 20 s each phone gets a ping, and one that missed two is
+//! dropped. None of it waits on another phone.
 
 use super::address;
 use super::core::Core;
 use super::frame::{self, Event, FrameDecoder};
 use super::http::{self, HeadParse, HeadReader, Upgrade};
+use super::limiter;
 use super::wire::{PlainWire, TlsWire, Wire};
 use crate::bridge::{Connection, ConnectionIo};
 use std::collections::HashMap;
@@ -26,9 +34,13 @@ use std::time::{Duration, Instant};
 pub struct Limits {
     /// For the TLS handshake and the request head together.
     pub head_timeout: Duration,
+    /// A socket that hasn't sent `hello` or `pair` by then is closed.
+    pub auth_timeout: Duration,
     pub ping_every: Duration,
     /// Phones connected or connecting at once, per port.
     pub max_connections: usize,
+    /// Sockets one LAN address (an IPv6 one by its /64) may hold before logging in.
+    pub unauthenticated_per_address: usize,
     /// A write that takes longer than this drops the phone.
     pub write_timeout: Duration,
     /// Frames waiting to go out to one phone before it is dropped as too slow.
@@ -39,8 +51,10 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             head_timeout: Duration::from_millis(http::HEAD_TIMEOUT_MS as u64),
+            auth_timeout: Duration::from_secs(10),
             ping_every: Duration::from_secs(20),
             max_connections: 64,
+            unauthenticated_per_address: 4,
             write_timeout: Duration::from_secs(10),
             queue: 512,
         }
@@ -64,28 +78,94 @@ struct Registry {
 
 struct Entry {
     wire: Arc<dyn Wire>,
+    /// The LAN peer, as the limiter keys it; `None` on the tunnel port, where every socket is
+    /// cloudflared's and the Access check at the door stands in.
+    peer: Option<String>,
+    opened: Instant,
+    /// Set by the first text frame, which is `hello` or `pair` (any other closes a socket that
+    /// hasn't logged in).
+    spoke: Arc<AtomicBool>,
     outbox: Option<Arc<Outbox>>,
+    connection: Option<Arc<Connection>>,
+    /// The watcher has closed it.
+    shut: bool,
+}
+
+impl Entry {
+    fn authenticated(&self) -> bool {
+        self.connection
+            .as_ref()
+            .is_some_and(|c| c.is_authenticated())
+    }
 }
 
 impl Registry {
-    fn insert(&self, wire: Arc<dyn Wire>, max: usize) -> Option<u64> {
+    /// A new socket, or `None` when the port or the peer's address has no room for it.
+    fn insert(
+        &self,
+        wire: Arc<dyn Wire>,
+        peer: Option<String>,
+        limits: &Limits,
+    ) -> Option<(u64, Arc<AtomicBool>)> {
         let mut wires = lock(&self.wires);
-        if wires.len() >= max {
+        if wires.len() >= limits.max_connections {
             return None;
         }
+        if let Some(peer) = &peer {
+            let waiting = wires
+                .values()
+                .filter(|e| e.peer.as_ref() == Some(peer) && !e.authenticated())
+                .count();
+            if waiting >= limits.unauthenticated_per_address {
+                return None;
+            }
+        }
         let key = self.next.fetch_add(1, Ordering::SeqCst);
-        wires.insert(key, Entry { wire, outbox: None });
-        Some(key)
+        let spoke = Arc::new(AtomicBool::new(false));
+        wires.insert(
+            key,
+            Entry {
+                wire,
+                peer,
+                opened: Instant::now(),
+                spoke: spoke.clone(),
+                outbox: None,
+                connection: None,
+                shut: false,
+            },
+        );
+        Some((key, spoke))
     }
 
-    fn attach(&self, key: u64, outbox: Arc<Outbox>) {
+    fn attach(&self, key: u64, outbox: Arc<Outbox>, connection: Arc<Connection>) {
         if let Some(entry) = lock(&self.wires).get_mut(&key) {
             entry.outbox = Some(outbox);
+            entry.connection = Some(connection);
         }
     }
 
     fn remove(&self, key: u64) {
         lock(&self.wires).remove(&key);
+    }
+
+    /// The sockets to close now (dropped as too slow, or silent past the auth timeout), and, when
+    /// `ping`, every outbox to ping.
+    fn sweep(&self, auth_timeout: Duration, ping: bool) -> (Vec<Arc<dyn Wire>>, Vec<Arc<Outbox>>) {
+        let mut close = Vec::new();
+        let mut pings = Vec::new();
+        for entry in lock(&self.wires).values_mut().filter(|e| !e.shut) {
+            let dropped = entry.outbox.as_ref().is_some_and(|o| o.is_done());
+            let silent = !entry.spoke.load(Ordering::SeqCst)
+                && !entry.authenticated()
+                && entry.opened.elapsed() >= auth_timeout;
+            if dropped || silent {
+                entry.shut = true;
+                close.push(entry.wire.clone());
+            } else if ping {
+                pings.extend(entry.outbox.clone());
+            }
+        }
+        (close, pings)
     }
 }
 
@@ -115,17 +195,17 @@ impl Listener {
                 .name(format!("bridge-accept-{port}"))
                 .spawn(move || accept_loop(listener, kind, core, limits, stop, registry))?
         };
-        let ping = {
+        let watch = {
             let (stop, registry) = (stop.clone(), registry.clone());
             std::thread::Builder::new()
-                .name(format!("bridge-ping-{port}"))
-                .spawn(move || ping_loop(limits.ping_every, stop, registry))?
+                .name(format!("bridge-watch-{port}"))
+                .spawn(move || watch_loop(limits, stop, registry))?
         };
         Ok(Listener {
             port,
             stop,
             registry,
-            threads: vec![accept, ping],
+            threads: vec![accept, watch],
         })
     }
 
@@ -200,19 +280,21 @@ fn accept_loop(
     }
 }
 
-fn ping_loop(every: Duration, stop: Arc<AtomicBool>, registry: Arc<Registry>) {
-    let mut last = Instant::now();
+/// Every 50 ms: closes the sockets of phones marked dropped and of ones silent past the auth
+/// timeout; every `ping_every`, pings the rest. Closing never waits ([`Wire::shutdown`]).
+fn watch_loop(limits: Limits, stop: Arc<AtomicBool>, registry: Arc<Registry>) {
+    let mut last_ping = Instant::now();
     while !stop.load(Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(50).min(every));
-        if last.elapsed() < every {
-            continue;
+        std::thread::sleep(Duration::from_millis(50).min(limits.ping_every));
+        let ping = last_ping.elapsed() >= limits.ping_every;
+        if ping {
+            last_ping = Instant::now();
         }
-        last = Instant::now();
-        let outboxes: Vec<Arc<Outbox>> = lock(&registry.wires)
-            .values()
-            .filter_map(|e| e.outbox.clone())
-            .collect();
-        for outbox in outboxes {
+        let (close, pings) = registry.sweep(limits.auth_timeout, ping);
+        for wire in close {
+            wire.shutdown();
+        }
+        for outbox in pings {
             outbox.ping_tick();
         }
     }
@@ -243,14 +325,18 @@ fn serve(
             Err(_) => return,
         },
     };
-    let Some(key) = registry.insert(wire.clone(), limits.max_connections) else {
+    let lan_peer = match kind {
+        Kind::Lan(_) => Some(limiter::key(&address::canonical(peer.ip()))),
+        Kind::Tunnel => None,
+    };
+    let Some((key, spoke)) = registry.insert(wire.clone(), lan_peer, &limits) else {
         if matches!(kind, Kind::Tunnel) {
             let _ = wire.write_all(&http::response(503, "busy\n", &[]));
         }
         wire.shutdown();
         return;
     };
-    run(&wire, peer, &kind, &core, limits, &registry, key);
+    run(&wire, peer, &kind, &core, limits, &registry, (key, &spoke));
     registry.remove(key);
 }
 
@@ -261,7 +347,7 @@ fn run(
     core: &Arc<Core>,
     limits: Limits,
     registry: &Registry,
-    key: u64,
+    (key, spoke): (u64, &AtomicBool),
 ) {
     let Some((head, leftover)) = read_head(wire.as_ref(), limits.head_timeout) else {
         wire.shutdown();
@@ -288,13 +374,19 @@ fn run(
     // Pings find a dead phone; this only stops a read that never returns.
     let _ = wire.set_read_timeout(Some(limits.ping_every * 3));
     let outbox = Outbox::start(wire.clone(), limits.queue);
-    registry.attach(key, outbox.clone());
     let address = tunnel
         .clone()
         .unwrap_or_else(|| address::canonical(peer.ip()));
     let io: Arc<dyn ConnectionIo> = outbox.clone();
     let connection = core.connect(&address, tunnel.is_some(), io);
-    frames(wire.as_ref(), &leftover, &connection, &outbox, core);
+    registry.attach(key, outbox.clone(), connection.clone());
+    frames(
+        wire.as_ref(),
+        &leftover,
+        (&connection, spoke),
+        &outbox,
+        core,
+    );
     connection.close();
     core.closed(&connection);
 }
@@ -313,10 +405,13 @@ fn read_head(wire: &dyn Wire, timeout: Duration) -> Option<(http::HttpHead, Vec<
         let n = match wire.read(&mut buf) {
             Ok(0) => return None,
             Ok(n) => n,
+            // `Interrupted`: TLS bytes but no plaintext yet, so the deadline is checked again.
             Err(e)
                 if matches!(
                     e.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::Interrupted
                 ) =>
             {
                 continue;
@@ -337,7 +432,7 @@ fn read_head(wire: &dyn Wire, timeout: Duration) -> Option<(http::HttpHead, Vec<
 fn frames(
     wire: &dyn Wire,
     leftover: &[u8],
-    connection: &Arc<Connection>,
+    (connection, spoke): (&Arc<Connection>, &AtomicBool),
     outbox: &Outbox,
     core: &Arc<Core>,
 ) {
@@ -348,7 +443,10 @@ fn frames(
     loop {
         for event in events.drain(..) {
             match event {
-                Event::Text(text) => handlers.run(core, connection, text),
+                Event::Text(text) => {
+                    spoke.store(true, Ordering::SeqCst);
+                    handlers.run(core, connection, text);
+                }
                 Event::Binary(_) => {} // binary frames from phones are not part of the protocol
                 Event::Ping(payload) => outbox.push(Out::Raw(frame::encode(frame::PONG, &payload))),
                 Event::Pong(_) => outbox.missed.store(0, Ordering::SeqCst),
@@ -366,8 +464,10 @@ fn frames(
             }
         }
         match wire.read(&mut buf) {
-            Ok(0) | Err(_) => return,
+            Ok(0) => return,
             Ok(n) => events = decoder.feed(&buf[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return,
         }
     }
 }
@@ -425,7 +525,6 @@ enum Out {
 /// The live [`ConnectionIo`]: a bounded queue drained by the phone's writer thread.
 struct Outbox {
     tx: SyncSender<Out>,
-    wire: Arc<dyn Wire>,
     done: Arc<AtomicBool>,
     missed: AtomicU32,
 }
@@ -444,7 +543,6 @@ impl Outbox {
         }
         Arc::new(Outbox {
             tx,
-            wire,
             done,
             missed: AtomicU32::new(0),
         })
@@ -467,9 +565,10 @@ impl Outbox {
         self.push(Out::Close(code));
     }
 
+    /// Marks the phone dropped. The socket is closed by the watcher (or the writer, if it is
+    /// free), never here: this runs inside the hub's push, which mustn't wait on one phone.
     fn drop_now(&self) {
         self.done.store(true, Ordering::SeqCst);
-        self.wire.shutdown();
     }
 
     fn is_done(&self) -> bool {

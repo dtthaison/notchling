@@ -31,7 +31,7 @@ use notchling_local_api::{
     Server, ServerConfig, ServerHandle, Tier, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -149,7 +149,41 @@ impl Ops {
     }
 }
 
+impl Ops {
+    /// The list, and whether the first read was in. Only this client's thread waits. Past the wait
+    /// the list is what there is, and the first read follows as `sessions.changed` to a client that
+    /// subscribed.
+    fn sessions_list(&self) -> (Value, bool) {
+        let landed = self.first.wait(self.first_wait);
+        let list = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        (list, landed)
+    }
+}
+
 impl Handler for Ops {
+    /// `sessions.list` answered before the first read adds `"partial": true` beside `ok`; the
+    /// result itself stays a bare list, which every client reads as one.
+    fn call_with_extras(
+        &self,
+        caller: &Caller,
+        op: &str,
+        args: &Value,
+    ) -> (Result<Value, ApiError>, Map<String, Value>) {
+        if op != ops::SESSIONS_LIST {
+            return (self.call(caller, op, args), Map::new());
+        }
+        let (list, landed) = self.sessions_list();
+        let mut extras = Map::new();
+        if !landed {
+            extras.insert("partial".into(), Value::Bool(true));
+        }
+        (Ok(list), extras)
+    }
+
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
@@ -166,16 +200,7 @@ impl Handler for Ops {
             return bridge.call(op, args);
         }
         match (op, &self.acting) {
-            (ops::SESSIONS_LIST, _) => {
-                // Only this client's thread waits. Past the wait the list is what there is, and
-                // the first read follows as `sessions.changed` to a client that subscribed.
-                self.first.wait(self.first_wait);
-                Ok(self
-                    .sessions
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone())
-            }
+            (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
             (op, Some(acting)) => acting.call(caller, op, args),
             (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
         }
@@ -544,6 +569,19 @@ mod tests {
         assert_eq!(ops.spec("approval.answer"), None);
         assert_eq!(ops.spec("settings.set"), None);
         assert_eq!(ops.topics(), &["sessions"]);
+    }
+
+    #[test]
+    fn a_list_answered_before_the_first_read_says_partial() {
+        let first = FirstScan::pending();
+        let ops = Ops::new(Arc::new(Mutex::new(json!([]))))
+            .with_first_scan(first.clone(), Duration::from_millis(10));
+        let (list, extras) = ops.call_with_extras(&caller(), ops::SESSIONS_LIST, &Value::Null);
+        assert_eq!(list.unwrap(), json!([]), "the result stays a bare list");
+        assert_eq!(extras.get("partial"), Some(&json!(true)));
+        first.finish();
+        let (_, extras) = ops.call_with_extras(&caller(), ops::SESSIONS_LIST, &Value::Null);
+        assert!(extras.is_empty(), "{extras:?}");
     }
 
     #[test]

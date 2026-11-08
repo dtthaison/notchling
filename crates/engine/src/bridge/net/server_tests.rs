@@ -57,12 +57,15 @@ fn limits() -> Limits {
 
 impl Rig {
     fn new() -> Rig {
+        Rig::with(limits(), Arc::new(FakeBackend::default()))
+    }
+
+    fn with(limits: Limits, backend: Arc<FakeBackend>) -> Rig {
         let dir = TempDir::new("bridge-server");
         let bridge = swift_folder(&dir);
         let key = TestKey::a("k1");
         let clock = now_clock();
         let log = FetchLog::new(vec![jwks(&[&key])]);
-        let backend = Arc::new(FakeBackend::default());
         let core = Arc::new(Core::new(
             &bridge,
             CoreParts {
@@ -76,10 +79,10 @@ impl Rig {
             local(0),
             Kind::Lan(identity.server_config().unwrap()),
             core.clone(),
-            limits(),
+            limits,
         )
         .unwrap();
-        let tunnel = Listener::start(local(0), Kind::Tunnel, core.clone(), limits()).unwrap();
+        let tunnel = Listener::start(local(0), Kind::Tunnel, core.clone(), limits).unwrap();
         Rig {
             _dir: dir,
             core,
@@ -391,16 +394,7 @@ pub(crate) type Phone =
 /// A phone on the LAN port: TLS pinned to `fingerprint`, then the WebSocket upgrade (tungstenite).
 pub(crate) fn tls_phone_at(port: u16, fingerprint: &str) -> Result<Phone, String> {
     use tungstenite::client::IntoClientRequest;
-    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .unwrap()
-    .dangerous()
-    .with_custom_certificate_verifier(Arc::new(Pinned(fingerprint.to_string())))
-    .with_no_client_auth();
-    let name = ServerName::try_from("bridge.local").unwrap();
-    let conn = rustls::ClientConnection::new(Arc::new(config), name).unwrap();
+    let conn = client_tls(fingerprint);
     let sock = TcpStream::connect(("127.0.0.1", port)).unwrap();
     sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let stream = rustls::StreamOwned::new(conn, sock);
@@ -412,6 +406,20 @@ pub(crate) fn tls_phone_at(port: u16, fingerprint: &str) -> Result<Phone, String
     tungstenite::client(req, stream)
         .map(|(ws, _)| ws)
         .map_err(|e| e.to_string())
+}
+
+/// A phone's TLS session, pinned to `fingerprint`, before any byte has gone.
+fn client_tls(fingerprint: &str) -> rustls::ClientConnection {
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .dangerous()
+    .with_custom_certificate_verifier(Arc::new(Pinned(fingerprint.to_string())))
+    .with_no_client_auth();
+    let name = ServerName::try_from("bridge.local").unwrap();
+    rustls::ClientConnection::new(Arc::new(config), name).unwrap()
 }
 
 fn tls_phone(rig: &Rig, fingerprint: &str) -> Result<Phone, String> {
@@ -478,4 +486,241 @@ fn stopping_closes_the_port_and_every_phone() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(core.connections(), 0, "the router heard it close");
+}
+
+/// True while the server keeps the socket open (a short read times out rather than ending).
+fn still_open(s: &mut TcpStream) -> bool {
+    s.set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mut buf = [0u8; 64];
+    match s.read(&mut buf) {
+        Ok(0) => false,
+        Ok(_) => true,
+        Err(e) => matches!(
+            e.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ),
+    }
+}
+
+fn wait_for(what: impl Fn() -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !what() {
+        if Instant::now() > deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+#[test]
+fn a_tls_client_dripping_its_handshake_is_closed_at_the_head_deadline() {
+    let rig = Rig::new();
+    let mut hello = Vec::new();
+    let mut tls = client_tls(&rig.fingerprint);
+    while tls.wants_write() {
+        tls.write_tls(&mut hello).unwrap();
+    }
+    let mut s = TcpStream::connect(("127.0.0.1", rig.lan.port())).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let writer = s.try_clone().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let dripping = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            for byte in hello {
+                if stop.load(Ordering::SeqCst) || (&writer).write_all(&[byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    let started = Instant::now();
+    assert!(closed(&mut s));
+    let took = started.elapsed();
+    stop.store(true, Ordering::SeqCst);
+    dripping.join().unwrap();
+    assert!(
+        took < Duration::from_secs(2),
+        "open for {took:?} while it dripped"
+    );
+}
+
+#[test]
+fn a_fifth_unauthenticated_socket_from_one_address_is_refused() {
+    let rig = Rig::with(
+        Limits {
+            head_timeout: Duration::from_secs(5),
+            ..limits()
+        },
+        Arc::new(FakeBackend::default()),
+    );
+    // A phone that said hello doesn't count.
+    let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
+    assert_eq!(ws_hello(&mut phone, PIXEL_TOKEN)["ok"], true);
+    let connect = || TcpStream::connect(("127.0.0.1", rig.lan.port())).unwrap();
+    let mut idle: Vec<TcpStream> = (0..4).map(|_| connect()).collect();
+    assert!(wait_for(|| rig.lan.sockets() == 5));
+    let mut fifth = connect();
+    fifth
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let started = Instant::now();
+    assert!(closed(&mut fifth));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "the fifth stayed {:?}",
+        started.elapsed()
+    );
+    for s in &mut idle {
+        assert!(still_open(s), "the first four stay");
+    }
+    drop(idle.pop());
+    assert!(wait_for(|| rig.lan.sockets() == 4));
+    let mut again = connect();
+    assert!(still_open(&mut again), "one gone makes room for another");
+}
+
+#[test]
+fn an_unauthenticated_websocket_answering_pings_is_closed_at_the_auth_deadline() {
+    let rig = Rig::with(
+        Limits {
+            auth_timeout: Duration::from_millis(600),
+            ping_every: Duration::from_millis(100),
+            ..limits()
+        },
+        Arc::new(FakeBackend::default()),
+    );
+    let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
+    let started = Instant::now();
+    let mut pings = 0;
+    while started.elapsed() < Duration::from_secs(4) {
+        match phone.read() {
+            Ok(tungstenite::Message::Ping(_)) => pings += 1,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    let took = started.elapsed();
+    assert!(pings > 0, "it answered pings");
+    assert!(
+        took < Duration::from_millis(1500),
+        "open for {took:?} without a hello"
+    );
+}
+
+#[test]
+fn a_pair_waiting_for_approval_outlasts_the_auth_deadline_and_then_may_idle() {
+    let backend = Arc::new(FakeBackend::default());
+    backend.with(|s| s.approval_delay_ms = 1500);
+    let rig = Rig::with(
+        Limits {
+            auth_timeout: Duration::from_millis(600),
+            ..limits()
+        },
+        backend,
+    );
+    let code = rig.core.codes.issue(rig.core.now()).unwrap().code;
+    let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
+    phone
+        .send(tungstenite::Message::text(format!(
+            r#"{{"id":1,"op":"pair","code":"{code}","device":{{"name":"Test","platform":"ios"}}}}"#
+        )))
+        .unwrap();
+    let reply = loop {
+        if let tungstenite::Message::Text(t) = phone.read().expect("open while the pair waits") {
+            break serde_json::from_str::<serde_json::Value>(t.as_str()).unwrap();
+        }
+    };
+    assert_eq!(reply["ok"], true, "{reply}");
+    std::thread::sleep(Duration::from_secs(1));
+    phone
+        .send(tungstenite::Message::text(r#"{"id":2,"op":"ping"}"#))
+        .unwrap();
+    match phone.read().expect("an idle paired phone stays") {
+        tungstenite::Message::Text(t) => assert!(t.as_str().contains(r#""ok":true"#), "{t}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_frame_larger_than_the_tls_buffer_reaches_a_tls_phone() {
+    // rustls takes at most 64 KB of plaintext before its records are written out.
+    let rig = Rig::new();
+    let mut phone = tls_phone(&rig, &rig.fingerprint).unwrap();
+    assert_eq!(ws_hello(&mut phone, PIXEL_TOKEN)["ok"], true);
+    let connection = rig.core.hub.all().pop().unwrap();
+    let big = "x".repeat(200 * 1024);
+    connection.send_text(big.clone());
+    match phone.read().expect("the frame arrives") {
+        tungstenite::Message::Text(t) => assert_eq!(t.as_str().len(), big.len()),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_phone_that_reads_slowly_holds_up_no_one_and_bridge_off_is_prompt() {
+    let rig = Rig::with(
+        Limits {
+            queue: 4,
+            write_timeout: Duration::from_secs(4),
+            ..limits()
+        },
+        Arc::new(FakeBackend::default()),
+    );
+    let mut other = rig.tunnel_client("203.0.113.30");
+    rig.hello(&mut other, IPHONE_TOKEN);
+    let mut slow = tls_phone(&rig, &rig.fingerprint).unwrap();
+    assert_eq!(ws_hello(&mut slow, PIXEL_TOKEN)["ok"], true);
+    let connection = rig
+        .core
+        .hub
+        .all()
+        .into_iter()
+        .find(|c| c.device().is_some_and(|d| d.name == "Pixel 9 / work"))
+        .unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let dripping = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let mut byte = [0u8; 1];
+            while !stop.load(Ordering::SeqCst) {
+                match slow.get_mut().sock.read(&mut byte) {
+                    Ok(1) => std::thread::sleep(Duration::from_millis(50)),
+                    _ => break,
+                }
+            }
+        })
+    };
+    let big = "x".repeat(200 * 1024);
+    let mut slowest = Duration::ZERO;
+    // Spaced, so the writer is stuck in a write by the time the queue fills.
+    for _ in 0..120 {
+        let started = Instant::now();
+        connection.send_text(big.clone());
+        slowest = slowest.max(started.elapsed());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        slowest < Duration::from_millis(500),
+        "a push waited {slowest:?} on the slow phone"
+    );
+    assert_eq!(
+        ping(&mut other, 7)["ok"],
+        true,
+        "the other phone carries on"
+    );
+    let Rig { lan, tunnel, .. } = rig;
+    let started = Instant::now();
+    lan.stop();
+    tunnel.stop();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "bridge-off took {:?}",
+        started.elapsed()
+    );
+    stop.store(true, Ordering::SeqCst);
+    dripping.join().unwrap();
 }

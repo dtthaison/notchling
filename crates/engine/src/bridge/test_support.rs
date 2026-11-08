@@ -90,6 +90,8 @@ pub struct FakeState {
     pub chat: Vec<ChatMessage>,
     pub prompts: HashMap<String, PendingPrompt>,
     pub refuse_approval: bool,
+    /// How long `request_approval` waits, as the person at the computer would.
+    pub approval_delay_ms: u64,
     pub send_delay_ms: u64,
     pub phone_error: Option<BridgeFailure>,
     pub commands: Vec<Command>,
@@ -187,6 +189,10 @@ impl BridgeBackend for FakeBackend {
         ]
     }
     fn request_approval(&self, _: &str, _: &str, _: &str) -> bool {
+        let delay = self.with(|s| s.approval_delay_ms);
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
         self.with(|s| {
             s.approval_calls += 1;
             !s.refuse_approval

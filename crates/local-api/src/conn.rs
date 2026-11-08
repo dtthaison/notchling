@@ -9,7 +9,7 @@ use crate::wire::{
     err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
     Subscribe, Tier, API_VERSION,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::io::Write;
 use std::net::Shutdown;
 use std::path::Path;
@@ -175,8 +175,28 @@ impl Session {
     }
 
     fn reply(&self, id: u64, result: Result<Value, ApiError>) -> bool {
+        self.reply_with(id, result, Map::new())
+    }
+
+    /// A reply with the handler's extra fields beside `ok`; they never replace the envelope's.
+    fn reply_with(
+        &self,
+        id: u64,
+        result: Result<Value, ApiError>,
+        extras: Map<String, Value>,
+    ) -> bool {
         match result {
-            Ok(value) => self.send(&ok_reply(id, value)),
+            Ok(value) => {
+                let mut line = ok_reply(id, value);
+                if let Value::Object(fields) = &mut line {
+                    for (key, value) in extras {
+                        if !matches!(key.as_str(), "id" | "ok" | "err") {
+                            fields.entry(key).or_insert(value);
+                        }
+                    }
+                }
+                self.send(&line)
+            }
             Err(e) => self.send(&err_reply(id, &e)),
         }
     }
@@ -211,8 +231,8 @@ impl Session {
                 self.reply(id, result)
             }
             op => {
-                let result = self.dispatch(op, &request.args);
-                self.reply(id, result)
+                let (result, extras) = self.dispatch(op, &request.args);
+                self.reply_with(id, result, extras)
             }
         }
     }
@@ -298,7 +318,19 @@ impl Session {
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }
 
-    fn dispatch(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
+    /// The op's result and the handler's extra reply fields (none when the op was refused).
+    fn dispatch(&self, op: &str, args: &Value) -> (Result<Value, ApiError>, Map<String, Value>) {
+        let mut extras = Map::new();
+        let result = self.dispatch_into(op, args, &mut extras);
+        (result, extras)
+    }
+
+    fn dispatch_into(
+        &self,
+        op: &str,
+        args: &Value,
+        extras: &mut Map<String, Value>,
+    ) -> Result<Value, ApiError> {
         let handler = &self.shared.handler;
         let Some(spec) = handler.spec(op) else {
             return Err(ApiError::new(
@@ -338,7 +370,8 @@ impl Session {
             // Read now: whoever sent this line (the hook's own process, say).
             pid: transport::peer(&self.probe).ok().map(|p| p.pid),
         };
-        let result = handler.call(&caller, op, args);
+        let (result, more) = handler.call_with_extras(&caller, op, args);
+        *extras = more;
         if spec.tier == Tier::App {
             // Every privileged call is on the record, not only the refusals.
             let outcome = match &result {
