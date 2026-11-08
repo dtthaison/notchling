@@ -208,7 +208,8 @@ pub fn append(
     Ok(splice(text, edits))
 }
 
-/// Removes item `index` of the container at `path`, with the comma that went with it.
+/// Removes item `index` of the container at `path`, with the comma that went with it. Comments
+/// between the items stay; one on the same lines as an item that goes on whole lines goes too.
 pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditError> {
     let root = jsonc::parse(text)?;
     let target = locate(&root, path).ok_or(EditError::Path("no such place"))?;
@@ -241,10 +242,26 @@ pub fn remove(text: &str, path: &[Seg], index: usize) -> Result<String, EditErro
             edits.push((p, p + 1, String::new()));
         }
     } else if !last {
-        edits.push((start, items[index + 1].0, String::new()));
+        // The item, its comma and the space after it: a comment after the comma is the user's
+        // and stays (so does one between the item and its comma).
+        let next = text[done..]
+            .find(|c: char| !c.is_whitespace())
+            .map_or(text.len(), |i| done + i);
+        if text[end..after].trim().is_empty() {
+            edits.push((start, next, String::new()));
+        } else {
+            edits.push((start, end, String::new()));
+            edits.push((after, next, String::new()));
+        }
     } else if index > 0 {
+        // The item and the comma before it, leaving whatever comments sit between them.
         let p = next_significant(text, items[index - 1].1);
-        edits.push((p, end, String::new()));
+        if text[p + 1..start].trim().is_empty() {
+            edits.push((p, end, String::new()));
+        } else {
+            edits.push((p, p + 1, String::new()));
+            edits.push((start, end, String::new()));
+        }
     } else {
         edits.push((start, done, String::new()));
     }
