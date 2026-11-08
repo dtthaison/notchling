@@ -5,6 +5,22 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+/// The same JSON with every object's keys in sorted order, as Swift's `.sortedKeys` writes them.
+/// Needed because serde_json's map keeps insertion order when another crate in the build turns
+/// on its `preserve_order` feature (the desktop app's dependencies do).
+pub fn sorted(value: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
+        other => other,
+    }
+}
+
 /// Milliseconds since the epoch, now.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()

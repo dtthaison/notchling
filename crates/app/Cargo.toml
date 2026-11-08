@@ -26,3 +26,8 @@ raw-window-handle = "=0.6.2"
 # The render tests read the PNG back. The version GPUI's `image` already locks, so no second copy.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 png = "=0.17.16"
+
+# The phone panel's readers are tested on the engine bridge's real replies, over a test certificate.
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+p12 = "0.6.3"

@@ -15,6 +15,8 @@
 pub mod acting;
 pub mod acting_ops;
 pub mod attach;
+pub mod bridge_backend;
+pub mod bridge_ops;
 pub mod cli;
 pub mod clients;
 pub mod control_ops;

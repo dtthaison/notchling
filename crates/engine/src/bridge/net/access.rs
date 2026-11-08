@@ -103,7 +103,8 @@ impl AccessConfigStore {
         if next == *cached {
             return Ok(());
         }
-        let value = serde_json::to_value(&next).map_err(std::io::Error::other)?;
+        let value =
+            super::files::sorted(serde_json::to_value(&next).map_err(std::io::Error::other)?);
         let text = serde_json::to_string_pretty(&value).map_err(std::io::Error::other)?;
         super::files::write_private(&self.file, text.as_bytes())?;
         *cached = next;
@@ -232,7 +233,7 @@ pub fn pairing_payload(
     if let Some(tunnel) = access.tunnel_payload() {
         object.insert("tunnel".into(), tunnel);
     }
-    Value::Object(object).to_string()
+    super::files::sorted(Value::Object(object)).to_string()
 }
 
 #[cfg(test)]

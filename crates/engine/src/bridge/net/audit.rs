@@ -48,7 +48,7 @@ impl AuditEntry {
         optional("length", self.length.map(|n| json!(n)));
         optional("address", self.address.as_ref().map(|s| json!(s)));
         optional("stoppedPid", self.stopped_pid.map(|n| json!(n)));
-        Value::Object(object).to_string()
+        super::files::sorted(Value::Object(object)).to_string()
     }
 
     fn from_line(line: &str) -> Option<AuditEntry> {

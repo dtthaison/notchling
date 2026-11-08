@@ -3396,9 +3396,11 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-graphics",
  "objc2-foundation",
+ "p12",
  "png 0.17.16",
  "qrcode",
  "raw-window-handle",
+ "rcgen",
  "serde_json",
 ]
 
@@ -3448,6 +3450,8 @@ dependencies = [
  "notchling-engine",
  "notchling-local-api",
  "notchling-platform",
+ "p12",
+ "rcgen",
  "serde_json",
 ]
 
