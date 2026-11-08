@@ -94,6 +94,8 @@ mod limits_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]
+mod providers_add_tests;
+#[cfg(test)]
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
