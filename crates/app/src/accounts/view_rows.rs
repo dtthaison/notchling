@@ -504,6 +504,8 @@ pub fn alert_overlay<V: 'static>(
     div()
         .absolute()
         .size_full()
+        // The backdrop takes every click and hover: no row under the alert is live.
+        .occlude()
         .flex()
         .items_center()
         .justify_center()

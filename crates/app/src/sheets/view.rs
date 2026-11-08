@@ -337,6 +337,8 @@ impl NewSessionView {
             div()
                 .absolute()
                 .size_full()
+                // The backdrop takes every click and hover: nothing under the dialog is live.
+                .occlude()
                 .flex()
                 .items_center()
                 .justify_center()

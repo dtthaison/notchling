@@ -250,6 +250,8 @@ impl HandoverView {
             .top_0()
             .left_0()
             .size_full()
+            // The backdrop takes every click: no switch under the dialog is live.
+            .occlude()
             .flex()
             .items_center()
             .justify_center()

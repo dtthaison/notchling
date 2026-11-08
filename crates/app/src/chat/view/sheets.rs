@@ -173,6 +173,8 @@ pub fn render(view: &ChatView, a: Appearance) -> Option<Div> {
         div()
             .absolute()
             .size_full()
+            // The backdrop takes every click and hover: nothing in Chat under the sheet is live.
+            .occlude()
             .flex()
             .items_center()
             .justify_center()
