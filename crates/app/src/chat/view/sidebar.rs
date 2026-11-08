@@ -9,8 +9,9 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 use super::ChatView;
 use crate::chat::data::Tool;
 use crate::chat::sidebar::sections;
+use crate::session_source::DAEMON_DOWN_NOTE;
 
-fn footer(a: Appearance) -> Div {
+fn footer(a: Appearance, daemon_down: bool) -> Div {
     div()
         .h(px(44.0))
         .flex_shrink_0()
@@ -32,6 +33,7 @@ fn footer(a: Appearance) -> Div {
             PartState::Disabled,
             a,
         ))
+        .children(daemon_down.then(|| label(DAEMON_DOWN_NOTE, TypeRole::Meta, Ink::TextFaint, a)))
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
@@ -109,5 +111,5 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .child(label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a)),
         )
         .child(list)
-        .child(footer(a))
+        .child(footer(a, view.daemon_down))
 }

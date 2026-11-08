@@ -110,9 +110,19 @@ impl Source {
 
     /// Polls the rows, reads each row's snapshot and the held prompts. `now_ms` is the clock.
     pub fn load(&mut self, now_ms: i64) -> Loaded {
-        let agents = self
-            .monitor
-            .poll(&self.root.roots(), &Probes::from_proc(), now_ms);
+        self.load_from(None, now_ms)
+    }
+
+    /// [`Source::load`] with the rows given: the daemon's list (`session_source`) in place of
+    /// reading the jobs and sessions folders here. `None` reads them. Snapshots and prompts are
+    /// read here either way.
+    pub fn load_from(&mut self, claude: Option<Vec<Agent>>, now_ms: i64) -> Loaded {
+        let agents = match claude {
+            Some(agents) => agents,
+            None => self
+                .monitor
+                .poll(&self.root.roots(), &Probes::from_proc(), now_ms),
+        };
         let projects = self.root.projects_dir();
         let mut snapshots = HashMap::new();
         for agent in &agents {

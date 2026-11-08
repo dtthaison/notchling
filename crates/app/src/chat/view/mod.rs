@@ -3,7 +3,7 @@
 //! `platform::watch` reports a change under the data root (at most every 2 s while changes keep
 //! arriving) and every 30 s for the ages (`chat::reload`). Every load runs on the background
 //! executor: the [`Loader`] is sent there and taken back with the result, so the window never
-//! waits on the disk.
+//! waits on the disk. The session rows come from the daemon (`session_source`) while it answers.
 
 mod conversation;
 mod header;
@@ -11,6 +11,7 @@ mod inspector;
 mod sidebar;
 
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gpui::{div, prelude::*, px, Context, Div, Render, ScrollHandle, Subscription, Window};
@@ -23,6 +24,7 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::data::{DataRoot, Loaded, Loader, Session};
 use crate::chat::reload::{watch_config, ReloadGate};
+use crate::session_source::SessionSource;
 
 /// How often the view looks for watch batches.
 const TICK: Duration = Duration::from_millis(500);
@@ -44,6 +46,12 @@ pub struct ChatView {
     /// Scroll to the end once the picked session's conversation is in.
     scroll_to_end: bool,
     gate: ReloadGate,
+    /// Claude Code's rows from the daemon while it answers; the folders are read otherwise.
+    source: Arc<SessionSource>,
+    /// The source's generation at the last tick, so a change of rows or link reloads.
+    seen_generation: u64,
+    /// The sidebar footer says "Daemon not running".
+    daemon_down: bool,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
     _appearance_changes: Subscription,
@@ -57,8 +65,19 @@ fn now_ms() -> i64 {
 }
 
 impl ChatView {
-    /// Starts the first load (it selects the first session) and watching for changes.
+    /// A Chat that reads the folders only (a render, a fixture root).
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx)
+    }
+
+    /// Starts the first load (it selects the first session) and watching for changes; the session
+    /// rows come from `source` while the daemon answers.
+    pub fn with_source(
+        root: DataRoot,
+        source: Arc<SessionSource>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let this = cx.weak_entity();
         let changes = window.observe_window_appearance(move |_, cx| {
             this.update(cx, |_, cx| cx.notify()).ok();
@@ -76,6 +95,9 @@ impl ChatView {
             loading: true,
             scroll_to_end: false,
             gate: ReloadGate::default(),
+            seen_generation: source.generation(),
+            daemon_down: source.view().daemon_down(),
+            source,
             watch,
             conversation_scroll: ScrollHandle::new(),
             _appearance_changes: changes,
@@ -108,11 +130,12 @@ impl ChatView {
         };
         let asked = self.selected.clone();
         let wanted = asked.clone();
+        let claude = self.source.view().agents;
         cx.spawn(async move |this, cx| {
             let (loader, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = loader.load(wanted.as_deref(), now_ms());
+                    let loaded = loader.load_from(wanted.as_deref(), claude, now_ms());
                     (loader, loaded)
                 })
                 .await;
@@ -165,6 +188,17 @@ impl ChatView {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
+        // New rows or a lost daemon: look again (the gate still spaces the reads).
+        let generation = self.source.generation();
+        if generation != self.seen_generation {
+            self.seen_generation = generation;
+            self.gate.changed();
+            let down = self.source.view().daemon_down();
+            if down != self.daemon_down {
+                self.daemon_down = down;
+                cx.notify();
+            }
+        }
         if let Some((_, batches)) = &self.watch {
             while batches.try_recv().is_ok() {
                 self.gate.changed();
