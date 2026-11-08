@@ -8,10 +8,24 @@ use notchling_local_api::ops;
 use serde_json::{json, Value};
 
 /// One op and its arguments.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Call {
     pub op: &'static str,
     pub args: Value,
+}
+
+/// A call's `Debug` never shows a value: `vault.save`'s `value` is printed as hidden.
+impl std::fmt::Debug for Call {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut args = self.args.clone();
+        if let Some(value) = args.get_mut("value") {
+            *value = json!("<hidden>");
+        }
+        f.debug_struct("Call")
+            .field("op", &self.op)
+            .field("args", &args)
+            .finish()
+    }
 }
 
 /// An approval's answer.
@@ -94,6 +108,47 @@ pub fn parse_entries(v: &Value) -> Vec<VaultEntry> {
     entries
 }
 
+/// What the daemon checked about the process asking (`verified` on `vault.approval.pending`):
+/// read from the socket's peer, not from anything the agent said. Older daemons don't send it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Verified {
+    /// The caller's executable.
+    pub exe: Option<String>,
+    pub pid: Option<i64>,
+    /// Its real working folder.
+    pub cwd: Option<String>,
+    /// Process names, nearest first.
+    pub parents: Vec<String>,
+    /// Whether the folder the request names is where it runs.
+    pub folder_matches: bool,
+}
+
+impl Verified {
+    fn from_value(v: &Value) -> Option<Verified> {
+        v.as_object()?;
+        let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
+        Some(Verified {
+            exe: text("exe"),
+            pid: v.get("pid").and_then(Value::as_i64),
+            cwd: text("cwd"),
+            parents: v
+                .get("parents")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|n| n.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            // Missing is not a match: nothing was checked.
+            folder_matches: v
+                .get("folder_matches")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+    }
+}
+
 /// An agent waiting to use secrets marked ask-first (`vault.approval.pending`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Approval {
@@ -101,6 +156,7 @@ pub struct Approval {
     pub names: Vec<String>,
     pub command: String,
     pub folder: String,
+    pub verified: Option<Verified>,
 }
 
 impl Approval {
@@ -129,6 +185,7 @@ impl Approval {
             names,
             command: text("command"),
             folder: text("folder"),
+            verified: data.get("verified").and_then(Verified::from_value),
         })
     }
 }
@@ -210,6 +267,12 @@ mod tests {
         assert_eq!(Call::request_cancel("r1").args, json!({"id": "r1"}));
         assert_eq!(Call::list().op, "vault.list");
         assert!(!format!("{value:?}").contains("s3cret"), "Debug hides it");
+        let shown = format!("{save:?}");
+        assert!(!shown.contains("s3cret"), "{shown}");
+        assert!(
+            shown.contains("vault.save") && shown.contains("<hidden>"),
+            "{shown}"
+        );
     }
 
     #[test]

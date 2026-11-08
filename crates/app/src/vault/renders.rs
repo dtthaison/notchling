@@ -83,8 +83,10 @@ pub fn entries() -> Vec<VaultEntry> {
 pub fn approvals() -> Vec<Value> {
     vec![
         json!({"id": "ap-1", "names": ["github", "registry"],
-               "command": "gh api repos/example/notchling/releases --paginate | jq '.[].tag_name'",
-               "folder": "/Users/me/work/notchling"}),
+               "command": "gh api repos/example/notchling/releases --paginate \\\n  | jq '.[].tag_name'",
+               "folder": "/Users/me/work/notchling",
+               "verified": {"exe": "/bin/zsh", "pid": 4242, "cwd": "/private/tmp/scratch",
+                            "parents": ["zsh", "claude", "Terminal"], "folder_matches": false}}),
         json!({"id": "ap-2", "names": ["weather-api"], "command": "curl $WEATHER_API_URL",
                "folder": "/Users/me/work/weather"}),
     ]
@@ -122,7 +124,7 @@ pub fn pending_request() -> PendingRequest {
 mod tests {
     use super::*;
     use crate::switches::Switches;
-    use crate::vault::approval::prompt;
+    use crate::vault::approval::{pending, Prompt, FOLDER_WARNING};
     use crate::vault::form::Form;
     use crate::vault::list::list;
 
@@ -136,8 +138,9 @@ mod tests {
         let l = list(&entries(), &Switches::all_on(), TODAY, None);
         assert_eq!(l.rows.len(), 3);
         assert!(l.rows[1].expiry.as_ref().is_some_and(|e| e.expired));
-        let p = prompt(&approvals()).unwrap();
-        assert_eq!(p.more.as_deref(), Some("1 more waiting"));
+        let p = Prompt::new(&pending(&approvals())[0]);
+        assert_eq!(p.warning, Some(FOLDER_WARNING));
+        assert!(p.command.contains('⏎'), "{}", p.command);
         let f = Form::request(&pending_request());
         assert!(f.host_warning().is_some());
         assert!(Form::edit(&entries()[0]).can_save());

@@ -1,245 +1,27 @@
-//! The vault's prompt windows over GPUI (macOS): the approval card (Always Allow / Deny / Allow
-//! Once, the folder and the command shown) and an agent's request form. Each is its own floating
-//! window (`mac::vault_prompts` opens it the moment the daemon asks and closes it when the answer
-//! is in). Esc denies or cancels; Return does not allow, so a key pressed in another app a moment
-//! before the window appeared can't hand out a secret. A render has a fixed prompt and no daemon.
+//! An agent's request form over GPUI (macOS), in a floating window of its own
+//! (`mac::vault_prompts` opens it without taking the focus when the daemon asks, and closes it when
+//! the answer is in; closing it is Cancel). Esc cancels; Return never saves an agent's request, so
+//! a key pressed in another app can't add a secret. The approval card is `approval_view`. A render
+//! has a fixed request and no daemon.
 
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{
-    div, prelude::*, px, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, Stateful,
-    Window,
-};
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
-use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, window_appearance, KitStyled, MONO_FONT};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use gpui::{div, prelude::*, px, Context, FocusHandle, Focusable, KeyDownEvent, Render, Window};
+use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
+use notchling_kit::ui::{hsla, label, window_appearance, KitStyled};
+use notchling_kit::{Icon, Ink, TypeRole};
 
-use super::approval::{self, Prompt, ALWAYS, COMMAND, DENY, FOLDER, ONCE, WINDOW_TITLE};
 use super::form::{Form, Typed};
 use super::form_view::{form_body, form_footer, FormEvent};
 use super::store::Vault;
-use super::wire::{Decision, PendingRequest};
+use super::wire::PendingRequest;
 use crate::accounts::view_rows::Handler;
-use crate::mac::gate;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
 /// The request window's size in points.
 pub const REQUEST_SIZE: (f32, f32) = (540.0, 720.0);
-
-pub struct VaultApprovalView {
-    feed: Arc<SwitchFeed>,
-    vault: Arc<Vault>,
-    fixed: Option<Prompt>,
-    busy: bool,
-    note: Option<String>,
-    focus: FocusHandle,
-}
-
-impl VaultApprovalView {
-    pub fn live(feed: Arc<SwitchFeed>, vault: Arc<Vault>, cx: &mut Context<Self>) -> Self {
-        VaultApprovalView {
-            feed,
-            vault,
-            fixed: None,
-            busy: false,
-            note: None,
-            focus: cx.focus_handle(),
-        }
-    }
-
-    pub fn fixed(prompt: Prompt, cx: &mut Context<Self>) -> Self {
-        VaultApprovalView {
-            feed: Arc::new(SwitchFeed::none()),
-            vault: Arc::new(Vault::fixed(Vec::new())),
-            fixed: Some(prompt),
-            busy: false,
-            note: None,
-            focus: cx.focus_handle(),
-        }
-    }
-
-    fn shown(&self) -> Option<Prompt> {
-        self.fixed
-            .clone()
-            .or_else(|| approval::prompt(&self.feed.approvals()))
-    }
-
-    /// Sends the answer. The prompt is gone at once; one the daemon no longer holds answers
-    /// `answered: false`, which is not an error.
-    fn answer(&mut self, id: String, decision: Decision, cx: &mut Context<Self>) {
-        if self.busy || !self.vault.is_live() {
-            return;
-        }
-        self.busy = true;
-        self.note = None;
-        self.feed.resolve(&id);
-        let (vault, switches) = (self.vault.clone(), self.feed.switches());
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { vault.answer(&switches, &id, decision) })
-                .await;
-            this.update(cx, |view, cx| {
-                view.busy = false;
-                view.note = result.err();
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-        cx.notify();
-    }
-}
-
-impl Focusable for VaultApprovalView {
-    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
-
-fn section(title: &str, body: impl IntoElement, a: Appearance) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(4.0))
-        .child(label(title, TypeRole::Section, Ink::TextFaint, a))
-        .child(body)
-}
-
-fn mono_box(text: &str, a: Appearance) -> Stateful<Div> {
-    div()
-        .id("command-box")
-        .max_h(px(120.0))
-        .overflow_y_scroll()
-        .p(px(8.0))
-        .rounded(px(RADIUS_MD))
-        .fill(Ink::Card, a)
-        .border(px(1.0))
-        .border_color(hsla(Ink::Hairline.color(a)))
-        .font_family(MONO_FONT)
-        .text_size(px(12.0))
-        .ink(Ink::Text, a)
-        .child(text.to_owned())
-}
-
-impl Render for VaultApprovalView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let a = window_appearance(window);
-        if !self.focus.is_focused(window) && self.fixed.is_none() {
-            window.focus(&self.focus);
-        }
-        let Some(prompt) = self.shown() else {
-            return div().size_full().fill(Ink::Window, a).into_any_element();
-        };
-        let live = self.vault.is_live() && self.feed.switches().is_on(Switch::Vault);
-        let state = if self.busy || (!live && self.fixed.is_none()) {
-            PartState::Disabled
-        } else {
-            PartState::Rest
-        };
-        let act = |id: &'static str,
-                   title: &str,
-                   kind: ButtonKind,
-                   decision: Decision,
-                   cx: &mut Context<Self>| {
-            let request = prompt.id.clone();
-            button(id, title, kind, state, a).when(state == PartState::Rest, |b| {
-                b.on_click(
-                    cx.listener(move |this, _, _, cx| this.answer(request.clone(), decision, cx)),
-                )
-            })
-        };
-        let always = gate::tip_text(
-            act(
-                "vault-always",
-                ALWAYS,
-                ButtonKind::Ghost,
-                Decision::Always,
-                cx,
-            ),
-            prompt.always_tip.clone().into(),
-            a,
-        );
-        let deny = act(
-            "vault-deny",
-            DENY,
-            ButtonKind::Secondary,
-            Decision::Deny,
-            cx,
-        );
-        let once = act("vault-once", ONCE, ButtonKind::Primary, Decision::Once, cx);
-        let esc = prompt.id.clone();
-        div()
-            .id("vault-approval")
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
-                    this.answer(esc.clone(), Decision::Deny, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .p(px(SIDE_PADDING + 4.0))
-            .rounded(px(RADIUS_CARD))
-            .border(px(1.0))
-            .border_color(hsla(Ink::Hairline.color(a)))
-            .fill(Ink::Window, a)
-            .child(label(WINDOW_TITLE, TypeRole::Section, Ink::TextFaint, a))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(label(
-                        Icon::Permission.glyph(),
-                        TypeRole::Title,
-                        Ink::AccentText,
-                        a,
-                    ))
-                    .child(label(&prompt.title, TypeRole::Title, Ink::Text, a)),
-            )
-            .child(section(
-                FOLDER,
-                div()
-                    .font_family(MONO_FONT)
-                    .text_size(px(12.0))
-                    .ink(Ink::Text, a)
-                    .child(prompt.folder.clone()),
-                a,
-            ))
-            .child(section(COMMAND, mono_box(&prompt.command, a), a))
-            .child(label(prompt.explanation, TypeRole::Meta, Ink::TextMuted, a))
-            .children(
-                prompt
-                    .more
-                    .as_deref()
-                    .map(|more| label(more, TypeRole::Meta, Ink::TextFaint, a)),
-            )
-            .children(
-                self.note
-                    .as_deref()
-                    .map(|note| label(note, TypeRole::Meta, Ink::Needs, a)),
-            )
-            .child(div().flex_1())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(always)
-                    .child(div().flex_1())
-                    .child(deny)
-                    .child(once),
-            )
-            .into_any_element()
-    }
-}
 
 /// An agent's request form in a window of its own.
 pub struct VaultRequestView {
