@@ -131,10 +131,13 @@ mod tests {
     use notchling_local_api::{ApiError, ErrorCode};
     use std::sync::Arc;
 
+    type Calls = Arc<Mutex<Vec<(String, Value)>>>;
+    type Script = Box<dyn Fn(&str) -> Result<Value, ClientError> + Send + Sync>;
+
     /// Answers each op from a script and records every call.
     struct Fake {
-        calls: Arc<Mutex<Vec<(String, Value)>>>,
-        answer: Box<dyn Fn(&str) -> Result<Value, ClientError> + Send + Sync>,
+        calls: Calls,
+        answer: Script,
     }
 
     impl Transport for Fake {
@@ -146,7 +149,7 @@ mod tests {
 
     fn fake(
         answer: impl Fn(&str) -> Result<Value, ClientError> + Send + Sync + 'static,
-    ) -> (Actions, Arc<Mutex<Vec<(String, Value)>>>) {
+    ) -> (Actions, Calls) {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let actions = Actions::over(Box::new(Fake {
             calls: calls.clone(),

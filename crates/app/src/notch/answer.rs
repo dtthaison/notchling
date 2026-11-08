@@ -200,10 +200,64 @@ impl QuestionDraft {
     }
 }
 
+/// What a key press did to a text box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Typed {
+    Changed,
+    /// Return: take the text.
+    Submit,
+    Ignored,
+}
+
+/// One key press into a one-line text box: Return submits, Backspace deletes a character, and a
+/// printable character is added. With ⌘ or Ctrl held nothing is typed. Control characters never
+/// get in, so the text can't carry an Esc or the end of a bracketed paste.
+pub fn type_key(text: &mut String, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
+    match key {
+        "enter" => Typed::Submit,
+        "backspace" => match text.pop() {
+            Some(_) => Typed::Changed,
+            None => Typed::Ignored,
+        },
+        _ if modified => Typed::Ignored,
+        _ => match key_char {
+            Some(c) if !c.is_empty() && !c.chars().any(char::is_control) => {
+                text.push_str(c);
+                Typed::Changed
+            }
+            _ => Typed::Ignored,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use notchling_engine::transcript::snapshot::QuestionItem;
+
+    #[test]
+    fn keys_type_delete_and_submit_but_never_control_characters() {
+        let mut t = String::new();
+        assert_eq!(type_key(&mut t, "a", Some("a"), false), Typed::Changed);
+        assert_eq!(type_key(&mut t, "space", Some(" "), false), Typed::Changed);
+        assert_eq!(type_key(&mut t, "é", Some("é"), false), Typed::Changed);
+        assert_eq!(t, "a é");
+        assert_eq!(type_key(&mut t, "v", Some("v"), true), Typed::Ignored, "⌘V");
+        assert_eq!(
+            type_key(&mut t, "escape", Some("\u{1b}"), false),
+            Typed::Ignored
+        );
+        assert_eq!(type_key(&mut t, "tab", Some("\t"), false), Typed::Ignored);
+        assert_eq!(type_key(&mut t, "left", None, false), Typed::Ignored);
+        assert_eq!(type_key(&mut t, "backspace", None, false), Typed::Changed);
+        assert_eq!(t, "a ");
+        assert_eq!(type_key(&mut t, "enter", Some("\r"), false), Typed::Submit);
+        let mut empty = String::new();
+        assert_eq!(
+            type_key(&mut empty, "backspace", None, false),
+            Typed::Ignored
+        );
+    }
 
     fn item(header: &str, options: &[&str], multi: bool) -> QuestionItem {
         QuestionItem {
