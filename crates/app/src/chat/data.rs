@@ -13,6 +13,7 @@ use notchling_platform::paths;
 
 use super::codex_list;
 use crate::notch::source::DATA_ROOT_ENV;
+use crate::transcripts::Locator;
 
 /// Which tool a session belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,32 +108,51 @@ impl DataRoot {
         out
     }
 
-    /// A transcript path from a job's state: relative ones belong to a fixture root.
-    fn resolve(&self, path: &str) -> PathBuf {
-        let path = PathBuf::from(path);
-        match &self.fixture {
-            Some(base) if path.is_relative() => base.join(path),
-            _ => path,
-        }
+    pub fn projects_dir(&self) -> PathBuf {
+        self.claude_dir.join("projects")
     }
 
-    /// Every session, needs input first, then working, then done, newest first in each: Claude
-    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
-    pub fn sessions(&self, now_ms: i64) -> Vec<Session> {
-        let probes = Probes::from_proc();
+    /// A monitor for this root: a fixture root never ages its Done rows out.
+    pub fn new_monitor(&self) -> Monitor {
         let mut monitor = Monitor::default();
         if self.fixture.is_some() {
             monitor.completed_window_ms = i64::MAX / 4;
         }
-        let mut out: Vec<Session> = monitor
-            .poll(&self.roots(), &probes, now_ms)
-            .into_iter()
+        monitor
+    }
+
+    /// Finds transcripts for this root (a fixture's job state may name them relative to it).
+    pub fn new_locator(&self) -> Locator {
+        Locator::new(self.fixture.clone())
+    }
+
+    /// Every session with a throwaway monitor and locator: nothing is remembered between calls.
+    pub fn sessions(&self, now_ms: i64) -> Vec<Session> {
+        self.sessions_with(&mut self.new_monitor(), &mut self.new_locator(), now_ms)
+    }
+
+    /// Every session, needs input first, then working, then done, newest first in each: Claude
+    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
+    /// Each Claude row's transcript is found the way the notch finds it (`Locator`). The monitor
+    /// and the locator keep what polls need between them: ended terminal sessions, and rows with no
+    /// transcript yet.
+    pub fn sessions_with(
+        &self,
+        monitor: &mut Monitor,
+        locator: &mut Locator,
+        now_ms: i64,
+    ) -> Vec<Session> {
+        let agents = monitor.poll(&self.roots(), &Probes::from_proc(), now_ms);
+        let projects = self.projects_dir();
+        let mut out: Vec<Session> = agents
+            .iter()
             .map(|agent| Session {
-                transcript: agent.transcript_path.as_deref().map(|p| self.resolve(p)),
-                agent,
+                transcript: locator.find(agent, &projects, now_ms),
+                agent: agent.clone(),
                 tool: Tool::Claude,
             })
             .collect();
+        locator.retain(&agents);
         let days = self.fixture.is_none().then_some(14);
         for path in codex_list::rollouts(&self.codex_dir.join("sessions"), days, now_ms, 30) {
             if let Some(agent) = codex_list::session(&path) {
@@ -196,11 +216,7 @@ mod tests {
             root.roots().lanes_file,
             PathBuf::from("/f/notchling/lanes.json")
         );
-        assert_eq!(
-            root.resolve("claude/x.jsonl"),
-            PathBuf::from("/f/claude/x.jsonl")
-        );
-        assert_eq!(root.resolve("/abs/x.jsonl"), PathBuf::from("/abs/x.jsonl"));
+        assert_eq!(root.projects_dir(), PathBuf::from("/f/claude/projects"));
         let folders = root.watch_folders();
         assert!(folders.contains(&PathBuf::from("/f/claude/projects")));
         assert!(folders.contains(&PathBuf::from("/f/codex/sessions")));
@@ -215,7 +231,18 @@ mod tests {
             home: "/Users/me".into(),
             fixture: None,
         };
-        assert_eq!(root.resolve("rel.jsonl"), PathBuf::from("rel.jsonl"));
+        assert_eq!(
+            root.projects_dir(),
+            PathBuf::from("/Users/me/.claude/projects")
+        );
+        // Real rows age out of Done after a day; a fixture's never do.
+        assert_eq!(root.new_monitor().completed_window_ms, 24 * 3600 * 1000);
+        assert!(
+            DataRoot::fixture(Path::new("/f"))
+                .new_monitor()
+                .completed_window_ms
+                > 1 << 50
+        );
     }
 
     #[test]
