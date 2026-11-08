@@ -60,8 +60,15 @@ fn daemon(root: &Path, home: &Path) -> Command {
     c
 }
 
+/// How long a test lets a started daemon take to answer. A load allowance, not a speed check: the
+/// daemon binds before it reads the session list (`daemon_tests.rs` pins that, with the read held),
+/// so a daemon that is up answers at once and this only matters when the machine is starved (a
+/// full workspace test run starts the process late). A test that waits less fails under that load
+/// without anything being wrong.
+const START_ALLOWANCE: Duration = Duration::from_secs(30);
+
 fn wait_for_socket(socket: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + START_ALLOWANCE;
     while Instant::now() < deadline {
         if std::os::unix::net::UnixStream::connect(socket).is_ok() {
             return;
@@ -257,9 +264,11 @@ fn ensure_daemon_starts_one_and_then_finds_it() {
     let root = fixture_root(&dir.0);
     let socket = dir.0.join("s/notchlingd.sock");
     let binary = Path::new(env!("CARGO_BIN_EXE_notchling"));
+    // The production wait is 3 s; this test asks whether a daemon starts and is found, not how
+    // fast, so it gets the load allowance (see `START_ALLOWANCE`).
     let options = SpawnOptions {
+        wait: START_ALLOWANCE,
         data_root: Some(root.clone()),
-        ..SpawnOptions::default()
     };
     // Detached, so not our child to kill: the guard finds it by its socket if the test fails.
     let _running = Daemon::detached(&socket);

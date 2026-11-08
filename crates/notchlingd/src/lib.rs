@@ -34,6 +34,8 @@ mod acting_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
+mod daemon_tests;
+#[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
