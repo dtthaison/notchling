@@ -46,11 +46,11 @@ fn lists_a_main_job_and_a_lane_job_sorted_by_group_then_recency() {
     let w = world(Some(LANE));
     w.tmp.write(
         "home/.claude/jobs/aa11bb22/state.json",
-        &format!(r#"{{"state":"done","sessionId":"s-main","name":"main","cwd":"/w/main","updatedAt":"{}"}}"#, iso(2)),
+        &format!(r#"{{"state":"done","sessionId":"s-main","name":"main","cwd":"/w/main","updatedAt":"{}"}}"#, iso(3)),
     );
     w.tmp.write(
         "lanes/b/jobs/cc33dd44/state.json",
-        &format!(r#"{{"state":"working","sessionId":"s-lane","name":"lane","cwd":"/w/lane","updatedAt":"{}"}}"#, iso(2)),
+        &format!(r#"{{"state":"working","sessionId":"s-lane","name":"lane","cwd":"/w/lane","updatedAt":"{}"}}"#, iso(3)),
     );
     let rows = poll(&mut Monitor::default(), &w.roots, &[]);
     assert_eq!(rows.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["s-lane", "s-main"]);
@@ -103,7 +103,7 @@ fn the_live_session_file_sets_the_job_status() {
     let w = world(None);
     w.tmp.write(
         "home/.claude/jobs/ab12cd34/state.json",
-        &format!(r#"{{"state":"working","sessionId":"conv","cwd":"/w","updatedAt":"{}"}}"#, iso(2)),
+        &format!(r#"{{"state":"working","sessionId":"conv","cwd":"/w","updatedAt":"{}"}}"#, iso(3)),
     );
     w.tmp.write("home/.claude/sessions/100.json", r#"{"sessionId":"conv","jobId":"ab12cd34","pid":100,"status":"idle"}"#);
     let rows = poll(&mut Monitor::default(), &w.roots, &[]);
