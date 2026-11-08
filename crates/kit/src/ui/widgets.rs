@@ -172,15 +172,12 @@ pub fn session_row(
                 .flex()
                 .flex_col()
                 .flex_1()
+                .min_w(px(0.0))
                 .gap(px(2.0))
                 .overflow_hidden()
-                .child(label(name, TypeRole::Heading, Ink::Text, appearance))
-                .child(label(
-                    status_line,
-                    TypeRole::Meta,
-                    Ink::TextMuted,
-                    appearance,
-                )),
+                // One line each, clipped with an ellipsis, so every row keeps the same height.
+                .child(label(name, TypeRole::Heading, Ink::Text, appearance).truncate())
+                .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).truncate()),
         )
         .child(label(age, TypeRole::Meta, Ink::TextFaint, appearance));
     interactive(
