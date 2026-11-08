@@ -18,3 +18,39 @@ pub mod registry;
 pub mod runner;
 pub mod shell;
 pub mod step;
+
+// Jobs: worker status, the poller and health, the morning list, merge plans and morning actions.
+pub mod actions;
+mod actions_util;
+pub mod merge;
+pub mod merge_ops;
+pub mod morning;
+pub mod poller;
+pub mod status;
+
+#[cfg(test)]
+pub mod fakes_jobs;
+#[cfg(test)]
+mod tests_actions;
+#[cfg(test)]
+mod tests_actions_files;
+#[cfg(test)]
+mod tests_actions_gh;
+#[cfg(test)]
+mod tests_actions_read;
+#[cfg(test)]
+mod tests_merge;
+#[cfg(test)]
+mod tests_merge_b;
+#[cfg(test)]
+mod tests_merge_c;
+#[cfg(test)]
+mod tests_merge_git;
+#[cfg(test)]
+mod tests_merge_git_b;
+#[cfg(test)]
+mod tests_morning;
+#[cfg(test)]
+mod tests_poller;
+#[cfg(test)]
+mod tests_status;
