@@ -11,12 +11,30 @@ use std::fmt;
 /// The API version this crate speaks; `hello` must name it.
 pub const API_VERSION: u32 = 1;
 
-/// The op names of Milestone 2.
+/// The op names: Milestone 2's reads, then Milestone 3's acting ops (app tier, refused while the
+/// daemon's `acting` setting is off), their reads, and the hook's.
 pub mod ops {
     pub const HELLO: &str = "hello";
     pub const DAEMON_STATUS: &str = "daemon.status";
     pub const SESSIONS_LIST: &str = "sessions.list";
     pub const EVENTS_SUBSCRIBE: &str = "events.subscribe";
+
+    pub const SESSION_REPLY: &str = "session.reply";
+    pub const SESSION_ANSWER: &str = "session.answer";
+    pub const SESSION_PERMISSION: &str = "session.permission";
+    pub const SESSION_INTERRUPT: &str = "session.interrupt";
+    pub const SESSION_STOP: &str = "session.stop";
+    pub const SESSION_REMOVE: &str = "session.remove";
+    pub const SESSION_TAKE_BACK: &str = "session.take_back";
+    pub const SESSION_NEW: &str = "session.new";
+    pub const FOLDER_TRUST: &str = "folder.trust";
+    pub const SESSION_MOVE: &str = "session.move";
+    pub const SESSION_COMMAND: &str = "session.command";
+    pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
+    pub const SETTINGS_GET_ACTING: &str = "settings.get_acting";
+    pub const PROMPTS_LIST: &str = "prompts.list";
+    pub const SESSION_QUESTION: &str = "session.question";
+    pub const HOOK_REQUEST: &str = "hook.request";
 }
 
 /// Event topics and the events they carry.
@@ -25,6 +43,15 @@ pub mod topics {
     pub const SESSIONS: &str = "sessions";
     /// The full new session list, as `sessions.list` returns it.
     pub const SESSIONS_CHANGED: &str = "sessions.changed";
+    /// Questions and permissions a hook holds open, so the app (and later the phone) share one
+    /// answered state.
+    pub const PROMPTS: &str = "prompts";
+    pub const PROMPT_PENDING: &str = "prompt.pending";
+    pub const PROMPT_RESOLVED: &str = "prompt.resolved";
+    /// The daemon's own settings.
+    pub const SETTINGS: &str = "settings";
+    /// `{"acting": bool}`, after `settings.set_acting`.
+    pub const ACTING_CHANGED: &str = "settings.acting";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.
@@ -55,6 +82,10 @@ pub enum ErrorCode {
     Forbidden,
     NeedsApproval,
     Internal,
+    /// The op exists and was allowed, but this daemon doesn't hold its code yet.
+    Unimplemented,
+    /// The op ran and the session refused it (a dialog open, a question gone); the message says why.
+    Failed,
 }
 
 impl ErrorCode {
@@ -65,6 +96,8 @@ impl ErrorCode {
             ErrorCode::Forbidden => "forbidden",
             ErrorCode::NeedsApproval => "needs_approval",
             ErrorCode::Internal => "internal",
+            ErrorCode::Unimplemented => "unimplemented",
+            ErrorCode::Failed => "failed",
         }
     }
 }
@@ -292,6 +325,24 @@ mod tests {
                 Value::String(code.as_str().into())
             );
         }
+    }
+
+    #[test]
+    fn the_m3_codes_are_wire_names_too() {
+        for (code, name) in [
+            (ErrorCode::Unimplemented, "unimplemented"),
+            (ErrorCode::Failed, "failed"),
+        ] {
+            assert_eq!(code.as_str(), name);
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                Value::String(name.into())
+            );
+        }
+        assert_eq!(ops::SETTINGS_SET_ACTING, "settings.set_acting");
+        assert_eq!(ops::HOOK_REQUEST, "hook.request");
+        assert_eq!(topics::PROMPT_PENDING, "prompt.pending");
+        assert_eq!(topics::PROMPT_RESOLVED, "prompt.resolved");
     }
 
     #[test]

@@ -218,6 +218,11 @@ impl ServerHandle {
         self.shared.status()
     }
 
+    /// Whether a client with the app tier has said hello: someone who can answer a prompt.
+    pub fn app_attached(&self) -> bool {
+        self.shared.hub.app_attached()
+    }
+
     /// Open connections, hello said or not.
     pub fn connections(&self) -> usize {
         self.shared.hub.len()

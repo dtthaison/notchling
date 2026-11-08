@@ -318,7 +318,16 @@ impl Session {
             client: self.kind.unwrap_or(ClientKind::Cli),
             peer: self.peer().map(Path::to_path_buf),
         };
-        handler.call(&caller, op, args)
+        let result = handler.call(&caller, op, args);
+        if spec.tier == Tier::App {
+            // Every privileged call is on the record, not only the refusals.
+            let outcome = match &result {
+                Ok(_) => "ok",
+                Err(e) => e.code.as_str(),
+            };
+            self.shared.audit(op, Some(self.tier), self.peer(), outcome);
+        }
+        result
     }
 
     /// The peer's file as last read: at hello once said, else at accept.

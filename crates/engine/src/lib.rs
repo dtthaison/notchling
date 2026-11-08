@@ -2,6 +2,7 @@
 //!
 //! Milestone 1 fills `transcript` (E1), `sessions` (E2) and `settings` (E14).
 
+pub mod reply;
 pub mod search;
 pub mod sessions;
 pub mod settings;
