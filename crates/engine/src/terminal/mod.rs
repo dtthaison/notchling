@@ -33,5 +33,5 @@ mod width;
 
 pub use ask_dialog::dialog_open;
 pub use live::Terminal;
-pub use pty::{Pty, PtyCommand, PtyError, ReadOutcome};
+pub use pty::{Pty, PtyCommand, PtyError, ReadOutcome, StartStep};
 pub use screen::{TermCell, TermColor, TermStyle, TerminalScreen};
