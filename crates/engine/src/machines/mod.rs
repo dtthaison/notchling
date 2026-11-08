@@ -11,10 +11,25 @@
 //! - Secrets travel only on a process's stdin or in GitHub's Authorization header, and every text a
 //!   machine sent is masked ([`masks`]) before anyone sees it.
 
+pub mod engine;
+pub mod engine_check;
+pub mod engine_fix;
+pub mod engine_plan;
 pub mod github;
 pub mod masks;
+pub mod offers;
 pub mod process;
 pub mod registry;
 pub mod runner;
 pub mod shell;
 pub mod step;
+pub mod usage;
+
+#[cfg(test)]
+mod tests_engine;
+#[cfg(test)]
+mod tests_engine_fix;
+#[cfg(test)]
+mod tests_engine_offers;
+#[cfg(test)]
+pub mod tests_engine_world;
