@@ -2,7 +2,7 @@
 //!
 //! [`ensure_daemon`] connects first; only when nobody listens does it start `<binary> daemon
 //! --socket <socket>` detached and wait up to 3 s for the socket. It refuses a binary outside an app
-//! bundle (`*.app/Contents/…`) or a cargo target folder (`target/[<triple>/]debug|release`), and
+//! bundle (`*.app/Contents/…`) or a cargo target folder (`target/[<triple>/]debug|release`, or a moved one marked by `CACHEDIR.TAG`), and
 //! one not named `notchling`, so a test can never start some other program, and the socket is
 //! always passed explicitly, so a daemon started for a test socket keeps its lock, audit log and
 //! log beside that socket.
@@ -74,7 +74,21 @@ pub fn spawn_allowed(binary: &Path) -> bool {
         || parts
             .windows(3)
             .any(|w| w[0] == OsStr::new("target") && profile(w[2]));
-    in_bundle || in_target
+    in_bundle || in_target || in_tagged_target(&real, profile)
+}
+
+/// A cargo target folder moved elsewhere (`build.target-dir`, `CARGO_TARGET_DIR`) is still named by
+/// the `CACHEDIR.TAG` cargo writes at its root: `<root>/[<triple>/]debug|release/notchling`.
+fn in_tagged_target(real: &Path, profile: impl Fn(&OsStr) -> bool) -> bool {
+    let Some(profile_dir) = real.parent() else {
+        return false;
+    };
+    if !profile_dir.file_name().is_some_and(&profile) {
+        return false;
+    }
+    let tagged = |dir: Option<&Path>| dir.is_some_and(|d| d.join("CACHEDIR.TAG").is_file());
+    let root = profile_dir.parent();
+    tagged(root) || tagged(root.and_then(Path::parent))
 }
 
 /// [`ensure_daemon_with`] with the default options.
@@ -207,6 +221,20 @@ mod tests {
         assert!(!spawn_allowed(
             &d.join("repo/target/debug/missing/notchling")
         ));
+    }
+
+    #[test]
+    fn a_relocated_cargo_target_folder_is_found_by_its_cachedir_tag() {
+        let dir = TempDir::new("spawn-cachedir");
+        let d = dir.path();
+        file(d, "cargo-out/CACHEDIR.TAG");
+        assert!(spawn_allowed(&file(d, "cargo-out/debug/notchling")));
+        assert!(spawn_allowed(&file(
+            d,
+            "cargo-out/x86_64-unknown-linux-gnu/release/notchling"
+        )));
+        // Without the tag, a folder that merely has a debug/ inside is not a target folder.
+        assert!(!spawn_allowed(&file(d, "plain/debug/notchling")));
     }
 
     #[cfg(unix)]
