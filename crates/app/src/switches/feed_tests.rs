@@ -4,6 +4,7 @@
 //! folder or a Keychain.
 
 use super::*;
+use crate::switches::restart::{turn_back_on, Area, RestartNotice, TurnOn};
 use crate::testutil::Scratch;
 use notchling_local_api::{
     Allowlist, ApiError, Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle, Tier,
@@ -24,7 +25,7 @@ impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT),
-            ops::SETTINGS_SET_SWITCH => Some(OpSpec::APP),
+            ops::SETTINGS_SET_SWITCH | ops::VAULT_PENDING => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -38,6 +39,11 @@ impl Handler for Daemon {
         match op {
             ops::SETTINGS_SWITCHES => Ok(json!({
                 "accounts": on.accounts, "vault": on.vault, "install": on.install
+            })),
+            // One approval waits from before the app (re)connected.
+            ops::VAULT_PENDING => Ok(json!({
+                "approvals": [{"id": "ap-early", "names": ["github"], "command": "gh api /user"}],
+                "requests": []
             })),
             _ => {
                 on.apply(args);
@@ -107,6 +113,10 @@ impl SwitchChoice for Chosen {
 }
 
 fn start(socket: &Path, chosen: Vec<Switch>) -> SwitchFeed {
+    start_with(socket, chosen, Arc::default())
+}
+
+fn start_with(socket: &Path, chosen: Vec<Switch>, restart: Arc<RestartNotice>) -> SwitchFeed {
     let config = FeedConfig {
         socket: socket.to_path_buf(),
         version: "test".into(),
@@ -122,6 +132,7 @@ fn start(socket: &Path, chosen: Vec<Switch>) -> SwitchFeed {
             socket: socket.to_path_buf(),
         }),
         Arc::new(Chosen(Mutex::new(chosen))),
+        restart,
     )
 }
 
@@ -134,28 +145,95 @@ fn wait_until(what: &str, ok: impl Fn() -> bool) {
 }
 
 #[test]
-fn the_app_reads_the_switches_asserts_its_choice_and_follows_the_events() {
+fn a_remembered_choice_sends_nothing_and_only_the_confirmed_notice_turns_them_on() {
+    let scratch = Scratch::new("sf-rs");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let calls: Calls = Arc::default();
+    let daemon = serve(&socket, &calls);
+    // The file says all three on; the daemon (like every daemon start) says all off.
+    let notice = Arc::new(RestartNotice::default());
+    let feed = start_with(&socket, Switch::ALL.to_vec(), notice.clone());
+    wait_until("the follow", || {
+        feed.following() && !notice.state().offer().is_empty()
+    });
+    let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
+    assert_eq!(
+        sent,
+        ["settings.switches", "vault.pending"],
+        "no switch is turned on"
+    );
+    // What waited from before the connection is there, as if its event had come.
+    let waiting = feed.approvals();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0]["id"], "ap-early");
+    let s = feed.switches();
+    assert!(s.attached && !s.vault && !s.accounts && !s.install, "{s:?}");
+    let confirm = notice.state().confirm().unwrap();
+    assert_eq!(confirm.areas, [Area::Accounts, Area::Vault, Area::Install]);
+    // The person clicks Turn Back On, then confirms: exactly those go out.
+    let failed = turn_back_on(&confirm.areas, &FeedOnly(&feed));
+    assert!(failed.is_empty(), "{failed:?}");
+    let sets: Vec<Value> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.0 == "settings.set_switch")
+        .map(|c| c.1.clone())
+        .collect();
+    assert_eq!(
+        sets,
+        [
+            json!({"switch": "accounts", "on": true}),
+            json!({"switch": "vault", "on": true}),
+            json!({"switch": "install", "on": true})
+        ]
+    );
+    assert_eq!(notice.state().offer(), []);
+    daemon.0.shutdown();
+    let _ = daemon.1.join();
+}
+
+/// Turns on only the feed's switches.
+struct FeedOnly<'a>(&'a SwitchFeed);
+
+impl TurnOn for FeedOnly<'_> {
+    fn turn_on(&self, area: Area) -> Result<(), String> {
+        let switch = match area {
+            Area::Accounts => Switch::Accounts,
+            Area::Vault => Switch::Vault,
+            Area::Install => Switch::Install,
+            _ => return Err("not the feed's".into()),
+        };
+        self.0.choose(switch, true).map(|_| ())
+    }
+}
+
+#[test]
+fn the_app_reads_the_switches_and_follows_the_events() {
     let scratch = Scratch::new("switch-feed");
     let socket = scratch.path().join(SOCKET_NAME);
     let calls: Calls = Arc::default();
     let daemon = serve(&socket, &calls);
-    // The user chose the vault on earlier; every daemon starts off.
-    let feed = start(&socket, vec![Switch::Vault]);
+    let feed = start(&socket, vec![]);
     wait_until("the follow", || {
         feed.following() && daemon.0.app_following("vault")
     });
     let s = feed.switches();
-    assert!(s.attached && s.vault && !s.accounts, "{s:?}");
+    assert!(s.attached && !s.vault && !s.accounts, "{s:?}");
     assert_eq!(
         feed.control_of(Switch::Accounts).tooltip,
         Some(super::super::ACCOUNTS_OFF)
     );
     let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
-    assert_eq!(sent, ["settings.switches", "settings.set_switch"]);
-    assert_eq!(
-        calls.lock().unwrap()[1].1,
-        json!({"switch": "vault", "on": true})
+    assert_eq!(sent, ["settings.switches", "vault.pending"]);
+    // The approval that waited from before the connection, answered elsewhere: it goes.
+    wait_until("the early approval", || feed.approvals().len() == 1);
+    daemon.0.publish(
+        "vault",
+        "vault.approval.resolved",
+        &json!({"id": "ap-early", "decision": "deny"}),
     );
+    wait_until("early resolved", || feed.approvals().is_empty());
 
     // The maintainer turns accounts on elsewhere: the event reaches the app.
     daemon.0.publish(

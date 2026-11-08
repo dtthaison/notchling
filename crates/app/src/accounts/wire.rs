@@ -488,6 +488,61 @@ pub fn parse_move_plan(v: &Value) -> MovePlan {
     }
 }
 
+/// How a Move All went (`accounts.move_all`'s reply, or the event a daemon publishes when the move
+/// outlasts the reply). Read tolerantly: a reply that only says the move is under way is pending.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MoveResult {
+    /// The sessions that moved.
+    pub moved: Vec<String>,
+    /// What didn't, by session id (or `accounts` for the login side), with why.
+    pub errors: Vec<(String, String)>,
+    pub closed_lane: Option<String>,
+    pub switched_to: Option<String>,
+    /// The daemon answered before the move ended; the result comes as an event.
+    pub pending: bool,
+    /// The reply had `moved` or `errors`: it says how a move ended.
+    has_fields: bool,
+}
+
+impl MoveResult {
+    /// Whether this says how a move ended (it has `moved` or `errors`).
+    pub fn is_result(&self) -> bool {
+        !self.pending && self.has_fields
+    }
+}
+
+pub fn parse_move_result(v: &Value) -> MoveResult {
+    let mut errors: Vec<(String, String)> = v
+        .get("errors")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .map(|(k, e)| {
+                    let why = e
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| e.to_string());
+                    (k.clone(), why)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // Sessions first, then the login side (`accounts`), which reads as the summary of the rest.
+    errors.sort_by_key(|(k, _)| k == "accounts");
+    let has = v.get("moved").is_some() || v.get("errors").is_some();
+    MoveResult {
+        moved: list(v, "moved")
+            .iter()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect(),
+        errors,
+        closed_lane: text(v, "closedLane"),
+        switched_to: text(v, "switchedTo"),
+        pending: !has && v.get("state").is_some(),
+        has_fields: has,
+    }
+}
+
 #[cfg(test)]
 #[path = "wire_tests.rs"]
 mod tests;

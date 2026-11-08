@@ -16,12 +16,14 @@ use notchling_kit::ui::{label, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::cost::Range;
-use super::flows::{move_all_alert, remove_alert, Alert};
+use super::flows::{
+    move_all_alert, move_all_banner, remove_alert, sign_in_page, Alert, Banner, NOT_A_SIGN_IN_PAGE,
+};
 use super::limits::Zone;
 use super::model::{page, tabs, Page, Tab, CLAUDE_CODE};
 use super::store::{Accounts, Snapshot};
 use super::view_rows::{account_row, add_panel, alert_overlay, segmented, AddEvent, RowEvent};
-use super::wire::Outcome;
+use super::wire::{parse_move_result, Outcome};
 use crate::sheets::view::Dismiss;
 use crate::switches::feed::{Changes, SwitchFeed};
 use crate::switches::Switches;
@@ -46,6 +48,10 @@ enum Done {
     Nothing,
     Alert(Alert, Pending),
     Open(String),
+    /// A Claude Code sign-in began: open its page and poll for its end.
+    SignIn(String),
+    /// How a Move All went, kept under the rows until the next action.
+    Banner(Option<Banner>),
 }
 
 pub struct AccountsView {
@@ -58,6 +64,8 @@ pub struct AccountsView {
     menu_open: Option<String>,
     alert: Option<(Alert, Pending)>,
     note: Option<String>,
+    /// How the last Move All went (or that it's still going).
+    banner: Option<Banner>,
     pub(super) range: Range,
     pub(super) account: String,
     /// In Chat's sheet: a Done button, and Dismiss on it.
@@ -95,6 +103,7 @@ impl AccountsView {
             menu_open: None,
             alert: None,
             note: None,
+            banner: None,
             range: Range::Days30,
             account: String::new(),
             in_sheet,
@@ -106,8 +115,11 @@ impl AccountsView {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 ticks = ticks.wrapping_add(1);
-                let due = this.update(cx, |view, _| {
+                let due = this.update(cx, |view, cx| {
                     let changes = view.feed.changes();
+                    if changes.moves != view.seen.moves {
+                        view.move_ended(cx);
+                    }
                     let moved = changes != view.seen;
                     view.seen = changes;
                     moved || (ticks as u64).is_multiple_of(REFRESH_EVERY.as_secs())
@@ -146,10 +158,16 @@ impl AccountsView {
             menu_open: None,
             alert: None,
             note: None,
+            banner: None,
             range: Range::Days30,
             account: String::new(),
             in_sheet: false,
         }
+    }
+
+    /// A render's: the ⋯ menu of the row `key` (`<provider>-<id>`) open.
+    pub fn open_menu(&mut self, key: &str) {
+        self.menu_open = Some(key.to_owned());
     }
 
     /// Opens on a provider's tab (Chat's Codex Accounts…).
@@ -159,7 +177,7 @@ impl AccountsView {
         cx.notify();
     }
 
-    fn switches(&self) -> Switches {
+    pub(super) fn switches(&self) -> Switches {
         match &self.fixed {
             Some((_, s)) => *s,
             None => self.feed.switches(),
@@ -198,6 +216,7 @@ impl AccountsView {
         }
         self.busy = true;
         self.note = None;
+        self.banner = None;
         self.menu_open = None;
         let (store, switches, range) = (self.store.clone(), self.switches(), self.range);
         cx.spawn(async move |this, cx| {
@@ -215,9 +234,27 @@ impl AccountsView {
                 match result {
                     Ok(Done::Nothing) => view.alert = None,
                     Ok(Done::Alert(alert, pending)) => view.alert = Some((alert, pending)),
-                    Ok(Done::Open(url)) => {
+                    // Only a known sign-in page opens: the link comes from the daemon.
+                    Ok(Done::Open(url)) if sign_in_page(&url) => {
                         view.alert = None;
                         cx.open_url(&url);
+                    }
+                    Ok(Done::Open(_)) => {
+                        view.alert = None;
+                        view.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                    }
+                    Ok(Done::SignIn(url)) => {
+                        view.alert = None;
+                        if sign_in_page(&url) {
+                            cx.open_url(&url);
+                        } else {
+                            view.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                        }
+                        view.poll_add(cx);
+                    }
+                    Ok(Done::Banner(banner)) => {
+                        view.alert = None;
+                        view.banner = banner;
                     }
                     Err(e) => {
                         view.alert = None;
@@ -286,16 +323,13 @@ impl AccountsView {
         let provider = self.provider.clone();
         let s = self.store.snapshot();
         match event {
-            AddEvent::Add if provider == CLAUDE_CODE => {
-                self.run(
-                    |s, sw| {
-                        s.clear_add();
-                        s.begin_add_claude(sw).map(Done::Open)
-                    },
-                    cx,
-                );
-                self.poll_add(cx);
-            }
+            AddEvent::Add if provider == CLAUDE_CODE => self.run(
+                |s, sw| {
+                    s.clear_add();
+                    s.begin_add_claude(sw).map(Done::SignIn)
+                },
+                cx,
+            ),
             AddEvent::Add => self.run(
                 move |s, sw| match s.add_provider(sw, &provider, false)? {
                     Outcome::NeedsConfirmation {
@@ -319,7 +353,12 @@ impl AccountsView {
             ),
             AddEvent::Open => {
                 if let Some(url) = super::view_tabs::sign_in_url(&s, &provider) {
-                    cx.open_url(&url);
+                    if sign_in_page(&url) {
+                        cx.open_url(&url);
+                    } else {
+                        self.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                        cx.notify();
+                    }
                 }
             }
             AddEvent::CopyLink => {
@@ -342,26 +381,6 @@ impl AccountsView {
                 cx.notify();
             }
         }
-    }
-
-    /// While a Claude Code sign-in waits, asks the daemon for its end every few seconds.
-    fn poll_add(&self, cx: &mut Context<Self>) {
-        let (store, switches) = (self.store.clone(), self.switches());
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            let waiting = store.snapshot().add.is_some_and(|a| a.state == "waiting");
-            if !waiting {
-                return;
-            }
-            let (s, sw) = (store.clone(), switches);
-            cx.background_executor()
-                .spawn(async move { s.poll_add_claude(&sw, false).ok() })
-                .await;
-            if this.update(cx, |_, cx| cx.notify()).is_err() {
-                return;
-            }
-        })
-        .detach();
     }
 
     fn alert_answered(&mut self, yes: bool, cx: &mut Context<Self>) {
@@ -396,11 +415,23 @@ impl AccountsView {
             ),
             Pending::MoveAll(target) => self.run(
                 move |s, sw| {
-                    s.move_all(sw, target.as_deref(), false)
-                        .map(|_| Done::Nothing)
+                    s.move_all_now(sw, target.as_deref())
+                        .map(|result| Done::Banner(move_all_banner(&result)))
                 },
                 cx,
             ),
+        }
+    }
+
+    /// A daemon that answered a Move All before it ended said how it went in an event: replace
+    /// the "still moving" line with it.
+    fn move_ended(&mut self, cx: &mut Context<Self>) {
+        let Some(end) = self.feed.last_move() else {
+            return;
+        };
+        if let Some(banner) = move_all_banner(&parse_move_result(&end)) {
+            self.banner = Some(banner);
+            cx.notify();
         }
     }
 
@@ -409,7 +440,7 @@ impl AccountsView {
     pub fn move_all(&mut self, target: Option<String>, email: String, cx: &mut Context<Self>) {
         self.run(
             move |s, sw| {
-                let plan = s.move_all(sw, target.as_deref(), true)?;
+                let plan = s.move_all_plan(sw, target.as_deref())?;
                 Ok(Done::Alert(
                     move_all_alert(&email, &plan),
                     Pending::MoveAll(target),
@@ -474,6 +505,14 @@ impl AccountsView {
                 cx,
                 on,
             ));
+        }
+        if let Some(b) = &self.banner {
+            let ink = if b.warning {
+                Ink::Needs
+            } else {
+                Ink::TextMuted
+            };
+            list = list.child(label(&b.text, TypeRole::Meta, ink, a));
         }
         if let Some(e) = page.error.as_deref().or(self.note.as_deref()) {
             list = list.child(label(e, TypeRole::Meta, Ink::Needs, a));

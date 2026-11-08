@@ -26,8 +26,43 @@ pub enum FormEvent {
     EditHowTo,
     /// Renewing: Pick a date (`false`) or No expiry (`true`); editing: the No expiry checkbox.
     NoExpiry(bool),
+    /// The person confirms (or takes back) an agent's request moving the address.
+    ConfirmHost,
     Save,
     Cancel,
+}
+
+/// ⌘V, ⌘C, ⌘X and ⌘A in the form's fields, through the system clipboard: paste into the focused
+/// field, copy or cut it whole (never the value). ⌘A has nothing to select and is swallowed.
+/// Whether the key was one of them.
+pub fn clipboard_key<V: 'static>(
+    form: &mut Form,
+    k: &gpui::Keystroke,
+    cx: &mut Context<V>,
+) -> bool {
+    if !k.modifiers.platform || k.modifiers.control || k.modifiers.alt {
+        return false;
+    }
+    match k.key.as_str() {
+        "v" => {
+            if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                form.paste(&text);
+            }
+        }
+        "c" => {
+            if let Some(text) = form.copy() {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            }
+        }
+        "x" => {
+            if let Some(text) = form.cut() {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            }
+        }
+        "a" => {}
+        _ => return false,
+    }
+    true
 }
 
 pub const FOOTER: &str =
@@ -300,6 +335,17 @@ pub fn form_body<V: 'static>(
         .children(marker(form, Changed::Url, a));
     if let Some(warning) = form.host_warning() {
         url = url.child(label(&warning, TypeRole::Meta, Ink::Needs, a));
+        if form.mode == Mode::Request {
+            url = url.child(checkbox(
+                "confirm-host",
+                "I checked the new address; send the secret there",
+                form.host_confirmed,
+                a,
+                cx,
+                FormEvent::ConfirmHost,
+                &on,
+            ));
+        }
     }
     if let Some(note) = form.renew_note() {
         url = url.child(label(&note, TypeRole::Meta, Ink::TextMuted, a));

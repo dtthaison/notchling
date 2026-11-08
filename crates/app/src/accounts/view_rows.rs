@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use gpui::{div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
+use gpui::{deferred, div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
 use notchling_kit::metric::{AVATAR, METER_BAR, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{avatar, button, card, hsla, label, KitStyled, MONO_FONT};
@@ -203,21 +203,33 @@ pub fn account_row<V: 'static>(
             .shadow_lg();
         for (i, item) in row.menu.iter().enumerate() {
             let handler = on.clone();
-            items = items.child(
-                div()
-                    .id(SharedString::from(format!("menu-item-{key}-{i}")))
-                    .px(px(10.0))
-                    .py(px(5.0))
-                    .rounded(px(RADIUS_SM))
+            let enabled = item.control.enabled;
+            let entry = div()
+                .id(SharedString::from(format!("menu-item-{key}-{i}")))
+                .px(px(10.0))
+                .py(px(5.0))
+                .rounded(px(RADIUS_SM))
+                .child(label(
+                    item.title,
+                    TypeRole::Label,
+                    if enabled { Ink::Text } else { Ink::TextFaint },
+                    a,
+                ));
+            let entry = if enabled {
+                entry
                     .cursor_pointer()
                     .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-                    .child(label(item.title, TypeRole::Label, Ink::Text, a))
                     .on_click(
                         cx.listener(move |this, _, _, cx| handler(this, RowEvent::Remove, cx)),
-                    ),
-            );
+                    )
+            } else {
+                gate::tip(entry, item.control, a)
+            };
+            items = items.child(entry);
         }
-        items
+        // Painted after every row and taking the clicks under it: a menu that reaches past its
+        // own row is drawn over the next one, not under it.
+        deferred(items.occlude()).with_priority(1)
     });
     card(a)
         .relative()
@@ -504,6 +516,8 @@ pub fn alert_overlay<V: 'static>(
     div()
         .absolute()
         .size_full()
+        // The backdrop takes every click and hover: no row under the alert is live.
+        .occlude()
         .flex()
         .items_center()
         .justify_center()

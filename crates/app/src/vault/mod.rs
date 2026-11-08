@@ -7,6 +7,8 @@
 //! are macOS only (`LINT-GPUI-MACOS-ONLY`).
 
 pub mod approval;
+#[cfg(target_os = "macos")]
+pub mod approval_view;
 pub mod form;
 #[cfg(target_os = "macos")]
 pub mod form_view;

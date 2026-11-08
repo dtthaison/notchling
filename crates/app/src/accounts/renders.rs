@@ -17,11 +17,19 @@ use crate::views::ViewSpec;
 /// The fixed clock every render draws at, seconds since 1970.
 pub const NOW: f64 = 1_800_000_000.0;
 
-pub const VIEWS: [ViewSpec; 5] = [
+/// The render with a row's ⋯ menu open, over the row under it.
+pub const MENU_RENDER: &str = "accounts-window-menu";
+
+pub const VIEWS: [ViewSpec; 6] = [
     ViewSpec {
         name: "accounts-window",
         size: (560.0, 640.0),
         about: "the Accounts window, Claude Code tab, accounts switch on (made-up data)",
+    },
+    ViewSpec {
+        name: MENU_RENDER,
+        size: (560.0, 640.0),
+        about: "the Accounts window with the first Claude Desktop row's ⋯ menu open over the row below (made-up data)",
     },
     ViewSpec {
         name: "accounts-window-off",
@@ -60,7 +68,7 @@ pub enum Shown {
 
 pub fn shown(name: &str) -> Option<Shown> {
     Some(match name {
-        "accounts-window" => Shown::Claude,
+        "accounts-window" | MENU_RENDER => Shown::Claude,
         "accounts-window-off" => Shown::Off,
         "accounts-window-codex" => Shown::Codex,
         "limit-bars" => Shown::LimitBars,

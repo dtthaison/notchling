@@ -126,3 +126,38 @@ fn outcomes_sign_ins_and_move_plans_are_read() {
     assert!(plan.switch_main);
     assert_eq!(parse_move_plan(&json!({"plan": {"jobs": 3}})).jobs, 3);
 }
+
+#[test]
+fn a_move_all_result_names_what_failed_and_a_late_reply_is_pending() {
+    let done = parse_move_result(&json!({"closedLane": "night", "switchedTo": "a2",
+        "moved": ["job-1", "job-2"],
+        "errors": {"job-3": "Couldn't move it: claude stop failed",
+                   "accounts": "The lane's login can't be read."}}));
+    assert_eq!(done.moved, ["job-1", "job-2"]);
+    assert!(!done.pending);
+    let banner = crate::accounts::flows::move_all_banner(&done).unwrap();
+    assert!(banner.warning);
+    assert_eq!(
+        banner.text,
+        "Moved 2 sessions. Not moved: job-3 (Couldn't move it: claude stop failed); \
+         accounts (The lane's login can't be read.)"
+    );
+    let clean = parse_move_result(&json!({"moved": ["job-1"], "errors": {}}));
+    let banner = crate::accounts::flows::move_all_banner(&clean).unwrap();
+    assert_eq!(
+        (banner.text.as_str(), banner.warning),
+        ("Moved 1 session.", false)
+    );
+    // A daemon that answers before the move ends: the result comes as an event.
+    let late = parse_move_result(&json!({"state": "moving"}));
+    assert!(late.pending && late.moved.is_empty());
+    assert_eq!(
+        crate::accounts::flows::move_all_banner(&late).unwrap().text,
+        "Moving the sessions; this says how it went when it ends."
+    );
+    assert!(
+        !parse_move_result(&json!({"reason": "switch"})).is_result(),
+        "an accounts event that isn't a move's end"
+    );
+    assert!(parse_move_result(&json!({"moved": []})).is_result());
+}

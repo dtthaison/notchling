@@ -260,6 +260,11 @@ impl VaultSheetView {
         let Some(form) = self.form.as_mut() else {
             return;
         };
+        if super::form_view::clipboard_key(form, k, cx) {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let modified = k.modifiers.platform || k.modifiers.control;
         match form.key(&k.key, k.key_char.as_deref(), modified) {
             Typed::Submit => self.save(cx),
@@ -448,6 +453,7 @@ impl VaultSheetView {
                         FormEvent::ToggleAdvanced => form.advanced = !form.advanced,
                         FormEvent::EditHowTo => form.editing_how_to = true,
                         FormEvent::NoExpiry(none) => form.choose_expiry(none, today),
+                        FormEvent::ConfirmHost => form.confirm_host(),
                         _ => {}
                     }
                 }
@@ -460,7 +466,8 @@ impl VaultSheetView {
 /// `--render vault-sheet|vault-form|vault-approval|vault-request`, over made-up entries; nothing
 /// is called.
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
-    use super::prompt_view::{VaultApprovalView, VaultRequestView};
+    use super::approval_view::VaultApprovalView;
+    use super::prompt_view::VaultRequestView;
     let which = renders::shown(name)?;
     let vault = Arc::new(Vault::fixed(renders::entries()));
     let feed = Arc::new(SwitchFeed::fixed(Switches::all_on()));
@@ -474,8 +481,10 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
                 .into()
         }
         Shown::Approval => {
-            let prompt = super::approval::prompt(&renders::approvals())?;
-            cx.new(|cx| VaultApprovalView::fixed(prompt, cx)).into()
+            let approval = super::approval::pending(&renders::approvals())
+                .into_iter()
+                .next()?;
+            cx.new(|cx| VaultApprovalView::fixed(&approval, cx)).into()
         }
         Shown::Request => cx
             .new(|cx| VaultRequestView::fixed(renders::pending_request(), renders::TODAY, cx))

@@ -9,6 +9,7 @@
 //! control that slipped past its disabled state still reaches no login.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -18,8 +19,8 @@ use serde_json::{json, Value};
 
 use super::wire::{
     parse_add, parse_claude_list, parse_cost, parse_lanes, parse_limits, parse_move_plan,
-    parse_outcome, parse_providers, parse_usage, working_ticket, AddProgress, Call, ClaudeList,
-    CostReply, Lane, LimitsStatus, MovePlan, Outcome, ProviderList,
+    parse_move_result, parse_outcome, parse_providers, parse_usage, working_ticket, AddProgress,
+    Call, ClaudeList, CostReply, Lane, LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList,
 };
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -49,9 +50,25 @@ pub struct Snapshot {
     pub error: Option<String>,
 }
 
+/// How often, at most, a refresh syncs the live logins and reads the providers' limits (the Swift
+/// app's rate). Refreshes between, on a tick or an event, read the lists without syncing.
+pub const SYNC_EVERY: f64 = 30.0;
+
+/// One refresh at a time; one asked for meanwhile runs once after.
+#[derive(Default)]
+struct Flight {
+    running: bool,
+    again: bool,
+}
+
 pub struct Accounts {
     transport: Option<Box<dyn Transport>>,
     snapshot: Mutex<Snapshot>,
+    flight: Mutex<Flight>,
+    /// When the last syncing refresh went out (seconds since 1970).
+    last_sync: Mutex<Option<f64>>,
+    /// A Claude Code sign-in is being polled (one poller at a time).
+    add_polling: AtomicBool,
 }
 
 fn message(e: &ClientError) -> String {
@@ -71,6 +88,9 @@ impl Accounts {
         Accounts {
             transport: Some(transport),
             snapshot: Mutex::new(Snapshot::default()),
+            flight: Mutex::default(),
+            last_sync: Mutex::new(None),
+            add_polling: AtomicBool::new(false),
         }
     }
 
@@ -79,6 +99,9 @@ impl Accounts {
         Accounts {
             transport: None,
             snapshot: Mutex::new(snapshot),
+            flight: Mutex::default(),
+            last_sync: Mutex::new(None),
+            add_polling: AtomicBool::new(false),
         }
     }
 
@@ -157,14 +180,62 @@ impl Accounts {
         })
     }
 
-    /// Reads every list. Blocking. `switches` says whether the switch is on, which decides
-    /// whether the live login is synced and the providers' limits are asked for.
+    /// Reads every list. Blocking. See [`Accounts::refresh_at`].
     pub fn refresh(&self, switches: &Switches) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        self.refresh_at(switches, now);
+    }
+
+    /// Reads every list at `now`. Blocking. Never two at once: one asked for while another runs
+    /// makes that one run once more after, and returns at once. With the switch on, the live login
+    /// is synced and the providers' limits read at most every [`SYNC_EVERY`] seconds; the
+    /// daemon publishes `providers.changed` for each list read, so syncing on every event would
+    /// feed itself.
+    pub fn refresh_at(&self, switches: &Switches, now: f64) {
         if self.transport.is_none() {
             return;
         }
+        {
+            let mut flight = lock(&self.flight);
+            if flight.running {
+                flight.again = true;
+                return;
+            }
+            flight.running = true;
+        }
+        loop {
+            self.read_lists(switches, now);
+            let mut flight = lock(&self.flight);
+            if flight.again {
+                flight.again = false;
+                continue;
+            }
+            flight.running = false;
+            return;
+        }
+    }
+
+    /// Whether this refresh syncs: the switch is on and the last sync is [`SYNC_EVERY`] old.
+    fn sync_due(&self, on: bool, now: f64) -> bool {
+        let mut last = lock(&self.last_sync);
+        if !on {
+            *last = None;
+            return false;
+        }
+        let due = last.is_none_or(|at| now - at >= SYNC_EVERY || now < at);
+        if due {
+            *last = Some(now);
+        }
+        due
+    }
+
+    fn read_lists(&self, switches: &Switches, now: f64) {
         let on = switches.is_on(Switch::Accounts);
-        let claude = match self.call(&Call::accounts_list(on)) {
+        let sync = self.sync_due(on, now);
+        let claude = match self.call(&Call::accounts_list(sync)) {
             Ok(v) => parse_claude_list(&v),
             Err(e) => {
                 if !switches::detaches(&e) {
@@ -180,7 +251,7 @@ impl Accounts {
         // went away mid-read has nothing more to say.
         let lanes = self.call(&Call::lanes_list()).map(|v| parse_lanes(&v));
         let providers = self
-            .call(&Call::providers_list(on))
+            .call(&Call::providers_list(sync))
             .map(|v| parse_providers(&v));
         let limits = self.call(&Call::limits_status()).map(|v| parse_limits(&v));
         if lanes.as_ref().err().is_some_and(switches::detaches)
@@ -190,7 +261,7 @@ impl Accounts {
             return;
         }
         let mut usage = BTreeMap::new();
-        if let (true, Ok(list)) = (on, &providers) {
+        if let (true, Ok(list)) = (sync, &providers) {
             for p in list.providers.iter().filter(|p| p.can(USAGE)) {
                 if let Ok(v) = self.call(&Call::providers_usage(&p.id, false)) {
                     usage.insert(p.id.clone(), parse_usage(&v));
@@ -209,9 +280,9 @@ impl Accounts {
             if let Ok(limits) = limits {
                 s.limits = limits;
             }
-            if on {
+            if sync {
                 s.usage = usage;
-            } else {
+            } else if !on {
                 s.usage.clear();
             }
             s.error = None;
@@ -265,6 +336,37 @@ impl Accounts {
         Ok(())
     }
 
+    /// Claims polling the Claude Code sign-in: false when another poller has it.
+    pub fn claim_add_poll(&self) -> bool {
+        self.add_polling
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// One poll of the sign-in. Blocking. Whether to poll again: it still waits and the daemon
+    /// answered.
+    pub fn add_poll_step(&self, switches: &Switches) -> bool {
+        if !self.add_waiting() {
+            return false;
+        }
+        self.poll_add_claude(switches, false).is_ok() && self.add_waiting()
+    }
+
+    /// The poller is done. A sign-in still shown as waiting with no one polling it is given up in
+    /// the daemon (best effort) and the row goes back to its Add button, rather than "Waiting"
+    /// forever. Blocking.
+    pub fn end_add_poll(&self, switches: &Switches) {
+        if self.add_waiting() {
+            let _ = self.poll_add_claude(switches, true);
+            self.clear_add();
+        }
+        self.add_polling.store(false, Ordering::SeqCst);
+    }
+
+    fn add_waiting(&self) -> bool {
+        self.snapshot().add.is_some_and(|a| a.state == "waiting")
+    }
+
     /// Forgets how the last sign-in ended.
     pub fn clear_add(&self) {
         self.update(|s| s.add = None);
@@ -279,15 +381,25 @@ impl Accounts {
             .ok_or_else(|| "The daemon made a lane this app can't read".to_owned())
     }
 
-    /// Move All: a dry run's plan, or the move itself (`accounts.move_all`). Blocking.
-    pub fn move_all(
+    /// Move All's dry run: the plan (`accounts.move_all` with `dryRun`). Blocking.
+    pub fn move_all_plan(
         &self,
         switches: &Switches,
         target: Option<&str>,
-        dry_run: bool,
     ) -> Result<MovePlan, String> {
-        let v = self.send(switches, &Call::accounts_move_all(target, dry_run))?;
+        let v = self.send(switches, &Call::accounts_move_all(target, true))?;
         Ok(parse_move_plan(&v))
+    }
+
+    /// Move All itself (`accounts.move_all`): what moved and what didn't, or pending when the
+    /// daemon answered before the move ended. Blocking.
+    pub fn move_all_now(
+        &self,
+        switches: &Switches,
+        target: Option<&str>,
+    ) -> Result<MoveResult, String> {
+        let v = self.send(switches, &Call::accounts_move_all(target, false))?;
+        Ok(parse_move_result(&v))
     }
 
     /// Switches another provider's account (`providers.switch`). Blocking.

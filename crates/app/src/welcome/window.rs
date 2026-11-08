@@ -16,11 +16,10 @@ use super::first_run::FirstRun;
 use super::handover_view::{HandoverView, Services};
 use super::hooks::Hooks;
 use super::own::{Flags, FIRST_RUN_KEY};
-use super::switches::Switches;
 use super::updates::{CurlFetcher, NoFeed, KILL_SWITCH};
 use super::view::{live_about, AboutEnv, AboutView, FirstRunEnv, FirstRunView};
 use crate::chat::data::DataRoot;
-use crate::mac::shell::{note_titled, AppActions, AppBridge};
+use crate::mac::shell::{note_titled, AppActions, AppBridge, AppSwitchFeed};
 
 /// What the windows need to know about the running app. Not set in a render.
 pub struct WelcomeSetup {
@@ -29,12 +28,6 @@ pub struct WelcomeSetup {
 }
 
 impl Global for WelcomeSetup {}
-
-/// The daemon's M6 switches as the app last saw them, shared by the Handover window and the poll
-/// that keeps the user's choices asserted. Not set in a render.
-pub struct AppSwitches(pub Arc<Switches>);
-
-impl Global for AppSwitches {}
 
 /// Which window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,7 +142,7 @@ fn open_handover(cx: &mut App) {
     let (Some(actions), Some(bridge), Some(switches)) = (
         cx.try_global::<AppActions>().map(|g| g.0.clone()),
         cx.try_global::<AppBridge>().map(|g| g.0.clone()),
-        cx.try_global::<AppSwitches>().map(|g| g.0.clone()),
+        cx.try_global::<AppSwitchFeed>().map(|g| g.0.clone()),
     ) else {
         eprintln!("the Handover window needs the running app's daemon connections");
         return;

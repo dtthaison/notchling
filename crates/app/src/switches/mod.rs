@@ -7,13 +7,17 @@
 //! refused op would give. The daemon's `settings.switch {switch, on}` events keep [`Switches`]
 //! current ([`Switches::apply`]); the first read is `settings.switches`.
 //!
-//! The user's choice per switch is the app's to keep (`accountsOn`, `vaultOn`, `installOn` in the
-//! app's own `settings.json`, like `actingOn`): [`feed::SwitchFeed`] asserts a chosen switch again
-//! when a daemon says it is off, so a restarted daemon comes back to what the user chose.
+//! The user's choice per switch is kept in the app's own `settings.json` (`accountsOn`, `vaultOn`,
+//! `installOn`, like `actingOn`), but the app never turns a switch on from that file: a file any
+//! agent can write must not hand out the vault or the logins. After a daemon restart the
+//! [`restart`] notice offers the switches back, and only the person's confirmation sends them.
 
 pub mod feed;
+pub mod restart;
+#[cfg(target_os = "macos")]
+pub mod restart_view;
 
-use notchling_local_api::{ClientError, ErrorCode};
+use notchling_local_api::ClientError;
 use serde_json::{json, Value};
 
 use crate::acting::{Control, DETACHED_MESSAGE};
@@ -66,11 +70,6 @@ impl Switch {
             Switch::Vault => "vaultOn",
             Switch::Install => "installOn",
         }
-    }
-
-    /// Whether `message` is this switch's off refusal, however it is prefixed.
-    pub fn is_off_message(self, message: &str) -> bool {
-        message.contains(self.off_message())
     }
 
     /// The op that turns it on or off, and its arguments.
@@ -194,22 +193,6 @@ impl Switches {
     }
 }
 
-/// What a failed call says about a switch: the daemon's off refusal for it turns it off; a lost
-/// connection detaches everything; any other error says nothing.
-pub fn after_error(error: &ClientError, switch: Switch) -> Option<Switches> {
-    match error {
-        ClientError::Api(e)
-            if e.code == ErrorCode::Forbidden && switch.is_off_message(&e.message) =>
-        {
-            Some(Switches {
-                attached: true,
-                ..Switches::default()
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Whether this error means there is no daemon to talk to.
 pub fn detaches(error: &ClientError) -> bool {
     crate::acting::after_error(error) == Some(crate::acting::Acting::Detached)
@@ -218,14 +201,12 @@ pub fn detaches(error: &ClientError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notchling_local_api::ApiError;
+    use notchling_local_api::{ApiError, ErrorCode};
 
     #[test]
     fn the_names_round_trip_and_each_has_its_message() {
         for s in Switch::ALL {
             assert_eq!(Switch::parse(s.wire()), Some(s));
-            assert!(s.is_off_message(&format!("forbidden: {}", s.off_message())));
-            assert!(!s.is_off_message("acting is off"));
         }
         assert_eq!(Switch::parse("acting"), None);
         assert_eq!(Switch::Accounts.choice_key(), "accountsOn");
@@ -277,17 +258,10 @@ mod tests {
     }
 
     #[test]
-    fn the_off_refusal_turns_a_switch_off_and_a_lost_daemon_detaches() {
+    fn only_a_lost_daemon_detaches() {
         let off = ClientError::Api(ApiError::new(ErrorCode::Forbidden, ACCOUNTS_OFF));
-        let after = after_error(&off, Switch::Accounts).unwrap();
-        assert!(after.attached && !after.accounts);
-        assert_eq!(
-            after_error(&off, Switch::Vault),
-            None,
-            "another switch's words"
-        );
+        assert!(!detaches(&off));
         let tier = ClientError::Api(ApiError::new(ErrorCode::Forbidden, "app tier only"));
-        assert_eq!(after_error(&tier, Switch::Accounts), None);
         assert!(!detaches(&tier));
         assert!(detaches(&ClientError::Closed));
     }
