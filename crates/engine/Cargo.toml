@@ -38,3 +38,8 @@ tungstenite = { version = "0.27", default-features = false, features = ["handsha
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# The Secret Vault's one Keychain item (E9), through the Security framework so it trusts only this
+# build. Already in the tree through rustls-native-certs.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7.0"

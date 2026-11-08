@@ -18,7 +18,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(pub(crate) PathBuf);
 
 impl Drop for Dir {
     fn drop(&mut self) {
@@ -33,30 +33,35 @@ fn dir(tag: &str) -> Dir {
     Dir(path)
 }
 
-const ID1: &str = "a1a1:0101";
-const ID2: &str = "a2a2:0202";
+pub(crate) const ID1: &str = "a1a1:0101";
+pub(crate) const ID2: &str = "a2a2:0202";
 
-fn profile(id: &str, email: &str) -> String {
+pub(crate) fn profile(id: &str, email: &str) -> String {
     let (a, o) = id.split_once(':').unwrap();
     json!({"account": {"uuid": a, "email": email}, "organization": {"uuid": o, "organization_type": "claude_pro"}})
         .to_string()
 }
 
-fn slot(id: &str, email: &str, n: &str) -> String {
+pub(crate) fn slot(id: &str, email: &str, n: &str) -> String {
     let (a, o) = id.split_once(':').unwrap();
     json!({"claudeAiOauth": {"accessToken": format!("test-access-{n}"), "refreshToken": format!("test-refresh-{n}")},
            "oauthAccount": {"accountUuid": a, "organizationUuid": o, "emailAddress": email}})
     .to_string()
 }
 
-struct World {
-    d: Dir,
-    flag: Arc<SwitchFlag>,
+pub(crate) struct World {
+    pub(crate) d: Dir,
+    pub(crate) flag: Arc<SwitchFlag>,
     room: Arc<FakeRoom>,
-    ops: AccountsOps,
+    pub(crate) ops: AccountsOps,
 }
 
-fn world(tag: &str, on: bool, runner: Arc<dyn SecurityRunner>, http: Arc<dyn HttpClient>) -> World {
+pub(crate) fn world(
+    tag: &str,
+    on: bool,
+    runner: Arc<dyn SecurityRunner>,
+    http: Arc<dyn HttpClient>,
+) -> World {
     let d = dir(tag);
     let flag = SwitchFlag::in_memory(ACCOUNTS, ACCOUNTS_OFF, on);
     let room = Arc::new(FakeRoom::default());

@@ -365,7 +365,7 @@ impl Server {
                         continue;
                     }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock || passing(&e) => {
                     std::thread::sleep(Duration::from_millis(25));
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -373,5 +373,42 @@ impl Server {
             }
         }
         Ok(())
+    }
+}
+
+/// An accept error that ends one connect, not the listener: the client gave up before it was
+/// accepted, or the process is out of descriptors or buffers for now. Ending the server on one of
+/// these would leave every client without a daemon.
+fn passing(e: &io::Error) -> bool {
+    if matches!(
+        e.kind(),
+        io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset
+    ) {
+        return true;
+    }
+    #[cfg(unix)]
+    if let Some(code) = e.raw_os_error() {
+        return [libc::EMFILE, libc::ENFILE, libc::ENOBUFS, libc::ENOMEM].contains(&code);
+    }
+    false
+}
+
+#[cfg(test)]
+mod accept_tests {
+    use super::passing;
+    use std::io;
+
+    #[test]
+    fn a_client_giving_up_or_a_short_of_descriptors_moment_keeps_the_server_up() {
+        assert!(passing(&io::Error::from(io::ErrorKind::ConnectionAborted)));
+        assert!(passing(&io::Error::from(io::ErrorKind::ConnectionReset)));
+        #[cfg(unix)]
+        {
+            assert!(passing(&io::Error::from_raw_os_error(libc::EMFILE)));
+            assert!(passing(&io::Error::from_raw_os_error(libc::ENFILE)));
+            assert!(!passing(&io::Error::from_raw_os_error(libc::EBADF)));
+            assert!(!passing(&io::Error::from_raw_os_error(libc::EINVAL)));
+        }
+        assert!(!passing(&io::Error::from(io::ErrorKind::PermissionDenied)));
     }
 }

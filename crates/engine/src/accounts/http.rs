@@ -15,6 +15,9 @@ use std::time::Duration;
 pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 /// The account behind a token.
 pub const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+/// An account's limits (`AccountStore.fetchUsage`), read with a token from
+/// [`super::claude::ClaudeAccounts::usage_token`].
+pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// Codes and refresh tokens are exchanged here.
 pub const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 /// The only hosts [`LiveHttp`] will call.

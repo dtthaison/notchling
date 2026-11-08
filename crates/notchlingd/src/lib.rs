@@ -24,8 +24,10 @@
 //! sessions over. Later milestones add `secret`, `delegate` and `page`.
 //!
 //! Milestone 6 adds three more switches, all off at every start ([`switches`]: `accounts`, `vault`,
-//! `install`), served as op groups ([`op_group`]), and Claude Code's accounts and lanes behind
-//! `accounts` ([`accounts_ops`]).
+//! `install`), served as op groups ([`op_group`]): Claude Code's accounts and lanes
+//! ([`accounts_ops`]), the other providers ([`providers_ops`]) and the limit watchers
+//! ([`limits_ops`]) behind `accounts`, and the Secret Vault ([`vault_ops`]) behind `vault`, with
+//! its command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
 
 pub mod accounts_ops;
 mod accounts_signin;
@@ -40,7 +42,9 @@ pub mod cli;
 pub mod clients;
 pub mod codex_ops;
 pub mod control_ops;
+pub mod cost_ops;
 pub mod daemon;
+pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
@@ -48,13 +52,21 @@ pub mod hook_output;
 pub mod install_ops;
 pub mod late_reply;
 pub mod layout;
+pub mod limits_ops;
+pub mod limits_sources;
 pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
+pub mod providers_daemon;
+pub mod providers_ops;
 pub mod service;
 pub mod signals;
 pub mod switches;
+pub mod vault_args;
+pub mod vault_cli;
+pub mod vault_ops;
+pub mod vault_wait;
 
 #[cfg(test)]
 mod accounts_ops_tests;
@@ -62,6 +74,8 @@ mod accounts_ops_tests;
 mod acting_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
+#[cfg(test)]
+mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
@@ -71,7 +85,11 @@ mod hook_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]
+mod limits_ops_tests;
+#[cfg(test)]
 mod pages_ops_tests;
+#[cfg(test)]
+mod providers_ops_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
@@ -111,6 +129,9 @@ pub fn run(command: Command) -> i32 {
         },
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
+        Command::Secrets { args } => vault_cli::secrets(&args),
+        Command::Secret { args } => vault_cli::secret(&args),
+        Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {

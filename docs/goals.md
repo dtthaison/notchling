@@ -108,7 +108,8 @@ carry over.
   Secret Service and Windows' Credential Manager have no per-app access control. Any program running
   as you can read what Notchling keeps there, vault values included. The vault's Ask First prompt
   still guards uses that go through Notchling, but not a program that reads the store directly. On
-  those systems, the vault is only as safe as your user account.
+  those systems, the vault is only as safe as your user account. The rebuild's vault has a store
+  only on macOS so far: on Linux and Windows it answers that there is none.
 - **Saved logins** are the same on every system. On macOS they go through `/usr/bin/security` on
   purpose, so a rebuilt app keeps access, which also means any program running as you can read them.
 - **Replies.** Typing into a session (`claude attach` over a pty) was verified only on macOS
