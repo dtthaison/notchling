@@ -13,7 +13,9 @@ use notchling_engine::machines::github::NoGitHub;
 use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::registry::{AdminAccess, Machine, MachineOs, RegistryState};
 use notchling_engine::machines::runner::{Refusing, Runner, ScriptedRunner, OFF};
-use notchling_engine::machines::step::{Detected, MacFacts, NoOpener, NoSecrets, StepId};
+use notchling_engine::machines::step::{
+    Detected, MacFacts, NoOpener, NoSecrets, SecretSource, StepId,
+};
 use notchling_engine::vault::entry::{Kind, VaultEntry};
 
 use super::model::{MachinesModel, Parts, Registry, Sheet, VaultList};
@@ -132,13 +134,23 @@ pub(super) fn world_with(
     runner: Arc<dyn Runner>,
     scripted: Arc<ScriptedRunner>,
 ) -> World {
+    world_with_secrets(machines, runner, scripted, Arc::new(NoSecrets))
+}
+
+/// A world whose engine reads its vault values from `secrets`.
+pub(super) fn world_with_secrets(
+    machines: Vec<Machine>,
+    runner: Arc<dyn Runner>,
+    scripted: Arc<ScriptedRunner>,
+    secrets: Arc<dyn SecretSource>,
+) -> World {
     let registry = Arc::new(MemRegistry::default());
     *lock(&registry.list) = machines;
     let vault = Arc::new(FakeVault::default());
     let store: Arc<dyn MachineStore> = registry.clone();
     let deps = Deps {
         runner: runner.clone(),
-        secrets: Arc::new(NoSecrets),
+        secrets,
         http: Arc::new(NoGitHub),
         opener: Arc::new(NoOpener),
         store,
