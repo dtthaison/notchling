@@ -140,6 +140,9 @@ pub mod ops {
     pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
     /// `{id}`: the user closed a `vault.request.pending` form without saving.
     pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
+    /// `{}` → `{approvals: [..], requests: [..]}`: the `vault.approval.pending` and
+    /// `vault.request.pending` events still waiting, oldest first, for an app that (re)connects.
+    pub const VAULT_PENDING: &str = "vault.pending";
 }
 
 /// Event topics and the events they carry.

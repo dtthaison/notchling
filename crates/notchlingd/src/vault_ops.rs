@@ -15,6 +15,7 @@
 //! | `vault.remove` | app | `{name}` | `{removed}` |
 //! | `vault.approval.answer` | app | `{id, decision: "deny"\|"once"\|"always"}` | `{answered}` |
 //! | `vault.request.cancel` | app | `{id}` | `{answered}` |
+//! | `vault.pending` | app | `{}` | `{approvals: [..], requests: [..]}`, the pending events below |
 //!
 //! `Entry` is `vault.json`'s shape: `{name, kind, note, url?, howTo?, expires?, userVar,
 //! secretVar, ask?, updated}`. No reply but `vault.use`'s carries a value, and no event ever does.
@@ -32,6 +33,11 @@
 //! changes}` (the form, filled in: an existing entry with the passed fields laid over it, and what
 //! that changed) and waits up to [`REQUEST_WAIT`] for the app's `vault.save {…, request: id}` or
 //! `vault.request.cancel {id}`. A cancel is `needs_approval` ("The user cancelled.").
+//!
+//! **Reconnecting.** `vault.pending` answers the `vault.approval.pending` and
+//! `vault.request.pending` events of the waits still open, oldest first, as they were sent: an
+//! app that (re)connects asks it after following `vault`, so nothing that waits for the user is
+//! missed.
 //!
 //! Errors carry names and fixed texts only: never a value, never a parse error that could quote
 //! one. Agent-tier calls are written to the audit log here (op, tier, peer, outcome and the
@@ -70,7 +76,7 @@ const MAX_TEXT: usize = 8 * 1024;
 const MAX_SHORT: usize = 2 * 1024;
 
 /// Every vault op.
-pub const VAULT_OPS: [&str; 8] = [
+pub const VAULT_OPS: [&str; 9] = [
     ops::VAULT_FIND,
     ops::VAULT_USE,
     ops::VAULT_REQUEST,
@@ -79,6 +85,7 @@ pub const VAULT_OPS: [&str; 8] = [
     ops::VAULT_REMOVE,
     ops::VAULT_APPROVAL_ANSWER,
     ops::VAULT_REQUEST_CANCEL,
+    ops::VAULT_PENDING,
 ];
 
 /// How long waits last and how often they look up; tests shorten them.
@@ -217,6 +224,7 @@ impl VaultOps {
             ops::VAULT_REMOVE => self.remove(args),
             ops::VAULT_APPROVAL_ANSWER => self.answer(caller, args),
             ops::VAULT_REQUEST_CANCEL => self.cancel(caller, args),
+            ops::VAULT_PENDING => Ok(self.pending()),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         };
         if op != ops::VAULT_USE {
@@ -371,143 +379,6 @@ impl VaultOps {
         Ok((json!({"env": env, "hide": hide}), used))
     }
 
-    /// Asks the app and waits. With no app following the vault, a no at once.
-    fn approve(
-        &self,
-        asking: &[VaultEntry],
-        command: &str,
-        folder: &str,
-    ) -> Result<Decision, ApiError> {
-        if !self.room.can_follow(topics::VAULT) {
-            return Err(said_no(
-                "This secret needs the user's approval in the Notchling app, and the app isn't open. Ask the user to open it, then try again.",
-            ));
-        }
-        let ticket = self.approvals.open().map_err(|r| match r {
-            Refused::Full => failed("Too many uses wait for the user's approval; try again later."),
-            Refused::NoId => ApiError::internal("no randomness for an approval id"),
-        })?;
-        let id = ticket.id.clone();
-        let names: Vec<&str> = asking.iter().map(|e| e.name.as_str()).collect();
-        let entries: Vec<Value> = asking.iter().map(entry_json).collect();
-        self.room.publish(
-            topics::VAULT,
-            topics::VAULT_APPROVAL_PENDING,
-            &json!({"id": id, "names": names, "entries": entries, "command": command, "folder": folder}),
-        );
-        let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
-        let decision = self
-            .approvals
-            .wait(ticket, self.timing.approval_wait, self.timing.slice, &still)
-            .unwrap_or(Decision::Deny);
-        self.room.publish(
-            topics::VAULT,
-            topics::VAULT_APPROVAL_RESOLVED,
-            &json!({"id": id, "decision": decision.as_str()}),
-        );
-        Ok(decision)
-    }
-
-    fn answer(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        Self::the_app(caller)?;
-        let bad = || {
-            ApiError::bad_request(
-                "vault.approval.answer takes {id, decision: \"deny\" | \"once\" | \"always\"}",
-            )
-        };
-        let id = args.get("id").and_then(Value::as_str).ok_or_else(bad)?;
-        let decision = args
-            .get("decision")
-            .and_then(Value::as_str)
-            .and_then(Decision::parse)
-            .ok_or_else(bad)?;
-        Ok(json!({"answered": self.approvals.answer(id, decision)}))
-    }
-
-    fn request(&self, args: &Value) -> Result<Value, ApiError> {
-        let name = text(args, "name", MAX_SHORT)?.unwrap_or_default();
-        if !valid_name(&name) {
-            return Err(ApiError::bad_request(
-                "Give a name: letters, digits, - _ or ., starting with a letter.",
-            ));
-        }
-        let kind = text(args, "kind", MAX_SHORT)?;
-        if kind.as_deref().is_some_and(|k| Kind::parse(k).is_none()) {
-            return Err(ApiError::bad_request("kind is token or login."));
-        }
-        let expires = text(args, "expires", MAX_SHORT)?;
-        if expires
-            .as_deref()
-            .is_some_and(|d| notchling_engine::vault::expiry::parse(d).is_none())
-        {
-            return Err(ApiError::bad_request(
-                "expires takes a day as YYYY-MM-DD, like 2026-12-06.",
-            ));
-        }
-        let request = VaultRequest {
-            name,
-            kind,
-            url: text(args, "url", MAX_SHORT)?,
-            note: text(args, "note", MAX_TEXT)?,
-            how_to: text(args, "how", MAX_TEXT)?,
-            expires,
-            reason: text(args, "reason", MAX_SHORT)?,
-        };
-        if !self.room.can_follow(topics::VAULT) {
-            return Err(failed(
-                "Notchling isn't open. Ask the user to open it, then try again.",
-            ));
-        }
-        let existing = self
-            .store
-            .entry(&request.name)
-            .map_err(|e| failed(e.to_string()))?;
-        let (entry, changes) = match &existing {
-            Some(saved) => (
-                saved.prefilled(&request),
-                PrefillChanges::of(saved, &request),
-            ),
-            None => (
-                VaultEntry::from_request(&request),
-                PrefillChanges::default(),
-            ),
-        };
-        let ticket = self.requests.open().map_err(|r| match r {
-            Refused::Full => failed("Too many requests wait for the user; try again later."),
-            Refused::NoId => ApiError::internal("no randomness for a request id"),
-        })?;
-        let id = ticket.id.clone();
-        self.room.publish(
-            topics::VAULT,
-            topics::VAULT_REQUEST_PENDING,
-            &json!({"id": id, "request": request, "entry": entry_json(&entry),
-                    "existing": existing.is_some(), "changes": changes}),
-        );
-        let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
-        let saved = self
-            .requests
-            .wait(ticket, self.timing.request_wait, self.timing.slice, &still)
-            .flatten();
-        self.room.publish(
-            topics::VAULT,
-            topics::VAULT_REQUEST_RESOLVED,
-            &json!({"id": id, "saved": saved.is_some()}),
-        );
-        match saved {
-            Some(entry) => Ok(json!({"entry": entry_json(&entry)})),
-            None => Err(said_no("The user cancelled.")),
-        }
-    }
-
-    fn cancel(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        Self::the_app(caller)?;
-        let id = args
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ApiError::bad_request("vault.request.cancel takes {id}"))?;
-        Ok(json!({"answered": self.requests.answer(id, None)}))
-    }
-
     fn save(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let request = text(args, "request", MAX_SHORT)?;
         if request.is_some() {
@@ -561,6 +432,12 @@ impl VaultOps {
     }
 }
 
+#[path = "vault_asks.rs"]
+mod asks;
+
+#[cfg(test)]
+#[path = "vault_ops_pending_tests.rs"]
+mod pending_tests;
 #[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;

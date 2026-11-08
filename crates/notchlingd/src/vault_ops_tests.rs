@@ -32,7 +32,7 @@ impl Room for FakeRoom {
 }
 
 impl FakeRoom {
-    fn pending(&self, event: &str) -> Option<Value> {
+    pub(super) fn pending(&self, event: &str) -> Option<Value> {
         let events = self.events.lock().unwrap();
         events
             .iter()
@@ -43,7 +43,7 @@ impl FakeRoom {
 }
 
 #[derive(Clone, Default)]
-struct FakeItem {
+pub(super) struct FakeItem {
     data: Arc<Mutex<Option<Vec<u8>>>>,
     reads: Arc<Mutex<u32>>,
 }
@@ -59,11 +59,11 @@ impl VaultKeychain for FakeItem {
     }
 }
 
-struct Setup {
-    ops: Arc<VaultOps>,
-    room: Arc<FakeRoom>,
-    item: FakeItem,
-    switch: Arc<SwitchFlag>,
+pub(super) struct Setup {
+    pub(super) ops: Arc<VaultOps>,
+    pub(super) room: Arc<FakeRoom>,
+    pub(super) item: FakeItem,
+    pub(super) switch: Arc<SwitchFlag>,
     dir: std::path::PathBuf,
 }
 
@@ -88,7 +88,7 @@ impl Setup {
     }
 }
 
-fn setup(tag: &str, on: bool) -> Setup {
+pub(super) fn setup(tag: &str, on: bool) -> Setup {
     let dir = std::env::temp_dir().join(format!("nl-vault-ops-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -123,16 +123,16 @@ fn caller(tier: Tier, client: ClientKind) -> Caller {
     }
 }
 
-fn app() -> Caller {
+pub(super) fn app() -> Caller {
     caller(Tier::App, ClientKind::App)
 }
 
-fn agent() -> Caller {
+pub(super) fn agent() -> Caller {
     caller(Tier::Agent, ClientKind::Cli)
 }
 
 /// Saves `gh` (a token, ask-first when `ask`) and `reg` (a login) through the app op.
-fn seed(s: &Setup, ask: bool) {
+pub(super) fn seed(s: &Setup, ask: bool) {
     let gh = json!({"name": "gh", "kind": "token", "url": "https://api.github.com", "ask": ask});
     s.ops
         .call(
@@ -152,7 +152,7 @@ fn seed(s: &Setup, ask: bool) {
         .unwrap();
 }
 
-fn err(result: Result<Value, ApiError>) -> ApiError {
+pub(super) fn err(result: Result<Value, ApiError>) -> ApiError {
     result.unwrap_err()
 }
 
@@ -327,7 +327,7 @@ fn ask_first_with_no_app_is_denied_without_reading_a_value() {
 }
 
 /// Starts a use of `gh` on its own thread and returns it with the pending event once published.
-fn pending_use(s: &Setup) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
+pub(super) fn pending_use(s: &Setup) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
     s.room.follows.store(true, Ordering::SeqCst);
     let asked = || {
         let events = s.room.events.lock().unwrap();
