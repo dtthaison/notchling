@@ -89,11 +89,11 @@ fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
 
 /// The Antigravity permission the daemon holds for the row, above the box.
 fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
-    let (prompt_id, agy) = view.agy_prompt()?;
+    let held = view.agy_prompt()?;
     let gate = view.acting(cx).control();
-    let rpc = agy.rpc_id.clone();
-    let card = agy_card(&agy, None, gate, a, cx, move |this, option, cx| {
-        this.answer_agy(prompt_id.clone(), rpc.clone(), option.to_owned(), cx);
+    let permission = held.permission.clone();
+    let card = agy_card(&permission, None, gate, a, cx, move |this, option, cx| {
+        this.answer_agy(&held, option.to_owned(), cx);
     });
     Some(
         div()

@@ -3,28 +3,46 @@
 //! titled, closable, resizable `NSWindow` of ours; the web view is built into its content view
 //! through the raw window handle, with no `tao`.
 //!
-//! The page is the local copy and nothing else: a link it holds to somewhere else is refused,
-//! since leaving for the browser means opening another app (a capability change, `CAP-PROCESS`,
-//! for the maintainer), and a `target=_blank` window is denied.
+//! The page is the local copy and nothing else. A copy loads with `loadFileURL(_:allowingReadAccessTo:)`
+//! on its own folder, so what it can read is that folder and no more, and a link it holds to
+//! somewhere else is refused (`local::stays_local`): leaving for the browser means opening
+//! another app (a capability change, `CAP-PROCESS`, for the maintainer). A `target=_blank`
+//! window is denied.
+//!
+//! Dropping a [`PageWindow`] closes its window and stops its page. The person closing the window
+//! is told to the owner by a callback (`NSWindowWillCloseNotification`), so the page doesn't go
+//! on running, with no window, until the next page opens.
 
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use objc2::rc::Retained;
+use block2::RcBlock;
+use objc2::rc::{Retained, Weak};
+use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_app_kit::{
+    NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask, NSWindowWillCloseNotification,
+};
+use objc2_foundation::{
+    NSNotification, NSNotificationCenter, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSURL,
+};
 use raw_window_handle::{
     AppKitWindowHandle, HandleError, HasWindowHandle, RawWindowHandle, WindowHandle,
 };
-use wry::{NewWindowResponse, WebView, WebViewBuilder};
+use wry::{NewWindowResponse, WebView, WebViewBuilder, WebViewExtMacOS};
 
-use super::local::PageSource;
+use super::local::{stays_local, PageSource};
+use super::set::counts_as_open;
 
 /// The window's size when it opens, and the least it can be.
 const SIZE: (f64, f64) = (960.0, 720.0);
 const MIN_SIZE: (f64, f64) = (480.0, 360.0);
 /// Each page window opens a step down and right of the one before.
 const STEP: f64 = 28.0;
+
+/// Numbers the page windows, so a close notice names the window it is about.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// A page window's content view, as the raw handle wry builds into.
 struct ViewHandle(Retained<NSView>);
@@ -38,20 +56,25 @@ impl HasWindowHandle for ViewHandle {
     }
 }
 
-/// Whether a navigation stays on the local copy.
-pub fn stays_local(url: &str) -> bool {
-    url.starts_with("file:") || url.starts_with("about:")
-}
-
-/// An open page window; dropping it closes the window and lets go of the web view.
+/// An open page window; dropping it closes the window and stops the page.
 pub struct PageWindow {
     window: Retained<NSWindow>,
-    _view: WebView,
+    id: u64,
+    /// The close notice's registration; taken out in `drop` so our own close tells no one.
+    closing: Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    view: WebView,
 }
 
 impl PageWindow {
     /// Opens `source` in a new window titled `title`, the `nth` one down and right of the first.
-    pub fn open(title: &str, source: &PageSource, nth: usize) -> Result<PageWindow, String> {
+    /// `on_close` is called, later and on the main thread, with [`PageWindow::id`] when the person
+    /// closes the window (not when this value is dropped).
+    pub fn open(
+        title: &str,
+        source: &PageSource,
+        nth: usize,
+        on_close: impl Fn(u64) + 'static,
+    ) -> Result<PageWindow, String> {
         let mtm = MainThreadMarker::new().ok_or("a page window opens on the main thread")?;
         let offset = STEP * nth as f64;
         let rect = NSRect::new(
@@ -82,45 +105,89 @@ impl PageWindow {
         let content = window
             .contentView()
             .ok_or("the page window has no content view")?;
-        let titled = window.clone();
+        // Weak: the web view outlives its drop (see `drop`), and must not keep the window with it.
+        let titled = Weak::from_retained(&window);
+        let folder = match source {
+            PageSource::File { folder, .. } => Some(folder.clone()),
+            PageSource::Html(_) => None,
+        };
         let builder = WebViewBuilder::new()
-            .with_navigation_handler(|url| stays_local(&url))
+            .with_navigation_handler(move |url| stays_local(&url, folder.as_deref()))
             .with_new_window_req_handler(|_, _| NewWindowResponse::Deny)
             .with_document_title_changed_handler(move |t| {
-                if !t.is_empty() {
-                    titled.setTitle(&NSString::from_str(&t));
+                if let (false, Some(window)) = (t.is_empty(), titled.load()) {
+                    window.setTitle(&NSString::from_str(&t));
                 }
             });
         let builder = match source {
-            PageSource::Url(url) => builder.with_url(url.clone()),
+            PageSource::File { .. } => builder,
             PageSource::Html(html) => builder.with_html(html.clone()),
         };
         let view = builder
             .build(&ViewHandle(content))
             .map_err(|e| format!("the web view couldn't be made: {e}"))?;
+        if let PageSource::File { file, folder } = source {
+            let url = NSURL::fileURLWithPath(&NSString::from_str(&file.to_string_lossy()));
+            let readable = NSURL::fileURLWithPath_isDirectory(
+                &NSString::from_str(&folder.to_string_lossy()),
+                true,
+            );
+            // SAFETY: both are file URLs made just now, and this is the main thread the web view
+            // was made on. The folder is the one read access is given to; the navigation handler
+            // allows the file's own URL, which is inside it.
+            unsafe {
+                view.webview()
+                    .loadFileURL_allowingReadAccessToURL(&url, &readable);
+            }
+        }
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let notice = RcBlock::new(move |_: NonNull<NSNotification>| on_close(id));
+        let window_object: &AnyObject = window.as_ref();
+        // SAFETY: with no queue the block runs on the thread that closes the window, the main
+        // thread, where everything it touches lives; it is only ever called there.
+        let closing = unsafe {
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(NSWindowWillCloseNotification),
+                Some(window_object),
+                None,
+                &notice,
+            )
+        };
         window.makeKeyAndOrderFront(None);
         Ok(PageWindow {
             window,
-            _view: view,
+            id,
+            closing: Some(closing),
+            view,
         })
     }
 
-    /// Whether the person still has it open.
+    /// The number a close notice carries.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Whether the person has not closed it: it is on screen or minimized to the Dock.
     pub fn is_open(&self) -> bool {
-        self.window.isVisible()
+        counts_as_open(self.window.isVisible(), self.window.isMiniaturized())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_the_local_copy_is_navigated_to() {
-        assert!(stays_local("file:///Users/me/pages/a/index.html"));
-        assert!(stays_local("about:blank"));
-        assert!(!stays_local("https://claude.ai/artifact/x"));
-        assert!(!stays_local("http://example.com"));
-        assert!(!stays_local("javascript:alert(1)"));
+impl Drop for PageWindow {
+    fn drop(&mut self) {
+        if let Some(registration) = self.closing.take() {
+            // SAFETY: the registration is the one `open` made, removed once.
+            let observer: &AnyObject = registration.as_ref();
+            unsafe { NSNotificationCenter::defaultCenter().removeObserver(observer) };
+        }
+        // wry keeps a dropped web view alive on purpose (releasing it crashes), so the page would
+        // run on, scripts and media included, with no window. Send it to a blank page first.
+        let web = self.view.webview();
+        // SAFETY: plain WKWebView calls on the main thread, where this window is dropped.
+        unsafe {
+            web.stopLoading();
+            web.loadHTMLString_baseURL(&NSString::from_str(""), None);
+        }
+        self.window.close();
     }
 }

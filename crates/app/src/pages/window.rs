@@ -3,7 +3,7 @@
 //! opens, each a `wry` web view over the local copy (`web`). A titled window, so it counts toward
 //! the Dock icon like Chat (`mac::shell::note_titled`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
@@ -12,6 +12,7 @@ use gpui::{
 };
 
 use super::local;
+use super::set::PageSet;
 use super::view::PagesView;
 use super::web::PageWindow;
 use crate::search::library::Library;
@@ -26,10 +27,18 @@ pub const MIN_SIZE: (f32, f32) = (760.0, 480.0);
 #[derive(Default)]
 pub struct PagesWindows {
     window: Option<WindowHandle<PagesView>>,
-    open: Vec<PageWindow>,
+    open: PageSet<PageWindow>,
 }
 
 impl Global for PagesWindows {}
+
+/// The library's folder: the only place a page's copy is loaded from. Not set in a render.
+pub struct AppPagesDir(pub PathBuf);
+
+impl Global for AppPagesDir {}
+
+/// What is said when the app has no pages folder to check a copy against.
+const NO_PAGES_DIR: &str = "There is no pages folder here.";
 
 /// Opens the Artifacts window, or brings it forward, and selects `select`'s page when given.
 pub fn open(cx: &mut App, select: Option<String>) {
@@ -72,13 +81,32 @@ pub fn open(cx: &mut App, select: Option<String>) {
     }
 }
 
-/// Opens `page`'s local copy in a window of its own. The line to show when it can't.
+/// Opens `page`'s local copy in a window of its own. The line to show when it can't. The copy has
+/// to be in the library's folder: the daemon names the path, and the page is given read access to
+/// the folder it is in.
 pub fn show_page(cx: &mut App, page: &Page) -> Result<(), String> {
-    let source = local::source_for(Path::new(&page.path))?;
+    let pages_dir = cx
+        .try_global::<AppPagesDir>()
+        .map(|d| d.0.clone())
+        .ok_or(NO_PAGES_DIR)?;
+    let path = local::inside(&pages_dir, Path::new(&page.path))?;
+    let source = local::source_for(&path)?;
+    let async_cx = cx.to_async();
     let windows = cx.default_global::<PagesWindows>();
-    // Windows the person closed are let go of here, where a new one is about to open.
-    windows.open.retain(PageWindow::is_open);
-    let window = PageWindow::open(&page.title, &source, windows.open.len())?;
-    windows.open.push(window);
+    // Windows the person closed without a notice reaching us are let go of here too.
+    windows.open.retain_open(PageWindow::is_open);
+    let window = PageWindow::open(&page.title, &source, windows.open.len(), move |id| {
+        // Called while AppKit closes the window, when the app may be mid-update: let go of the
+        // window a moment later, from the app's own queue.
+        async_cx
+            .spawn(async move |cx| {
+                cx.update(|cx| {
+                    cx.default_global::<PagesWindows>().open.forget(id);
+                })
+                .ok();
+            })
+            .detach();
+    })?;
+    windows.open.push(window.id(), window);
     Ok(())
 }

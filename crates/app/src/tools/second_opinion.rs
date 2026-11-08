@@ -1,8 +1,8 @@
 //! The Second Opinion sheet, pure (`SecondOpinionForm`): ask Codex or Antigravity CLI to review an
 //! edit or a reply. The prompt is built from what is being reviewed (the engine's
 //! `delegate::second_opinion`), the tool, model and effort are picked, and Run hands a
-//! [`Request`] to the engine's [`SecondOpinionStore`], which runs this binary's `notchling
-//! delegate` through a `ProcessHost`.
+//! [`Request`] to the engine's [`SecondOpinionStore`], which runs the `notchling delegate` command
+//! (the `notchling` binary beside this app, not the app itself) through a `ProcessHost`.
 //!
 //! Starting one launches `codex` or `agy`, so Run is an acting control: disabled with the off
 //! message while acting isn't on, like every other control that runs a tool.
@@ -19,6 +19,7 @@ use notchling_engine::delegate::second_opinion_store::{file_in, Request, SecondO
 
 use crate::acting::{Acting, Control};
 use crate::chat::data::DataRoot;
+use crate::session_source::notchling_binary;
 
 /// Why Run is off while there is no store (a render, a fixture root).
 pub const NO_STORE: &str =
@@ -216,14 +217,21 @@ fn make_id() -> String {
     )
 }
 
-/// The running app's store: over the app's own data folder (`second-opinions.json`, never the
-/// Swift app's) and this binary as the delegate command. `None` for a fixture root, which never
-/// starts a tool, and when the binary can't be named.
+/// Where the app keeps its second opinions: `second-opinions.json` in the app's own folder. Not
+/// the data folder's, which is the Swift app's `SecondOpinionStore` file in the same format, kept
+/// by a process that may be running beside this one.
+pub fn opinions_file(root: &DataRoot) -> PathBuf {
+    file_in(&root.app_dir())
+}
+
+/// The running app's store: over [`opinions_file`], running the `notchling` binary beside `exe`
+/// (the app's own executable rejects `delegate`). `None` for a fixture root, which never starts a
+/// tool, and when the binary can't be named.
 pub fn store_for_run(root: Option<&DataRoot>, exe: Option<&Path>) -> Option<SecondOpinionStore> {
     let root = root.filter(|r| r.fixture.is_none())?;
-    let program: PathBuf = exe?.to_path_buf();
+    let program: PathBuf = notchling_binary(exe?)?;
     Some(SecondOpinionStore::new(
-        Some(file_in(&root.data_dir)),
+        Some(opinions_file(root)),
         std::env::temp_dir(),
         Arc::new(ProcessHost::new(program)),
         Box::new(now_secs),
@@ -340,6 +348,17 @@ mod tests {
         assert_eq!(tool_name(Tool::Agy), "Antigravity");
     }
 
+    fn real_root(scratch: &crate::testutil::Scratch) -> DataRoot {
+        DataRoot {
+            claude_dir: scratch.path().join("claude"),
+            data_dir: scratch.path().join("data"),
+            codex_dir: scratch.path().join("codex"),
+            antigravity_dir: scratch.path().join("agy"),
+            home: scratch.path().to_path_buf(),
+            fixture: None,
+        }
+    }
+
     #[test]
     fn a_fixture_root_gets_no_store_and_ids_differ() {
         let fixture = DataRoot::for_render(None);
@@ -348,16 +367,102 @@ mod tests {
         assert_ne!(make_id(), make_id());
         // A real root over a scratch folder: the store opens over our own file, writing nothing yet.
         let scratch = crate::testutil::Scratch::new("opinions");
-        let root = DataRoot {
-            claude_dir: scratch.path().join("claude"),
-            data_dir: scratch.path().join("data"),
-            codex_dir: scratch.path().join("codex"),
-            antigravity_dir: scratch.path().join("agy"),
-            home: scratch.path().to_path_buf(),
-            fixture: None,
-        };
+        let root = real_root(&scratch);
         let store = store_for_run(Some(&root), Some(Path::new("/bin/true"))).expect("a store");
         assert!(store.opinions().is_empty());
+        assert!(!opinions_file(&root).exists());
+    }
+
+    #[test]
+    fn the_apps_opinions_are_not_the_swift_apps_file() {
+        let scratch = crate::testutil::Scratch::new("opinions-path");
+        let root = real_root(&scratch);
+        let file = opinions_file(&root);
+        assert_eq!(file, scratch.path().join("data/app/second-opinions.json"));
+        assert_ne!(
+            file,
+            file_in(&root.data_dir),
+            "the Swift app's file is in data/"
+        );
+        assert!(
+            !file.starts_with(root.data_dir.join("daemon")),
+            "nor the daemon's folder"
+        );
+    }
+
+    /// A card asked for lands in the app's file, and the data folder's own file is never made.
+    #[test]
+    fn an_opinion_is_saved_in_the_apps_own_file() {
+        let scratch = crate::testutil::Scratch::new("opinions-saved");
+        let root = real_root(&scratch);
+        // The program does not exist, so the card fails at once and nothing runs.
+        let app = scratch.path().join("nowhere/notchling-app");
+        let store = store_for_run(Some(&root), Some(&app)).expect("a store");
+        store.start(&request_in(&scratch));
+        assert!(opinions_file(&root).exists());
         assert!(!scratch.path().join("data/second-opinions.json").exists());
+    }
+
+    fn request_in(scratch: &crate::testutil::Scratch) -> Request {
+        let mut request = SecondOpinionSheet::new(
+            Subject::Message("hi".into()),
+            "codex:s1",
+            "a1",
+            &scratch.path().to_string_lossy(),
+            vec![Tool::Codex],
+        )
+        .request();
+        request.prompt = "look".into();
+        request
+    }
+
+    #[test]
+    fn the_delegate_command_is_the_notchling_binary_beside_the_app() {
+        let app = Path::new("/Applications/Notchling.app/Contents/MacOS/notchling-app");
+        assert_eq!(
+            notchling_binary(app),
+            Some(PathBuf::from(format!(
+                "/Applications/Notchling.app/Contents/MacOS/notchling{}",
+                std::env::consts::EXE_SUFFIX
+            )))
+        );
+    }
+
+    /// The app's own executable rejects `delegate`; the store has to run the sibling.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_opinion_runs_the_binary_beside_the_app_not_the_app() {
+        use notchling_engine::delegate::second_opinion::Status;
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = crate::testutil::Scratch::new("opinions-run");
+        let root = real_root(&scratch);
+        let bin = scratch.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("a folder");
+        for name in ["notchling", "notchling-app"] {
+            let script = bin.join(name);
+            // Each records its first argument beside itself, and prints nothing.
+            std::fs::write(&script, "#!/bin/sh\necho \"$1\" > \"$0.arg\"\n").expect("a script");
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+        }
+        let store = store_for_run(Some(&root), Some(&bin.join("notchling-app"))).expect("a store");
+        store.start(&request_in(&scratch));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while store.opinions().iter().any(|o| o.status == Status::Running)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(bin.join("notchling.arg"))
+                .as_deref()
+                .ok(),
+            Some("delegate\n"),
+            "the sibling got `delegate`"
+        );
+        assert!(
+            !bin.join("notchling-app.arg").exists(),
+            "the app itself was not run"
+        );
     }
 }

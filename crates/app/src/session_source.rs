@@ -81,6 +81,14 @@ pub struct SourceConfig {
     pub check_server: bool,
 }
 
+/// The `notchling` binary (the daemon, and its `delegate` and other commands) beside the running
+/// executable `exe`: the app is `notchling-app`, and both sit in one folder, in a bundle's
+/// `Contents/MacOS` and in cargo's target folder alike. `None` for a path without a parent.
+pub fn notchling_binary(exe: &Path) -> Option<PathBuf> {
+    exe.parent()
+        .map(|dir| dir.join(format!("notchling{}", std::env::consts::EXE_SUFFIX)))
+}
+
 /// The configuration for the running app over `root`, or `None` when it must read files only: a
 /// fixture root never touches a daemon. `exe` is the running executable; the daemon to start is
 /// the `notchling` beside it.
@@ -88,8 +96,7 @@ pub fn config_for(root: &DataRoot, exe: Option<&Path>) -> Option<SourceConfig> {
     if root.fixture.is_some() {
         return None;
     }
-    let start = exe.and_then(Path::parent).map(|dir| {
-        let binary = dir.join(format!("notchling{}", std::env::consts::EXE_SUFFIX));
+    let start = exe.and_then(notchling_binary).map(|binary| {
         let starter: Starter = Arc::new(move |socket| ensure_daemon(&binary, socket));
         starter
     });

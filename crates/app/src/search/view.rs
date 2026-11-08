@@ -1,31 +1,29 @@
 //! The search panel over GPUI (part U3, macOS): a search box, then the results grouped Pages and
-//! Sessions, then a footer with the key hints. Every key goes through `SearchModel::press`; each
-//! change of the query asks the daemon on the background executor, and an answer for an older
-//! query is dropped. Return on a page opens the Artifacts window on it; on a session, Chat on it.
+//! Sessions, then a footer with the key hints. Every key goes through `SearchModel::press`; a
+//! change of the query asks the daemon on the background executor once the keys stop for a moment
+//! (`pacer`: one call out at a time, the newest query wins). Return on a page opens the
+//! Artifacts window on it; on a session, Chat on it.
 //! A render has fixed results and never calls anything or moves its window.
 
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, AnyView, ClipboardItem, Context, Div, FocusHandle, FontWeight,
-    HighlightStyle, KeyDownEvent, Render, ScrollHandle, SharedString, Stateful, StyledText,
-    Subscription, Window,
+    KeyDownEvent, Render, ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
-use notchling_engine::search::{age_text, SessionTool};
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM};
-use notchling_kit::ui::{claude_mark, hsla, label, window_appearance, KitStyled};
+use notchling_kit::metric::RADIUS_CARD;
+use notchling_kit::ui::{hsla, label, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 
 use super::library::Library;
-use super::model::{layout, Item, Outcome, Press, SearchModel, Section};
+use super::model::{layout, Item, Outcome, Press, SearchModel};
+use super::pacer::{Pacer, Settled, DEBOUNCE};
 use super::panel;
 use super::renders::{model, results, shown};
-use super::wire::{Page, SessionRow};
-use crate::chat::format::short_path;
+use super::rows::{hairline, page_row, section_header, session_row};
 
 /// How often the window is put back where it belongs (GPUI moves it after opening).
 const PLACE_EVERY: Duration = Duration::from_millis(100);
@@ -37,8 +35,8 @@ pub struct SearchPanelView {
     library: Arc<Library>,
     focus: FocusHandle,
     scroll: ScrollHandle,
-    /// Bumped per search; an answer for an older one is dropped.
-    generation: u64,
+    /// When to ask, and whether an answer is still wanted.
+    pacer: Pacer,
     /// A render's: fixed results, nothing called, the window left alone.
     fixed: bool,
     ns_window: Option<Retained<NSWindow>>,
@@ -76,14 +74,14 @@ impl SearchPanelView {
             library,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
-            generation: 0,
+            pacer: Pacer::default(),
             fixed: false,
             ns_window,
             top,
             seen_active: false,
             _activation: Some(activation),
         };
-        view.search(cx);
+        view.search(Duration::ZERO, cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(PLACE_EVERY).await;
             if this.update(cx, |view, _| view.place()).is_err() {
@@ -101,7 +99,7 @@ impl SearchPanelView {
             library,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
-            generation: 0,
+            pacer: Pacer::default(),
             fixed: true,
             ns_window: None,
             top: (0.0, 0.0),
@@ -116,14 +114,37 @@ impl SearchPanelView {
         }
     }
 
-    /// Asks the daemon for the query as it is now; the answer lands unless the query moved on.
-    fn search(&mut self, cx: &mut Context<Self>) {
+    /// Asks the daemon for the query as it is now, once `after` has passed without another key
+    /// press (zero: at once). At most one call is out; see [`Pacer`].
+    fn search(&mut self, after: Duration, cx: &mut Context<Self>) {
         if self.fixed {
             return;
         }
-        self.generation += 1;
-        let generation = self.generation;
+        let generation = self.pacer.typed();
         self.model.searching = true;
+        if after.is_zero() {
+            self.settled(generation, cx);
+        } else {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(after).await;
+                this.update(cx, |view, cx| view.settled(generation, cx))
+                    .ok();
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    /// The wait after key press `generation` is over.
+    fn settled(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if let Settled::Ask(generation) = self.pacer.settled(generation) {
+            self.ask(generation, cx);
+        }
+    }
+
+    /// The call itself; its answer lands unless the query moved on, and a newer query waiting
+    /// for it goes out next.
+    fn ask(&mut self, generation: u64, cx: &mut Context<Self>) {
         let (library, text, limit) = (
             self.library.clone(),
             self.model.query.clone(),
@@ -135,31 +156,33 @@ impl SearchPanelView {
                 .spawn(async move { library.search(&text, limit) })
                 .await;
             this.update(cx, |view, cx| {
-                if view.generation != generation {
-                    return;
-                }
-                view.model.searching = false;
-                let mut again = false;
-                match result {
-                    Ok(results) => {
-                        again = results.indexing;
-                        let keeping = view.model.current().map(Item::id);
-                        view.model.apply(results, keeping.as_deref());
-                        view.model.error = None;
+                let answered = view.pacer.finished(generation);
+                if answered.apply {
+                    view.model.searching = false;
+                    let mut again = false;
+                    match result {
+                        Ok(results) => {
+                            again = results.indexing;
+                            let keeping = view.model.current().map(Item::id);
+                            view.model.apply(results, keeping.as_deref());
+                            view.model.error = None;
+                        }
+                        Err(e) => view.model.error = Some(e),
                     }
-                    Err(e) => view.model.error = Some(e),
+                    view.scroll_to_selected();
+                    if again {
+                        // The daemon is reading the index: the same query may find more soon.
+                        view.search_later(generation, cx);
+                    }
                 }
-                view.scroll_to_selected();
-                if again {
-                    // The daemon is reading the index: the same query may find more in a moment.
-                    view.search_later(generation, cx);
+                if let Some(next) = answered.next {
+                    view.ask(next, cx);
                 }
                 cx.notify();
             })
             .ok();
         })
         .detach();
-        cx.notify();
     }
 
     /// Searches again after a moment, unless the query moved on meanwhile.
@@ -167,8 +190,8 @@ impl SearchPanelView {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(INDEXING_RETRY).await;
             this.update(cx, |view, cx| {
-                if view.generation == generation {
-                    view.search(cx);
+                if view.pacer.generation() == generation {
+                    view.search(Duration::ZERO, cx);
                 }
             })
             .ok();
@@ -202,7 +225,7 @@ impl SearchPanelView {
                     panel::close(cx, window, returning);
                 }
             }
-            Outcome::Cleared | Outcome::Typed => self.search(cx),
+            Outcome::Cleared | Outcome::Typed => self.search(DEBOUNCE, cx),
             Outcome::Copy { text, note } => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 self.model.flash(note, now_ms());
@@ -225,178 +248,6 @@ impl SearchPanelView {
             Item::Session(session) => crate::mac::shell::open_chat_session(cx, session.reference()),
         }
     }
-}
-
-fn hairline(a: Appearance) -> Div {
-    div()
-        .h(px(1.0))
-        .w_full()
-        .flex_shrink_0()
-        .fill(Ink::Hairline, a)
-}
-
-/// The 30-point square a row's icon sits in.
-fn icon_box(selected: bool, a: Appearance) -> Div {
-    div()
-        .size(px(30.0))
-        .flex_shrink_0()
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .justify_center()
-        .fill(
-            if selected {
-                Ink::AccentWash
-            } else {
-                Ink::Raised
-            },
-            a,
-        )
-}
-
-/// A tool's mark: Claude's sparkle, else its short name.
-fn tool_mark(tool: SessionTool, selected: bool, a: Appearance) -> Div {
-    let ink = if selected {
-        Ink::AccentText
-    } else {
-        Ink::TextMuted
-    };
-    match tool {
-        SessionTool::Claude => icon_box(selected, a).child(claude_mark(20.0, a)),
-        SessionTool::Codex => icon_box(selected, a).child(label("Cx", TypeRole::Label, ink, a)),
-        SessionTool::Antigravity => {
-            icon_box(selected, a).child(label("Ag", TypeRole::Label, ink, a))
-        }
-    }
-}
-
-fn section_header(section: Section, a: Appearance) -> Div {
-    div()
-        .h(px(layout::HEADER))
-        .flex_shrink_0()
-        .px(px(10.0))
-        .pb(px(4.0))
-        .flex()
-        .items_end()
-        .child(label(section.title(), TypeRole::Section, Ink::TextFaint, a))
-}
-
-/// A row's frame: the selection wash when selected.
-fn row_frame(height: f32, selected: bool, a: Appearance) -> Div {
-    div()
-        .h(px(height))
-        .w_full()
-        .flex_shrink_0()
-        .px(px(10.0))
-        .flex()
-        .items_center()
-        .gap(px(12.0))
-        .rounded(px(RADIUS_MD))
-        .when(selected, |r| r.fill(Ink::Selection, a))
-}
-
-fn page_row(page: &Page, selected: bool, now_secs: f64, a: Appearance) -> Div {
-    let subtitle: Vec<&str> = [page.project.as_str(), page.account.as_str()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect();
-    row_frame(layout::PAGE_ROW, selected, a)
-        .child(icon_box(selected, a).child(label(
-            Icon::Page.glyph(),
-            TypeRole::Heading,
-            if selected {
-                Ink::AccentText
-            } else {
-                Ink::TextMuted
-            },
-            a,
-        )))
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(label(&page.title, TypeRole::Heading, Ink::Text, a).truncate())
-                .child(label(&subtitle.join(" · "), TypeRole::Meta, Ink::TextMuted, a).truncate()),
-        )
-        .child(label(
-            &age_text(page.updated_secs, now_secs),
-            TypeRole::Meta,
-            Ink::TextFaint,
-            a,
-        ))
-}
-
-/// The snippet with the query's words bold, else the folder.
-fn session_detail(session: &SessionRow, home: &std::path::Path, a: Appearance) -> Div {
-    let line = div()
-        .kit_type(TypeRole::Meta)
-        .ink(Ink::TextMuted, a)
-        .truncate();
-    match &session.snippet {
-        Some(snippet) => {
-            let bold = HighlightStyle {
-                font_weight: Some(FontWeight::BOLD),
-                color: Some(hsla(Ink::Text.color(a))),
-                ..Default::default()
-            };
-            let ranges = session
-                .highlights
-                .iter()
-                .filter(|(s, e)| {
-                    s < e && snippet.is_char_boundary(*s) && snippet.is_char_boundary(*e)
-                })
-                .map(|(s, e)| (Range { start: *s, end: *e }, bold));
-            line.child(StyledText::new(SharedString::from(snippet.clone())).with_highlights(ranges))
-        }
-        None => line.child(short_path(&session.folder, home)),
-    }
-}
-
-fn session_row(
-    session: &SessionRow,
-    selected: bool,
-    now_secs: f64,
-    home: &std::path::Path,
-    a: Appearance,
-) -> Div {
-    let place = std::path::Path::new(&session.folder)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_owned();
-    row_frame(layout::SESSION_ROW, selected, a)
-        .child(tool_mark(session.tool, selected, a))
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            label(&session.title, TypeRole::Heading, Ink::Text, a)
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .truncate(),
-                        )
-                        .child(label(&place, TypeRole::Meta, Ink::TextMuted, a).truncate())
-                        .child(label(
-                            &age_text(session.updated_secs, now_secs),
-                            TypeRole::Meta,
-                            Ink::TextFaint,
-                            a,
-                        )),
-                )
-                .child(session_detail(session, home, a)),
-        )
 }
 
 impl SearchPanelView {
