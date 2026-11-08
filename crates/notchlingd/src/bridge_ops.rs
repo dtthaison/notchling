@@ -152,6 +152,7 @@ impl BridgeOps {
 
     /// The daemon is stopping: phones waiting to pair are refused and the ports close.
     pub fn close(&self) {
+        self.bridge.halt();
         self.approvals.refuse_all();
         self.bridge.set(false);
     }

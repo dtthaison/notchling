@@ -74,6 +74,12 @@ impl Uploads {
         id
     }
 
+    /// Frees every upload older than [`EXPIRES_AFTER_MS`]. The hub's tick runs it, so a phone that
+    /// went quiet mid-photo doesn't keep its pieces in memory until its next call.
+    pub fn sweep(&self, now_ms: f64) {
+        lock(&self.uploads).retain(|_, u| now_ms - u.started_ms < EXPIRES_AFTER_MS);
+    }
+
     /// Uploads in progress.
     pub fn pending(&self) -> usize {
         lock(&self.uploads).len()
@@ -234,13 +240,15 @@ impl ImageStore {
     }
 }
 
+/// The mode applies only to a folder made here, so one that was already there is set to 0700 too.
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(dir)
+        .create(dir)?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(not(unix))]

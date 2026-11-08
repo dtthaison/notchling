@@ -63,6 +63,12 @@ pub trait BridgeBackend: Send + Sync {
 
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure>;
 
+    /// Whether the acting calls would run now. Asked before work that only leads to one (a photo
+    /// upload), so nothing is held for a call that will be refused.
+    fn acting_on(&self) -> bool {
+        true
+    }
+
     /// One Esc to an owned terminal, so Claude Code runs the queued message next.
     fn send_now(&self, _session: &Session) -> Result<(), BridgeFailure> {
         Err(BridgeFailure::invalid(

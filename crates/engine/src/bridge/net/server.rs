@@ -525,7 +525,6 @@ enum Out {
 /// The live [`ConnectionIo`]: a bounded queue drained by the phone's writer thread.
 struct Outbox {
     tx: SyncSender<Out>,
-    wire: Arc<dyn Wire>,
     done: Arc<AtomicBool>,
     missed: AtomicU32,
 }
@@ -544,7 +543,6 @@ impl Outbox {
         }
         Arc::new(Outbox {
             tx,
-            wire,
             done,
             missed: AtomicU32::new(0),
         })

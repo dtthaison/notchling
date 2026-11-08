@@ -132,6 +132,7 @@ impl Core {
 
     /// The 300 ms push: what changed goes to every subscriber.
     pub fn tick(&self) {
+        self.router.sweep_uploads();
         self.hub.tick(self.backend.as_ref());
     }
 

@@ -82,6 +82,10 @@ pub trait Sources: Send + Sync {
 /// What the bridge does to sessions. The daemon's implementation runs its acting ops, which refuse
 /// while acting is off. Messages to Codex and Antigravity rows come here too (`session.tool`).
 pub trait Acting: Send + Sync {
+    /// The acting switch now; the calls below still refuse on their own while it's off.
+    fn is_on(&self) -> bool {
+        true
+    }
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure>;
     fn send_now(&self, session: &Session) -> Result<(), BridgeFailure>;
     fn respond(
@@ -109,6 +113,9 @@ fn off<T>() -> Result<T, BridgeFailure> {
 }
 
 impl Acting for ActingOff {
+    fn is_on(&self) -> bool {
+        false
+    }
     fn send_message(&self, _: &str, _: &Session) -> Result<(), BridgeFailure> {
         off()
     }
@@ -310,6 +317,10 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 
     fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
         self.acting.send_message(text, session)
+    }
+
+    fn acting_on(&self) -> bool {
+        self.acting.is_on()
     }
 
     fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {

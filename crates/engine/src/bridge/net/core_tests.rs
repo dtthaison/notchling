@@ -288,6 +288,21 @@ fn once_halted_a_hello_pair_or_revoke_in_flight_writes_nothing() {
 }
 
 #[test]
+fn the_tick_sweeps_an_upload_left_idle_past_its_expiry() {
+    let rig = Rig::new();
+    let (connection, io, _) = rig.login();
+    rig.core.handle(
+        &connection,
+        r#"{"id":2,"op":"session.image.begin","sessionId":"s1","bytes":1000}"#,
+    );
+    assert_eq!(rig.core.router.pending_uploads(), 1, "{:?}", io.texts());
+    rig.clock
+        .advance(crate::bridge::uploads::EXPIRES_AFTER_MS as i64 + 1);
+    rig.core.tick();
+    assert_eq!(rig.core.router.pending_uploads(), 0);
+}
+
+#[test]
 fn the_tick_pushes_sessions_to_a_subscriber() {
     let rig = Rig::new();
     let (connection, io, _) = rig.login();

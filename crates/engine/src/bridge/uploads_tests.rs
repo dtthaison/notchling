@@ -303,6 +303,52 @@ fn the_store_refuses_an_extension_that_is_not_plain() {
     assert_eq!(saved.parent(), Some(dir.path("photos").as_path()));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_folder_that_was_already_there_is_made_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("store-mode");
+    let folder = dir.path("photos");
+    std::fs::create_dir_all(&folder).expect("mkdir");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    ImageStore::new(folder.clone())
+        .save(&[1], "jpg", 1.0e12)
+        .expect("saved");
+    let mode = std::fs::metadata(&folder)
+        .expect("meta")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o700);
+}
+
+#[test]
+fn an_idle_expired_upload_is_swept() {
+    let uploads = Uploads::default();
+    uploads.begin(1, "s", 10, "", 0.0);
+    uploads.sweep(EXPIRES_AFTER_MS - 1.0);
+    assert_eq!(uploads.pending(), 1, "not yet");
+    uploads.sweep(EXPIRES_AFTER_MS + 1.0);
+    assert_eq!(
+        uploads.pending(),
+        0,
+        "gone without another call from the phone"
+    );
+}
+
+#[test]
+fn with_acting_off_an_upload_is_not_even_begun() {
+    let backend: Arc<dyn BridgeBackend> = Arc::new(LiveBackend::new(FakeSources, ActingOff));
+    let (router, connection, io, _dir) = live_rig(backend);
+    router.handle(
+        &connection,
+        &json!({"id":2,"op":"session.image.begin","sessionId":"p","bytes":1000}).to_string(),
+    );
+    let reply = io.last_json();
+    assert_eq!(error_code(&reply), Some("invalid"), "{reply}");
+    assert_eq!(reply["error"]["message"], json!(ACTING_OFF));
+    assert_eq!(router.pending_uploads(), 0, "nothing held in memory");
+}
+
 #[test]
 fn old_files_are_pruned_after_a_day() {
     let dir = TempDir::new("store-prune");
@@ -521,8 +567,35 @@ fn send_photo(router: &Router, connection: &Arc<super::Connection>, io: &Recordi
 }
 
 #[test]
-fn with_acting_off_a_photo_is_refused_and_no_file_is_left_behind() {
-    let backend: Arc<dyn BridgeBackend> = Arc::new(LiveBackend::new(FakeSources, ActingOff));
+fn acting_turned_off_mid_photo_refuses_it_and_no_file_is_left_behind() {
+    /// On when the upload begins, off by the time the path is typed.
+    struct TurnedOff;
+    impl Acting for TurnedOff {
+        fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
+            ActingOff.send_message(text, session)
+        }
+        fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {
+            ActingOff.send_now(session)
+        }
+        fn respond(
+            &self,
+            prompt: &PendingPrompt,
+            response: &PromptResponse,
+        ) -> Result<(), BridgeFailure> {
+            ActingOff.respond(prompt, response)
+        }
+        fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure> {
+            ActingOff.new_session(cwd, model)
+        }
+        fn take_over(
+            &self,
+            session: &Session,
+            stop: bool,
+        ) -> Result<TakeoverOutcome, BridgeFailure> {
+            ActingOff.take_over(session, stop)
+        }
+    }
+    let backend: Arc<dyn BridgeBackend> = Arc::new(LiveBackend::new(FakeSources, TurnedOff));
     let (router, connection, io, dir) = live_rig(backend);
     let reply = send_photo(&router, &connection, &io);
     assert_eq!(error_code(&reply), Some("invalid"));
