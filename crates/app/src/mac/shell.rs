@@ -1,13 +1,17 @@
-//! The menu bar app: the tray item, the Dock presence and the main window, wired together.
+//! The menu bar app: the tray item, the Dock presence and the main window (Chat), wired together.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use gpui::{App, Application, Global, WindowId};
 use objc2::MainThreadMarker;
 
+use super::dock;
 use super::tray::Tray;
-use super::{dock, window};
-use crate::dock::policy_for;
+use super::window::{open_main_window, ShellView};
+use crate::chat::data::DataRoot;
+use crate::chat::view::ChatView;
+use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
 
 /// The app's state while it runs.
@@ -16,13 +20,19 @@ struct Shell {
     tray: Option<Tray>,
     /// Our titled windows: the ones that earn a Dock icon.
     titled: HashSet<WindowId>,
+    /// Where Chat reads from; `None` when the environment names no home folder.
+    root: Option<DataRoot>,
 }
 
 impl Global for Shell {}
 
-/// Runs the app until Quit; the exit code.
-pub fn run() -> i32 {
-    Application::new().run(|cx: &mut App| {
+/// Runs the app until Quit; the exit code. `data_root` is a fixture root instead of the real folders.
+pub fn run(data_root: Option<PathBuf>) -> i32 {
+    let root = match data_root {
+        Some(dir) => Some(DataRoot::fixture(&dir)),
+        None => DataRoot::real(),
+    };
+    Application::new().run(move |cx: &mut App| {
         dock::register(cx);
         dock::apply(policy_for(0));
         dock::set_main_menu(cx, policy_for(0));
@@ -44,6 +54,7 @@ pub fn run() -> i32 {
             state,
             tray,
             titled: HashSet::new(),
+            root,
         });
         cx.on_window_closed(update_dock).detach();
         // Not titled, so it never counts toward the Dock icon.
@@ -76,7 +87,7 @@ fn refresh_tray(shell: &Shell) {
     }
 }
 
-/// Brings the main window forward, opening it first if it isn't open.
+/// Brings the Chat window forward, opening it first if it isn't open.
 fn open_chat(cx: &mut App) {
     let open: Vec<_> = cx.windows();
     let existing = open
@@ -90,8 +101,15 @@ fn open_chat(cx: &mut App) {
                 .ok();
         }
         None => {
-            if let Some(handle) = window::open_main_window(cx) {
-                cx.global_mut::<Shell>().titled.insert(handle.window_id());
+            let root = cx.global::<Shell>().root.clone();
+            let id = match root {
+                Some(root) => open_main_window(cx, |window, cx| ChatView::new(root, window, cx))
+                    .map(|h| h.window_id()),
+                None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
+                    .map(|h| h.window_id()),
+            };
+            if let Some(id) = id {
+                cx.global_mut::<Shell>().titled.insert(id);
             }
         }
     }
@@ -106,7 +124,7 @@ fn update_dock(cx: &mut App) {
     let policy = policy_for(shell.titled.len());
     dock::apply(policy);
     dock::set_main_menu(cx, policy);
-    if policy == crate::dock::Policy::Regular {
+    if policy == Policy::Regular {
         cx.activate(true);
     }
 }

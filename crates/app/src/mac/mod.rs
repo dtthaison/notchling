@@ -14,8 +14,12 @@ use crate::cli::Command;
 /// Runs a command; the exit code.
 pub fn run(command: Command) -> i32 {
     match command {
-        Command::Run => shell::run(),
-        Command::Render { view, out } => render::run(&view, &out),
+        Command::Run { data_root } => shell::run(data_root),
+        Command::Render {
+            view,
+            out,
+            data_root,
+        } => render::run(&view, &out, data_root.as_deref()),
         Command::Version | Command::Help => 0,
     }
 }
