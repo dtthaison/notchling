@@ -81,6 +81,8 @@ pub enum RowAction {
 pub struct MenuItem {
     pub title: &'static str,
     pub action: RowAction,
+    /// Off with the `accounts` switch (or while busy), like Switch: the daemon would refuse it.
+    pub control: Control,
 }
 
 /// The row's content slot.
@@ -208,6 +210,7 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
                 menu: vec![MenuItem {
                     title: "Remove…",
                     action: RowAction::Remove,
+                    control: gate(switches, busy),
                 }],
                 content,
                 cost: cost_line(s, &a.id),
@@ -301,6 +304,7 @@ fn provider_page(
                         "Remove…"
                     },
                     action: RowAction::Remove,
+                    control: gate(switches, busy || p.busy || p.adding),
                 }],
                 content,
                 cost: cost_line(s, &a.id),

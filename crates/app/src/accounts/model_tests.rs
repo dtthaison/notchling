@@ -93,6 +93,14 @@ fn off_lists_the_names_and_every_control_says_why() {
         if let Some(c) = row.switch {
             assert_eq!(c.tooltip, Some(ACCOUNTS_OFF));
         }
+        // ⋯ Remove asks the daemon too: off, it is drawn disabled with the reason.
+        assert_eq!(
+            row.menu[0].control,
+            Control {
+                enabled: false,
+                tooltip: Some(ACCOUNTS_OFF)
+            }
+        );
         assert!(matches!(
             row.content,
             RowContent::Text { .. } | RowContent::None
@@ -104,6 +112,9 @@ fn off_lists_the_names_and_every_control_says_why() {
     assert_eq!(add.tooltip, Some(ACCOUNTS_OFF));
     let codex = page(CODEX, &s, &Switches::all_off(), false, NOW, Zone::UTC);
     assert_eq!(codex.rows.len(), 2, "saved Codex names list while off");
+    assert!(codex.rows.iter().all(|r| !r.menu[0].control.enabled));
+    let live = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC);
+    assert!(live.rows.iter().all(|r| r.menu[0].control.enabled));
     assert!(codex.rows.iter().all(|r| !r.in_use));
     // Detached: the daemon's absence is the reason.
     let d = page(

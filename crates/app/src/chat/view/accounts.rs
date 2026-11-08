@@ -14,10 +14,12 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
 use crate::accounts::limits::{self, Meter, Zone};
-use crate::accounts::menu::{account_menu, AccountMenu, Entry, Place, Target};
+use crate::accounts::menu::{
+    account_menu, move_all_account, move_needs_accounts, AccountMenu, Entry, Place, Target,
+};
 use crate::accounts::model::{CLAUDE_CODE, CODEX};
 use crate::accounts::view_rows::meter;
-use crate::acting::Request;
+use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
 use crate::mac::gate;
 use crate::switches::Switch;
@@ -30,6 +32,17 @@ fn now_secs() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0)
+}
+
+/// Whether `codex` is on the PATH or in its usual places. It reads the disk, so Chat asks with the
+/// accounts poll, not on each render.
+pub(super) fn codex_installed(home: &Path) -> bool {
+    notchling_engine::tools::codex::plan::find_binary(
+        home,
+        &std::env::var("PATH").unwrap_or_default(),
+        Path::is_file,
+    )
+    .is_some()
 }
 
 impl ChatView {
@@ -60,17 +73,11 @@ impl ChatView {
             notchling_engine::sessions::AgentTarget::Job(_)
         ) && agent.command.is_none()
             && agent.transcript_path.is_some();
-        let codex = notchling_engine::tools::codex::plan::find_binary(
-            &self.root.home,
-            &std::env::var("PATH").unwrap_or_default(),
-            Path::is_file,
-        )
-        .is_some();
         Some(account_menu(
             &self.accounts.snapshot(),
             agent.config_dir.as_deref(),
             movable,
-            codex,
+            self.codex_installed,
         ))
     }
 
@@ -129,9 +136,12 @@ impl ChatView {
     /// Move All Sessions To a target: the Accounts sheet shows the plan and asks.
     fn move_all_to(&mut self, target: Target, cx: &mut Context<Self>) {
         self.account_menu = false;
-        let account = match &target.place {
-            Place::Main => None,
-            _ => target.account.clone(),
+        let account = match move_all_account(&target) {
+            Ok(account) => account,
+            Err(why) => {
+                self.tools.error = Some(why.to_owned());
+                return cx.notify();
+            }
         };
         let entity = self.accounts_sheet_entity(Some(CLAUDE_CODE), cx);
         entity.update(cx, |view, cx| {
@@ -250,6 +260,23 @@ pub(super) fn account_control(
 }
 
 fn menu_item(id: SharedString, title: &str, checked: bool, a: Appearance) -> Stateful<Div> {
+    menu_row(id, title, checked, Ink::Text, a)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
+}
+
+/// An item the `accounts` switch holds off: faint, no click, the reason on hover.
+fn held_item(id: SharedString, title: &str, control: Control, a: Appearance) -> Stateful<Div> {
+    gate::tip(menu_row(id, title, false, Ink::TextFaint, a), control, a)
+}
+
+fn menu_row(
+    id: SharedString,
+    title: &str,
+    checked: bool,
+    ink: Ink,
+    a: Appearance,
+) -> Stateful<Div> {
     div()
         .id(id)
         .px(px(10.0))
@@ -258,15 +285,13 @@ fn menu_item(id: SharedString, title: &str, checked: bool, a: Appearance) -> Sta
         .flex()
         .items_center()
         .gap(px(8.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
         .child(label(
             if checked { Icon::Check.glyph() } else { " " },
             TypeRole::Label,
-            Ink::Text,
+            ink,
             a,
         ))
-        .child(label(title, TypeRole::Label, Ink::Text, a))
+        .child(label(title, TypeRole::Label, ink, a))
 }
 
 /// The account menu under the header's button, over a click-away layer.
@@ -287,6 +312,8 @@ pub(super) fn render_menu(
         .gap(px(2.0))
         .shadow_lg();
     let mut move_all = Vec::new();
+    // Move All and a lane made for a saved account ask the daemon's accounts side.
+    let accounts = view.switches.switches().control(Switch::Accounts);
     for (i, entry) in menu.entries.iter().enumerate() {
         match entry {
             Entry::Header(text) => {
@@ -298,18 +325,17 @@ pub(super) fn render_menu(
             }
             Entry::Target { index, current } => {
                 let target = &menu.targets[*index];
+                let id = SharedString::from(format!("account-target-{i}"));
+                if !*current && move_needs_accounts(target) && !accounts.enabled {
+                    items = items.child(held_item(id, &target.title, accounts, a));
+                    continue;
+                }
                 let (entry, menu_clone) = (entry.clone(), menu.clone());
-                items = items.child(
-                    menu_item(
-                        SharedString::from(format!("account-target-{i}")),
-                        &target.title,
-                        *current,
-                        a,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                items = items.child(menu_item(id, &target.title, *current, a).on_click(
+                    cx.listener(move |this, _, _, cx| {
                         this.menu_entry(entry.clone(), &menu_clone, cx)
-                    })),
-                );
+                    }),
+                ));
             }
             Entry::Note(text) => {
                 items = items.child(
@@ -329,6 +355,11 @@ pub(super) fn render_menu(
                 );
                 for (t, target) in menu.targets.iter().enumerate() {
                     let target = target.clone();
+                    if !accounts.enabled {
+                        let id = SharedString::from(format!("move-all-{t}"));
+                        move_all.push(held_item(id, &target.title, accounts, a));
+                        continue;
+                    }
                     move_all.push(
                         menu_item(
                             SharedString::from(format!("move-all-{t}")),

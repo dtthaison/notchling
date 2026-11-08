@@ -25,6 +25,28 @@ pub struct Target {
     pub account: Option<String>,
 }
 
+/// Said when Move All is asked for a lane whose account isn't known.
+pub const LANE_ACCOUNT_UNKNOWN: &str =
+    "That lane's account isn't known yet, so its sessions can't be moved there. Open Accounts to check it.";
+
+/// What Move All sends as its target: `None` (the main login's account) only for the main login.
+/// A lane or saved account goes by its account id; one with none is refused, because sending
+/// `null` would move every session to the main login instead.
+pub fn move_all_account(target: &Target) -> Result<Option<String>, &'static str> {
+    match &target.place {
+        Place::Main => Ok(None),
+        Place::Lane(_) | Place::Saved(_) => {
+            target.account.clone().map(Some).ok_or(LANE_ACCOUNT_UNKNOWN)
+        }
+    }
+}
+
+/// Whether moving one session there asks the daemon's accounts side: a saved account needs a lane
+/// made first (`lanes.create`). The main login and an existing lane are a plain `session.move`.
+pub fn move_needs_accounts(target: &Target) -> bool {
+    matches!(target.place, Place::Saved(_))
+}
+
 /// The targets in the Swift order: the main login, the lanes, then the free saved accounts.
 pub fn targets(s: &Snapshot) -> Vec<Target> {
     let active = s
@@ -192,6 +214,26 @@ mod tests {
             }],
             ..Snapshot::default()
         }
+    }
+
+    #[test]
+    fn move_all_never_sends_the_main_login_for_a_lane() {
+        let t = targets(&snapshot());
+        assert_eq!(move_all_account(&t[0]), Ok(None));
+        assert_eq!(move_all_account(&t[1]), Ok(Some("a2".into())));
+        assert_eq!(move_all_account(&t[2]), Ok(Some("a3".into())));
+        let unknown = Target {
+            title: "night".into(),
+            place: Place::Lane("/h/.claude-lanes/night".into()),
+            account: None,
+        };
+        assert_eq!(move_all_account(&unknown), Err(LANE_ACCOUNT_UNKNOWN));
+        let needs: Vec<bool> = t.iter().map(move_needs_accounts).collect();
+        assert_eq!(
+            needs,
+            [false, false, true],
+            "only a saved account needs a lane made"
+        );
     }
 
     #[test]

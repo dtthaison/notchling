@@ -203,19 +203,29 @@ pub fn account_row<V: 'static>(
             .shadow_lg();
         for (i, item) in row.menu.iter().enumerate() {
             let handler = on.clone();
-            items = items.child(
-                div()
-                    .id(SharedString::from(format!("menu-item-{key}-{i}")))
-                    .px(px(10.0))
-                    .py(px(5.0))
-                    .rounded(px(RADIUS_SM))
+            let enabled = item.control.enabled;
+            let entry = div()
+                .id(SharedString::from(format!("menu-item-{key}-{i}")))
+                .px(px(10.0))
+                .py(px(5.0))
+                .rounded(px(RADIUS_SM))
+                .child(label(
+                    item.title,
+                    TypeRole::Label,
+                    if enabled { Ink::Text } else { Ink::TextFaint },
+                    a,
+                ));
+            let entry = if enabled {
+                entry
                     .cursor_pointer()
                     .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-                    .child(label(item.title, TypeRole::Label, Ink::Text, a))
                     .on_click(
                         cx.listener(move |this, _, _, cx| handler(this, RowEvent::Remove, cx)),
-                    ),
-            );
+                    )
+            } else {
+                gate::tip(entry, item.control, a)
+            };
+            items = items.child(entry);
         }
         items
     });
