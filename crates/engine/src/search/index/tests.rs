@@ -3,7 +3,9 @@
 use super::*;
 use crate::sessions::testutil::TempDir;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
+#[cfg(unix)]
+use std::io::{Seek, SeekFrom};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -18,13 +20,13 @@ fn now() -> f64 {
 }
 
 fn user(text: &str, cwd: &str) -> String {
-    format!(
-        r#"{{"type":"user","cwd":"{cwd}","message":{{"role":"user","content":"{text}"}}}}"#
-    )
+    format!(r#"{{"type":"user","cwd":"{cwd}","message":{{"role":"user","content":"{text}"}}}}"#)
 }
 
 fn assistant(text: &str) -> String {
-    format!(r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"{text}"}}]}}}}"#)
+    format!(
+        r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"{text}"}}]}}}}"#
+    )
 }
 
 /// Sets a file's modification time to `ago` seconds before now.
@@ -99,14 +101,24 @@ fn claude_codex_and_antigravity_sessions_are_found() {
     assert_eq!(keys(&index, &["token"]), vec!["claude:c1"]);
     let hits = index.search(&["uploader"], now(), 30);
     let got: Vec<&str> = hits.iter().map(|h| h.meta.key.as_str()).collect();
-    assert!(got.contains(&"agy:ag1") && got.iter().any(|k| k.starts_with("codex:")), "{got:?}");
+    assert!(
+        got.contains(&"agy:ag1") && got.iter().any(|k| k.starts_with("codex:")),
+        "{got:?}"
+    );
     let claude = &index.search(&["stale"], now(), 30)[0];
     assert_eq!(claude.meta.title, "Token cache work");
     assert_eq!(claude.meta.folder, "/w/app");
-    assert!(claude.snippet.as_deref().unwrap_or("").contains("stale token cache"));
+    assert!(claude
+        .snippet
+        .as_deref()
+        .unwrap_or("")
+        .contains("stale token cache"));
     let codex = hits.iter().find(|h| h.meta.tool_key == "codex").unwrap();
     assert_eq!(codex.meta.folder, "/w/codex-app");
-    assert_eq!(codex.meta.session_id, "01a1ac75-2a19-7750-a0d3-2df380733486");
+    assert_eq!(
+        codex.meta.session_id,
+        "01a1ac75-2a19-7750-a0d3-2df380733486"
+    );
     // No words: the newest first, with no snippet.
     let latest = index.search::<&str>(&[], now(), 2);
     assert_eq!(latest.len(), 2);
@@ -123,8 +135,18 @@ fn civil_day_path(ts: f64) -> String {
 #[test]
 fn only_changed_files_are_read_again() {
     let dir = TempDir::new("idx-changed");
-    let a = transcript(&dir, "claude/projects/p/a.jsonl", &[user("alpha one", "/w")], 100.0);
-    transcript(&dir, "claude/projects/p/b.jsonl", &[user("beta two", "/w")], 100.0);
+    let a = transcript(
+        &dir,
+        "claude/projects/p/a.jsonl",
+        &[user("alpha one", "/w")],
+        100.0,
+    );
+    transcript(
+        &dir,
+        "claude/projects/p/b.jsonl",
+        &[user("beta two", "/w")],
+        100.0,
+    );
     let r = roots(&dir);
     let index = SessionIndex::new(None);
     assert_eq!(index.refresh(&r, now()).read, 2);
@@ -147,8 +169,18 @@ fn only_changed_files_are_read_again() {
 #[test]
 fn files_outside_the_window_are_left_out_and_aged_out_ones_dropped() {
     let dir = TempDir::new("idx-window");
-    transcript(&dir, "claude/projects/p/old.jsonl", &[user("ancient", "/w")], 20.0 * DAY);
-    let fresh = transcript(&dir, "claude/projects/p/new.jsonl", &[user("recent", "/w")], 60.0);
+    transcript(
+        &dir,
+        "claude/projects/p/old.jsonl",
+        &[user("ancient", "/w")],
+        20.0 * DAY,
+    );
+    let fresh = transcript(
+        &dir,
+        "claude/projects/p/new.jsonl",
+        &[user("recent", "/w")],
+        60.0,
+    );
     let r = roots(&dir);
     let index = SessionIndex::new(None);
     assert_eq!(index.refresh(&r, now()).read, 1);
@@ -159,7 +191,12 @@ fn files_outside_the_window_are_left_out_and_aged_out_ones_dropped() {
     assert_eq!((stats.read, stats.dropped), (0, 1));
     assert!(index.is_empty());
     // And a deleted file is dropped too.
-    let gone = transcript(&dir, "claude/projects/p/gone.jsonl", &[user("vanishing", "/w")], 5.0);
+    let gone = transcript(
+        &dir,
+        "claude/projects/p/gone.jsonl",
+        &[user("vanishing", "/w")],
+        5.0,
+    );
     assert_eq!(index.refresh(&r, now()).read, 1);
     std::fs::remove_file(gone).unwrap();
     assert_eq!(index.refresh(&r, now()).dropped, 1);
@@ -188,8 +225,15 @@ fn a_big_file_is_read_by_its_start_and_its_end() {
     index.refresh(&roots(&dir), now());
     assert_eq!(keys(&index, &["headmarker"]), vec!["claude:big"]);
     assert_eq!(keys(&index, &["tailmarker"]), vec!["claude:big"]);
-    assert_eq!(keys(&index, &["middlemarker"]), Vec::<String>::new(), "the middle is not read");
-    assert_eq!(index.search(&["tailmarker"], now(), 5)[0].meta.folder, "/w/big");
+    assert_eq!(
+        keys(&index, &["middlemarker"]),
+        Vec::<String>::new(),
+        "the middle is not read"
+    );
+    assert_eq!(
+        index.search(&["tailmarker"], now(), 5)[0].meta.folder,
+        "/w/big"
+    );
 }
 
 // Sparse files: where the file system has none (NTFS), the test would write the gap.
@@ -210,7 +254,11 @@ fn a_two_gigabyte_file_costs_two_reads() {
     let index = SessionIndex::new(None);
     let started = std::time::Instant::now();
     index.refresh(&roots(&dir), now());
-    assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        started.elapsed()
+    );
     assert_eq!(keys(&index, &["headmarker"]), vec!["claude:huge"]);
     assert_eq!(keys(&index, &["tailmarker"]), vec!["claude:huge"]);
 }
@@ -259,11 +307,19 @@ fn a_long_line_in_a_small_file_is_skipped_and_the_rest_kept() {
 #[test]
 fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
     let dir = TempDir::new("idx-gone");
-    transcript(&dir, "claude/projects/p/ok.jsonl", &[user("still here", "/w")], 10.0);
+    transcript(
+        &dir,
+        "claude/projects/p/ok.jsonl",
+        &[user("still here", "/w")],
+        10.0,
+    );
     // A dangling link, a folder named like a transcript and an empty file.
     #[cfg(unix)]
-    std::os::unix::fs::symlink(dir.path("nowhere"), dir.path("claude/projects/p/dangling.jsonl"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        dir.path("nowhere"),
+        dir.path("claude/projects/p/dangling.jsonl"),
+    )
+    .unwrap();
     std::fs::create_dir_all(dir.path("claude/projects/p/dir.jsonl")).unwrap();
     dir.write("claude/projects/p/empty.jsonl", "");
     let index = SessionIndex::new(None);
@@ -277,16 +333,25 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
         session_id: "x".into(),
         title: String::new(),
         folder: String::new(),
-        path: dir.path("claude/projects/p/never.jsonl").to_string_lossy().into_owned(),
+        path: dir
+            .path("claude/projects/p/never.jsonl")
+            .to_string_lossy()
+            .into_owned(),
         config_dir: None,
         modified: 0.0,
         size: 10,
     };
-    assert!(matches!(read::read(&meta, SessionTool::Claude), read::Read1::Gone));
+    assert!(matches!(
+        read::read(&meta, SessionTool::Claude),
+        read::Read1::Gone
+    ));
     // A missing root is no error either.
     let index = SessionIndex::new(None);
     let nothing = IndexRoots {
-        claude: vec![ClaudeRoot { projects: dir.path("absent"), config_dir: None }],
+        claude: vec![ClaudeRoot {
+            projects: dir.path("absent"),
+            config_dir: None,
+        }],
         codex_sessions: Some(dir.path("absent2")),
         titled: vec![],
     };
@@ -296,7 +361,12 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
 #[test]
 fn the_cache_carries_the_index_to_the_next_start() {
     let dir = TempDir::new("idx-cache");
-    transcript(&dir, "claude/projects/p/a.jsonl", &[user("remember me please", "/w/a")], 10.0);
+    transcript(
+        &dir,
+        "claude/projects/p/a.jsonl",
+        &[user("remember me please", "/w/a")],
+        10.0,
+    );
     let cache = dir.path("daemon/search-index.json");
     let r = roots(&dir);
     let first = SessionIndex::new(Some(cache.clone()));
@@ -307,7 +377,10 @@ fn the_cache_carries_the_index_to_the_next_start() {
     assert_eq!(raw["version"], CACHE_VERSION);
     assert_eq!(raw["sessions"][0]["meta"]["toolKey"], "claude");
     assert_eq!(raw["sessions"][0]["meta"]["sessionID"], "a");
-    assert!(raw["sessions"][0]["text"].as_str().unwrap().contains("remember me"));
+    assert!(raw["sessions"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("remember me"));
 
     // A new index answers from the cache before it reads anything, and reuses the entry.
     let second = SessionIndex::new(Some(cache.clone()));
@@ -320,12 +393,18 @@ fn the_cache_carries_the_index_to_the_next_start() {
 #[test]
 fn a_cache_of_another_version_or_damaged_is_rebuilt() {
     let dir = TempDir::new("idx-version");
-    transcript(&dir, "claude/projects/p/a.jsonl", &[user("rebuild me", "/w")], 10.0);
+    transcript(
+        &dir,
+        "claude/projects/p/a.jsonl",
+        &[user("rebuild me", "/w")],
+        10.0,
+    );
     let cache = dir.path("daemon/search-index.json");
     let r = roots(&dir);
     SessionIndex::new(Some(cache.clone())).refresh(&r, now());
 
-    let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
     raw["version"] = serde_json::json!(CACHE_VERSION + 1);
     // A stale entry the rebuild must not trust.
     raw["sessions"][0]["text"] = serde_json::json!("stale words");
@@ -346,11 +425,24 @@ fn a_cache_of_another_version_or_damaged_is_rebuilt() {
 #[test]
 fn a_session_in_two_lanes_keeps_the_newer_copy_and_a_linked_projects_folder_counts_once() {
     let dir = TempDir::new("idx-lanes");
-    transcript(&dir, "main/projects/p/s.jsonl", &[user("shared session", "/w")], 500.0);
-    transcript(&dir, "lane/projects/p/s.jsonl", &[user("shared session newer", "/w")], 50.0);
+    transcript(
+        &dir,
+        "main/projects/p/s.jsonl",
+        &[user("shared session", "/w")],
+        500.0,
+    );
+    transcript(
+        &dir,
+        "lane/projects/p/s.jsonl",
+        &[user("shared session newer", "/w")],
+        50.0,
+    );
     let mut r = roots(&dir);
     r.claude = vec![
-        ClaudeRoot { projects: dir.path("main/projects"), config_dir: None },
+        ClaudeRoot {
+            projects: dir.path("main/projects"),
+            config_dir: None,
+        },
         ClaudeRoot {
             projects: dir.path("lane/projects"),
             config_dir: Some(dir.path("lane").to_string_lossy().into_owned()),
@@ -370,7 +462,12 @@ fn a_session_in_two_lanes_keeps_the_newer_copy_and_a_linked_projects_folder_coun
     let stats = index.refresh(&r, now());
     assert_eq!(stats.read, 1, "one session, one read");
     let hit = &index.search(&["shared"], now(), 5)[0];
-    assert!(hit.meta.config_dir.as_deref().unwrap_or("").ends_with("lane"));
+    assert!(hit
+        .meta
+        .config_dir
+        .as_deref()
+        .unwrap_or("")
+        .ends_with("lane"));
     assert!(hit.meta.path.contains("lane/projects"));
 }
 
@@ -385,13 +482,35 @@ fn codex_rollouts_are_found_only_under_recent_day_folders() {
     };
     let today = civil_day_path(now());
     let old = "2020/01/15";
-    let name = |n: u32| format!("rollout-2026-11-05T23-05-22-01a1ac75-2a19-7750-a0d3-2df3807334{n:02}.jsonl");
-    transcript(&dir, &format!("codex/sessions/{today}/{}", name(11)), &line("a"), 60.0);
+    let name = |n: u32| {
+        format!("rollout-2026-11-05T23-05-22-01a1ac75-2a19-7750-a0d3-2df3807334{n:02}.jsonl")
+    };
+    transcript(
+        &dir,
+        &format!("codex/sessions/{today}/{}", name(11)),
+        &line("a"),
+        60.0,
+    );
     // Written to recently but started long ago: not found, like the Swift app.
-    transcript(&dir, &format!("codex/sessions/{old}/{}", name(22)), &line("b"), 60.0);
+    transcript(
+        &dir,
+        &format!("codex/sessions/{old}/{}", name(22)),
+        &line("b"),
+        60.0,
+    );
     // A file that isn't a rollout, and a folder that isn't a date.
-    transcript(&dir, &format!("codex/sessions/{today}/notes.jsonl"), &line("c"), 60.0);
-    transcript(&dir, &format!("codex/sessions/misc/{}", name(33)), &line("d"), 60.0);
+    transcript(
+        &dir,
+        &format!("codex/sessions/{today}/notes.jsonl"),
+        &line("c"),
+        60.0,
+    );
+    transcript(
+        &dir,
+        &format!("codex/sessions/misc/{}", name(33)),
+        &line("d"),
+        60.0,
+    );
     let index = SessionIndex::new(None);
     index.refresh(&roots(&dir), now());
     assert_eq!(
@@ -410,7 +529,10 @@ fn antigravity_titles_come_and_go_with_the_rows() {
         modified: now(),
     };
     let mut r = roots(&dir);
-    r.titled = vec![row("a", "Plan the migration"), row("b", "Review the schema")];
+    r.titled = vec![
+        row("a", "Plan the migration"),
+        row("b", "Review the schema"),
+    ];
     let index = SessionIndex::new(None);
     index.refresh(&r, now());
     assert_eq!(keys(&index, &["migration"]), vec!["agy:a"]);
@@ -428,7 +550,10 @@ fn a_second_refresh_while_one_runs_does_nothing() {
     index.refreshing.store(true, Ordering::SeqCst);
     let stats = index.refresh(&roots(&dir), now());
     assert!(stats.skipped);
-    assert!(index.is_refreshing(), "the running refresh's flag is not cleared by the skipped one");
+    assert!(
+        index.is_refreshing(),
+        "the running refresh's flag is not cleared by the skipped one"
+    );
     index.refreshing.store(false, Ordering::SeqCst);
     assert!(!index.refresh(&roots(&dir), now()).skipped);
     assert!(!index.is_refreshing());

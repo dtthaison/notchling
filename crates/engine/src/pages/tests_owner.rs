@@ -54,10 +54,13 @@ impl Http {
 impl HttpClient for Http {
     fn send(&self, request: &HttpRequest) -> HttpResponse {
         self.sent.borrow_mut().push(request.clone());
-        self.answers.borrow_mut().pop_front().unwrap_or(HttpResponse {
-            status: 0,
-            body: "no answer".into(),
-        })
+        self.answers
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or(HttpResponse {
+                status: 0,
+                body: "no answer".into(),
+            })
     }
 }
 
@@ -100,9 +103,12 @@ fn setup(recorded_version: &str) -> Setup {
         format!("{url} (version {recorded_version})")
     };
     let cwd = dir.path("work").to_string_lossy().into_owned();
-    lib.record(&publish_event(&cwd, "p.html", &response), &ctx(OWNER, dir.root()))
-        .unwrap()
-        .unwrap();
+    lib.record(
+        &publish_event(&cwd, "p.html", &response),
+        &ctx(OWNER, dir.root()),
+    )
+    .unwrap()
+    .unwrap();
     dir.write("work/p.html", "<title>New</title><p>new</p>");
     let event = json!({
         "hook_event_name": "PreToolUse",
@@ -150,23 +156,38 @@ fn a_link_id_is_the_pages_uuid_in_base58() {
         assert_eq!(uuid_from_short_id(&short), uuid);
     }
     assert_eq!(short_id_from_uuid("not a uuid"), None);
-    assert_eq!(short_id_from_uuid("0f8e2c4a-6b1d-4e3f-9a7c-5d2b8e1f4a6"), None);
+    assert_eq!(
+        short_id_from_uuid("0f8e2c4a-6b1d-4e3f-9a7c-5d2b8e1f4a6"),
+        None
+    );
 }
 
 // MARK: the version rule and the body
 
 #[test]
 fn a_newer_version_is_never_overwritten_without_force() {
-    assert!(stale_refusal("u", "1-a", "2-b", false).unwrap().contains("force: true"));
+    assert!(stale_refusal("u", "1-a", "2-b", false)
+        .unwrap()
+        .contains("force: true"));
     assert_eq!(stale_refusal("u", "1-a", "2-b", true), None);
     assert_eq!(stale_refusal("u", "1-a", "1-a", false), None);
-    assert_eq!(stale_refusal("u", "", "2-b", false), None, "nothing on record to compare");
+    assert_eq!(
+        stale_refusal("u", "", "2-b", false),
+        None,
+        "nothing on record to compare"
+    );
 }
 
 #[test]
 fn the_body_carries_the_slug_base_version_content_and_title() {
     let input = json!({"description": "d", "label": "l", "force": true, "ignored": 1});
-    let body = publish_body(SLUG, "9-z", "<title>T</title>x", "fallback", input.as_object().unwrap());
+    let body = publish_body(
+        SLUG,
+        "9-z",
+        "<title>T</title>x",
+        "fallback",
+        input.as_object().unwrap(),
+    );
     assert_eq!(
         body,
         json!({"slug": SLUG, "baseVersion": "9-z", "content": "<title>T</title>x", "title": "T",
@@ -195,7 +216,9 @@ fn the_request_headers_are_claude_codes() {
         method: Method::Post,
         ..get
     };
-    assert!(post.headers().contains(&("Content-Type", "application/json".to_string())));
+    assert!(post
+        .headers()
+        .contains(&("Content-Type", "application/json".to_string())));
 }
 
 // MARK: run
@@ -210,7 +233,9 @@ fn a_publish_as_the_owner_goes_through_and_updates_the_copy() {
         panic!("{outcome:?}");
     };
     assert!(text.starts_with("Done, not an error: Notchling published p.html to "));
-    assert!(text.contains("as owner@example.com, the page's owner (Claude Code is signed in as me@example.com"));
+    assert!(text.contains(
+        "as owner@example.com, the page's owner (Claude Code is signed in as me@example.com"
+    ));
     assert!(text.contains(". New version 200000-bb, over 100000-aa."));
     assert!(text.ends_with("Don't publish it again. Notchling's local copy is updated."));
 
@@ -253,7 +278,9 @@ fn a_page_changed_elsewhere_is_refused_until_force() {
     let Some(Outcome::Refused(text)) = run_with(&s, &Tokens::owner(), &http, 1.0) else {
         panic!()
     };
-    assert!(text.contains("300000-cc") && text.contains("100000-aa") && text.contains("force: true"));
+    assert!(
+        text.contains("300000-cc") && text.contains("100000-aa") && text.contains("force: true")
+    );
     assert_eq!(http.sent.borrow().len(), 1, "no publish was sent");
 
     let mut forced = setup("100000-aa");
@@ -266,7 +293,10 @@ fn a_page_changed_elsewhere_is_refused_until_force() {
     let sent = http.sent.borrow();
     let body = sent[1].body.as_ref().unwrap();
     assert_eq!(body["force"], true);
-    assert_eq!(body["baseVersion"], "300000-cc", "built on the live version");
+    assert_eq!(
+        body["baseVersion"], "300000-cc",
+        "built on the live version"
+    );
 }
 
 #[test]
@@ -325,9 +355,12 @@ fn without_a_login_the_normal_publish_runs() {
 fn publishes_it_does_not_handle_are_left_to_claude_code() {
     let http = Http::new(vec![]);
     let tokens = Tokens::owner();
-    let mut cases: Vec<Box<dyn Fn(&mut Value)>> = vec![
+    type Change = Box<dyn Fn(&mut Value)>;
+    let mut cases: Vec<Change> = vec![
         Box::new(|e| e["tool_input"]["action"] = json!("read")),
-        Box::new(|e| e["tool_input"]["url"] = json!("https://claude.ai/artifact/ZZZZZZZZZZZZZZZZZZZZZZ")),
+        Box::new(|e| {
+            e["tool_input"]["url"] = json!("https://claude.ai/artifact/ZZZZZZZZZZZZZZZZZZZZZZ")
+        }),
         Box::new(|e| e["tool_input"]["url"] = json!("https://claude.ai/artifact/short")),
         Box::new(|e| e["tool_input"]["file_path"] = json!("p.md")),
         Box::new(|e| e["tool_input"]["file_path"] = json!("gone.html")),
@@ -336,7 +369,10 @@ fn publishes_it_does_not_handle_are_left_to_claude_code() {
         Box::new(|e| e["tool_input"]["root"] = json!(null)),
         Box::new(|e| e["tool_input"]["asset"] = json!(true)),
         Box::new(|e| e["tool_input"]["edits"] = json!([{"old_str": "absent", "new_str": "x"}])),
-        Box::new(|e| e["tool_input"]["edits"] = json!([{"old_str": "<p>", "new_str": "x"}, {"old_str": "<p>", "new_str": "y"}])),
+        Box::new(|e| {
+            e["tool_input"]["edits"] =
+                json!([{"old_str": "<p>", "new_str": "x"}, {"old_str": "<p>", "new_str": "y"}])
+        }),
         Box::new(|e| e["tool_input"]["edits"] = json!([{"old_str": "", "new_str": "x"}])),
     ];
     for change in cases.drain(..) {
@@ -360,7 +396,10 @@ fn a_page_with_no_known_owner_is_left_alone() {
     .unwrap();
     let tokens = Tokens::owner();
     assert_eq!(run_with(&s, &tokens, &Http::new(vec![]), 1.0), None);
-    assert!(tokens.asked.borrow().is_empty(), "no login was even asked for");
+    assert!(
+        tokens.asked.borrow().is_empty(),
+        "no login was even asked for"
+    );
 }
 
 #[test]
@@ -375,18 +414,27 @@ fn edits_are_applied_once_and_saved_to_the_file() {
     let file = std::fs::read_to_string(s.dir.path("work/p.html")).unwrap();
     assert!(file.contains("<p>edited</p>"));
     let sent = http.sent.borrow();
-    assert!(sent[1].body.as_ref().unwrap()["content"].as_str().unwrap().contains("edited"));
+    assert!(sent[1].body.as_ref().unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .contains("edited"));
 }
 
 #[test]
 fn trouble_on_the_way_fails_open_with_a_reason() {
     // Reading the live version fails.
     let s = setup("100000-aa");
-    let http = Http::new(vec![HttpResponse { status: 404, body: " not found ".into() }]);
+    let http = Http::new(vec![HttpResponse {
+        status: 404,
+        body: " not found ".into(),
+    }]);
     let Some(Outcome::Failed(text)) = run_with(&s, &Tokens::owner(), &http, 1.0) else {
         panic!()
     };
-    assert!(text.contains("reading the page failed (HTTP 404: not found)."), "{text}");
+    assert!(
+        text.contains("reading the page failed (HTTP 404: not found)."),
+        "{text}"
+    );
     // The read answers without a live version.
     let http = Http::new(vec![ok(json!({"other": 1}))]);
     assert!(matches!(
@@ -398,11 +446,17 @@ fn trouble_on_the_way_fails_open_with_a_reason() {
     let Some(Outcome::Failed(text)) = run_with(&s, &Tokens::owner(), &http, 1.0) else {
         panic!()
     };
-    assert!(text.contains("couldn't confirm the publish") && text.contains("may still have gone through"));
+    assert!(
+        text.contains("couldn't confirm the publish")
+            && text.contains("may still have gone through")
+    );
     // The publish is rejected.
     let http = Http::new(vec![
         live("100000-aa"),
-        HttpResponse { status: 500, body: "boom".into() },
+        HttpResponse {
+            status: 500,
+            body: "boom".into(),
+        },
     ]);
     let Some(Outcome::Failed(text)) = run_with(&s, &Tokens::owner(), &http, 1.0) else {
         panic!()

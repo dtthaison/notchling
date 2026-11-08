@@ -21,14 +21,20 @@ fn event(text: &str) -> Value {
 
 /// A library holding the page behind `URL_A`, published from a temp folder.
 fn library_with_page(dir: &TempDir) -> PageLibrary {
-    dir.write("work/report.html", "<title>Cost Report</title><p>numbers</p>");
+    dir.write(
+        "work/report.html",
+        "<title>Cost Report</title><p>numbers</p>",
+    );
     let lib = PageLibrary::writable(dir.path("pages"));
     let work = dir.path("work");
     let text = POST_PUBLISH.replace("WORK", &work.to_string_lossy());
     let saved = lib
         .record(&event(&text), &ctx("owner@example.com", dir.root()))
         .unwrap();
-    assert_eq!(saved.map(|e| e.url), Some(URL_A.replace("/artifact/", "/code/artifact/")));
+    assert_eq!(
+        saved.map(|e| e.url),
+        Some(URL_A.replace("/artifact/", "/code/artifact/"))
+    );
     lib
 }
 
@@ -37,8 +43,12 @@ fn only_the_artifact_tool_events_are_handled() {
     assert!(handles(&event(PRE_READ_SAVED)));
     assert!(handles(&event(POST_PUBLISH)));
     assert!(handles(&event(POST_FAILURE_READ)));
-    assert!(!handles(&json!({"tool_name": "Bash", "hook_event_name": "PreToolUse"})));
-    assert!(!handles(&json!({"tool_name": "Artifact", "hook_event_name": "PermissionRequest"})));
+    assert!(!handles(
+        &json!({"tool_name": "Bash", "hook_event_name": "PreToolUse"})
+    ));
+    assert!(!handles(
+        &json!({"tool_name": "Artifact", "hook_event_name": "PermissionRequest"})
+    ));
     assert!(!handles(&json!({})));
 }
 
@@ -99,7 +109,10 @@ fn an_owner_publish_outcome_decides_the_pre_hook() {
             Outcome::Done(r) | Outcome::Refused(r) => r,
             Outcome::Failed(r) => r,
         };
-        assert_eq!(out["hookSpecificOutput"]["permissionDecisionReason"], json!(reason));
+        assert_eq!(
+            out["hookSpecificOutput"]["permissionDecisionReason"],
+            json!(reason)
+        );
     }
     // A failed owner publish lets the real one run, with the reason as context.
     let out = pre_tool_use(&lib, &e, Some(Outcome::Failed("why".into()))).unwrap();
@@ -126,7 +139,10 @@ fn a_failed_read_is_pointed_at_the_local_copy() {
         assert!(h.get("permissionDecision").is_none());
     }
     // A read that worked says nothing; so does a failed read of a page we don't keep.
-    assert_eq!(post_tool_use(&lib, &event(POST_READ_OK), &ctx("x", dir.root())), None);
+    assert_eq!(
+        post_tool_use(&lib, &event(POST_READ_OK), &ctx("x", dir.root())),
+        None
+    );
     let mut unsaved = event(POST_FAILURE_READ);
     unsaved["tool_input"]["url"] = json!("https://claude.ai/artifact/ZZZZZZZZZZZZZZZZZZZZZZ");
     assert_eq!(post_tool_use(&lib, &unsaved, &ctx("x", dir.root())), None);

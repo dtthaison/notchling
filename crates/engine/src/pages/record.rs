@@ -167,7 +167,11 @@ impl PageLibrary {
             };
             notchling_platform::files::write_private_no_follow(&folder_dir.join(&file), &body)?;
             // A republish may change the kind of page; drop the other index file.
-            let other = if ext == "html" { "index.md" } else { "index.html" };
+            let other = if ext == "html" {
+                "index.md"
+            } else {
+                "index.html"
+            };
             let _ = std::fs::remove_file(folder_dir.join(other));
             copy_supporting(input, &base, &folder_dir, &file);
 
@@ -246,7 +250,9 @@ fn copy_supporting(input: &Map<String, Value>, cwd: &Path, folder: &Path, main: 
         if published == main {
             continue;
         }
-        let target = parts.iter().fold(folder.to_path_buf(), |p, part| p.join(part));
+        let target = parts
+            .iter()
+            .fold(folder.to_path_buf(), |p, part| p.join(part));
         let Some(data) = read_bounded(&join_normalized(&root, &source)) else {
             continue;
         };

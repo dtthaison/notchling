@@ -66,8 +66,11 @@ pub fn safe_relative(path: &str) -> Option<Vec<&str>> {
         return None;
     }
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-    (!parts.is_empty() && parts.iter().all(|p| *p != "." && *p != ".." && !p.contains(':')))
-        .then_some(parts)
+    (!parts.is_empty()
+        && parts
+            .iter()
+            .all(|p| *p != "." && *p != ".." && !p.contains(':')))
+    .then_some(parts)
 }
 
 impl PageLibrary {

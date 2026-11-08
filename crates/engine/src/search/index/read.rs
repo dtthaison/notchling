@@ -17,7 +17,7 @@ pub(super) enum Read1 {
     Gone,
     /// It read, but holds no text worth searching: skip it until it changes.
     Empty,
-    Built(IndexedSession),
+    Built(Box<IndexedSession>),
 }
 
 /// The bytes to index: the whole file when it is small, else its start and its end joined at line
@@ -29,12 +29,16 @@ pub(super) fn contents(path: &str) -> Option<Vec<u8>> {
     let size = file.metadata().ok()?.len();
     if size <= WHOLE_FILE_BYTES {
         let mut data = Vec::new();
-        (&mut file).take(WHOLE_FILE_BYTES).read_to_end(&mut data).ok()?;
+        (&mut file)
+            .take(WHOLE_FILE_BYTES)
+            .read_to_end(&mut data)
+            .ok()?;
         return Some(data);
     }
     let mut head = Vec::new();
     (&mut file).take(HEAD_BYTES).read_to_end(&mut head).ok()?;
-    file.seek(SeekFrom::Start(size.saturating_sub(TAIL_BYTES))).ok()?;
+    file.seek(SeekFrom::Start(size.saturating_sub(TAIL_BYTES)))
+        .ok()?;
     let mut tail = Vec::new();
     (&mut file).take(TAIL_BYTES).read_to_end(&mut tail).ok()?;
     if let Some(cut) = head.iter().rposition(|&b| b == b'\n') {
@@ -98,5 +102,5 @@ pub(super) fn read(candidate: &SessionMeta, tool: SessionTool) -> Read1 {
         Some(t) => t,
         None => builder.title(),
     };
-    Read1::Built(IndexedSession::new(meta, text))
+    Read1::Built(Box::new(IndexedSession::new(meta, text)))
 }

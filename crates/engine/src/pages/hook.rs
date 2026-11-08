@@ -6,10 +6,10 @@
 //! Not wired into `notchling hook` until E13 (M6) installs the hook; the Swift app's `--hook`
 //! still owns these events until then (decision 0011).
 
+use super::content;
 use super::library::PageLibrary;
 use super::owner::Outcome;
 use super::record::{flatten, RecordContext};
-use super::content;
 use crate::search::{artifact_id_in, PageEntry};
 use serde_json::{json, Value};
 
@@ -105,8 +105,7 @@ pub fn post_tool_use(lib: &PageLibrary, event: &Value, ctx: &RecordContext<'_>) 
         let _ = lib.record(event, ctx);
     }
     let failed = name == "PostToolUseFailure"
-        || (name == "PostToolUse"
-            && content::looks_missing(&flatten(event.get("tool_response"))));
+        || (name == "PostToolUse" && content::looks_missing(&flatten(event.get("tool_response"))));
     if !failed {
         return None;
     }

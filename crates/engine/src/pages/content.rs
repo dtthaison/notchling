@@ -112,9 +112,12 @@ pub fn make_folder(title: &str, key: &str) -> String {
 /// The first claude.ai artifact link in a tool result, whatever shape the result has.
 pub fn artifact_url_in(text: &str) -> Option<String> {
     static URL: OnceLock<Option<Regex>> = OnceLock::new();
-    re(&URL, r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
-        .and_then(|r| r.find(text))
-        .map(|m| m.as_str().to_string())
+    re(
+        &URL,
+        r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+",
+    )
+    .and_then(|r| r.find(text))
+    .map(|m| m.as_str().to_string())
 }
 
 /// The version id a publish result names: Claude Code's "version id 1793506664-65e3", or

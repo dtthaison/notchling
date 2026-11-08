@@ -53,7 +53,11 @@ pub(crate) fn acquire(path: &Path) -> io::Result<Option<DirLock>> {
 pub(crate) fn acquire(path: &Path) -> io::Result<Option<DirLock>> {
     let marker = path.with_extension("busy");
     for _ in 0..TRIES {
-        match OpenOptions::new().write(true).create_new(true).open(&marker) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+        {
             Ok(file) => {
                 return Ok(Some(DirLock {
                     _file: file,

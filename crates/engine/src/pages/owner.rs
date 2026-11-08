@@ -318,9 +318,7 @@ pub fn run(lib: &PageLibrary, event: &Value, env: &OwnerEnv<'_>) -> Option<Outco
         )
     };
     let same = if version == live {
-        format!(
-            ". claude.ai already had exactly this content (version {version})"
-        )
+        format!(". claude.ai already had exactly this content (version {version})")
     } else {
         format!(". New version {version}, over {live}")
     };

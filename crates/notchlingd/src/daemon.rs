@@ -19,6 +19,7 @@ use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::layout::Layout;
+use crate::pages_ops::{PagesOps, PagesSetup};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -113,6 +114,7 @@ pub struct Ops {
     sessions: Arc<Mutex<Value>>,
     acting: Option<Arc<ActingOps>>,
     bridge: Option<Arc<BridgeOps>>,
+    pages: Option<Arc<PagesOps>>,
     /// What `sessions.list` waits for, and for how long.
     first: Arc<FirstScan>,
     first_wait: Duration,
@@ -124,6 +126,7 @@ impl Ops {
             sessions,
             acting: None,
             bridge: None,
+            pages: None,
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
         }
@@ -138,6 +141,12 @@ impl Ops {
 
     pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
         self.bridge = Some(bridge);
+        self
+    }
+
+    /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
+    pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
+        self.pages = Some(pages);
         self
     }
 
@@ -188,9 +197,10 @@ impl Handler for Ops {
         match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
             op => self
-                .acting
+                .pages
                 .as_ref()
-                .and_then(|a| a.spec(op))
+                .and_then(|p| p.spec(op))
+                .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op))),
         }
     }
@@ -198,6 +208,9 @@ impl Handler for Ops {
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
             return bridge.call(op, args);
+        }
+        if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
+            return pages.call(op, args);
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
@@ -463,6 +476,7 @@ pub fn run(
         Arc::new(
             Ops::with_acting(sessions.clone(), acting_ops.clone())
                 .with_bridge(bridge.clone())
+                .with_pages(Arc::new(PagesOps::new(PagesSetup::from_layout(&layout))))
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )

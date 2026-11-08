@@ -3,7 +3,9 @@
 
 /// Seconds the local time zone is ahead of UTC at `ts` (seconds since 1970). Zero where the system
 /// can't say, and on Windows (not built yet).
+// `tm_gmtoff` is an `i64` on 64-bit systems and an `i32` on 32-bit ones.
 #[cfg(unix)]
+#[allow(clippy::useless_conversion)]
 pub fn local_offset_secs(ts: f64) -> i64 {
     let t = ts as libc::time_t;
     // SAFETY: an all-zero `tm` is a valid value for localtime_r to overwrite, and both pointers

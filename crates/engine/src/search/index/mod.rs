@@ -162,7 +162,11 @@ impl SessionIndex {
     /// True when no refresh is running and the last one ended `min_interval` seconds or more
     /// before `now` (or never ran).
     pub fn due(&self, now: f64, min_interval: f64) -> bool {
-        !self.is_refreshing() && self.lock().refreshed_at.is_none_or(|t| now - t >= min_interval)
+        !self.is_refreshing()
+            && self
+                .lock()
+                .refreshed_at
+                .is_none_or(|t| now - t >= min_interval)
     }
 
     /// The best sessions for the query's words (lowercase; see [`crate::search::words`]), at most
@@ -228,7 +232,7 @@ impl SessionIndex {
             match read::read(&candidate.meta, candidate.tool) {
                 Read1::Built(session) => {
                     stats.read += 1;
-                    batch.push(session);
+                    batch.push(*session);
                     changed = true;
                     // Search works while the first scan is still going.
                     if batch.len() >= 25 {

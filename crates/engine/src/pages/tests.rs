@@ -61,7 +61,10 @@ fn titles_come_from_title_tags_and_headings() {
     assert_eq!(page_title(b"<p>no title</p>", "html", "f.html"), "f.html");
     assert_eq!(page_title(b"<title> </title>", "html", "f.html"), "f.html");
     let long = format!("<title>{}</title>", "x".repeat(300));
-    assert_eq!(page_title(long.as_bytes(), "html", "f").chars().count(), 200);
+    assert_eq!(
+        page_title(long.as_bytes(), "html", "f").chars().count(),
+        200
+    );
 }
 
 #[test]
@@ -79,7 +82,10 @@ fn folder_names_are_a_slug_and_a_stable_hash() {
     assert!(a.starts_with("cost-report-q4-"), "{a}");
     assert_eq!(a.len(), "cost-report-q4-".len() + 8);
     assert_eq!(a, make_folder("Cost Report: Q4!", URL_A));
-    assert_ne!(a, make_folder("Cost Report: Q4!", "https://claude.ai/artifact/other"));
+    assert_ne!(
+        a,
+        make_folder("Cost Report: Q4!", "https://claude.ai/artifact/other")
+    );
     assert!(make_folder("日本語", "k").starts_with("page-"));
     assert!(make_folder(&"a".repeat(100), "k").len() <= 40 + 9);
     // FNV-1a 64 of "a" is af63dc4c8601ec8c; the folder keeps the low 32 bits.
@@ -94,14 +100,20 @@ fn the_result_names_a_link_and_a_version() {
         Some("https://claude.ai/code/artifact/KVBHDXYvY8f1b1AZG6PbAR")
     );
     assert_eq!(published_version(r), "1793506664-65e3");
-    assert_eq!(published_version("(version 1793506664-65e3)"), "1793506664-65e3");
+    assert_eq!(
+        published_version("(version 1793506664-65e3)"),
+        "1793506664-65e3"
+    );
     assert_eq!(published_version("no version here"), "");
     assert!(looks_failed("Publish refused: conflict"));
     assert!(!looks_failed("Published"));
     assert!(looks_missing("404 not found"));
     assert!(!looks_missing(&format!("404 {}", "x".repeat(2100))));
     assert_eq!(project_name("/w/notchling"), "notchling");
-    assert_eq!(project_name("/w/notchling/.claude/worktrees/agent-1"), "notchling");
+    assert_eq!(
+        project_name("/w/notchling/.claude/worktrees/agent-1"),
+        "notchling"
+    );
     assert_eq!(project_name(""), "");
 }
 
@@ -141,7 +153,10 @@ fn a_hand_edited_list_cannot_point_outside_the_library() {
 #[test]
 fn a_publish_is_saved_wrapped_and_listed() {
     let dir = TempDir::new("pages-rec");
-    let src = dir.write("work/proj/report.html", "<title>Cost Report</title><p>hi</p>");
+    let src = dir.write(
+        "work/proj/report.html",
+        "<title>Cost Report</title><p>hi</p>",
+    );
     let lib = PageLibrary::writable(dir.path("pages"));
     let response = format!("Published to {URL_A} (version id 1793506664-65e3)");
     let event = publish_event(
@@ -159,13 +174,16 @@ fn a_publish_is_saved_wrapped_and_listed() {
     assert_eq!(e.project, "proj");
     assert_eq!(e.version, "1793506664-65e3");
     assert_eq!(e.source, src.to_string_lossy());
-    let saved = std::fs::read_to_string(dir.path("pages").join(&e.folder).join("index.html")).unwrap();
+    let saved =
+        std::fs::read_to_string(dir.path("pages").join(&e.folder).join("index.html")).unwrap();
     assert!(saved.starts_with("<!doctype html>") && saved.contains("<p>hi</p>"));
     // The list on disk is the Swift app's shape.
     let raw: Value = serde_json::from_slice(&std::fs::read(lib.list_path()).unwrap()).unwrap();
     assert_eq!(raw["pages"][0]["folder"], json!(e.folder));
     assert_eq!(raw["pages"][0]["version"], json!("1793506664-65e3"));
-    assert!(std::fs::read_to_string(lib.index_path()).unwrap().contains("Cost Report"));
+    assert!(std::fs::read_to_string(lib.index_path())
+        .unwrap()
+        .contains("Cost Report"));
     assert_eq!(lib.entries().len(), 1);
     assert_eq!(lib.find("cost").len(), 1);
     assert_eq!(lib.find(URL_A).len(), 1);
@@ -193,14 +211,23 @@ fn the_first_publisher_owns_the_page_and_a_republish_updates_it() {
         )
         .unwrap()
         .unwrap();
-    assert_eq!(second.folder, first.folder, "the same link keeps its folder");
-    assert_eq!(second.account, "a@example.com", "the first publisher stays the owner");
+    assert_eq!(
+        second.folder, first.folder,
+        "the same link keeps its folder"
+    );
+    assert_eq!(
+        second.account, "a@example.com",
+        "the first publisher stays the owner"
+    );
     assert_eq!(second.title, "Two");
     assert_eq!(second.version, "1793506999-bbbb");
     assert_eq!(lib.entries().len(), 1);
     // A publish whose result has no version clears it, as the Swift app does.
     let third = lib
-        .record(&publish_event(cwd, "p.html", URL_A), &ctx("b@example.com", dir.root()))
+        .record(
+            &publish_event(cwd, "p.html", URL_A),
+            &ctx("b@example.com", dir.root()),
+        )
         .unwrap()
         .unwrap();
     assert_eq!(third.version, "");
@@ -216,9 +243,15 @@ fn a_page_with_no_link_is_keyed_by_its_source_and_an_empty_account_is_filled_in(
         .record(&publish_event(&cwd, "p.md", "ok"), &ctx("", dir.root()))
         .unwrap()
         .unwrap();
-    assert_eq!((a.file.as_str(), a.title.as_str(), a.url.as_str()), ("index.md", "Notes", ""));
+    assert_eq!(
+        (a.file.as_str(), a.title.as_str(), a.url.as_str()),
+        ("index.md", "Notes", "")
+    );
     let b = lib
-        .record(&publish_event(&cwd, "p.md", "ok"), &ctx("me@example.com", dir.root()))
+        .record(
+            &publish_event(&cwd, "p.md", "ok"),
+            &ctx("me@example.com", dir.root()),
+        )
         .unwrap()
         .unwrap();
     assert_eq!(b.folder, a.folder);
@@ -274,7 +307,10 @@ fn events_that_are_not_a_page_publish_record_nothing() {
     assert!(lib.entries().is_empty());
     // A refused publish with a link in the result is still a page (the link is what the copy is for).
     assert!(lib
-        .record(&publish_event(&cwd, "p.html", &format!("conflict, see {URL_A}")), &c)
+        .record(
+            &publish_event(&cwd, "p.html", &format!("conflict, see {URL_A}")),
+            &c
+        )
         .unwrap()
         .is_some());
 }
@@ -289,8 +325,11 @@ fn a_file_over_the_cap_is_not_copied() {
     let lib = PageLibrary::writable(dir.path("pages"));
     let cwd = dir.path("w").to_string_lossy().into_owned();
     assert_eq!(
-        lib.record(&publish_event(&cwd, "big.html", URL_A), &ctx("a", dir.root()))
-            .unwrap(),
+        lib.record(
+            &publish_event(&cwd, "big.html", URL_A),
+            &ctx("a", dir.root())
+        )
+        .unwrap(),
         None
     );
 }
@@ -316,14 +355,22 @@ fn supporting_files_are_copied_inside_the_folder_only() {
     });
     let e = lib.record(&event, &ctx("a", dir.root())).unwrap().unwrap();
     let folder = dir.path("pages").join(&e.folder);
-    assert_eq!(std::fs::read_to_string(folder.join("img/a.png")).unwrap(), "png");
-    assert_eq!(std::fs::read_to_string(folder.join("data.json")).unwrap(), "{}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("img/a.png")).unwrap(),
+        "png"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("data.json")).unwrap(),
+        "{}"
+    );
     assert!(!folder.parent().unwrap().join("escape.txt").exists());
     assert!(!dir.path("pages/abs.txt").exists());
     assert!(!dir.path("b.txt").exists() && !dir.path("pages/b.txt").exists());
     assert!(!folder.join("other.html").exists());
     // The page itself is not overwritten by a supporting file of the same name.
-    assert!(std::fs::read_to_string(folder.join("index.html")).unwrap().contains("<title>S</title>"));
+    assert!(std::fs::read_to_string(folder.join("index.html"))
+        .unwrap()
+        .contains("<title>S</title>"));
     assert_eq!(lib.supporting_files(&e), vec!["data.json", "img/a.png"]);
     // A files array and a root work too.
     dir.write("w/assets/c.css", "css");
@@ -341,7 +388,10 @@ fn a_backfill_keeps_its_own_time_and_account() {
     let lib = PageLibrary::writable(dir.path("pages"));
     let mut event = publish_event(&dir.path("w").to_string_lossy(), "p.html", URL_A);
     event["notchling_backfill"] = json!({"account": "old@example.com", "updated": 42.5});
-    let e = lib.record(&event, &ctx("now@example.com", dir.root())).unwrap().unwrap();
+    let e = lib
+        .record(&event, &ctx("now@example.com", dir.root()))
+        .unwrap()
+        .unwrap();
     assert_eq!((e.account.as_str(), e.updated), ("old@example.com", 42.5));
 }
 
@@ -420,12 +470,22 @@ fn entries_are_newest_first_and_bad_ones_are_skipped() {
     );
     let lib = PageLibrary::read_only(dir.path("pages"));
     let list = lib.entries();
-    assert_eq!(list.iter().map(|e| e.folder.as_str()).collect::<Vec<_>>(), ["b", "a"]);
-    assert_eq!(list[1].title, "a", "the folder stands in for a missing title");
+    assert_eq!(
+        list.iter().map(|e| e.folder.as_str()).collect::<Vec<_>>(),
+        ["b", "a"]
+    );
+    assert_eq!(
+        list[1].title, "a",
+        "the folder stands in for a missing title"
+    );
     assert!(lib.list_modified().is_some());
-    assert!(PageLibrary::read_only(dir.path("nothing")).entries().is_empty());
+    assert!(PageLibrary::read_only(dir.path("nothing"))
+        .entries()
+        .is_empty());
     dir.write("pages2/pages.json", "not json");
-    assert!(PageLibrary::read_only(dir.path("pages2")).entries().is_empty());
+    assert!(PageLibrary::read_only(dir.path("pages2"))
+        .entries()
+        .is_empty());
 }
 
 #[test]
@@ -436,7 +496,10 @@ fn describe_names_the_copy_and_who_can_republish() {
     let lib = PageLibrary::writable(dir.path("pages"));
     let mut event = publish_event(&dir.path("w").to_string_lossy(), "p.html", URL_A);
     event["tool_input"]["files"] = json!({"x.css": "x.css"});
-    let e = lib.record(&event, &ctx("me@example.com", dir.root())).unwrap().unwrap();
+    let e = lib
+        .record(&event, &ctx("me@example.com", dir.root()))
+        .unwrap()
+        .unwrap();
     std::fs::write(dir.path("pages").join(&e.folder).join(".hidden"), "h").unwrap();
     let text = lib.describe(&e);
     let lines: Vec<&str> = text.lines().collect();
@@ -447,7 +510,13 @@ fn describe_names_the_copy_and_who_can_republish() {
     assert!(lines[4].starts_with("Last published: 19"), "{}", lines[4]);
     assert_eq!(
         lines[5],
-        format!("Local copy: {}", dir.path("pages").join(&e.folder).join("index.html").display())
+        format!(
+            "Local copy: {}",
+            dir.path("pages")
+                .join(&e.folder)
+                .join("index.html")
+                .display()
+        )
     );
     assert_eq!(lines[6], "Supporting files (next to it): x.css");
     assert_eq!(lines[7], format!("Original source file: {}", e.source));
@@ -461,4 +530,32 @@ fn describe_names_the_copy_and_who_can_republish() {
     assert!(text.contains("Link: (never published to claude.ai)"));
     assert!(text.contains("Published by: unknown account"));
     assert!(!text.contains("Project:") && !text.contains("Original source"));
+}
+
+#[test]
+fn an_id_or_query_with_dots_and_slashes_never_becomes_a_path() {
+    let dir = TempDir::new("pages-traversal");
+    dir.write("w/p.html", "<title>A</title>");
+    dir.write("secret.txt", "secret");
+    let lib = PageLibrary::writable(dir.path("pages"));
+    lib.record(
+        &publish_event(&dir.path("w").to_string_lossy(), "p.html", URL_A),
+        &ctx("a", dir.root()),
+    )
+    .unwrap();
+    for query in [
+        "../secret.txt",
+        "../../etc/passwd",
+        "https://claude.ai/artifact/../../etc/passwd",
+        "claude.ai/code/artifact/..%2F..%2Fsecret",
+        "AbCdEfGhIjKlMnOpQrStUv/../../secret",
+    ] {
+        assert!(lib.find(query).is_empty(), "{query}");
+    }
+    // A lookup only ever selects entries; the paths come from the entries, inside the library.
+    let found = lib.find("AbCdEfGhIjKlMnOpQrStUv");
+    assert_eq!(found.len(), 1);
+    let path = lib.local_path(&found[0]).unwrap();
+    assert!(path.starts_with(dir.path("pages")));
+    assert!(!path.components().any(|c| c.as_os_str() == ".."));
 }
