@@ -79,10 +79,14 @@ struct Shared {
 }
 
 impl Shared {
-    /// Waits up to `wait`, or until [`Shared::wake_all`].
+    /// Waits up to `wait`, or until the switch is off or the daemon stopping. Checked under the
+    /// lock [`Shared::wake_all`] notifies under, so a change made before the wait began still
+    /// ends it.
     fn nap(&self, wait: Duration) {
         let adding = lock(&self.adding);
-        let _ = self.wake.wait_timeout(adding, wait);
+        let _ = self.wake.wait_timeout_while(adding, wait, |_| {
+            self.accounts.is_on() && !self.closing.load(Ordering::SeqCst)
+        });
     }
 
     fn wake_all(&self) {
