@@ -95,8 +95,8 @@ Since Phase 4. Every crate but `crates/protocol` is a stub that builds, has one 
 | Engine service | `crates/notchlingd/` (prints its version) | unit test in `src/main.rs` | protected | E4, E16 |
 | Terminal host | `crates/ptyhost/` (prints its version) | unit test in `src/main.rs` | protected | E3 |
 | Local API | `crates/local-api/` | unit test in `src/lib.rs` | protected | E17 |
-| Desktop app | `crates/app/` (no GPUI yet) | unit test in `src/lib.rs` | mixed: all but `Cargo.toml` and `build.rs` auto | U1 to U11 |
-| Kit | `crates/kit/` | unit test in `src/lib.rs` | mixed: all but `Cargo.toml` and `build.rs` auto | U0 |
+| Desktop app | `crates/app/`: `src/cli.rs`, `src/menu.rs`, `src/dock.rs`, `src/views.rs` (pure, every system); `src/mac/` (GPUI and AppKit, macOS only: `shell.rs`, `tray.rs`, `dock.rs`, `window.rs`, `render.rs`, `capture.rs`, `views.rs`) | unit tests in each pure module; `tests/render.rs` (ignored by default: renders `kit-gallery` to a PNG and checks it, `cargo test -p notchling-app -- --ignored`) | mixed: all but `Cargo.toml` and `build.rs` auto | U0 (shell), U10 (`--render`), then U1 to U11 |
+| Kit | `crates/kit/`: tokens in `src/` (`ink.rs`, `typescale.rs`, `metric.rs`, `motion.rs`, `icon.rs`, `part.rs`, every system); widgets and `KitGallery` in `src/ui/` (GPUI, macOS only) | unit tests in each token module | mixed: all but `Cargo.toml` and `build.rs` auto | U0 |
 | Platform | `crates/platform/` | unit test in `src/lib.rs` | protected | U0, U2 |
 | Protocol types | `crates/protocol/src/lib.rs`, `crates/protocol/src/generated.rs` (from `tools/protocol/gen.py`; never edit it by hand) | `crates/protocol/tests/fixtures.rs` (every fixture parses and writes back the same JSON) | protected | P1, E5 |
 

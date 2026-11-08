@@ -100,6 +100,29 @@ def _defaults_migrated(path: str, lines: List[str], repo: Path) -> Found:
     return out
 
 
+GPUI_DEP = re.compile(r"^\s*gpui\s*=")
+# The one table a GPUI dependency may sit in (and its dev and build forms), until Linux and Windows build it.
+# The cfg in a TOML literal string ('...') or a basic one ("..." with the inner quotes escaped).
+MACOS_DEPS = re.compile(r"""^\[target\.(['"])cfg\(target_os = \\?"macos\\?"\)\1\.(dev-|build-)?dependencies(\.gpui)?\]\s*$""")
+ANY_TABLE = re.compile(r"^\s*\[")
+
+
+def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
+    """A `gpui` dependency line under any table but the macOS target's, or a `[dependencies.gpui]` table."""
+    out = []
+    macos = False
+    for i, raw in enumerate(lines):
+        line = strip_comments(path, raw).rstrip()
+        if ANY_TABLE.match(line):
+            macos = bool(MACOS_DEPS.match(line.strip()))
+            if not macos and re.match(r"^\s*\[.*dependencies\.gpui\]\s*$", line):
+                out.append((i + 1, raw.strip()))
+            continue
+        if GPUI_DEP.match(line) and not macos:
+            out.append((i + 1, raw.strip()))
+    return out
+
+
 # What tools/protocol/gen.py writes, and nobody splits. Exact paths: a mark inside a file would let any file opt out.
 GENERATED_FILES = frozenset({
     "crates/protocol/src/generated.rs",
@@ -144,6 +167,11 @@ RULES: List[Rule] = [
          ("legacy/macos/Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
          ("legacy/macos/Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
          ("legacy/macos/Sources/Notchling/A.swift", "// never osascript\n")),
+    Rule("LINT-GPUI-MACOS-ONLY", "gpui is a dependency only under [target.'cfg(target_os = \"macos\")'.dependencies] "
+         "(Linux needs system libraries CI doesn't install yet; Windows is unverified)",
+         ("crates/**/Cargo.toml",), _gpui_macos_only,
+         ("crates/kit/Cargo.toml", '[dependencies]\ngpui = { version = "=0.2.2", features = ["runtime_shaders"] }\n'),
+         ("crates/kit/Cargo.toml", '[target.\'cfg(target_os = "macos")\'.dependencies]\ngpui = { version = "=0.2.2" }\n')),
     Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
          ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(1000),
          ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1001), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1000)),

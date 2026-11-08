@@ -17,3 +17,7 @@ objc2-foundation = "=0.3.2"
 objc2-app-kit = "=0.3.2"
 objc2-core-graphics = { version = "=0.3.2", features = ["CGWindow", "CGImage", "CGGeometry"] }
 raw-window-handle = "=0.6.2"
+
+# The render test reads the PNG back. The version GPUI's `image` already locks, so no second copy.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+png = "=0.17.16"

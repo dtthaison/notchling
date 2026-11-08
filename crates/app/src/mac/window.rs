@@ -1,0 +1,135 @@
+//! The main window and its root view. Chat's parts arrive with U1; until then the window shows the
+//! kit's surfaces in their places (sidebar, conversation) so the shell, the Dock presence and the
+//! appearance can be seen and rendered.
+
+use gpui::{
+    div, point, prelude::*, px, size, App, Bounds, Context, Render, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+};
+use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
+use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::ui::{button, claude_mark, label, window_appearance, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
+
+/// The root of the main window.
+pub struct ShellView {
+    /// Forced by `--render shell-*`; `None` follows the system.
+    appearance: Option<Appearance>,
+    _appearance_changes: Subscription,
+}
+
+impl ShellView {
+    pub fn new(
+        appearance: Option<Appearance>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let this = cx.weak_entity();
+        let changes = window.observe_window_appearance(move |_, cx| {
+            this.update(cx, |_, cx| cx.notify()).ok();
+        });
+        Self {
+            appearance,
+            _appearance_changes: changes,
+        }
+    }
+}
+
+fn sidebar(a: Appearance) -> impl IntoElement {
+    div()
+        .w(px(SIDEBAR_WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .fill(Ink::Sidebar, a)
+        .border_r(px(1.0))
+        .border_color(notchling_kit::ui::hsla(Ink::Hairline.color(a)))
+        .flex()
+        .flex_col()
+        // The traffic lights sit here; nothing else does.
+        .child(div().h(px(TITLE_BAR)).flex_shrink_0())
+        .child(div().px(px(SIDE_PADDING)).pb(px(8.0)).child(label(
+            "Sessions",
+            TypeRole::Section,
+            Ink::TextFaint,
+            a,
+        )))
+        .child(div().px(px(SIDE_PADDING)).child(label(
+            "No sessions yet",
+            TypeRole::Meta,
+            Ink::TextMuted,
+            a,
+        )))
+        .child(div().flex_1())
+        .child(
+            div()
+                .h(px(44.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(button(
+                    "settings",
+                    "Settings",
+                    ButtonKind::Ghost,
+                    PartState::Rest,
+                    a,
+                ))
+                .child(button("parts", "?", ButtonKind::Ghost, PartState::Rest, a)),
+        )
+}
+
+impl Render for ShellView {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let a = self.appearance.unwrap_or_else(|| window_appearance(window));
+        div()
+            .size_full()
+            .flex()
+            .fill(Ink::Window, a)
+            .child(sidebar(a))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(12.0))
+                    .child(claude_mark(48.0, a))
+                    .child(label(
+                        "Chat arrives with part U1",
+                        TypeRole::Heading,
+                        Ink::Text,
+                        a,
+                    ))
+                    .child(label(
+                        "Sessions, replies and the inspector come with Milestone 1",
+                        TypeRole::Meta,
+                        Ink::TextMuted,
+                        a,
+                    )),
+            )
+    }
+}
+
+/// Opens the main window: 1040 × 720, at least 720 × 460, title bar hidden with the traffic lights
+/// over the sidebar's top. `None` when GPUI can't open a window.
+pub fn open_main_window(cx: &mut App) -> Option<WindowHandle<ShellView>> {
+    let bounds = Bounds::centered(None, size(px(WINDOW_DEFAULT.0), px(WINDOW_DEFAULT.1)), cx);
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Notchling".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(12.0), px(12.0))),
+        }),
+        window_min_size: Some(size(px(WINDOW_MIN.0), px(WINDOW_MIN.1))),
+        kind: WindowKind::Normal,
+        ..Default::default()
+    };
+    cx.open_window(options, |window, cx| {
+        cx.new(|cx| ShellView::new(None, window, cx))
+    })
+    .map_err(|e| eprintln!("open window: {e}"))
+    .ok()
+}
