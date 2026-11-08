@@ -7,6 +7,7 @@ pub mod control;
 pub mod search;
 pub mod sessions;
 pub mod settings;
+pub mod terminal;
 pub mod transcript;
 
 /// The crate's short name.

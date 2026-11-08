@@ -3320,6 +3320,7 @@ dependencies = [
  "notchling-platform",
  "serde",
  "serde_json",
+ "unicode-properties",
 ]
 
 [[package]]
@@ -3371,6 +3372,12 @@ dependencies = [
 [[package]]
 name = "notchling-ptyhost"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "notchling-engine",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ntapi"
