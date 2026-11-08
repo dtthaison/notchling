@@ -17,6 +17,7 @@ pub fn build(name: &str, window: &mut Window, cx: &mut App) -> Option<AnyView> {
     match kind {
         "kit-gallery" => Some(cx.new(|cx| KitGallery::new(appearance, window, cx)).into()),
         "shell" => Some(cx.new(|cx| ShellView::new(appearance, window, cx)).into()),
+        notch if notch.starts_with("notch-") => crate::notch::view::build_render(notch, cx),
         _ => None,
     }
 }

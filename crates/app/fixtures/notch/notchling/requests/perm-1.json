@@ -1,0 +1,1 @@
+{"id": "perm-1", "session_id": "sess-migrate", "pid": 4242, "created": 1794128340.0, "hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "sqlx migrate run --database-url postgres://localhost/api_dev", "description": "Apply migrations"}, "permission_suggestions": [{"type": "addRules", "rules": [{"toolName": "Bash"}]}]}
