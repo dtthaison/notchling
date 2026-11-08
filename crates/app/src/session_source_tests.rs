@@ -1,5 +1,6 @@
 use super::*;
 use crate::testutil::Scratch;
+#[cfg(unix)]
 use notchling_engine::sessions::{AgentGroup, AgentTarget};
 use std::sync::atomic::AtomicUsize;
 
@@ -10,6 +11,8 @@ fn quick() -> Backoff {
     }
 }
 
+/// A row; only the socket tests (Unix) build rows.
+#[cfg(unix)]
 fn agent(id: &str) -> Agent {
     Agent {
         id: id.into(),
@@ -31,6 +34,7 @@ fn agent(id: &str) -> Agent {
     }
 }
 
+#[cfg(unix)]
 fn ids(view: &View) -> Vec<String> {
     view.agents.iter().flatten().map(|a| a.id.clone()).collect()
 }

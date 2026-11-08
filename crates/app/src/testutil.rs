@@ -22,7 +22,8 @@ impl Scratch {
         &self.0
     }
 
-    /// A folder inside it, made.
+    /// A folder inside it, made. Only Unix tests use it so far.
+    #[cfg(unix)]
     pub(crate) fn dir(&self, rel: &str) -> PathBuf {
         let path = self.0.join(rel);
         std::fs::create_dir_all(&path).expect("make the folder");

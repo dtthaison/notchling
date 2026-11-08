@@ -1,7 +1,12 @@
 //! The service file per OS, as pure functions, and writing it into a folder.
 //!
 //! - macOS: a LaunchAgent plist, label `dev.notchling.daemon`, `RunAtLoad`, `KeepAlive` on a crash,
-//!   output to `notchlingd.log` in the data folder.
+//!   output to `notchlingd.log` in the data folder. `Crashed`, not `SuccessfulExit = false`, on
+//!   purpose (ruled 2026-11-08): the daemon exits 0 when stopped and when another already serves,
+//!   and non-zero only on a setup error a restart won't fix, which `SuccessfulExit = false` would
+//!   retry every 10 s into the log. Since an installed daemon ignores `NOTCHLING_APP_TIER_PATHS`
+//!   and `ensure_daemon` passes no `NOTCHLING_*` on, one a client starts after a stop is no weaker
+//!   than one launchd restarts, so launchd needn't win that race.
 //! - Linux: a systemd user unit, restarted on failure.
 //! - Windows: a Task Scheduler XML file, started at logon.
 //!

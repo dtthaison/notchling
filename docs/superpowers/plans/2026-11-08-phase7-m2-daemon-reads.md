@@ -43,7 +43,7 @@
   - `notchling service install|uninstall|print [--dir <folder>]`.
   - Later milestones add `hook`, `secret`, `delegate` and `page`.
 - **Service files are pure functions.**
-  - macOS: a LaunchAgent plist with label `dev.notchling.daemon`, `KeepAlive` on crash, `RunAtLoad`, and logs in the data dir.
+  - macOS: a LaunchAgent plist with label `dev.notchling.daemon`, `KeepAlive` on crash, `RunAtLoad`, and logs in the data dir. `KeepAlive` stays `Crashed` rather than `SuccessfulExit = false` (ruled 2026-11-08, after the review's C2 fix): a stop and "already running" exit 0, a setup error exits non-zero and a restart loop wouldn't fix it, and a daemon a client restarts carries no tier variable, so launchd needn't restart it first.
   - Linux: a systemd user unit.
   - Windows: a Task Scheduler XML file.
   - `install` writes the file into `--dir` (default: the OS's real place) and prints the command that loads it. M2 never runs `launchctl`, `systemctl` or `schtasks` itself.
