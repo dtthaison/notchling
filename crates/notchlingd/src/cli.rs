@@ -44,6 +44,15 @@ pub enum Command {
         query: String,
         socket: Option<PathBuf>,
     },
+    /// `notchling delegate <codex|agy> … -- <prompt>`: hands a job to another tool. `args` are
+    /// what follows `delegate`, parsed by the engine (it has flags of its own).
+    Delegate {
+        args: Vec<String>,
+    },
+    /// `notchling delegate-models [codex|agy]`.
+    DelegateModels {
+        args: Vec<String>,
+    },
     Version,
     Help,
 }
@@ -60,6 +69,9 @@ pub fn usage() -> &'static str {
      notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
      notchling pages [words] [--socket <path>]   the saved Artifact pages (id, title, account), newest first\n  \
      notchling page <link|id|words> [--socket <path>]  where a saved page is, and who can republish it\n  \
+     notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
+     \u{20}                                           hand a job to another tool and wait (read-only unless --write)\n  \
+     notchling delegate-models [codex|agy]       the models and efforts each tool offers\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -83,6 +95,20 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     match first.as_str() {
         "--version" | "-V" | "version" => return Ok(Command::Version),
         "--help" | "-h" | "help" => return Ok(Command::Help),
+        _ => {}
+    }
+    // The prompt may hold anything, flags included, so these take the rest as it is.
+    match first.as_str() {
+        "delegate" => {
+            return Ok(Command::Delegate {
+                args: args.collect(),
+            })
+        }
+        "delegate-models" => {
+            return Ok(Command::DelegateModels {
+                args: args.collect(),
+            })
+        }
         _ => {}
     }
     let action = if first == "service" {
@@ -201,6 +227,29 @@ mod tests {
         assert!(p(&["page", "x", "--json"]).is_err());
         assert!(p(&["status", "word"]).is_err());
         assert!(usage().contains("notchling page <link|id|words>"));
+    }
+
+    #[test]
+    fn delegate_takes_everything_after_it_as_it_is() {
+        assert_eq!(
+            p(&["delegate", "codex", "--json", "--", "--help", "-x", "--socket"]),
+            Ok(Command::Delegate {
+                args: ["codex", "--json", "--", "--help", "-x", "--socket"]
+                    .map(String::from)
+                    .to_vec()
+            })
+        );
+        assert_eq!(p(&["delegate"]), Ok(Command::Delegate { args: vec![] }));
+        assert_eq!(
+            p(&["delegate-models", "agy"]),
+            Ok(Command::DelegateModels {
+                args: vec!["agy".into()]
+            })
+        );
+        let text = usage();
+        assert!(
+            text.contains("notchling delegate <codex|agy>") && text.contains("delegate-models")
+        );
     }
 
     #[test]

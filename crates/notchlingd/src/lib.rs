@@ -8,6 +8,10 @@
 //! - `notchling pages [words]` and `notchling page <link|id|words>` look up saved Artifact pages
 //!   ([`pages_cli`]); the daemon serves `search.query`, `pages.list` and `pages.find` ([`pages_ops`]).
 //!
+//! - `notchling delegate <codex|agy> … -- <prompt>` and `notchling delegate-models` hand a job to
+//!   another tool ([`delegate_cli`] over `notchling_engine::delegate`). They need no daemon and are
+//!   not behind `acting`.
+//!
 //! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
 //!   permission or question and prints the answer; anything else, or any trouble, passes.
 //!
@@ -26,6 +30,7 @@ pub mod clients;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod daemon;
+pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
@@ -85,6 +90,8 @@ pub fn run(command: Command) -> i32 {
             Some(l) => pages_cli::run(&l, &query, false),
             None => 1,
         },
+        Command::Delegate { args } => delegate_cli::run(&args),
+        Command::DelegateModels { args } => delegate_cli::models(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
