@@ -186,7 +186,7 @@ impl BridgeBackend for FakeBackend {
             "/Users/example/src/notes".into(),
         ]
     }
-    fn request_approval(&self, _: &str, _: &str) -> bool {
+    fn request_approval(&self, _: &str, _: &str, _: &str) -> bool {
         self.with(|s| {
             s.approval_calls += 1;
             !s.refuse_approval

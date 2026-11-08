@@ -18,6 +18,8 @@ use std::time::Duration;
 pub(crate) struct FakeRoom {
     pub events: Mutex<Vec<(String, Value)>>,
     pub app: AtomicBool,
+    /// The topics an attached app follows.
+    pub following: Mutex<Vec<String>>,
 }
 
 impl Room for FakeRoom {
@@ -29,6 +31,9 @@ impl Room for FakeRoom {
     }
     fn can_answer(&self) -> bool {
         self.app.load(Ordering::SeqCst)
+    }
+    fn can_follow(&self, topic: &str) -> bool {
+        self.app.load(Ordering::SeqCst) && self.following.lock().unwrap().iter().any(|t| t == topic)
     }
 }
 
