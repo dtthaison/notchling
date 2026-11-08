@@ -13,7 +13,7 @@ use notchling_kit::ui::{hsla, label, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::form::{Form, Typed};
-use super::form_view::{form_body, form_footer, FormEvent};
+use super::form_view::{clipboard_key, form_body, form_footer, FormEvent};
 use super::store::Vault;
 use super::wire::PendingRequest;
 use crate::accounts::view_rows::Handler;
@@ -154,6 +154,7 @@ impl VaultRequestView {
             FormEvent::ToggleAdvanced => self.form.advanced = !self.form.advanced,
             FormEvent::EditHowTo => self.form.editing_how_to = true,
             FormEvent::NoExpiry(none) => self.form.choose_expiry(none, today),
+            FormEvent::ConfirmHost => self.form.confirm_host(),
         }
         cx.notify();
     }
@@ -163,6 +164,11 @@ impl VaultRequestView {
         if k.key == "escape" {
             self.cancel(cx);
             cx.stop_propagation();
+            return;
+        }
+        if clipboard_key(&mut self.form, k, cx) {
+            cx.stop_propagation();
+            cx.notify();
             return;
         }
         let modified = k.modifiers.platform || k.modifiers.control;

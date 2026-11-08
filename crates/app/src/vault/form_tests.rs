@@ -199,7 +199,18 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
         f.host_warning().as_deref(),
         Some("The request changes where this secret is sent: https://api.github.com → https://evil.example")
     );
+    // A moved address must be confirmed before Save is live.
+    let mut f = f;
+    assert!(!f.can_save(), "the new address isn't confirmed");
+    assert_eq!(f.blocker(), Some(CONFIRM_HOST_BLOCKER));
+    f.confirm_host();
     assert!(f.can_save(), "an existing entry keeps its value");
+    assert_eq!(f.blocker(), None);
+    // Return never saves an agent's request, in any field.
+    f.focus = Field::Url;
+    assert_eq!(f.key("enter", Some("\r"), false), Typed::Ignored);
+    f.focus = Field::Secret;
+    assert_eq!(f.key("enter", Some("\r"), false), Typed::Ignored);
     let fresh = PendingRequest {
         existing: false,
         entry: VaultEntry::new("npm", Kind::Token),
@@ -211,4 +222,32 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
         f.original.is_none() && !f.can_save(),
         "a new one needs a value"
     );
+}
+
+#[test]
+fn paste_copy_and_cut_work_in_the_fields_but_the_value_is_never_copied() {
+    let mut f = Form::add();
+    assert_eq!(f.paste("my-api\n"), Typed::Changed);
+    assert_eq!(f.name, "my-api", "a single-line field drops the line break");
+    assert_eq!(
+        f.secret_var, "MY_API_TOKEN",
+        "the variables follow a pasted name"
+    );
+    assert_eq!(f.copy(), Some("my-api".to_owned()));
+    assert_eq!(f.cut(), Some("my-api".to_owned()));
+    assert_eq!(f.name, "");
+    f.focus = Field::Note;
+    f.paste("line one\nline two");
+    assert_eq!(f.note, "line one\nline two", "a multi-line field keeps it");
+    f.focus = Field::Secret;
+    assert_eq!(f.paste("ghp_abc\r\n"), Typed::Changed);
+    assert_eq!(f.secret, "ghp_abc", "the value's trailing line break goes");
+    assert_eq!(f.copy(), None, "the value is never copied");
+    assert_eq!(f.cut(), None, "nor cut");
+    assert_eq!(f.secret, "ghp_abc");
+    assert_eq!(f.paste(""), Typed::Ignored);
+    // Control characters other than line breaks and tabs never reach a field.
+    f.focus = Field::Url;
+    f.paste("https://x\u{7}.example");
+    assert_eq!(f.url, "https://x.example");
 }

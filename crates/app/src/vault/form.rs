@@ -14,6 +14,9 @@ use notchling_engine::vault::url::renew_refusal;
 
 use super::wire::PendingRequest;
 
+/// What the footer says while an agent's request moves the address and it isn't confirmed.
+pub const CONFIRM_HOST_BLOCKER: &str = "Confirm the new address before saving.";
+
 /// Why the form is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -93,6 +96,8 @@ pub struct Form {
     pub advanced: bool,
     pub focus: Field,
     pub changes: PrefillChanges,
+    /// The person ticked that the request's new address is right; Save waits for it.
+    pub host_confirmed: bool,
     pub error: Option<String>,
 }
 
@@ -133,6 +138,7 @@ impl Form {
             advanced: false,
             focus: Field::Name,
             changes: PrefillChanges::default(),
+            host_confirmed: false,
             error: None,
         }
     }
@@ -285,7 +291,8 @@ impl Form {
     }
 
     /// Typing into the focused field. Return inserts a line in a multi-line field, submits in
-    /// the others; Tab moves on. Whether anything changed, and whether Return asked to save.
+    /// the others, except in an agent's request, which only a click on Save saves; Tab moves on.
+    /// Whether anything changed, and whether Return asked to save.
     pub fn key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
         let field = self.focus;
         match key {
@@ -297,6 +304,7 @@ impl Form {
                 self.text_mut(field).push('\n');
                 Typed::Changed
             }
+            "enter" if self.mode == Mode::Request => Typed::Ignored,
             "enter" => Typed::Submit,
             "backspace" => {
                 if self.text_mut(field).pop().is_some() {
@@ -413,7 +421,7 @@ impl Form {
 
     /// Whether Save is live: a name, and a value where one is needed.
     pub fn can_save(&self) -> bool {
-        if self.name.trim().is_empty() {
+        if self.name.trim().is_empty() || self.host_unconfirmed() {
             return false;
         }
         match self.mode {
@@ -424,6 +432,9 @@ impl Form {
 
     /// What the footer says when Save can't go: the Swift messages.
     pub fn blocker(&self) -> Option<&'static str> {
+        if self.host_unconfirmed() {
+            return Some(CONFIRM_HOST_BLOCKER);
+        }
         if self.mode != Mode::Renew {
             return None;
         }
@@ -487,6 +498,52 @@ impl Form {
             .filter(|o| o.name != name)
             .map(|o| o.name.clone());
         Ok((entry, value, replacing))
+    }
+
+    /// Pastes `text` into the focused field: a single-line field drops line breaks, the value its
+    /// trailing one; control characters other than line breaks and tabs are dropped.
+    pub fn paste(&mut self, text: &str) -> Typed {
+        let field = self.focus;
+        let clean: String = text
+            .chars()
+            .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+            .collect();
+        let clean = if field.multiline() {
+            clean
+        } else {
+            clean.trim_end_matches('\n').replace('\n', " ")
+        };
+        if clean.is_empty() {
+            return Typed::Ignored;
+        }
+        self.text_mut(field).push_str(&clean);
+        self.after_typing(field);
+        Typed::Changed
+    }
+
+    /// The focused field's text for the clipboard; never the value.
+    pub fn copy(&self) -> Option<String> {
+        (self.focus != Field::Secret).then(|| self.text(self.focus).to_owned())
+    }
+
+    /// Copies the focused field and empties it; never the value.
+    pub fn cut(&mut self) -> Option<String> {
+        let text = self.copy()?;
+        let field = self.focus;
+        self.text_mut(field).clear();
+        self.after_typing(field);
+        Some(text)
+    }
+
+    /// An agent's request moved the address: the person confirms it (or takes it back).
+    pub fn confirm_host(&mut self) {
+        self.host_confirmed = !self.host_confirmed;
+        self.error = None;
+    }
+
+    /// Whether Save waits for the new address to be confirmed.
+    pub fn host_unconfirmed(&self) -> bool {
+        self.mode == Mode::Request && self.changes.host_change.is_some() && !self.host_confirmed
     }
 
     /// After a save: the value is gone from memory at once.

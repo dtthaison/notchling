@@ -260,6 +260,11 @@ impl VaultSheetView {
         let Some(form) = self.form.as_mut() else {
             return;
         };
+        if super::form_view::clipboard_key(form, k, cx) {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let modified = k.modifiers.platform || k.modifiers.control;
         match form.key(&k.key, k.key_char.as_deref(), modified) {
             Typed::Submit => self.save(cx),
@@ -448,6 +453,7 @@ impl VaultSheetView {
                         FormEvent::ToggleAdvanced => form.advanced = !form.advanced,
                         FormEvent::EditHowTo => form.editing_how_to = true,
                         FormEvent::NoExpiry(none) => form.choose_expiry(none, today),
+                        FormEvent::ConfirmHost => form.confirm_host(),
                         _ => {}
                     }
                 }
