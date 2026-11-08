@@ -16,12 +16,12 @@ use notchling_kit::ui::{label, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::cost::Range;
-use super::flows::{move_all_alert, remove_alert, Alert};
+use super::flows::{move_all_alert, move_all_banner, remove_alert, Alert, Banner};
 use super::limits::Zone;
 use super::model::{page, tabs, Page, Tab, CLAUDE_CODE};
 use super::store::{Accounts, Snapshot};
 use super::view_rows::{account_row, add_panel, alert_overlay, segmented, AddEvent, RowEvent};
-use super::wire::Outcome;
+use super::wire::{parse_move_result, Outcome};
 use crate::sheets::view::Dismiss;
 use crate::switches::feed::{Changes, SwitchFeed};
 use crate::switches::Switches;
@@ -46,6 +46,8 @@ enum Done {
     Nothing,
     Alert(Alert, Pending),
     Open(String),
+    /// How a Move All went, kept under the rows until the next action.
+    Banner(Option<Banner>),
 }
 
 pub struct AccountsView {
@@ -58,6 +60,8 @@ pub struct AccountsView {
     menu_open: Option<String>,
     alert: Option<(Alert, Pending)>,
     note: Option<String>,
+    /// How the last Move All went (or that it's still going).
+    banner: Option<Banner>,
     pub(super) range: Range,
     pub(super) account: String,
     /// In Chat's sheet: a Done button, and Dismiss on it.
@@ -95,6 +99,7 @@ impl AccountsView {
             menu_open: None,
             alert: None,
             note: None,
+            banner: None,
             range: Range::Days30,
             account: String::new(),
             in_sheet,
@@ -106,8 +111,11 @@ impl AccountsView {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 ticks = ticks.wrapping_add(1);
-                let due = this.update(cx, |view, _| {
+                let due = this.update(cx, |view, cx| {
                     let changes = view.feed.changes();
+                    if changes.moves != view.seen.moves {
+                        view.move_ended(cx);
+                    }
                     let moved = changes != view.seen;
                     view.seen = changes;
                     moved || (ticks as u64).is_multiple_of(REFRESH_EVERY.as_secs())
@@ -146,6 +154,7 @@ impl AccountsView {
             menu_open: None,
             alert: None,
             note: None,
+            banner: None,
             range: Range::Days30,
             account: String::new(),
             in_sheet: false,
@@ -198,6 +207,7 @@ impl AccountsView {
         }
         self.busy = true;
         self.note = None;
+        self.banner = None;
         self.menu_open = None;
         let (store, switches, range) = (self.store.clone(), self.switches(), self.range);
         cx.spawn(async move |this, cx| {
@@ -218,6 +228,10 @@ impl AccountsView {
                     Ok(Done::Open(url)) => {
                         view.alert = None;
                         cx.open_url(&url);
+                    }
+                    Ok(Done::Banner(banner)) => {
+                        view.alert = None;
+                        view.banner = banner;
                     }
                     Err(e) => {
                         view.alert = None;
@@ -396,11 +410,23 @@ impl AccountsView {
             ),
             Pending::MoveAll(target) => self.run(
                 move |s, sw| {
-                    s.move_all(sw, target.as_deref(), false)
-                        .map(|_| Done::Nothing)
+                    s.move_all_now(sw, target.as_deref())
+                        .map(|result| Done::Banner(move_all_banner(&result)))
                 },
                 cx,
             ),
+        }
+    }
+
+    /// A daemon that answered a Move All before it ended said how it went in an event: replace
+    /// the "still moving" line with it.
+    fn move_ended(&mut self, cx: &mut Context<Self>) {
+        let Some(end) = self.feed.last_move() else {
+            return;
+        };
+        if let Some(banner) = move_all_banner(&parse_move_result(&end)) {
+            self.banner = Some(banner);
+            cx.notify();
         }
     }
 
@@ -409,7 +435,7 @@ impl AccountsView {
     pub fn move_all(&mut self, target: Option<String>, email: String, cx: &mut Context<Self>) {
         self.run(
             move |s, sw| {
-                let plan = s.move_all(sw, target.as_deref(), true)?;
+                let plan = s.move_all_plan(sw, target.as_deref())?;
                 Ok(Done::Alert(
                     move_all_alert(&email, &plan),
                     Pending::MoveAll(target),
@@ -474,6 +500,14 @@ impl AccountsView {
                 cx,
                 on,
             ));
+        }
+        if let Some(b) = &self.banner {
+            let ink = if b.warning {
+                Ink::Needs
+            } else {
+                Ink::TextMuted
+            };
+            list = list.child(label(&b.text, TypeRole::Meta, ink, a));
         }
         if let Some(e) = page.error.as_deref().or(self.note.as_deref()) {
             list = list.child(label(e, TypeRole::Meta, Ink::Needs, a));

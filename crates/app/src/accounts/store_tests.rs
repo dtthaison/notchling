@@ -155,7 +155,7 @@ fn nothing_but_the_lists_is_sent_while_the_switch_is_off() {
             .unwrap_err(),
         ACCOUNTS_OFF
     );
-    assert_eq!(store.move_all(&off, None, true).unwrap_err(), ACCOUNTS_OFF);
+    assert_eq!(store.move_all_plan(&off, None).unwrap_err(), ACCOUNTS_OFF);
     assert!(calls.lock().unwrap().is_empty(), "refused here, unsent");
     // Detached: the daemon's absence is the reason.
     let detached = Switches::detached();
@@ -184,7 +184,7 @@ fn with_the_switch_on_the_actions_go_out_and_their_replies_land_in_the_snapshot(
     store.clear_add();
     assert!(store.snapshot().add.is_none());
     store.poll_add_claude(&on, false).unwrap();
-    let plan = store.move_all(&on, Some("a2"), true).unwrap();
+    let plan = store.move_all_plan(&on, Some("a2")).unwrap();
     assert_eq!((plan.jobs, plan.close_lane.as_deref()), (1, Some("night")));
     assert_eq!(
         calls.lock().unwrap().last().unwrap().1,

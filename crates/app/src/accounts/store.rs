@@ -17,8 +17,8 @@ use serde_json::{json, Value};
 
 use super::wire::{
     parse_add, parse_claude_list, parse_cost, parse_lanes, parse_limits, parse_move_plan,
-    parse_outcome, parse_providers, parse_usage, AddProgress, Call, ClaudeList, CostReply, Lane,
-    LimitsStatus, MovePlan, Outcome, ProviderList,
+    parse_move_result, parse_outcome, parse_providers, parse_usage, AddProgress, Call, ClaudeList,
+    CostReply, Lane, LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList,
 };
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -326,15 +326,25 @@ impl Accounts {
             .ok_or_else(|| "The daemon made a lane this app can't read".to_owned())
     }
 
-    /// Move All: a dry run's plan, or the move itself (`accounts.move_all`). Blocking.
-    pub fn move_all(
+    /// Move All's dry run: the plan (`accounts.move_all` with `dryRun`). Blocking.
+    pub fn move_all_plan(
         &self,
         switches: &Switches,
         target: Option<&str>,
-        dry_run: bool,
     ) -> Result<MovePlan, String> {
-        let v = self.send(switches, &Call::accounts_move_all(target, dry_run))?;
+        let v = self.send(switches, &Call::accounts_move_all(target, true))?;
         Ok(parse_move_plan(&v))
+    }
+
+    /// Move All itself (`accounts.move_all`): what moved and what didn't, or pending when the
+    /// daemon answered before the move ended. Blocking.
+    pub fn move_all_now(
+        &self,
+        switches: &Switches,
+        target: Option<&str>,
+    ) -> Result<MoveResult, String> {
+        let v = self.send(switches, &Call::accounts_move_all(target, false))?;
+        Ok(parse_move_result(&v))
     }
 
     /// Switches another provider's account (`providers.switch`). Blocking.

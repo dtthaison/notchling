@@ -7,7 +7,7 @@ use crate::switches::{Switch, Switches};
 
 use super::model::{ANTIGRAVITY, CLAUDE_CODE, CLAUDE_DESKTOP, CODEX};
 use super::store::Snapshot;
-use super::wire::MovePlan;
+use super::wire::{MovePlan, MoveResult};
 
 /// The add panel under a provider's list.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -179,6 +179,44 @@ pub fn remove_alert(provider: &str, email: &str, in_use: bool) -> Alert {
 }
 
 /// The Move All alert for a dry run's plan: `email` is the target's.
+/// The line a Move All leaves in the window: how many moved, and each one that didn't, with why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Banner {
+    pub text: String,
+    /// Something didn't move: drawn in the warning color.
+    pub warning: bool,
+}
+
+pub fn move_all_banner(result: &MoveResult) -> Option<Banner> {
+    if result.pending {
+        return Some(Banner {
+            text: "Moving the sessions; this says how it went when it ends.".into(),
+            warning: false,
+        });
+    }
+    if !result.is_result() {
+        return None;
+    }
+    let n = result.moved.len();
+    let mut text = if n == 1 {
+        "Moved 1 session.".to_owned()
+    } else {
+        format!("Moved {n} sessions.")
+    };
+    if !result.errors.is_empty() {
+        let failed: Vec<String> = result
+            .errors
+            .iter()
+            .map(|(id, why)| format!("{id} ({why})"))
+            .collect();
+        text.push_str(&format!(" Not moved: {}", failed.join("; ")));
+    }
+    Some(Banner {
+        text,
+        warning: !result.errors.is_empty(),
+    })
+}
+
 pub fn move_all_alert(email: &str, plan: &MovePlan) -> Alert {
     let mut parts = Vec::new();
     if plan.jobs > 0 {

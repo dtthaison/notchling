@@ -147,3 +147,18 @@ fn the_choice_is_kept_in_the_apps_own_settings() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains("vaultOn"), "{text}");
 }
+
+#[test]
+fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
+    let s = shared();
+    s.apply(&event(topics::ACCOUNTS_CHANGED, json!({"active": "a1"})));
+    {
+        let st = s.state();
+        assert_eq!((st.changes.moves, st.last_move.clone()), (0, None));
+    }
+    let end = json!({"moved": ["job-1"], "errors": {"job-2": "Couldn't move it"}});
+    s.apply(&event(topics::ACCOUNTS_CHANGED, end.clone()));
+    let st = s.state();
+    assert_eq!((st.changes.moves, st.changes.accounts), (1, 2));
+    assert_eq!(st.last_move, Some(end));
+}

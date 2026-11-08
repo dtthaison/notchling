@@ -101,6 +101,8 @@ pub struct Changes {
     pub providers: u64,
     pub limits: u64,
     pub vault: u64,
+    /// `accounts.changed` events that said how a Move All ended (see [`SwitchFeed::last_move`]).
+    pub moves: u64,
 }
 
 /// One thing a limit watcher said (`limits.notice {at, text}`).
@@ -120,6 +122,8 @@ struct State {
     /// `vault.request.pending` events, oldest first.
     requests: Vec<Value>,
     notices: Vec<Notice>,
+    /// The last `accounts.changed` that carried a Move All's end (`moved`, `errors`).
+    last_move: Option<Value>,
 }
 
 struct Shared {
@@ -179,7 +183,16 @@ impl Shared {
                     }
                 }
             }
-            topics::ACCOUNTS_CHANGED | topics::ACCOUNTS_ADD_ENDED => s.changes.accounts += 1,
+            topics::ACCOUNTS_CHANGED | topics::ACCOUNTS_ADD_ENDED => {
+                s.changes.accounts += 1;
+                // A daemon that answers a Move All before it ends says how it went here.
+                if event.event == topics::ACCOUNTS_CHANGED
+                    && (event.data.get("moved").is_some() || event.data.get("errors").is_some())
+                {
+                    s.changes.moves += 1;
+                    s.last_move = Some(event.data.clone());
+                }
+            }
             // The daemon publishes a "sync" change for every `providers.list`, the app's own
             // refresh included; counting those would make each refresh ask for the next.
             topics::PROVIDERS_CHANGED
@@ -331,6 +344,11 @@ impl SwitchFeed {
         let data = json!({"id": id});
         remove_pending(&mut s.approvals, &data);
         remove_pending(&mut s.requests, &data);
+    }
+
+    /// How the last Move All ended, when the daemon said so in an event rather than its reply.
+    pub fn last_move(&self) -> Option<Value> {
+        self.shared.state().last_move.clone()
     }
 
     /// What the limit watchers said, oldest first.
