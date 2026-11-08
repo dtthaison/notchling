@@ -14,6 +14,7 @@ pub mod delegate;
 pub mod install;
 pub mod lanes;
 pub mod limits;
+pub mod machines;
 pub mod pages;
 pub mod providers;
 pub mod reply;
