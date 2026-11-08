@@ -164,15 +164,19 @@ fn place(w: &NSWindow, g: &Geometry) {
 /// Reads the sessions every [`POLL`], off the main thread, and the display's geometry with them.
 async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
     let mut polls = 0u32;
+    let mut was_attached = false;
     loop {
         polls = polls.wrapping_add(1);
-        // Whether acting is on, now and then and only while the daemon serves the rows.
+        // Whether acting is on, now and then and only while the daemon serves the rows; at once
+        // after a (re)connect, so a daemon that started off gets the user's choice back.
         let asking = this.update(cx, |view, _| {
             let attached = view
                 .sessions
                 .as_ref()
                 .is_some_and(|s| s.view().link == Link::Daemon);
-            (attached && polls % ACTING_EVERY == 1).then(|| view.actions.clone())
+            let fresh = attached && !was_attached;
+            was_attached = attached;
+            (attached && (fresh || polls % ACTING_EVERY == 1)).then(|| view.actions.clone())
         });
         match asking {
             Ok(Some(actions)) => {

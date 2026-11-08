@@ -223,7 +223,13 @@ impl ActingOps {
             .get("on")
             .and_then(Value::as_bool)
             .ok_or_else(|| bad("settings.set_acting takes {\"on\": true|false}"))?;
-        self.acting.set(on).map_err(ApiError::internal)?;
+        self.acting.set(on);
+        if !on {
+            // Every held hook passes now, not at its deadline: nobody may decide them any more.
+            for prompt in self.prompts.drain() {
+                self.resolved(&prompt, "pass", "acting_off");
+            }
+        }
         let data = json!({"acting": on});
         self.room
             .publish(topics::SETTINGS, topics::ACTING_CHANGED, &data);

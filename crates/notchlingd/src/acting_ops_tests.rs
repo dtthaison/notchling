@@ -506,6 +506,28 @@ fn a_held_hook_passes_at_its_deadline_or_when_the_app_leaves() {
 }
 
 #[test]
+fn turning_acting_off_passes_every_held_hook_at_once() {
+    let s = Arc::new(setup(true, PROMPT, sessions()));
+    let (first, _) = held(&s, fixture("permission-request.json"), 60_000);
+    let (second, _) = held(&s, fixture("ask-user-question.json"), 60_000);
+    let started = std::time::Instant::now();
+    s.ops
+        .call(&app(), ops::SETTINGS_SET_ACTING, &json!({"on": false}))
+        .unwrap();
+    for thread in [first, second] {
+        assert_eq!(
+            thread.join().unwrap(),
+            json!({"action": "pass", "reason": "acting is off"})
+        );
+    }
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(s.ops.prompts().list().is_empty());
+    let resolved = s.room.named("prompt.resolved");
+    assert_eq!(resolved.len(), 2);
+    assert!(resolved.iter().all(|r| r["by"] == "acting_off"));
+}
+
+#[test]
 fn a_hook_claude_code_gave_up_on_is_let_go() {
     let s = Arc::new(setup(true, PROMPT, sessions()));
     let ops = s.clone();

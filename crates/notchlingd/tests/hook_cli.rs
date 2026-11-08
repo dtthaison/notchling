@@ -201,3 +201,73 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
     // Nothing turned it on: the settings file was never written.
     assert!(!root.join("notchling/notchlingd-settings.json").exists());
 }
+
+/// Starts a daemon over `root` with this test binary in the app tier, and waits for its socket.
+fn start_daemon(dir: &Path, root: &Path) -> Daemon {
+    let socket = root.join("notchling/notchlingd.sock");
+    let me = std::env::current_exe().unwrap();
+    let daemon = Daemon(
+        Command::new(env!("CARGO_BIN_EXE_notchling"))
+            .arg("daemon")
+            .env("NOTCHLING_DATA_ROOT", root)
+            .env("HOME", dir)
+            .env(notchling_local_api::APP_TIER_PATHS_ENV, &me)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+        assert!(
+            Instant::now() < deadline,
+            "no daemon on {}",
+            socket.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    daemon
+}
+
+#[test]
+fn a_settings_file_that_says_on_is_ignored_at_every_start() {
+    let dir = scratch("file-on");
+    let root = dir.0.join("root");
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch"),
+        &root,
+    );
+    // What an agent that can write files would do, before the daemon (re)starts.
+    let file = root.join("notchling/notchlingd-settings.json");
+    std::fs::write(&file, br#"{"acting": true}"#).unwrap();
+    let socket = root.join("notchling/notchlingd.sock");
+    for run in 0..2 {
+        let daemon = start_daemon(&dir.0, &root);
+        let mut app = Client::connect(&socket, ClientKind::App, "0.1.0").unwrap();
+        assert_eq!(
+            app.call(ops::SETTINGS_GET_ACTING, json!({})).unwrap(),
+            json!({"acting": false}),
+            "run {run}: the file says on, the daemon starts off"
+        );
+        // Only the app turns it on, for this run.
+        assert_eq!(
+            app.call(ops::SETTINGS_SET_ACTING, json!({"on": true}))
+                .unwrap(),
+            json!({"acting": true})
+        );
+        assert_eq!(app.status().unwrap().acting, Some(true));
+        drop(app);
+        drop(daemon);
+    }
+    let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
+    assert_eq!(
+        audit
+            .matches("\"result\":\"file_said_on_ignored\"")
+            .count(),
+        2,
+        "{audit}"
+    );
+    // The daemon keeps no record of its own: the file is as the agent left it.
+    assert_eq!(std::fs::read(&file).unwrap(), br#"{"acting": true}"#);
+}

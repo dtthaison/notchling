@@ -21,6 +21,7 @@ pub const DETACHED_MESSAGE: &str = "Notchling's daemon isn't attached, so nothin
 /// The acting ops (app tier) and the status read.
 pub mod ops {
     pub const DAEMON_STATUS: &str = "daemon.status";
+    pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
     pub const SESSION_REPLY: &str = "session.reply";
     pub const SESSION_ANSWER: &str = "session.answer";
     pub const SESSION_PERMISSION: &str = "session.permission";
