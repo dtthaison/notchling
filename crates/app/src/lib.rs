@@ -19,6 +19,7 @@ pub mod dock;
 pub mod mac;
 pub mod menu;
 pub mod notch;
+pub mod phone;
 pub mod session_source;
 pub mod sheets;
 #[cfg(test)]
