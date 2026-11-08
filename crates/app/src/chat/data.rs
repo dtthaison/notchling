@@ -3,6 +3,7 @@
 //! `--data-root`, by `NOTCHLING_DATA_ROOT`, or for a render the checked-in `crates/app/fixtures/chat`.
 //! A render never reads the real `~/.claude`. Everything here only reads files.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
@@ -12,13 +13,34 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
-use crate::notch::source::DATA_ROOT_ENV;
+use crate::notch::source::{DataRoot as NotchRoot, Source, DATA_ROOT_ENV};
+use crate::transcripts::Locator;
 
 /// Which tool a session belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Claude,
     Codex,
+}
+
+/// The folders with none scanned twice. A lane's `projects` is a symlink to the main one, so
+/// several config folders reach the same files by different paths; and a folder inside another
+/// watched one is scanned with it. The first spelling of each is kept, in order.
+fn distinct_folders(folders: Vec<PathBuf>) -> Vec<PathBuf> {
+    let keyed: Vec<(PathBuf, PathBuf)> = folders
+        .into_iter()
+        .map(|f| (std::fs::canonicalize(&f).unwrap_or_else(|_| f.clone()), f))
+        .collect();
+    keyed
+        .iter()
+        .enumerate()
+        .filter(|(i, (path, _))| {
+            !keyed.iter().enumerate().any(|(j, (other, _))| {
+                j != *i && path.starts_with(other) && (path != other || j < *i)
+            })
+        })
+        .map(|(_, (_, folder))| folder.clone())
+        .collect()
 }
 
 /// A sidebar session: the engine's row, its tool and where its transcript is.
@@ -71,19 +93,56 @@ impl DataRoot {
 
     /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
     pub fn from_env() -> Option<DataRoot> {
-        std::env::var_os(DATA_ROOT_ENV)
-            .filter(|v| !v.is_empty())
-            .map(|v| DataRoot::fixture(Path::new(&v)))
+        DataRoot::named(None, std::env::var_os(DATA_ROOT_ENV).as_deref())
+    }
+
+    /// The fixture root a `--data-root` argument names, else the environment variable's value
+    /// (empty names nothing).
+    fn named(data_root: Option<&Path>, env: Option<&OsStr>) -> Option<DataRoot> {
+        let dir = match data_root {
+            Some(dir) => dir.to_path_buf(),
+            None => PathBuf::from(env.filter(|v| !v.is_empty())?),
+        };
+        Some(DataRoot::fixture(&dir))
     }
 
     /// What a render reads: the `--data-root` folder, else the environment's, else the fixture this
     /// crate carries. Never the real home.
     pub fn for_render(data_root: Option<&Path>) -> DataRoot {
-        match data_root {
-            Some(dir) => DataRoot::fixture(dir),
-            None => DataRoot::from_env().unwrap_or_else(|| {
-                DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"))
-            }),
+        DataRoot::named(data_root, std::env::var_os(DATA_ROOT_ENV).as_deref()).unwrap_or_else(
+            || DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat")),
+        )
+    }
+
+    /// What the running app reads, for Chat and the notch alike: the `--data-root` folder, else the
+    /// environment's, else the user's real folders (`None` without a home).
+    pub fn for_run(data_root: Option<&Path>) -> Option<DataRoot> {
+        DataRoot::resolve_run(
+            data_root,
+            std::env::var_os(DATA_ROOT_ENV).as_deref(),
+            DataRoot::real,
+        )
+    }
+
+    /// [`DataRoot::for_run`] with the environment and the real folders passed in.
+    fn resolve_run(
+        data_root: Option<&Path>,
+        env: Option<&OsStr>,
+        real: impl FnOnce() -> Option<DataRoot>,
+    ) -> Option<DataRoot> {
+        DataRoot::named(data_root, env).or_else(real)
+    }
+
+    /// The notch's source over this root: the same folders, and a fixture's finished rows stay.
+    pub fn notch_source(&self) -> Source {
+        let root = NotchRoot {
+            claude_dir: self.claude_dir.clone(),
+            data_dir: self.data_dir.clone(),
+            fixture: self.fixture.clone(),
+        };
+        match self.fixture {
+            Some(_) => Source::keeping_everything(root),
+            None => Source::new(root),
         }
     }
 
@@ -95,7 +154,7 @@ impl DataRoot {
     }
 
     /// The folders whose changes mean a reload: jobs, sessions and transcripts of every config
-    /// folder, and Codex's sessions.
+    /// folder, and Codex's sessions. Each real folder once: the watcher scans all of it every poll.
     pub fn watch_folders(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for config in notchling_engine::sessions::config_dirs(&self.roots()) {
@@ -104,35 +163,54 @@ impl DataRoot {
             out.push(config.dir.join("projects"));
         }
         out.push(self.codex_dir.join("sessions"));
-        out
+        distinct_folders(out)
     }
 
-    /// A transcript path from a job's state: relative ones belong to a fixture root.
-    fn resolve(&self, path: &str) -> PathBuf {
-        let path = PathBuf::from(path);
-        match &self.fixture {
-            Some(base) if path.is_relative() => base.join(path),
-            _ => path,
-        }
+    pub fn projects_dir(&self) -> PathBuf {
+        self.claude_dir.join("projects")
     }
 
-    /// Every session, needs input first, then working, then done, newest first in each: Claude
-    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
-    pub fn sessions(&self, now_ms: i64) -> Vec<Session> {
-        let probes = Probes::from_proc();
+    /// A monitor for this root: a fixture root never ages its Done rows out.
+    pub fn new_monitor(&self) -> Monitor {
         let mut monitor = Monitor::default();
         if self.fixture.is_some() {
             monitor.completed_window_ms = i64::MAX / 4;
         }
-        let mut out: Vec<Session> = monitor
-            .poll(&self.roots(), &probes, now_ms)
-            .into_iter()
+        monitor
+    }
+
+    /// Finds transcripts for this root (a fixture's job state may name them relative to it).
+    pub fn new_locator(&self) -> Locator {
+        Locator::new(self.fixture.clone())
+    }
+
+    /// Every session with a throwaway monitor and locator: nothing is remembered between calls.
+    pub fn sessions(&self, now_ms: i64) -> Vec<Session> {
+        self.sessions_with(&mut self.new_monitor(), &mut self.new_locator(), now_ms)
+    }
+
+    /// Every session, needs input first, then working, then done, newest first in each: Claude
+    /// Code's across the main folder and the lanes, then Codex's rollouts (30 newest, 14 days).
+    /// Each Claude row's transcript is found the way the notch finds it (`Locator`). The monitor
+    /// and the locator keep what polls need between them: ended terminal sessions, and rows with no
+    /// transcript yet.
+    pub fn sessions_with(
+        &self,
+        monitor: &mut Monitor,
+        locator: &mut Locator,
+        now_ms: i64,
+    ) -> Vec<Session> {
+        let agents = monitor.poll(&self.roots(), &Probes::from_proc(), now_ms);
+        let projects = self.projects_dir();
+        let mut out: Vec<Session> = agents
+            .iter()
             .map(|agent| Session {
-                transcript: agent.transcript_path.as_deref().map(|p| self.resolve(p)),
-                agent,
+                transcript: locator.find(agent, &projects, now_ms),
+                agent: agent.clone(),
                 tool: Tool::Claude,
             })
             .collect();
+        locator.retain(&agents);
         let days = self.fixture.is_none().then_some(14);
         for path in codex_list::rollouts(&self.codex_dir.join("sessions"), days, now_ms, 30) {
             if let Some(agent) = codex_list::session(&path) {
@@ -183,6 +261,68 @@ impl DataRoot {
     }
 }
 
+/// One read of everything Chat shows.
+#[derive(Clone, Debug)]
+pub struct Loaded {
+    pub sessions: Vec<Session>,
+    /// The session the conversation is of: the one asked for if it is listed, else the first.
+    pub selected: Option<String>,
+    pub conversation: Conversation,
+    pub subagents: Vec<Subagent>,
+    pub now_ms: i64,
+}
+
+/// Reads a data root again and again, keeping what polls need between them: the monitor's memory of
+/// ended terminal sessions (they show as Exited) and which rows had no transcript. Owns no view
+/// state, so a view can send it to the background executor and take it back.
+pub struct Loader {
+    root: DataRoot,
+    monitor: Monitor,
+    locator: Locator,
+}
+
+impl Loader {
+    pub fn new(root: DataRoot) -> Loader {
+        Loader {
+            monitor: root.new_monitor(),
+            locator: root.new_locator(),
+            root,
+        }
+    }
+
+    /// The sessions, and the conversation and subagents of `selected` (else the first session).
+    /// `now_ms` is the clock.
+    pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
+        let sessions = self
+            .root
+            .sessions_with(&mut self.monitor, &mut self.locator, now_ms);
+        let selected = selected
+            .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
+            .map(str::to_owned)
+            .or_else(|| sessions.first().map(|s| s.agent.id.clone()));
+        let session = selected
+            .as_deref()
+            .and_then(|id| sessions.iter().find(|s| s.agent.id == id));
+        let (conversation, subagents) = match session {
+            Some(session) => {
+                let conversation = self.root.conversation(session);
+                let subagents = self
+                    .root
+                    .subagents(session, &conversation, now_ms as f64 / 1000.0);
+                (conversation, subagents)
+            }
+            None => (Conversation::default(), Vec::new()),
+        };
+        Loaded {
+            sessions,
+            selected,
+            conversation,
+            subagents,
+            now_ms,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,11 +336,7 @@ mod tests {
             root.roots().lanes_file,
             PathBuf::from("/f/notchling/lanes.json")
         );
-        assert_eq!(
-            root.resolve("claude/x.jsonl"),
-            PathBuf::from("/f/claude/x.jsonl")
-        );
-        assert_eq!(root.resolve("/abs/x.jsonl"), PathBuf::from("/abs/x.jsonl"));
+        assert_eq!(root.projects_dir(), PathBuf::from("/f/claude/projects"));
         let folders = root.watch_folders();
         assert!(folders.contains(&PathBuf::from("/f/claude/projects")));
         assert!(folders.contains(&PathBuf::from("/f/codex/sessions")));
@@ -215,7 +351,184 @@ mod tests {
             home: "/Users/me".into(),
             fixture: None,
         };
-        assert_eq!(root.resolve("rel.jsonl"), PathBuf::from("rel.jsonl"));
+        assert_eq!(
+            root.projects_dir(),
+            PathBuf::from("/Users/me/.claude/projects")
+        );
+        // Real rows age out of Done after a day; a fixture's never do.
+        assert_eq!(root.new_monitor().completed_window_ms, 24 * 3600 * 1000);
+        assert!(
+            DataRoot::fixture(Path::new("/f"))
+                .new_monitor()
+                .completed_window_ms
+                > 1 << 50
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lanes_share_one_projects_folder_so_it_is_watched_once() {
+        use crate::testutil::Scratch;
+        let s = Scratch::new("watch-lanes");
+        let main = s.dir("claude");
+        for sub in ["jobs", "sessions", "projects"] {
+            s.dir(&format!("claude/{sub}"));
+        }
+        let lane = s.dir("lanes/work");
+        s.dir("lanes/work/jobs");
+        s.dir("lanes/work/sessions");
+        // The lane's projects is the main one, as `LaneStore.shared` links it.
+        std::os::unix::fs::symlink(main.join("projects"), lane.join("projects")).unwrap();
+        s.write(
+            "notchling/lanes.json",
+            &format!(
+                r#"[{{"name":"work","path":{:?},"accountID":"a1","email":"w@example.com"}}]"#,
+                lane.to_string_lossy()
+            ),
+        );
+
+        let folders = DataRoot::fixture(s.path()).watch_folders();
+        let projects = std::fs::canonicalize(main.join("projects")).unwrap();
+        let hits = folders
+            .iter()
+            .filter(|f| std::fs::canonicalize(f).ok().as_ref() == Some(&projects))
+            .count();
+        assert_eq!(hits, 1, "{folders:?}");
+        // The lane's own jobs and sessions are still watched.
+        assert!(folders.contains(&lane.join("jobs")), "{folders:?}");
+        assert!(folders.contains(&lane.join("sessions")), "{folders:?}");
+        assert!(folders.contains(&main.join("jobs")), "{folders:?}");
+    }
+
+    #[test]
+    fn a_folder_inside_another_watched_folder_is_dropped() {
+        let folders = vec![
+            PathBuf::from("/nowhere/a"),
+            PathBuf::from("/nowhere/a/b"),
+            PathBuf::from("/nowhere/c"),
+            PathBuf::from("/nowhere/c"),
+        ];
+        assert_eq!(
+            distinct_folders(folders),
+            [PathBuf::from("/nowhere/a"), PathBuf::from("/nowhere/c")]
+        );
+    }
+
+    /// A fixture root with one live terminal session (this process's pid, so it is alive wherever
+    /// the tests run) and its transcript; the returned path is the session's file.
+    fn terminal_world(s: &crate::testutil::Scratch) -> PathBuf {
+        s.write(
+            "claude/projects/-work-app/term-1.jsonl",
+            "{\"type\":\"user\",\"timestamp\":\"2026-11-08T08:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n",
+        );
+        let pid = std::process::id();
+        s.write(
+            &format!("claude/sessions/{pid}.json"),
+            &format!(
+                r#"{{"sessionId":"term-1","pid":{pid},"cwd":"/work/app","status":"idle","name":"terminal one","startedAt":1794160000000}}"#
+            ),
+        )
+    }
+
+    #[test]
+    fn a_loader_keeps_its_monitor_so_an_ended_terminal_session_shows_as_exited() {
+        let s = crate::testutil::Scratch::new("loader-exited");
+        let file = terminal_world(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+
+        let first = loader.load(None, 1_000);
+        let row = first.sessions.iter().find(|r| r.agent.id == "term-1");
+        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Idle"));
+
+        // The terminal closes: its session file goes away.
+        std::fs::remove_file(&file).unwrap();
+        let second = loader.load(first.selected.as_deref(), 2_000);
+        let row = second.sessions.iter().find(|r| r.agent.id == "term-1");
+        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Exited"));
+        // Its conversation is still readable by id.
+        assert!(!second.conversation.items.is_empty());
+    }
+
+    #[test]
+    fn a_loader_selects_the_asked_session_else_the_first_listed() {
+        let s = crate::testutil::Scratch::new("loader-select");
+        terminal_world(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+        assert_eq!(loader.load(None, 1_000).selected.as_deref(), Some("term-1"));
+        assert_eq!(
+            loader.load(Some("gone"), 1_000).selected.as_deref(),
+            Some("term-1")
+        );
+        assert_eq!(
+            loader.load(Some("term-1"), 1_000).selected.as_deref(),
+            Some("term-1")
+        );
+        let empty = crate::testutil::Scratch::new("loader-empty");
+        let none = Loader::new(DataRoot::fixture(empty.path())).load(Some("x"), 1_000);
+        assert_eq!(none.selected, None);
+        assert!(none.sessions.is_empty() && none.conversation.items.is_empty());
+    }
+
+    fn real_stand_in() -> Option<DataRoot> {
+        Some(DataRoot {
+            claude_dir: "/Users/me/.claude".into(),
+            data_dir: "/Users/me/Library/Application Support/Notchling".into(),
+            codex_dir: "/Users/me/.codex".into(),
+            home: "/Users/me".into(),
+            fixture: None,
+        })
+    }
+
+    #[test]
+    fn the_running_app_reads_the_argument_then_the_environment_then_the_real_folders() {
+        let env = std::ffi::OsString::from("/from-env");
+        let arg = Path::new("/from-arg");
+        let picked = DataRoot::resolve_run(Some(arg), Some(&env), real_stand_in);
+        assert_eq!(
+            picked.unwrap().claude_dir,
+            PathBuf::from("/from-arg/claude")
+        );
+        let picked = DataRoot::resolve_run(None, Some(&env), real_stand_in);
+        assert_eq!(
+            picked.unwrap().claude_dir,
+            PathBuf::from("/from-env/claude")
+        );
+        let empty = std::ffi::OsString::new();
+        let picked = DataRoot::resolve_run(None, Some(&empty), real_stand_in).unwrap();
+        assert_eq!(picked.fixture, None, "an empty variable names nothing");
+        let picked = DataRoot::resolve_run(None, None, real_stand_in).unwrap();
+        assert_eq!(picked.claude_dir, PathBuf::from("/Users/me/.claude"));
+        assert_eq!(DataRoot::resolve_run(None, None, || None), None);
+    }
+
+    #[test]
+    fn the_notch_reads_the_same_root_chat_does() {
+        let fixture = DataRoot::fixture(Path::new("/f"));
+        let source = fixture.notch_source();
+        assert_eq!(source.root.claude_dir, PathBuf::from("/f/claude"));
+        assert_eq!(source.root.data_dir, PathBuf::from("/f/notchling"));
+        assert_eq!(source.root.fixture, Some(PathBuf::from("/f")));
+
+        let real = real_stand_in().unwrap().notch_source();
+        assert_eq!(real.root.claude_dir, PathBuf::from("/Users/me/.claude"));
+        assert_eq!(
+            real.root.data_dir,
+            PathBuf::from("/Users/me/Library/Application Support/Notchling")
+        );
+        assert_eq!(real.root.fixture, None);
+    }
+
+    #[test]
+    fn a_fixture_notch_keeps_finished_rows_however_old() {
+        let root = DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"));
+        // Years after the fixture's dates: a real source would have aged every Done row out.
+        let far = 1_900_000_000_000;
+        let loaded = root.notch_source().load(far);
+        assert!(
+            loaded.agents.iter().any(|a| a.name == "shell mode"),
+            "{:?}",
+            loaded.agents.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
     }
 
     #[test]

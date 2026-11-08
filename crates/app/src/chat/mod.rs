@@ -13,6 +13,7 @@ pub mod data;
 pub mod format;
 pub mod header;
 pub mod inspector;
+pub mod reload;
 pub mod rows;
 pub mod sidebar;
 #[cfg(target_os = "macos")]

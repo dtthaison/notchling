@@ -17,6 +17,9 @@ pub mod dock;
 pub mod mac;
 pub mod menu;
 pub mod notch;
+#[cfg(test)]
+mod testutil;
+pub mod transcripts;
 pub mod views;
 
 /// What `main` prints on a system the app isn't built for yet.

@@ -21,7 +21,7 @@ use super::layout::{
     canvas_frame, geometry, hit_test, shape_rect, Geometry, NotchState, Rect, ScreenInfo, CANVAS,
 };
 use super::model::NotchModel;
-use super::source::{now_ms, DataRoot, Source};
+use super::source::{now_ms, Source};
 use super::view::NotchView;
 use crate::mac::capture::ns_window;
 
@@ -47,12 +47,12 @@ fn screen_info(mtm: MainThreadMarker) -> Option<ScreenInfo> {
     })
 }
 
-/// Opens the notch over the camera, reading this user's sessions. `None` when there's no screen,
-/// no home folder, or GPUI can't open the window.
-pub fn open(cx: &mut App) -> Option<WindowHandle<NotchView>> {
+/// Opens the notch over the camera, reading the sessions `source` reads: the same root Chat reads
+/// (`--data-root`, `NOTCHLING_DATA_ROOT`, else the user's own). `None` when there's no screen or
+/// GPUI can't open the window.
+pub fn open(cx: &mut App, source: Source) -> Option<WindowHandle<NotchView>> {
     let mtm = MainThreadMarker::new()?;
     let geometry = geometry(&screen_info(mtm)?);
-    let root = DataRoot::real()?;
     let options = WindowOptions {
         // Placed for real on the first tick: AppKit keeps a new window below the menu bar, and
         // GPUI sets the frame again after opening.
@@ -82,7 +82,7 @@ pub fn open(cx: &mut App) -> Option<WindowHandle<NotchView>> {
             let mut view = NotchView::new(model, false);
             view.ns_window = ns;
             view.geometry = Some(geometry);
-            view.source = Some(Source::new(root));
+            view.source = Some(source);
             cx.spawn(async move |this, cx| loop {
                 if this.update(cx, tick).is_err() {
                     break;

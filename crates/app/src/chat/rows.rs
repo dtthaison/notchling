@@ -86,9 +86,69 @@ pub fn notice_icon(symbol: &str) -> Icon {
     }
 }
 
-/// The first [`OUTPUT_LINES`] lines, and how many follow.
+/// Tab stops in drawn text. GPUI shapes a raw tab as one odd glyph, so a Read's `   N<tab>` prefix
+/// and a Go file's indentation would not line up: the view models hand over spaces.
+const TAB_WIDTH: usize = 4;
+
+/// `text` with every tab replaced by the spaces up to the next stop of [`TAB_WIDTH`] columns, the
+/// column starting over on each line.
+pub fn expand_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut column = 0;
+    for c in text.chars() {
+        match c {
+            '\t' => {
+                let spaces = TAB_WIDTH - column % TAB_WIDTH;
+                out.push_str(&" ".repeat(spaces));
+                column += spaces;
+            }
+            '\n' | '\r' => {
+                out.push(c);
+                column = 0;
+            }
+            _ => {
+                out.push(c);
+                column += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A line of a `cat -n` listing as its number and its code: spaces, digits, a tab, the code. The
+/// last line may be the number alone, its tab trimmed off with the rest of the output's end.
+fn numbered(line: &str) -> Option<(&str, &str)> {
+    let (number, code) = line.split_once('\t').unwrap_or((line, ""));
+    let number = number.trim_start_matches(' ');
+    (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())).then_some((number, code))
+}
+
+/// A Read's output as a gutter: every line is a number and code, as `cat -n` prints them, with at
+/// least one tab so plain numbers aren't taken for a listing. The numbers are right-aligned to the
+/// widest and two spaces come before the code, so the code lines up even though the engine
+/// trimmed the first line's leading spaces. `None` for any other output.
+fn listing(text: &str) -> Option<String> {
+    let lines: Vec<(&str, &str)> = text.lines().map(numbered).collect::<Option<_>>()?;
+    if !text.contains('\t') {
+        return None;
+    }
+    let width = lines.iter().map(|(number, _)| number.len()).max()?;
+    let drawn: Vec<String> = lines
+        .iter()
+        .map(|(number, code)| match expand_tabs(code).as_str() {
+            "" => format!("{number:>width$}"),
+            code => format!("{number:>width$}  {code}"),
+        })
+        .collect();
+    Some(drawn.join("\n"))
+}
+
+/// The first [`OUTPUT_LINES`] lines, and how many follow. A numbered listing gets a gutter, any
+/// other output its tabs as spaces.
 pub fn cut_output(text: &str) -> Output {
-    let trimmed = text.trim_end_matches(['\n', '\r']);
+    let ended = text.trim_end_matches(['\n', '\r']);
+    let expanded = listing(ended).unwrap_or_else(|| expand_tabs(ended));
+    let trimmed = expanded.trim_end_matches(['\n', '\r']);
     let total = trimmed.lines().count();
     if total <= OUTPUT_LINES {
         return Output {
@@ -116,7 +176,14 @@ fn tool_row(call: &ToolCall) -> ToolRow {
             .as_deref()
             .filter(|o| !o.trim().is_empty())
             .map(cut_output),
-        diff: call.diff.clone(),
+        diff: call
+            .diff
+            .iter()
+            .map(|line| DiffLine {
+                text: expand_tabs(&line.text),
+                ..line.clone()
+            })
+            .collect(),
         added: call.added(),
         removed: call.removed(),
         is_error: call.is_error,
@@ -147,7 +214,9 @@ fn row(item: &ChatItem) -> Row {
             text: text.clone(),
             icon: notice_icon(symbol),
         },
-        ItemKind::CommandOutput { text } => Row::CommandOutput { text: text.clone() },
+        ItemKind::CommandOutput { text } => Row::CommandOutput {
+            text: expand_tabs(text),
+        },
     }
 }
 
@@ -271,6 +340,87 @@ mod tests {
         assert_eq!(out.more, 8);
         assert_eq!(out.text.lines().count(), OUTPUT_LINES);
         assert_eq!(cut_output("one\n\n").text, "one");
+    }
+
+    /// What the engine hands over for a Read: Claude Code's `cat -n` lines (a number right-aligned
+    /// to six and a tab), trimmed as a whole, so the first line has lost its leading spaces.
+    const READ_OUTPUT: &str = "1\timport Foundation\n     2\t\n     3\tenum SessionSearch {\n     4\t    static func rank() {\n    10\t}\n   123\t\tlet tabbed = 1";
+
+    #[test]
+    fn a_reads_line_numbers_become_a_gutter_without_raw_tabs() {
+        let out = cut_output(READ_OUTPUT);
+        assert!(!out.text.contains('\t'), "{:?}", out.text);
+        let lines: Vec<&str> = out.text.lines().collect();
+        assert_eq!(lines[0], "  1  import Foundation");
+        assert_eq!(lines[1], "  2");
+        assert_eq!(lines[3], "  4      static func rank() {");
+        assert_eq!(lines[4], " 10  }");
+        // A tab in the code counts from the code's own column.
+        assert_eq!(lines[5], "123      let tabbed = 1");
+        // The code starts in the same column on every line, the trimmed first one included.
+        let code_column = |line: &str, code: &str| line.find(code).unwrap();
+        assert_eq!(
+            code_column(lines[0], "import"),
+            code_column(lines[2], "enum")
+        );
+        assert_eq!(code_column(lines[0], "import"), code_column(lines[4], "}"));
+    }
+
+    #[test]
+    fn a_listing_whose_last_line_lost_its_tab_still_lines_up() {
+        // `trim` also ate the tab of a final empty line.
+        let out = cut_output("1\tfn main() {\n     2\t}\n     3");
+        assert_eq!(out.text, "1  fn main() {\n2  }\n3");
+    }
+
+    #[test]
+    fn output_that_is_not_a_numbered_listing_only_loses_its_tabs() {
+        // Numbers alone are not a listing: there has to be a tab after one.
+        assert_eq!(cut_output("1\n2\n10").text, "1\n2\n10");
+        // One line that isn't numbered makes the rest plain output too.
+        assert_eq!(cut_output("1\ta\nplain\n2\tb").text, "1   a\nplain\n2   b");
+        assert_eq!(cut_output("a\tb\nc").text, "a   b\nc");
+    }
+
+    #[test]
+    fn tabs_expand_to_the_next_stop_of_four() {
+        assert_eq!(expand_tabs("a\tb"), "a   b");
+        assert_eq!(expand_tabs("ab\tc"), "ab  c");
+        assert_eq!(expand_tabs("abcd\te"), "abcd    e");
+        assert_eq!(expand_tabs("\t"), "    ");
+        assert_eq!(expand_tabs("no tabs"), "no tabs");
+        // The column starts over on every line, and wide characters count once.
+        assert_eq!(expand_tabs("ab\tc\nd\te"), "ab  c\nd   e");
+        assert_eq!(expand_tabs("é\tx"), "é   x");
+    }
+
+    #[test]
+    fn a_diff_and_a_command_output_lose_their_raw_tabs_too() {
+        let mut call = ToolCall::new(
+            "t3",
+            "Edit",
+            ToolKind::Edit,
+            "Edited main.go".into(),
+            "/repo/main.go".into(),
+        );
+        call.diff = vec![DiffLine {
+            kind: notchling_engine::transcript::model::DiffKind::Add,
+            text: "\treturn nil".into(),
+            number: Some(9),
+        }];
+        assert_eq!(tool_row(&call).diff[0].text, "    return nil");
+        let c = Conversation {
+            items: vec![item(ItemKind::CommandOutput {
+                text: "a\tb".into(),
+            })],
+            ..Conversation::default()
+        };
+        assert_eq!(
+            rows(&c),
+            [Row::CommandOutput {
+                text: "a   b".into()
+            }]
+        );
     }
 
     #[test]

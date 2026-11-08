@@ -12,17 +12,13 @@ use std::path::{Path, PathBuf};
 
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::settings::dirs::{data_dir, DirEnv};
-use notchling_engine::transcript::locate::{find_transcript, successor};
 use notchling_engine::transcript::snapshot::{self, Snapshot};
 
 use super::requests::{self, HookRequest};
+use crate::transcripts::Locator;
 
 /// The fixture root a render reads, when set.
 pub const DATA_ROOT_ENV: &str = "NOTCHLING_DATA_ROOT";
-
-/// A row without a transcript yet isn't searched for again sooner than this (ms): the search looks
-/// in every project folder.
-const MISS_RETRY: i64 = 30_000;
 
 /// The folders read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +27,8 @@ pub struct DataRoot {
     pub claude_dir: PathBuf,
     /// Notchling's data folder: `lanes.json`, `requests/`.
     pub data_dir: PathBuf,
+    /// A fixture root: a relative transcript path in a job's state belongs to it.
+    pub fixture: Option<PathBuf>,
 }
 
 impl DataRoot {
@@ -40,6 +38,7 @@ impl DataRoot {
         Some(DataRoot {
             claude_dir: env.home.as_ref()?.join(".claude"),
             data_dir: data_dir(&env)?,
+            fixture: None,
         })
     }
 
@@ -48,6 +47,7 @@ impl DataRoot {
         DataRoot {
             claude_dir: root.join("claude"),
             data_dir: root.join("notchling"),
+            fixture: Some(root.to_path_buf()),
         }
     }
 
@@ -89,15 +89,15 @@ pub struct Loaded {
 pub struct Source {
     pub root: DataRoot,
     monitor: Monitor,
-    missed: HashMap<String, i64>,
+    locator: Locator,
 }
 
 impl Source {
     pub fn new(root: DataRoot) -> Source {
         Source {
+            locator: Locator::new(root.fixture.clone()),
             root,
             monitor: Monitor::default(),
-            missed: HashMap::new(),
         }
     }
 
@@ -119,42 +119,17 @@ impl Source {
             if agent.command.is_some() {
                 continue;
             }
-            if let Some(path) = self.transcript(agent, &projects, now_ms) {
-                snapshots.insert(agent.id.clone(), snapshot::read(&path));
+            if let Some(path) = self.locator.find(agent, &projects, now_ms) {
+                snapshots.insert(agent.id.clone(), snapshot::read(&path.to_string_lossy()));
             }
         }
-        self.missed
-            .retain(|id, _| agents.iter().any(|a| &a.id == id));
+        self.locator.retain(&agents);
         let requests = requests::read_dir(&self.root.requests_dir(), now_ms as f64 / 1000.0);
         Loaded {
             agents,
             snapshots,
             requests,
         }
-    }
-
-    /// The row's transcript (`TranscriptReader.path(for:)`): the job's own file followed past
-    /// `/clear`, else Claude Code's project folder for its working directory, else any project folder.
-    fn transcript(&mut self, agent: &Agent, projects: &Path, now_ms: i64) -> Option<String> {
-        if let Some(path) = agent
-            .transcript_path
-            .as_deref()
-            .filter(|p| Path::new(p).is_file())
-        {
-            return Some(successor(path, &agent.name).unwrap_or_else(|| path.to_owned()));
-        }
-        if self
-            .missed
-            .get(&agent.id)
-            .is_some_and(|at| now_ms - at < MISS_RETRY)
-        {
-            return None;
-        }
-        let found = find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd);
-        if found.is_none() {
-            self.missed.insert(agent.id.clone(), now_ms);
-        }
-        found
     }
 }
 
@@ -239,9 +214,9 @@ mod tests {
         };
         ghost.transcript_path = None;
         let projects = source.root.projects_dir();
-        assert_eq!(source.transcript(&ghost, &projects, 1_000), None);
-        assert!(source.missed.contains_key("no-such-session"));
-        assert_eq!(source.transcript(&ghost, &projects, 2_000), None);
+        assert_eq!(source.locator.find(&ghost, &projects, 1_000), None);
+        assert!(source.locator.has_missed("no-such-session"));
+        assert_eq!(source.locator.find(&ghost, &projects, 2_000), None);
         assert_eq!(fixture_clock(&[]), 60_000);
     }
 }

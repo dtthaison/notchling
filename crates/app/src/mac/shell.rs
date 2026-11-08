@@ -26,12 +26,11 @@ struct Shell {
 
 impl Global for Shell {}
 
-/// Runs the app until Quit; the exit code. `data_root` is a fixture root instead of the real folders.
+/// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
+/// root instead of the real folders; Chat and the notch read the same one.
 pub fn run(data_root: Option<PathBuf>) -> i32 {
-    let root = match data_root {
-        Some(dir) => Some(DataRoot::fixture(&dir)),
-        None => DataRoot::real(),
-    };
+    let root = DataRoot::for_run(data_root.as_deref());
+    let notch = root.as_ref().map(DataRoot::notch_source);
     Application::new().run(move |cx: &mut App| {
         dock::register(cx);
         dock::apply(policy_for(0));
@@ -58,7 +57,9 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         });
         cx.on_window_closed(update_dock).detach();
         // Not titled, so it never counts toward the Dock icon.
-        crate::notch::panel::open(cx);
+        if let Some(source) = notch {
+            crate::notch::panel::open(cx, source);
+        }
     });
     0
 }
