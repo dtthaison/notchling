@@ -67,14 +67,17 @@ pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
         SessionTool::Codex => sessions
             .iter()
             .find(|s| s.tool == Tool::Codex && s.agent.id == format!("codex:{id}")),
-        SessionTool::Claude => sessions.iter().filter(|s| s.tool == Tool::Claude).find(|s| {
-            s.agent.session_id().as_deref() == Some(id)
-                || s.transcript
-                    .as_deref()
-                    .and_then(|p| p.file_stem())
-                    .and_then(|stem| stem.to_str())
-                    == Some(id)
-        }),
+        SessionTool::Claude => sessions
+            .iter()
+            .filter(|s| s.tool == Tool::Claude)
+            .find(|s| {
+                s.agent.session_id().as_deref() == Some(id)
+                    || s.transcript
+                        .as_deref()
+                        .and_then(|p| p.file_stem())
+                        .and_then(|stem| stem.to_str())
+                        == Some(id)
+            }),
         SessionTool::Antigravity => None,
     };
     found.map(|s| s.agent.id.clone())
@@ -203,8 +206,14 @@ mod tests {
             row_for(&sessions, &target(SessionTool::Codex, "0199a1b2")).as_deref(),
             Some("codex:0199a1b2")
         );
-        assert_eq!(row_for(&sessions, &target(SessionTool::Codex, "3f1c2a9e")), None);
-        assert_eq!(row_for(&sessions, &target(SessionTool::Claude, "nope")), None);
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Codex, "3f1c2a9e")),
+            None
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Claude, "nope")),
+            None
+        );
         assert_eq!(
             row_for(&sessions, &target(SessionTool::Antigravity, "x")),
             None,

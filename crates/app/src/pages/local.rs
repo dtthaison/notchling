@@ -73,10 +73,15 @@ mod tests {
     #[test]
     fn a_file_url_keeps_plain_bytes_and_encodes_the_rest() {
         assert_eq!(
-            file_url(Path::new("/Users/me/Library/Application Support/Notchling/pages/a-b_c.d~/index.html")),
+            file_url(Path::new(
+                "/Users/me/Library/Application Support/Notchling/pages/a-b_c.d~/index.html"
+            )),
             "file:///Users/me/Library/Application%20Support/Notchling/pages/a-b_c.d~/index.html"
         );
-        assert_eq!(file_url(Path::new("/p/#1?/é.html")), "file:///p/%231%3F/%C3%A9.html");
+        assert_eq!(
+            file_url(Path::new("/p/#1?/é.html")),
+            "file:///p/%231%3F/%C3%A9.html"
+        );
     }
 
     #[test]
@@ -102,6 +107,10 @@ mod tests {
             source_for(&scratch.path().join("three/index.html")),
             Err(GONE.to_owned())
         );
-        assert_eq!(source_for(scratch.path()), Err(GONE.to_owned()), "a folder isn't a copy");
+        assert_eq!(
+            source_for(scratch.path()),
+            Err(GONE.to_owned()),
+            "a folder isn't a copy"
+        );
     }
 }

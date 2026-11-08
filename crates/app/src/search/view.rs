@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, AnyView, ClipboardItem, Context, Div, FocusHandle, FontWeight,
-    HighlightStyle, KeyDownEvent, Render, ScrollHandle, SharedString, StyledText, Subscription,
-    Window,
+    HighlightStyle, KeyDownEvent, Render, ScrollHandle, SharedString, Stateful, StyledText,
+    Subscription, Window,
 };
 use notchling_engine::search::{age_text, SessionTool};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM};
@@ -29,6 +29,8 @@ use crate::chat::format::short_path;
 
 /// How often the window is put back where it belongs (GPUI moves it after opening).
 const PLACE_EVERY: Duration = Duration::from_millis(100);
+/// How long after an answer that said `indexing` the same query is asked again.
+const INDEXING_RETRY: Duration = Duration::from_millis(700);
 
 pub struct SearchPanelView {
     pub model: SearchModel,
@@ -137,8 +139,10 @@ impl SearchPanelView {
                     return;
                 }
                 view.model.searching = false;
+                let mut again = false;
                 match result {
                     Ok(results) => {
+                        again = results.indexing;
                         let keeping = view.model.current().map(Item::id);
                         view.model.apply(results, keeping.as_deref());
                         view.model.error = None;
@@ -146,12 +150,30 @@ impl SearchPanelView {
                     Err(e) => view.model.error = Some(e),
                 }
                 view.scroll_to_selected();
+                if again {
+                    // The daemon is reading the index: the same query may find more in a moment.
+                    view.search_later(generation, cx);
+                }
                 cx.notify();
             })
             .ok();
         })
         .detach();
         cx.notify();
+    }
+
+    /// Searches again after a moment, unless the query moved on meanwhile.
+    fn search_later(&self, generation: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(INDEXING_RETRY).await;
+            this.update(cx, |view, cx| {
+                if view.generation == generation {
+                    view.search(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The list's children are headers and rows; the selected row's index among them.
@@ -206,7 +228,11 @@ impl SearchPanelView {
 }
 
 fn hairline(a: Appearance) -> Div {
-    div().h(px(1.0)).w_full().flex_shrink_0().fill(Ink::Hairline, a)
+    div()
+        .h(px(1.0))
+        .w_full()
+        .flex_shrink_0()
+        .fill(Ink::Hairline, a)
 }
 
 /// The 30-point square a row's icon sits in.
@@ -218,12 +244,23 @@ fn icon_box(selected: bool, a: Appearance) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .fill(if selected { Ink::AccentWash } else { Ink::Raised }, a)
+        .fill(
+            if selected {
+                Ink::AccentWash
+            } else {
+                Ink::Raised
+            },
+            a,
+        )
 }
 
 /// A tool's mark: Claude's sparkle, else its short name.
 fn tool_mark(tool: SessionTool, selected: bool, a: Appearance) -> Div {
-    let ink = if selected { Ink::AccentText } else { Ink::TextMuted };
+    let ink = if selected {
+        Ink::AccentText
+    } else {
+        Ink::TextMuted
+    };
     match tool {
         SessionTool::Claude => icon_box(selected, a).child(claude_mark(20.0, a)),
         SessionTool::Codex => icon_box(selected, a).child(label("Cx", TypeRole::Label, ink, a)),
@@ -308,7 +345,9 @@ fn session_detail(session: &SessionRow, home: &std::path::Path, a: Appearance) -
             let ranges = session
                 .highlights
                 .iter()
-                .filter(|(s, e)| s < e && snippet.is_char_boundary(*s) && snippet.is_char_boundary(*e))
+                .filter(|(s, e)| {
+                    s < e && snippet.is_char_boundary(*s) && snippet.is_char_boundary(*e)
+                })
                 .map(|(s, e)| (Range { start: *s, end: *e }, bold));
             line.child(StyledText::new(SharedString::from(snippet.clone())).with_highlights(ranges))
         }
@@ -375,7 +414,12 @@ impl SearchPanelView {
             .flex()
             .items_center()
             .gap(px(12.0))
-            .child(label(Icon::Search.glyph(), TypeRole::Title, Ink::TextMuted, a))
+            .child(label(
+                Icon::Search.glyph(),
+                TypeRole::Title,
+                Ink::TextMuted,
+                a,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -393,12 +437,27 @@ impl SearchPanelView {
                         .truncate(),
                     )
                     // The caret, after the text (the field takes every key while the panel is up).
-                    .child(div().w(px(1.5)).h(px(22.0)).ml(px(1.0)).fill(Ink::Accent, a)),
+                    .child(
+                        div()
+                            .w(px(1.5))
+                            .h(px(22.0))
+                            .ml(px(1.0))
+                            .fill(Ink::Accent, a),
+                    ),
             )
     }
 
-    fn results(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let now_secs = now_ms() as f64 / 1000.0;
+    /// The clock the ages are read against: a render's is fixed, like its data.
+    fn now_secs(&self) -> f64 {
+        if self.fixed {
+            super::renders::NOW_SECS
+        } else {
+            now_ms() as f64 / 1000.0
+        }
+    }
+
+    fn results(&self, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
+        let now_secs = self.now_secs();
         let home = notchling_platform::paths::home().unwrap_or_default();
         let mut list = div()
             .id("search-results")
@@ -419,22 +478,23 @@ impl SearchPanelView {
                 Item::Session(session) => session_row(session, selected, now_secs, &home, a),
             };
             let opened = item.clone();
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("search-row-{index}")))
-                    .w_full()
-                    .cursor_pointer()
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        if *hovered && this.model.selected != index {
-                            this.model.selected = index;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open(opened.clone(), window, cx)
-                    }))
-                    .child(row),
-            );
+            list =
+                list.child(
+                    div()
+                        .id(SharedString::from(format!("search-row-{index}")))
+                        .w_full()
+                        .cursor_pointer()
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered && this.model.selected != index {
+                                this.model.selected = index;
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open(opened.clone(), window, cx)
+                        }))
+                        .child(row),
+                );
         }
         list
     }
@@ -454,7 +514,12 @@ impl SearchPanelView {
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .child(label(Icon::Check.glyph(), TypeRole::Meta, Ink::AccentText, a))
+                    .child(label(
+                        Icon::Check.glyph(),
+                        TypeRole::Meta,
+                        Ink::AccentText,
+                        a,
+                    ))
                     .child(label(&text, TypeRole::Meta, Ink::AccentText, a))
             } else {
                 label(&text, TypeRole::Meta, Ink::TextFaint, a).truncate()
@@ -495,15 +560,16 @@ impl Render for SearchPanelView {
                     Ink::TextMuted,
                     a,
                 ))
+                .into_any_element()
         } else {
-            self.results(a, cx)
+            self.results(a, cx).into_any_element()
         };
         div()
             .id("search-panel")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                this.key(event, window, cx)
-            }))
+            .on_key_down(
+                cx.listener(|this, event: &KeyDownEvent, window, cx| this.key(event, window, cx)),
+            )
             .size_full()
             .flex()
             .flex_col()

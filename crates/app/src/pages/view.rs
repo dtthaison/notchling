@@ -98,8 +98,8 @@ impl PagesView {
                 .await;
             this.update(cx, |view, cx| {
                 match result {
-                    Ok(pages) => {
-                        view.model.set_pages(pages);
+                    Ok(list) => {
+                        view.model.set_list(list);
                         if let Some(key) = view.pending.take() {
                             view.model.select(&key);
                         }
@@ -167,7 +167,11 @@ impl PagesView {
 }
 
 fn hairline(a: Appearance) -> Div {
-    div().h(px(1.0)).w_full().flex_shrink_0().fill(Ink::Hairline, a)
+    div()
+        .h(px(1.0))
+        .w_full()
+        .flex_shrink_0()
+        .fill(Ink::Hairline, a)
 }
 
 fn page_row(page: &Page, selected: bool, a: Appearance) -> Div {
@@ -216,9 +220,8 @@ fn page_row(page: &Page, selected: bool, a: Appearance) -> Div {
 }
 
 impl PagesView {
-    fn list(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
+    fn list(&self, focused: bool, a: Appearance, cx: &mut Context<Self>) -> Div {
         let shown = self.model.shown();
-        let focused = !self.fixed && self.focus.is_focused(cx);
         let mut rows = div()
             .id("pages-list")
             .track_scroll(&self.scroll)
@@ -257,24 +260,30 @@ impl PagesView {
             .border_r(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
             .child(
-                div()
-                    .p(px(12.0))
-                    .flex_shrink_0()
-                    .child(field(&self.model.search, "Search or Paste Artifact ID", focused, a).w_full()),
+                div().p(px(12.0)).flex_shrink_0().child(
+                    field(
+                        &self.model.search,
+                        "Search or Paste Artifact ID",
+                        focused,
+                        a,
+                    )
+                    .w_full(),
+                ),
             )
             .child(hairline(a))
             .child(rows)
             .child(hairline(a))
-            .child(
-                div()
-                    .p(px(8.0))
-                    .flex_shrink_0()
-                    .child(label(&self.model.count_text(), TypeRole::Meta, Ink::TextMuted, a)),
-            )
+            .child(div().p(px(8.0)).flex_shrink_0().child(label(
+                &self.model.count_text(),
+                TypeRole::Meta,
+                Ink::TextMuted,
+                a,
+            )))
     }
 
     fn detail(&self, page: &Page, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let exists = Path::new(&page.path).is_file();
+        // A render's pages are made up: drawn as if their copies were there.
+        let exists = self.fixed || Path::new(&page.path).is_file();
         let open_state = if exists {
             PartState::Rest
         } else {
@@ -291,9 +300,14 @@ impl PagesView {
         );
         let link = page.link.clone();
         let copy = (!link.is_empty()).then(|| {
-            button("copy-link", "Copy Link", ButtonKind::Secondary, PartState::Rest, a).on_click(
-                cx.listener(move |this, _, _, cx| this.copy_link(link.clone(), cx)),
+            button(
+                "copy-link",
+                "Copy Link",
+                ButtonKind::Secondary,
+                PartState::Rest,
+                a,
             )
+            .on_click(cx.listener(move |this, _, _, cx| this.copy_link(link.clone(), cx)))
         });
         let mut about = card(a)
             .p(px(SIDE_PADDING))
@@ -362,6 +376,7 @@ impl Render for PagesView {
         if !self.fixed && !self.focus.is_focused(window) {
             window.focus(&self.focus);
         }
+        let focused = !self.fixed && self.focus.is_focused(window);
         let selected = self.model.selected().cloned();
         let right = match &selected {
             Some(page) => self.detail(page, a, cx),
@@ -385,7 +400,7 @@ impl Render for PagesView {
             .size_full()
             .flex()
             .fill(Ink::Window, a)
-            .child(self.list(a, cx))
+            .child(self.list(focused, a, cx))
             .child(right)
     }
 }

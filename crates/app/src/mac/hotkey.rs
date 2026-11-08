@@ -146,7 +146,9 @@ fn install_handler() -> Result<(), String> {
         )
     };
     if status != NO_ERR {
-        return Err(format!("Carbon refused the hot key handler (status {status})"));
+        return Err(format!(
+            "Carbon refused the hot key handler (status {status})"
+        ));
     }
     INSTALLED.with(|i| i.set(true));
     Ok(())

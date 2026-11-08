@@ -11,16 +11,19 @@ use crate::views::ViewSpec;
 /// The fixed clock every render draws at (seconds since 1970).
 pub const NOW_SECS: f64 = 1_800_000_000.0;
 
+/// Each window is exactly the panel's height for its data (`SearchModel::height`), as the live
+/// panel's is.
 pub const VIEWS: [ViewSpec; 2] = [
     ViewSpec {
         name: "search-panel",
-        size: (680.0, 470.0),
+        size: (680.0, 458.0),
         about: "the ⌘⇧P panel just opened: the newest pages and conversations (made-up data)",
     },
     ViewSpec {
         name: "search-panel-results",
-        size: (680.0, 460.0),
-        about: "the ⌘⇧P panel with words typed, a session selected and the words bold (made-up data)",
+        size: (680.0, 308.0),
+        about:
+            "the ⌘⇧P panel with words typed, a session selected and the words bold (made-up data)",
     },
 ];
 
@@ -42,15 +45,18 @@ pub fn shown(name: &str) -> Option<Shown> {
 }
 
 fn page(id: &str, title: &str, project: &str, age_secs: f64) -> Page {
+    let folder = format!("{}-{}", title.to_lowercase().replace(' ', "-"), &id[..4]);
     Page {
         id: id.into(),
         title: title.into(),
-        folder: format!("/Users/me/Library/Application Support/Notchling/pages/{id}"),
+        path: format!("/Users/me/Library/Application Support/Notchling/pages/{folder}/index.html"),
+        folder,
+        file: "index.html".into(),
         project: project.into(),
         account: "me@example.com".into(),
         updated_secs: NOW_SECS - age_secs,
         link: format!("https://claude.ai/artifact/{id}"),
-        path: format!("/Users/me/Library/Application Support/Notchling/pages/{id}/index.html"),
+        ..Page::default()
     }
 }
 
@@ -82,9 +88,24 @@ pub fn results(shown: Shown) -> Results {
     match shown {
         Shown::Opened => Results {
             pages: vec![
-                page("KVBHDXYvY8f1b1AZG6PbAR", "Phone bridge: pairing flow", "notchling", 1_800.0),
-                page("7Qp2mN9xLkR4tVwYzB3cDe", "Release notes draft", "notchling", 86_400.0),
-                page("Hs8fJ2kLm3nP4qR5tU6vW7", "Flutter kit audit", "apps/flutter", 3.5 * 86_400.0),
+                page(
+                    "KVBHDXYvY8f1b1AZG6PbAR",
+                    "Phone bridge: pairing flow",
+                    "notchling",
+                    1_800.0,
+                ),
+                page(
+                    "7Qp2mN9xLkR4tVwYzB3cDe",
+                    "Release notes draft",
+                    "notchling",
+                    86_400.0,
+                ),
+                page(
+                    "Hs8fJ2kLm3nP4qR5tU6vW7",
+                    "Flutter kit audit",
+                    "apps/flutter",
+                    3.5 * 86_400.0,
+                ),
             ],
             sessions: vec![
                 session(
@@ -112,6 +133,7 @@ pub fn results(shown: Shown) -> Results {
                     2.0 * 86_400.0,
                 ),
             ],
+            indexing: false,
         },
         Shown::Results => Results {
             pages: vec![page(
@@ -126,7 +148,10 @@ pub fn results(shown: Shown) -> Results {
                     "3f1c2a9e-7b4d-4e1f-9c8a-1d2e3f4a5b6c",
                     "Fix the bridge handshake deadline",
                     "/Users/me/go/src/pp/notchling",
-                    Some(("…the bridge was off at every daemon start, so the bridge switch…", &[(7, 13), (54, 60)])),
+                    Some((
+                        "…the bridge was off at every daemon start, so the bridge switch…",
+                        &[(7, 13), (52, 58)],
+                    )),
                     600.0,
                 ),
                 session(
@@ -134,10 +159,11 @@ pub fn results(shown: Shown) -> Results {
                     "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
                     "Review the pairing panel",
                     "/Users/me/go/src/pp/notchling/apps/flutter",
-                    Some(("Pairing goes through the bridge on port 47821", &[(26, 32)])),
+                    Some(("Pairing goes through the bridge on port 47821", &[(25, 31)])),
                     7_200.0,
                 ),
             ],
+            indexing: false,
         },
     }
 }
@@ -193,8 +219,8 @@ mod tests {
                 }
             }
         }
-        // The panel fits its render window.
-        assert!(opened.height() <= VIEWS[0].size.1);
-        assert!(results.height() <= VIEWS[1].size.1);
+        // Each render window is the panel's own height.
+        assert_eq!(opened.height(), VIEWS[0].size.1);
+        assert_eq!(results.height(), VIEWS[1].size.1);
     }
 }

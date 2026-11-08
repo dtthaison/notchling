@@ -138,8 +138,7 @@ fn previous_app() -> Option<i32> {
 
 /// Brings the remembered app back to the front.
 fn give_back(pid: Option<i32>) {
-    if let Some(app) = pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier)
-    {
+    if let Some(app) = pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier) {
         app.activateWithOptions(NSApplicationActivationOptions::empty());
     }
 }

@@ -119,9 +119,7 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
             let async_cx = cx.to_async();
             hotkey::for_system()
                 .register(Box::new(move || {
-                    async_cx
-                        .update(|cx| crate::search::panel::toggle(cx))
-                        .ok();
+                    async_cx.update(crate::search::panel::toggle).ok();
                 }))
                 .map_err(|e| eprintln!("no ⌘⇧P: {e}"))
                 .ok()
@@ -171,7 +169,10 @@ fn refresh_tray(shell: &Shell) {
 /// The Chat window, if it is still open.
 fn chat_window(cx: &App) -> Option<WindowHandle<ChatView>> {
     let handle = cx.global::<Shell>().chat?;
-    let open = cx.windows().iter().any(|w| w.window_id() == handle.window_id());
+    let open = cx
+        .windows()
+        .iter()
+        .any(|w| w.window_id() == handle.window_id());
     open.then_some(handle)
 }
 

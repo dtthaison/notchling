@@ -79,10 +79,12 @@ impl PageWindow {
         if nth == 0 {
             window.center();
         }
-        let content = window.contentView().ok_or("the page window has no content view")?;
+        let content = window
+            .contentView()
+            .ok_or("the page window has no content view")?;
         let titled = window.clone();
         let builder = WebViewBuilder::new()
-            .with_navigation_handler(stays_local)
+            .with_navigation_handler(|url| stays_local(&url))
             .with_new_window_req_handler(|_, _| NewWindowResponse::Deny)
             .with_document_title_changed_handler(move |t| {
                 if !t.is_empty() {
