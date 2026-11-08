@@ -15,15 +15,18 @@ use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Appearance, Ink};
 
 use super::ChatView;
+use crate::accounts::view::AccountsView;
 use crate::acting::Acting;
 use crate::actions::Actions;
 use crate::chat::data::Tool;
-use crate::mac::shell::AppActions;
+use crate::mac::shell::{AppActions, AppVault};
 use crate::sheets::new_session::{accounts, folders, NewSession};
 use crate::sheets::second_opinion_view::SecondOpinionView;
 use crate::sheets::settings_view::SettingsView;
 use crate::sheets::view::{Acts, Dismiss, NewSessionView};
 use crate::tools::second_opinion::SecondOpinionSheet;
+use crate::vault::store::Vault;
+use crate::vault::view::VaultSheetView;
 
 /// The sheet on show.
 pub struct Sheet {
@@ -41,6 +44,48 @@ impl ChatView {
             actions,
             sessions: Some(self.source.clone()),
         }
+    }
+
+    /// The Accounts sheet's entity, on `provider`'s tab, not shown yet (Move All sets it up first).
+    pub(super) fn accounts_sheet_entity(
+        &mut self,
+        provider: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Entity<AccountsView> {
+        let (store, feed) = (self.accounts.clone(), self.switches.clone());
+        let provider = provider.map(str::to_owned);
+        cx.new(|cx| {
+            let mut view = AccountsView::live(store, feed, true, cx);
+            if let Some(p) = &provider {
+                view.show_provider(p, cx);
+            }
+            view
+        })
+    }
+
+    /// The Accounts sheet (Add Account…, Codex Accounts…, the Move All plan).
+    pub(super) fn open_accounts_sheet(&mut self, provider: Option<&str>, cx: &mut Context<Self>) {
+        let entity = self.accounts_sheet_entity(provider, cx);
+        self.show(entity, cx);
+    }
+
+    /// The Secret Vault sheet over the app's shared store.
+    pub(super) fn open_vault_sheet(&mut self, cx: &mut Context<Self>) {
+        let vault = cx
+            .try_global::<AppVault>()
+            .map(|v| v.0.clone())
+            .unwrap_or_else(|| Arc::new(Vault::fixed(Vec::new())));
+        let feed = self.switches.clone();
+        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cx));
+        self.show(entity, cx);
+    }
+
+    pub(super) fn show_sheet<V: gpui::Render + gpui::EventEmitter<Dismiss>>(
+        &mut self,
+        entity: Entity<V>,
+        cx: &mut Context<Self>,
+    ) {
+        self.show(entity, cx);
     }
 
     fn show<V: gpui::Render + gpui::EventEmitter<Dismiss>>(

@@ -6,6 +6,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{avatar, button, hsla, label, status_pill, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::accounts;
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
 use super::ChatView;
 use crate::chat::header::header;
@@ -88,8 +89,16 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .flex_col()
                 .gap(px(2.0))
                 .child(label(&h.title, TypeRole::Heading, Ink::Text, a).truncate())
-                .child(label(&subtitle, TypeRole::Meta, Ink::TextMuted, a).truncate()),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(label(&subtitle, TypeRole::Meta, Ink::TextMuted, a).truncate())
+                        .children(accounts::account_control(view, a, cx)),
+                ),
         )
+        .children(accounts::header_meters(view, a))
         .when_some(h.context.as_deref(), |bar, context| {
             bar.child(chip(&format!("Context {context}"), a))
         })

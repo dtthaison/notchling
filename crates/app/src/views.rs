@@ -58,6 +58,8 @@ pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
         .chain(crate::search::renders::VIEWS.iter())
         .chain(crate::pages::renders::VIEWS.iter())
         .chain(crate::tools::renders::VIEWS.iter())
+        .chain(crate::accounts::renders::VIEWS.iter())
+        .chain(crate::vault::renders::VIEWS.iter())
         .chain(crate::welcome::renders::VIEWS.iter())
 }
 
