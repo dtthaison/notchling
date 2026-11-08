@@ -60,11 +60,11 @@ fn the_notch_shows_the_daemons_rows_and_reads_their_transcripts() {
         .cloned()
         .expect("a row with a transcript");
 
-    let loaded = source.load_from(Some(vec![working.clone()]), NOW_MS);
+    let loaded = source.load_from(Some(vec![working.clone()]), None, NOW_MS);
     assert_eq!(loaded.agents, std::slice::from_ref(&working));
     assert!(loaded.snapshots.contains_key(&working.id));
     assert!(loaded.agents.len() < files.agents.len());
 
-    let empty = source.load_from(Some(Vec::new()), NOW_MS);
+    let empty = source.load_from(Some(Vec::new()), None, NOW_MS);
     assert!(empty.agents.is_empty() && empty.snapshots.is_empty());
 }

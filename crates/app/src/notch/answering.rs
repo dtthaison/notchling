@@ -210,7 +210,11 @@ impl NotchView {
                 gate::tip(row, gate, A).when(gate.enabled, |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(answers) = this.draft.choose(&question, i + 1) {
-                            this.send_for(session.clone(), Request::answer(&session, &answers), cx);
+                            this.send_for(
+                                session.clone(),
+                                Request::answer_for(&session, &question, &answers),
+                                cx,
+                            );
                         }
                         cx.notify();
                     }))
@@ -310,7 +314,7 @@ impl NotchView {
                     match type_key(typed, &k.key, k.key_char.as_deref(), modified) {
                         Typed::Submit => {
                             if let Some(answers) = this.draft.submit_text(&question) {
-                                let request = Request::answer(&session, &answers);
+                                let request = Request::answer_for(&session, &question, &answers);
                                 this.send_for(session.clone(), request, cx);
                             }
                         }
@@ -355,7 +359,11 @@ impl NotchView {
         let submit = gate::tip(submit, ready, A).when(ready.enabled, |b| {
             b.on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(answers) = this.draft.answers(&question) {
-                    this.send_for(session.clone(), Request::answer(&session, &answers), cx);
+                    this.send_for(
+                        session.clone(),
+                        Request::answer_for(&session, &question, &answers),
+                        cx,
+                    );
                 }
             }))
         });
@@ -401,10 +409,11 @@ impl NotchView {
                     A,
                 )
                 .line_height(px(line(TypeRole::Heading)));
-                let session = id.to_owned();
+                // The card hides by row; the decision goes to the prompt by its own id.
+                let (session, prompt) = (id.to_owned(), r.id.clone());
                 gate::tip(row, gate, A).when(gate.enabled, |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
-                        let request = Request::permission(&session, decision);
+                        let request = Request::permission(&prompt, decision);
                         this.send_for(session.clone(), request, cx);
                     }))
                 })

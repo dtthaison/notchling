@@ -9,6 +9,7 @@
 //! 2026-11-08-phase7-m3-daemon-acts.md`, "Daemon ops"); [`Request`] builds them, pure, so the
 //! shapes are tested here and the socket only carries them.
 
+use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_local_api::{ClientError, ErrorCode};
 use serde_json::{json, Value};
 
@@ -183,6 +184,28 @@ impl Request {
         Request::new(ops::SESSION_ANSWER, json!({ "id": id, "answers": answers }))
     }
 
+    /// Answers the question on a row's card. One a hook holds (`hook:<prompt id>`) is answered by
+    /// its prompt id, never the row's, so the answer reaches the prompt the card showed; any other
+    /// (read from the transcript or the screen) is typed into the row's dialog, with the question
+    /// it was read as so the daemon checks each page.
+    pub fn answer_for(row: &str, question: &PendingQuestion, answers: &[Answer]) -> Request {
+        if let Some(prompt) = question.tool_use_id.strip_prefix("hook:") {
+            return Request::answer(prompt, answers);
+        }
+        let mut request = Request::answer(row, answers);
+        let items: Vec<Value> = question
+            .items
+            .iter()
+            .map(|i| {
+                json!({"header": i.header, "question": i.question, "options": i.options,
+                       "details": i.details, "multiSelect": i.multi_select})
+            })
+            .collect();
+        request.args["question"] = json!({ "items": items });
+        request
+    }
+
+    /// `id` is the held prompt's id (`HookRequest::id`), never a row's.
     pub fn permission(id: &str, decision: Decision) -> Request {
         Request::new(
             ops::SESSION_PERMISSION,
@@ -308,6 +331,38 @@ mod tests {
         assert!(is_untrusted("Workspace not trusted: /w/new"));
         assert!(!is_untrusted("acting is off"));
         assert!(is_off(&format!("forbidden: {OFF_MESSAGE}")));
+    }
+
+    #[test]
+    fn a_held_question_is_answered_by_its_prompt_id_and_a_screen_one_by_its_row() {
+        use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem};
+        let item = QuestionItem {
+            header: "DB".into(),
+            question: "Which db?".into(),
+            options: vec!["Postgres".into(), "SQLite".into()],
+            details: vec![],
+            multi_select: false,
+        };
+        let held = PendingQuestion {
+            tool_use_id: "hook:p7-19a".into(),
+            items: vec![item.clone()],
+        };
+        let picked = [Answer::Options(vec![2])];
+        assert_eq!(
+            Request::answer_for("job-a", &held, &picked).args,
+            json!({"id": "p7-19a", "answers": [[2]]})
+        );
+        // Read from the transcript or the screen: typed into the row's dialog, page by page.
+        let typed = PendingQuestion {
+            tool_use_id: "toolu_01".into(),
+            items: vec![item],
+        };
+        assert_eq!(
+            Request::answer_for("job-a", &typed, &picked).args,
+            json!({"id": "job-a", "answers": [[2]], "question": {"items": [{"header": "DB",
+                "question": "Which db?", "options": ["Postgres", "SQLite"], "details": [],
+                "multiSelect": false}]}})
+        );
     }
 
     #[test]

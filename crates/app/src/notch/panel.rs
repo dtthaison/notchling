@@ -194,18 +194,18 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, note) = match answer {
+        let (claude, prompts, note) = match answer {
             Some(answer) => {
                 let note = answer.note();
-                (answer.agents, note)
+                (answer.agents, answer.prompts, note)
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = source.load_from(claude, now_ms());
+                    let loaded = source.load_from(claude, prompts, now_ms());
                     (source, loaded)
                 })
                 .await;

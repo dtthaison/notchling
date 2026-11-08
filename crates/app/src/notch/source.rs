@@ -110,13 +110,18 @@ impl Source {
 
     /// Polls the rows, reads each row's snapshot and the held prompts. `now_ms` is the clock.
     pub fn load(&mut self, now_ms: i64) -> Loaded {
-        self.load_from(None, now_ms)
+        self.load_from(None, None, now_ms)
     }
 
-    /// [`Source::load`] with the rows given: the daemon's list (`session_source`) in place of
-    /// reading the jobs and sessions folders here. `None` reads them. Snapshots and prompts are
-    /// read here either way.
-    pub fn load_from(&mut self, claude: Option<Vec<Agent>>, now_ms: i64) -> Loaded {
+    /// [`Source::load`] with the rows and held prompts given: the daemon's (`session_source`) in
+    /// place of reading the jobs and sessions folders and the Swift hook's `requests/` here. `None`
+    /// reads them. Snapshots are read here either way.
+    pub fn load_from(
+        &mut self,
+        claude: Option<Vec<Agent>>,
+        prompts: Option<Vec<serde_json::Value>>,
+        now_ms: i64,
+    ) -> Loaded {
         let agents = match claude {
             Some(agents) => agents,
             None => self
@@ -134,7 +139,10 @@ impl Source {
             }
         }
         self.locator.retain(&agents);
-        let requests = requests::read_dir(&self.root.requests_dir(), now_ms as f64 / 1000.0);
+        let requests = match prompts {
+            Some(prompts) => requests::from_daemon(&prompts, &agents),
+            None => requests::read_dir(&self.root.requests_dir(), now_ms as f64 / 1000.0),
+        };
         Loaded {
             agents,
             snapshots,
