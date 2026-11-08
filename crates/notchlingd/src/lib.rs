@@ -60,6 +60,7 @@ pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
 pub mod providers_daemon;
+mod providers_gate;
 pub mod providers_ops;
 pub mod service;
 pub mod signals;
