@@ -62,6 +62,7 @@ pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
         .chain(crate::vault::renders::VIEWS.iter())
         .chain(crate::welcome::renders::VIEWS.iter())
         .chain(crate::switches::restart::VIEWS.iter())
+        .chain(crate::machines::renders::VIEWS.iter())
 }
 
 #[cfg(test)]
