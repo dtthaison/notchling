@@ -433,6 +433,15 @@ impl AccountProvider for AntigravityStore {
         }
     }
 
+    /// Stops waiting without putting the previous login back (that would write Antigravity's item).
+    fn abandon_add(&self) -> Option<String> {
+        let mut inner = lock(&self.inner);
+        inner.adding = false;
+        inner.before_add.take().map(|_| {
+            "Antigravity was left at its sign-in screen. Sign in there, or turn accounts on and switch to an account to put its login back.".to_string()
+        })
+    }
+
     fn remove(&self, id: &str) {
         let _op = lock(&self.op);
         let _ = chunked::delete(&Plain(self.deps.keychain.as_ref()), SERVICE, id);

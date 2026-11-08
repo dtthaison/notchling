@@ -548,11 +548,8 @@ fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
             _ => None,
         })
         .unwrap();
-    std::fs::write(
-        scratch.join("auth.json"),
-        codex_login("c@example.com", "u3", "w3"),
-    )
-    .unwrap();
+    // The scratch home is gone with `codex login`: a login that would have landed there can't.
+    assert!(!scratch.exists());
     rig.procs.login_state().lock().unwrap().exit = Some(0);
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(
@@ -585,8 +582,18 @@ fn a_waiting_add_flow_ends_when_accounts_turn_off_not_at_its_next_poll() {
     assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(ended["error"], ACCOUNTS_OFF);
     no_secrets(&ended);
-    // The provider's own flow is left alone: cancelling it could write a login back.
-    assert!(!rig.procs.login_state().lock().unwrap().killed);
+    // `codex login` is stopped and its scratch home removed, but nothing is written: a cancel
+    // could put a login back, an abandon never does.
+    assert!(rig.procs.login_state().lock().unwrap().killed);
+    let scratch: Vec<_> = std::fs::read_dir(rig.root.join("state/codex-login"))
+        .map(|d| d.flatten().collect())
+        .unwrap_or_default();
+    assert!(scratch.is_empty(), "{scratch:?}");
+    assert!(!rig
+        .keychain
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("write") || c.starts_with("delete")));
 }
 
 #[test]
@@ -604,7 +611,12 @@ fn stopping_the_daemon_cancels_a_waiting_add_only_while_accounts_are_on() {
         .unwrap();
     off.flag.set(false);
     off.ops.close();
-    assert!(!off.procs.login_state().lock().unwrap().killed);
+    // Off, the flow is abandoned (codex login stopped) and nothing is written.
+    assert!(!off
+        .keychain
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("write") || c.starts_with("delete")));
 }
 
 #[test]

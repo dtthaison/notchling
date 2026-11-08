@@ -25,7 +25,9 @@
 //! reply or an event; a failure's text is fixed words.
 //!
 //! One switch or add flow per provider at a time. A flow that waits for the user stops being
-//! polled the moment the switch turns off, and is cancelled when the daemon stops while it is on.
+//! polled the moment the switch turns off and is abandoned (`AccountProvider::abandon_add`: Codex's
+//! `codex login` stopped and its scratch home removed; nothing written or restored, the event's
+//! `note` says where a provider was left), and is cancelled when the daemon stops while it is on.
 
 use crate::acting_ops::{bad, text_arg, Room};
 use crate::op_group::OpGroup;
@@ -549,7 +551,9 @@ fn add_flow(
             return;
         }
         if !sh.accounts.is_on() {
-            return event("cancelled", json!({"error": ACCOUNTS_OFF}));
+            // Stopped without writing a login: no restore, only the provider's own cleanup.
+            let note = p.abandon_add();
+            return event("cancelled", json!({"error": ACCOUNTS_OFF, "note": note}));
         }
         match p.poll_add() {
             AddProgress::Waiting { sign_in_url } => {

@@ -503,6 +503,21 @@ impl AccountProvider for CodexStore {
         }
     }
 
+    /// Stops `codex login` and removes its scratch home, which holds the new login if one landed;
+    /// the live login and the Keychain are not touched.
+    fn abandon_add(&self) -> Option<String> {
+        let flow = {
+            let mut inner = lock(&self.inner);
+            inner.sign_in_url = None;
+            inner.add.take()
+        };
+        if let Some(mut flow) = flow {
+            flow.child.kill();
+            let _ = std::fs::remove_dir_all(&flow.scratch);
+        }
+        None
+    }
+
     fn remove(&self, id: &str) {
         let _op = lock(&self.op);
         let _ = chunked::delete(&Plain(self.deps.keychain.as_ref()), SERVICE, id);

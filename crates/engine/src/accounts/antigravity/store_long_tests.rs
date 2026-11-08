@@ -86,3 +86,18 @@ fn an_add_that_could_not_put_a_long_login_back_is_refused() {
     assert_eq!(rig.live().as_deref(), Some(a.as_str()), "still signed in");
     assert!(no_quit(&rig));
 }
+
+#[test]
+fn an_add_abandoned_when_accounts_turn_off_writes_nothing_and_says_where_it_left_things() {
+    let rig = Rig::new("abandon", FakeApps::new());
+    rig.set_live(&fake_login("1", "a@example.com", "ta"));
+    rig.store.begin_add().unwrap();
+    let calls = rig.keychain.calls().len();
+    let note = rig.store.abandon_add().unwrap_or_default();
+    assert!(note.contains("sign-in screen"), "{note}");
+    assert_eq!(rig.keychain.calls().len(), calls, "no Keychain call");
+    assert!(!rig.store.state().adding);
+    // Nothing is left to put back later either.
+    rig.store.cancel_add();
+    assert_eq!(rig.keychain.calls().len(), calls);
+}
