@@ -317,7 +317,7 @@ fn a_switch_that_would_interrupt_work_asks_first_and_runs_only_when_confirmed() 
         FakeApps::new().running("com.openai.codex"),
     );
     std::fs::write(rig.codex_auth(), codex_login("a@example.com", "u1", "w1")).unwrap();
-    rig.keychain.write("Notchling Codex", "u2:w2", "x");
+    rig.keychain.write("Notchling Codex", "u2:w2", "x").unwrap();
     let asked = rig
         .call(
             ops::PROVIDERS_SWITCH,
@@ -351,7 +351,7 @@ fn a_confirmed_switch_replies_and_announces() {
     std::fs::write(rig.codex_auth(), &a).unwrap();
     {
         use base64_for_tests::encode;
-        rig.keychain.write("Notchling Codex", "u2:w2", &encode(&b));
+        rig.keychain.write("Notchling Codex", "u2:w2", &encode(&b)).unwrap();
     }
     let reply = rig
         .call(
@@ -645,7 +645,7 @@ fn bad_arguments_are_bad_requests() {
 #[test]
 fn removing_forgets_the_saved_login() {
     let rig = Rig::new("remove", true, FakeProcs::new(), FakeApps::new());
-    rig.keychain.write("Notchling Codex", "u2:w2", "x");
+    rig.keychain.write("Notchling Codex", "u2:w2", "x").unwrap();
     let reply = rig
         .call(
             ops::PROVIDERS_REMOVE,

@@ -72,7 +72,7 @@ impl Rig {
     }
 
     fn save(&self, id: &str, login: &[u8]) {
-        assert!(self.keychain.write(SERVICE, id, &STANDARD.encode(login)));
+        assert_eq!(self.keychain.write(SERVICE, id, &STANDARD.encode(login)), Ok(()));
     }
 }
 

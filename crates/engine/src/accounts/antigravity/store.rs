@@ -132,14 +132,14 @@ impl AntigravityStore {
     /// Sets both places Antigravity reads: its go-keyring Keychain item and the file the language
     /// server reads.
     fn write_login(&self, login: &str) -> Result<(), AccountError> {
-        if !self
-            .deps
-            .keychain
-            .write(LIVE_SERVICE, LIVE_ACCOUNT, &login::encode_keyring(login))
+        if let Err(e) =
+            self.deps
+                .keychain
+                .write(LIVE_SERVICE, LIVE_ACCOUNT, &login::encode_keyring(login))
         {
-            return Err(AccountError::new(
-                "Couldn't update Antigravity's saved login.",
-            ));
+            return Err(AccountError::new(&format!(
+                "Couldn't update Antigravity's saved login: {e}."
+            )));
         }
         // The file mirror is the older format (with `id_token`). A newer-format login doesn't fit
         // it, so drop the old account's file instead; Antigravity writes it again from the item.
@@ -209,7 +209,7 @@ impl AntigravityStore {
             }
         }
         let unchanged = lock(&self.inner).last_saved.as_deref() == Some(login.as_str());
-        if !unchanged && self.deps.keychain.write(SERVICE, &account.id, &login) {
+        if !unchanged && self.deps.keychain.write(SERVICE, &account.id, &login).is_ok() {
             lock(&self.inner).last_saved = Some(login);
         }
         let mut inner = lock(&self.inner);

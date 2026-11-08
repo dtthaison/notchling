@@ -12,7 +12,7 @@
 use super::live::{auth_path, write_live, LOCK_WAIT};
 use super::login::{self, Identity, RunningWork};
 use crate::accounts::book::{self, Saved};
-use crate::accounts::generic_password::Keychain;
+use crate::accounts::generic_password::{Keychain, KeychainError};
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
@@ -144,9 +144,9 @@ impl CodexStore {
         STANDARD.decode(text.trim()).ok()
     }
 
-    fn store(&self, login: &[u8], id: &str) -> bool {
+    fn store(&self, login: &[u8], id: &str) -> Result<(), KeychainError> {
         if self.saved(id).as_deref() == Some(login) {
-            return true;
+            return Ok(());
         }
         self.deps
             .keychain
@@ -166,7 +166,7 @@ impl CodexStore {
             return None;
         };
         let unchanged = lock(&self.inner).last_saved.as_deref() == Some(live.as_slice());
-        if !unchanged && self.store(&live, &who.id) {
+        if !unchanged && self.store(&live, &who.id).is_ok() {
             lock(&self.inner).last_saved = Some(live);
         }
         let mut inner = lock(&self.inner);
@@ -286,10 +286,10 @@ impl CodexStore {
         let Some(who) = login::identity(&data) else {
             return not_finished();
         };
-        if !self.store(&data, &who.id) {
-            return AddProgress::Failed(AccountError::new(
-                "Couldn't save the new Codex login in the Keychain.",
-            ));
+        if let Err(e) = self.store(&data, &who.id) {
+            return AddProgress::Failed(AccountError::new(&format!(
+                "Couldn't save the new Codex login in the Keychain: {e}."
+            )));
         }
         let mut inner = lock(&self.inner);
         let account = Saved {

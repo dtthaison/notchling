@@ -61,7 +61,8 @@ impl Rig {
     /// Antigravity's own item, as it would have written it.
     fn set_live(&self, login: &str) {
         self.keychain
-            .write(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(login));
+            .write(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(login))
+            .unwrap();
     }
 
     fn live(&self) -> Option<String> {
@@ -71,7 +72,7 @@ impl Rig {
     }
 
     fn save(&self, id: &str, login: &str) {
-        self.keychain.write(SERVICE, id, login);
+        assert_eq!(self.keychain.write(SERVICE, id, login), Ok(()));
     }
 }
 
