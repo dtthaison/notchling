@@ -10,6 +10,8 @@
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod acting;
+pub mod actions;
 pub mod chat;
 pub mod cli;
 pub mod dock;
