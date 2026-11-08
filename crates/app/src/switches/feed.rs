@@ -205,6 +205,24 @@ impl Shared {
                     }
                 }
             }
+            // An accounts op that outlasted its call answers here; Move All's carries what moved.
+            topics::ACCOUNTS_DONE => {
+                s.changes.accounts += 1;
+                if event.data.get("op").and_then(Value::as_str) == Some(ops::ACCOUNTS_MOVE_ALL) {
+                    let end = match event.data.get("result") {
+                        Some(result) if event.data.get("ok") != Some(&Value::Bool(false)) => {
+                            result.clone()
+                        }
+                        _ => {
+                            let why = event.data.get("error").and_then(Value::as_str);
+                            let why = why.unwrap_or("The move ended with an error.");
+                            json!({"moved": [], "errors": {"accounts": why}})
+                        }
+                    };
+                    s.changes.moves += 1;
+                    s.last_move = Some(end);
+                }
+            }
             topics::ACCOUNTS_CHANGED | topics::ACCOUNTS_ADD_ENDED => {
                 s.changes.accounts += 1;
                 // A daemon that answers a Move All before it ends says how it went here.

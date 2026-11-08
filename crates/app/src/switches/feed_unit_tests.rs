@@ -195,7 +195,38 @@ fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
     }
     let end = json!({"moved": ["job-1"], "errors": {"job-2": "Couldn't move it"}});
     s.apply(&event(topics::ACCOUNTS_CHANGED, end.clone()));
+    {
+        let st = s.state();
+        assert_eq!((st.changes.moves, st.changes.accounts), (1, 2));
+        assert_eq!(st.last_move, Some(end));
+    }
+    // The daemon's late answer: `accounts.done` for a Move All carries its result or its error.
+    let result = json!({"moved": [], "errors": {"job-9": "Couldn't move it: stop failed"}});
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 4, "op": "accounts.move_all", "ok": true, "result": result}),
+    ));
+    let moves = s.state().changes.moves;
+    assert_eq!((moves, s.state_move()), (2, Some(result)));
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 5, "op": "accounts.move_all", "ok": false, "error": "Acting is off."}),
+    ));
+    assert_eq!(
+        s.state_move(),
+        Some(json!({"moved": [], "errors": {"accounts": "Acting is off."}}))
+    );
+    // Another op's late answer only says the accounts moved.
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 6, "op": "accounts.switch", "ok": true, "result": {"moved": []}}),
+    ));
     let st = s.state();
-    assert_eq!((st.changes.moves, st.changes.accounts), (1, 2));
-    assert_eq!(st.last_move, Some(end));
+    assert_eq!((st.changes.moves, st.changes.accounts), (3, 5));
+}
+
+impl Shared {
+    fn state_move(&self) -> Option<Value> {
+        self.state().last_move.clone()
+    }
 }
