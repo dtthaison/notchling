@@ -110,6 +110,23 @@ impl Layout {
         }
     }
 
+    /// `~/.gemini/antigravity-cli`, which is only ever read through a copy. A fixture root keeps it
+    /// at `<root>/gemini/antigravity-cli`, beside `claude`.
+    pub fn antigravity_dir(&self) -> PathBuf {
+        let home = self
+            .claude_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        home.join(if self.fixture { "gemini" } else { ".gemini" })
+            .join("antigravity-cli")
+    }
+
+    /// Where the copy of Antigravity's summaries database is made: ours, never Antigravity's.
+    pub fn antigravity_copy_dir(&self) -> PathBuf {
+        self.data_dir.join("antigravity")
+    }
+
     /// The folder holding the socket, its lock and the audit log.
     pub fn state_dir(&self) -> PathBuf {
         self.socket
@@ -155,6 +172,28 @@ mod tests {
         );
         assert_eq!(l.audit_path(), l.data_dir.join("audit.jsonl"));
         assert!(!l.fixture && !l.socket_given);
+    }
+
+    #[test]
+    fn antigravity_is_read_from_the_gemini_folder_and_copied_into_ours() {
+        let real = Layout::resolve(None, None, real).unwrap();
+        assert_eq!(
+            real.antigravity_dir(),
+            PathBuf::from("/Users/me/.gemini/antigravity-cli")
+        );
+        assert_eq!(
+            real.antigravity_copy_dir(),
+            real.data_dir.join("antigravity")
+        );
+        let fixture = Layout::resolve(None, Some(OsStr::new("/r")), || None).unwrap();
+        assert_eq!(
+            fixture.antigravity_dir(),
+            PathBuf::from("/r/gemini/antigravity-cli")
+        );
+        assert_eq!(
+            fixture.antigravity_copy_dir(),
+            PathBuf::from("/r/notchling/antigravity")
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@
 
 use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::{ActingOps, Room};
+use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
@@ -116,6 +117,7 @@ pub struct Ops {
     acting: Option<Arc<ActingOps>>,
     bridge: Option<Arc<BridgeOps>>,
     codex: Option<Arc<CodexOps>>,
+    agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
@@ -131,6 +133,7 @@ impl Ops {
             acting: None,
             bridge: None,
             codex: None,
+            agy: None,
             pages: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
@@ -165,11 +168,17 @@ impl Ops {
         if self.bridge.is_some() {
             list.push(topics::BRIDGE);
         }
-        if self.codex.is_some() {
+        if self.codex.is_some() || self.agy.is_some() {
             list.push(topics::TOOLS);
         }
         self.topic_list = list;
         self
+    }
+
+    /// M5's Antigravity ops ([`AgyOps`]), publishing on the `tools` topic too.
+    pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
+        self.agy = Some(agy);
+        self.with_topics()
     }
 
     /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
@@ -230,7 +239,8 @@ impl Handler for Ops {
                 .and_then(|p| p.spec(op))
                 .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
-                .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op))),
+                .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
+                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op))),
         }
     }
 
@@ -240,6 +250,9 @@ impl Handler for Ops {
         }
         if let Some(codex) = self.codex.as_ref().filter(|c| c.spec(op).is_some()) {
             return codex.call(op, args);
+        }
+        if let Some(agy) = self.agy.as_ref().filter(|a| a.spec(op).is_some()) {
+            return agy.call(op, args);
         }
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
             return pages.call(op, args);
@@ -490,6 +503,14 @@ pub fn run(
         acting_ops.clone(),
         room.clone(),
     ));
+    // Off with acting: `agy` starts only on an acting op, and the copy of its list is made only
+    // when the list is read.
+    let agy = Arc::new(AgyOps::for_daemon(
+        &layout,
+        acting_ops.acting_switch(),
+        room.clone(),
+    ));
+    acting_ops.attach_agy(agy.clone());
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -502,7 +523,10 @@ pub fn run(
             Ops::with_acting(sessions.clone(), acting_ops.clone())
                 .with_bridge(bridge.clone())
                 .with_codex(codex_ops.clone())
-                .with_pages(Arc::new(PagesOps::new(PagesSetup::from_layout(&layout))))
+                .with_agy(agy.clone())
+                .with_pages(Arc::new(
+                    PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
+                ))
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -545,6 +569,7 @@ pub fn run(
         }
         last_poll = Instant::now();
         scan(&mut lister, &options, &sessions, &handle);
+        agy.reap();
         // A lane or a jobs/sessions folder that came or went: watch the new set.
         let now = lister.watched();
         if now != watched {
@@ -558,6 +583,7 @@ pub fn run(
     first_scan.finish();
     acting_ops.close();
     codex_ops.close();
+    agy.close();
     bridge.close();
     handle.shutdown();
     match thread.join() {

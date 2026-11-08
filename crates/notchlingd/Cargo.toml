@@ -24,3 +24,5 @@ libc = "0.2"
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
 p12 = "0.6.3"
+# A stand-in for Antigravity's summaries database (agy_ops tests); the engine reads it the same way.
+rusqlite = { version = "0.41.1", features = ["bundled"] }
