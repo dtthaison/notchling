@@ -5,6 +5,9 @@
 //! - `notchling service install|uninstall|print [--dir]` writes the per-OS service file
 //!   ([`service`]) and prints the command that loads it; it never runs that command.
 //!
+//! - `notchling pages [words]` and `notchling page <link|id|words>` look up saved Artifact pages
+//!   ([`pages_cli`]); the daemon serves `search.query`, `pages.list` and `pages.find` ([`pages_ops`]).
+//!
 //! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
 //!   permission or question and prints the answer; anything else, or any trouble, passes.
 //!
@@ -27,6 +30,8 @@ pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod layout;
+pub mod pages_cli;
+pub mod pages_ops;
 pub mod prompts;
 pub mod service;
 pub mod signals;
@@ -41,6 +46,8 @@ mod daemon_tests;
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod pages_ops_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
@@ -68,6 +75,14 @@ pub fn run(command: Command) -> i32 {
         },
         Command::Sessions { json, socket } => match layout_for(socket.as_deref()) {
             Some(l) => clients::sessions(&l.socket, json),
+            None => 1,
+        },
+        Command::Pages { query, socket } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, true),
+            None => 1,
+        },
+        Command::Page { query, socket } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, false),
             None => 1,
         },
         Command::Service { action, dir } => run_service(action, dir.as_deref()),

@@ -189,6 +189,14 @@ fn acting_off_refuses_every_acting_op_before_anything_starts() {
     assert_eq!(list[0]["name"], "Edit hello");
     assert_eq!(list[0]["cwd"], rig.folder.to_string_lossy().as_ref());
     assert_eq!(list[0]["working"], false);
+    // The session index gets the same list by title, with no acting and no process.
+    let titled = rig.ops.titled_sessions();
+    assert_eq!(titled.len(), 1);
+    assert_eq!(
+        (titled[0].id.as_str(), titled[0].title.as_str()),
+        (SESSION, "Edit hello")
+    );
+    assert_eq!(titled[0].folder, rig.folder.to_string_lossy());
     let state = rig.call(STATE, json!({"id": ROW})).unwrap();
     assert_eq!(state["open"], false);
 }

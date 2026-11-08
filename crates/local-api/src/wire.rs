@@ -59,6 +59,15 @@ pub mod ops {
     pub const BRIDGE_REVOKE: &str = "bridge.revoke";
     /// `{enabled, configured, connected, last_connection, listening, hostname}`.
     pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
+
+    /// Milestone 5's pages library and session index, agent tier, reads that work whatever the
+    /// `acting` switch says. The shapes are in `notchlingd`'s `pages_ops` module docs.
+    /// `{text?, limit?}` → `{pages: [Page], sessions: [Session], indexing}`.
+    pub const SEARCH_QUERY: &str = "search.query";
+    /// `{}` → `{pages: [Page], truncated}`.
+    pub const PAGES_LIST: &str = "pages.list";
+    /// `{query}` → `{pages: [Page + describe], truncated}`.
+    pub const PAGES_FIND: &str = "pages.find";
 }
 
 /// Event topics and the events they carry.

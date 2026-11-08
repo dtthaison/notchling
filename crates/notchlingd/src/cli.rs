@@ -34,6 +34,16 @@ pub enum Command {
     Hook {
         socket: Option<PathBuf>,
     },
+    /// `notchling pages [words]`: the saved Artifact pages, one line each.
+    Pages {
+        query: String,
+        socket: Option<PathBuf>,
+    },
+    /// `notchling page <link|id|words>`: where a saved page is and who can republish it.
+    Page {
+        query: String,
+        socket: Option<PathBuf>,
+    },
     Version,
     Help,
 }
@@ -48,6 +58,8 @@ pub fn usage() -> &'static str {
      notchling daemon [--socket <path>]          serve the local API\n  \
      notchling status [--socket <path>]          the daemon's version, pid, uptime and clients\n  \
      notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
+     notchling pages [words] [--socket <path>]   the saved Artifact pages (id, title, account), newest first\n  \
+     notchling page <link|id|words> [--socket <path>]  where a saved page is, and who can republish it\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -87,8 +99,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     let mut socket = None;
     let mut dir = None;
     let mut json = false;
+    let mut words: Vec<String> = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            word if (first == "pages" || first == "page") && !word.starts_with("--") => {
+                words.push(arg)
+            }
             "--socket" if action.is_none() => socket = Some(value(&mut args, "--socket")?),
             "--dir" if action.is_some() => dir = Some(value(&mut args, "--dir")?),
             "--json" if first == "sessions" => json = true,
@@ -100,6 +116,17 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         ("status", _) => Ok(Command::Status { socket }),
         ("sessions", _) => Ok(Command::Sessions { json, socket }),
         ("hook", _) => Ok(Command::Hook { socket }),
+        ("pages", _) => Ok(Command::Pages {
+            query: words.join(" "),
+            socket,
+        }),
+        ("page", _) if words.is_empty() => {
+            Err("page needs a link, an id or words from the title".into())
+        }
+        ("page", _) => Ok(Command::Page {
+            query: words.join(" "),
+            socket,
+        }),
         ("service", Some(action)) => Ok(Command::Service { action, dir }),
         (other, _) => Err(format!("unknown command: {other}")),
     }
@@ -145,6 +172,35 @@ mod tests {
         );
         assert!(p(&["hook", "--json"]).is_err());
         assert!(usage().contains("notchling hook"));
+    }
+
+    #[test]
+    fn pages_and_page_take_words() {
+        assert_eq!(
+            p(&["pages"]),
+            Ok(Command::Pages {
+                query: String::new(),
+                socket: None
+            })
+        );
+        assert_eq!(
+            p(&["pages", "cost", "report", "--socket", "/tmp/s.sock"]),
+            Ok(Command::Pages {
+                query: "cost report".into(),
+                socket: Some("/tmp/s.sock".into())
+            })
+        );
+        assert_eq!(
+            p(&["page", "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv"]),
+            Ok(Command::Page {
+                query: "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv".into(),
+                socket: None
+            })
+        );
+        assert!(p(&["page"]).is_err(), "a page needs something to look for");
+        assert!(p(&["page", "x", "--json"]).is_err());
+        assert!(p(&["status", "word"]).is_err());
+        assert!(usage().contains("notchling page <link|id|words>"));
     }
 
     #[test]

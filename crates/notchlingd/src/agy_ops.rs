@@ -27,7 +27,9 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{now_ms, text_arg, Room};
 use crate::layout::Layout;
+use crate::pages_ops::Titles;
 use notchling_engine::bridge::foreign::PROMPT_PREFIX;
+use notchling_engine::search::index::TitledSession;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
@@ -344,6 +346,25 @@ impl AgyOps {
             PERMISSION => self.permission(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
+    }
+
+    /// Antigravity's sessions by title, for the session index (`search.query`): read from the
+    /// summaries copy each time it asks, so it needs no process and no acting.
+    pub fn titles(self: &Arc<Self>) -> Titles {
+        let ops = self.clone();
+        Arc::new(move || ops.titled_sessions())
+    }
+
+    fn titled_sessions(&self) -> Vec<TitledSession> {
+        self.rows()
+            .into_iter()
+            .map(|r| TitledSession {
+                id: r.id,
+                title: r.title,
+                folder: r.folder,
+                modified: r.modified,
+            })
+            .collect()
     }
 
     /// The permissions waiting, as `prompts.list` rows.
