@@ -87,6 +87,9 @@ const K_VK_ANSI_P: u32 = 0x23;
 const CMD_KEY: u32 = 1 << 8;
 const SHIFT_KEY: u32 = 1 << 9;
 const NO_ERR: OSStatus = 0;
+/// Carbon's `eventNotHandledErr`: "not for me, pass it on". Anything else, `noErr` included, says
+/// the event was handled, and Carbon stops offering it to the other handlers in the process.
+const EVENT_NOT_HANDLED_ERR: OSStatus = -9874;
 
 thread_local! {
     /// What to call for each registered id, on the main thread.
@@ -114,14 +117,32 @@ extern "C" fn on_hot_key(_: EventHandlerCallRef, event: EventRef, _: *mut c_void
             (&mut id as *mut EventHotKeyID).cast(),
         )
     };
-    if status == NO_ERR && id.signature == SIGNATURE {
+    let handler = if is_ours(status, id) {
         // Cloned out of the map first: a handler may register or drop a key itself.
-        let handler = HANDLERS.with(|h| h.borrow().get(&id.id).cloned());
-        if let Some(handler) = handler {
-            handler();
-        }
+        HANDLERS.with(|h| h.borrow().get(&id.id).cloned())
+    } else {
+        None
+    };
+    let handled = handler.is_some();
+    if let Some(handler) = handler {
+        handler();
     }
-    NO_ERR
+    reply(handled)
+}
+
+/// Whether a hot key event, read with `status`, names one of ours.
+fn is_ours(status: OSStatus, id: EventHotKeyID) -> bool {
+    status == NO_ERR && id.signature == SIGNATURE
+}
+
+/// What the handler tells Carbon: handled only when one of our keys was pressed and its handler
+/// ran. A press of another library's key in this process is passed on, not swallowed.
+fn reply(handled: bool) -> OSStatus {
+    if handled {
+        NO_ERR
+    } else {
+        EVENT_NOT_HANDLED_ERR
+    }
 }
 
 /// Installs the one Carbon handler for hot key presses, the first time.
@@ -243,6 +264,25 @@ mod tests {
         assert_eq!(key.label(), "⌘⇧P");
         assert_eq!((key.key_code, key.modifiers), (0x23, 0x300));
         assert_eq!(std::mem::size_of::<EventHotKeyID>(), 8);
+        assert_eq!(EVENT_NOT_HANDLED_ERR, -9874);
         // Nothing is registered here: that needs the running app and takes the real shortcut.
+    }
+
+    #[test]
+    fn only_a_handled_press_of_ours_is_answered_with_no_error() {
+        let ours = EventHotKeyID {
+            signature: SIGNATURE,
+            id: 3,
+        };
+        let theirs = EventHotKeyID {
+            signature: four(b"OTHR"),
+            id: 3,
+        };
+        assert!(is_ours(NO_ERR, ours));
+        assert!(!is_ours(NO_ERR, theirs), "another library's key");
+        assert!(!is_ours(-50, ours), "a parameter that could not be read");
+        // Handled: noErr. Not ours, or no handler left for it: pass it on.
+        assert_eq!(reply(true), NO_ERR);
+        assert_eq!(reply(false), EVENT_NOT_HANDLED_ERR);
     }
 }
