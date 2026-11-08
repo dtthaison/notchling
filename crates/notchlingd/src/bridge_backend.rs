@@ -1,0 +1,309 @@
+//! What the phone bridge reads from and does through the daemon: [`DaemonSources`] (the session
+//! list, the held prompts, the pairing approval) and [`DaemonActing`] (the acting ops, so the
+//! acting switch applies: while it's off, the phone reads and never types, answers or starts).
+
+use crate::acting_ops::{ActingOps, Room};
+use crate::control_ops::PICKER_MODELS;
+use crate::prompts::{Kind, Prompt};
+use notchling_engine::bridge::agents;
+use notchling_engine::bridge::live::{Acting, Sources};
+use notchling_engine::bridge::model::{
+    Control, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session, TakeoverOutcome,
+};
+use notchling_engine::bridge::BridgeFailure;
+use notchling_engine::sessions::{Agent, AgentTarget};
+use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{sync_channel, SyncSender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// How long a phone that gave the right code waits for the person at the computer.
+pub const APPROVAL_WAIT: Duration = Duration::from_secs(120);
+
+/// Pairing requests waiting for `bridge.pair.answer`. With no app attached, nobody can answer:
+/// refused at once.
+pub struct Approvals {
+    room: Arc<dyn Room>,
+    waiting: Mutex<HashMap<String, SyncSender<bool>>>,
+    next: Mutex<u64>,
+    wait: Duration,
+}
+
+impl Approvals {
+    pub fn new(room: Arc<dyn Room>, wait: Duration) -> Approvals {
+        Approvals {
+            room,
+            waiting: Mutex::new(HashMap::new()),
+            next: Mutex::new(0),
+            wait,
+        }
+    }
+
+    /// Publishes `bridge.pair.request` and waits for the answer; false when there's none.
+    pub fn request(&self, name: &str, platform: &str) -> bool {
+        if !self.room.can_answer() {
+            return false;
+        }
+        let id = {
+            let mut next = lock(&self.next);
+            *next += 1;
+            format!("pair-{}", *next)
+        };
+        let (tx, rx) = sync_channel(1);
+        lock(&self.waiting).insert(id.clone(), tx);
+        self.room.publish(
+            topics::BRIDGE,
+            topics::BRIDGE_PAIR_REQUEST,
+            &json!({"request": id, "name": name, "platform": platform}),
+        );
+        let allowed = rx.recv_timeout(self.wait).unwrap_or(false);
+        lock(&self.waiting).remove(&id);
+        allowed
+    }
+
+    /// The app's answer; false when no request has that id (answered, timed out or never made).
+    pub fn answer(&self, id: &str, allow: bool) -> bool {
+        match lock(&self.waiting).remove(id) {
+            Some(tx) => tx.try_send(allow).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Every waiting phone is refused (the bridge stops or the daemon quits).
+    pub fn refuse_all(&self) {
+        for (_, tx) in lock(&self.waiting).drain() {
+            let _ = tx.try_send(false);
+        }
+    }
+}
+
+/// The daemon's list and prompts, as the bridge's live backend reads them.
+pub struct DaemonSources {
+    pub sessions: Arc<Mutex<Value>>,
+    pub acting: Arc<ActingOps>,
+    pub approvals: Arc<Approvals>,
+    /// `~/.claude/projects`, for the recent folders of `session.new`.
+    pub projects_dir: PathBuf,
+}
+
+fn agents_of(list: &Value) -> Vec<Agent> {
+    serde_json::from_value(list.clone()).unwrap_or_default()
+}
+
+impl Sources for DaemonSources {
+    fn claude_sessions(&self) -> Vec<Session> {
+        let rows = agents_of(&lock(&self.sessions));
+        let mut sessions = agents::sessions(&rows);
+        let mut prompts = self.acting.prompts().list();
+        prompts.sort_by_key(|p| p.created_ms);
+        for prompt in prompts {
+            if let Some(session) = sessions
+                .iter_mut()
+                .find(|s| s.id == prompt.session_id && s.pending.is_none())
+            {
+                session.pending = Some(pending(&prompt));
+            }
+        }
+        sessions
+    }
+
+    fn projects_dir(&self) -> Option<PathBuf> {
+        Some(self.projects_dir.clone())
+    }
+
+    fn request_approval(&self, device_name: &str, platform: &str) -> bool {
+        self.approvals.request(device_name, platform)
+    }
+
+    fn now_ms(&self) -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as f64)
+            .unwrap_or(0.0)
+    }
+}
+
+/// A held hook as the phone's prompt.
+pub fn pending(prompt: &Prompt) -> PendingPrompt {
+    let kind = match (prompt.kind, &prompt.question) {
+        (Kind::Question, Some(question)) => PromptKind::Question(
+            question
+                .items
+                .iter()
+                .map(|i| PromptQuestion {
+                    header: i.header.clone(),
+                    question: i.question.clone(),
+                    options: i.options.clone(),
+                    multi_select: i.multi_select,
+                })
+                .collect(),
+        ),
+        _ => PromptKind::Permission,
+    };
+    PendingPrompt {
+        id: prompt.id.clone(),
+        session_id: prompt.session_id.clone(),
+        kind,
+        tool_name: prompt
+            .event
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        summary: prompt.summary(),
+        created_ms: prompt.created_ms as f64,
+    }
+}
+
+/// The bridge's actions on the acting ops, as the app would call them.
+pub struct DaemonActing {
+    pub ops: Arc<ActingOps>,
+    pub sessions: Arc<Mutex<Value>>,
+}
+
+/// The phone acts with the app's rights; the acting switch still decides.
+fn bridge_caller() -> Caller {
+    Caller {
+        tier: Tier::App,
+        client: ClientKind::App,
+        peer: None,
+        pid: None,
+    }
+}
+
+fn failure(e: ApiError) -> BridgeFailure {
+    match e.code {
+        ErrorCode::Internal => BridgeFailure::internal(e.message),
+        ErrorCode::Failed => BridgeFailure::not_reachable(e.message),
+        _ => BridgeFailure::invalid(e.message),
+    }
+}
+
+impl DaemonActing {
+    fn call(&self, op: &str, args: Value) -> Result<Value, BridgeFailure> {
+        self.ops.call(&bridge_caller(), op, &args).map_err(failure)
+    }
+
+    /// The list row of a background job, by its job id.
+    fn row_of(&self, session: &Session) -> Result<String, BridgeFailure> {
+        let Control::Job(job) = &session.control else {
+            return Err(BridgeFailure::view_only("Session này chỉ xem được."));
+        };
+        agents_of(&lock(&self.sessions))
+            .into_iter()
+            .find(|a| matches!(&a.target, AgentTarget::Job(j) if j == job))
+            .map(|a| a.id)
+            .ok_or_else(|| BridgeFailure::not_found("Không tìm thấy session."))
+    }
+}
+
+impl Acting for DaemonActing {
+    fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
+        let id = self.row_of(session)?;
+        self.call(ops::SESSION_REPLY, json!({"id": id, "text": text}))
+            .map(|_| ())
+    }
+
+    fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {
+        let id = self.row_of(session)?;
+        self.call(ops::SESSION_INTERRUPT, json!({"id": id}))
+            .map(|_| ())
+    }
+
+    fn respond(
+        &self,
+        prompt: &PendingPrompt,
+        response: &PromptResponse,
+    ) -> Result<(), BridgeFailure> {
+        let (op, args) = match (response, &prompt.kind) {
+            (PromptResponse::Allow, _) => (
+                ops::SESSION_PERMISSION,
+                json!({"id": prompt.id, "decision": "allow"}),
+            ),
+            (PromptResponse::Deny, _) => (
+                ops::SESSION_PERMISSION,
+                json!({"id": prompt.id, "decision": "deny"}),
+            ),
+            (PromptResponse::Answers(answers), PromptKind::Question(items)) => (
+                ops::SESSION_ANSWER,
+                json!({"id": prompt.id, "answers": answer_json(answers, items)}),
+            ),
+            (PromptResponse::Answers(_), PromptKind::Permission) => {
+                return Err(BridgeFailure::invalid(
+                    "Đây là yêu cầu cấp quyền, không phải câu hỏi.",
+                ))
+            }
+        };
+        self.call(op, args).map(|_| ())
+    }
+
+    fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure> {
+        let mut args = json!({"folder": cwd.to_string_lossy()});
+        if let Some(full) = model.and_then(model_id) {
+            args["flags"] = json!(["--model", full]);
+        }
+        self.call(ops::SESSION_NEW, args).map(|_| ())
+    }
+
+    fn take_over(&self, _: &Session, _: bool) -> Result<TakeoverOutcome, BridgeFailure> {
+        Err(BridgeFailure::invalid(
+            "Máy này chưa tiếp quản được session từ điện thoại.",
+        ))
+    }
+}
+
+/// The phone's short model name as the picker's full id (`opus` → `claude-opus-5-5`).
+fn model_id(short: &str) -> Option<&'static str> {
+    PICKER_MODELS
+        .iter()
+        .copied()
+        .find(|id| id.split('-').nth(1) == Some(short))
+}
+
+/// The phone answers with option labels or free text; `session.answer` takes option numbers
+/// (1-based, a list each) or text.
+fn answer_json(answers: &[String], items: &[PromptQuestion]) -> Value {
+    Value::Array(
+        answers
+            .iter()
+            .zip(items)
+            .map(
+                |(answer, item)| match item.options.iter().position(|o| o == answer) {
+                    Some(i) => json!([i + 1]),
+                    None => json!(answer),
+                },
+            )
+            .collect(),
+    )
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_model_names_become_the_pickers_ids() {
+        assert_eq!(model_id("opus"), Some("claude-opus-5-5"));
+        assert_eq!(model_id("sonnet"), Some("claude-sonnet-5-5"));
+        assert_eq!(model_id("default"), None);
+    }
+
+    #[test]
+    fn answers_become_option_numbers_or_text() {
+        let item = PromptQuestion {
+            header: "Pick".into(),
+            question: "Which?".into(),
+            options: vec!["Red".into(), "Blue".into()],
+            multi_select: false,
+        };
+        let out = answer_json(&["Blue".into(), "green".into()], &[item.clone(), item]);
+        assert_eq!(out, json!([[2], "green"]));
+    }
+}
