@@ -88,6 +88,16 @@ impl Hub {
             .any(|e| e.kind == Some(ClientKind::App) && e.tier == Tier::App)
     }
 
+    /// Whether an app-tier client that said hello as the app follows `topic`: someone who will
+    /// see what is published on it.
+    pub(crate) fn app_client_following(&self, topic: &str) -> bool {
+        self.entries().values().any(|e| {
+            e.kind == Some(ClientKind::App)
+                && e.tier == Tier::App
+                && e.topics.iter().any(|t| t == topic)
+        })
+    }
+
     pub(crate) fn counts(&self) -> ClientCounts {
         let mut counts = ClientCounts::default();
         for entry in self.entries().values() {

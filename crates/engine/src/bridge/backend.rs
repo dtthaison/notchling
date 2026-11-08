@@ -91,7 +91,7 @@ pub trait BridgeBackend: Send + Sync {
     fn recent_projects(&self) -> Vec<String>;
 
     /// Asks the person at the computer whether to pair this device, and waits for the answer.
-    fn request_approval(&self, device_name: &str, platform: &str) -> bool;
+    fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool;
 
     fn start_phone(
         &self,

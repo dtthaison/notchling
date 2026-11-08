@@ -73,7 +73,7 @@ pub trait Sources: Send + Sync {
         None
     }
     /// Asks the person at the computer to approve a phone. No approver means no.
-    fn request_approval(&self, _device_name: &str, _platform: &str) -> bool {
+    fn request_approval(&self, _device_name: &str, _platform: &str, _address: &str) -> bool {
         false
     }
     fn now_ms(&self) -> f64;
@@ -365,8 +365,9 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
         })
     }
 
-    fn request_approval(&self, device_name: &str, platform: &str) -> bool {
-        self.sources.request_approval(device_name, platform)
+    fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool {
+        self.sources
+            .request_approval(device_name, platform, address)
     }
 
     fn start_phone(

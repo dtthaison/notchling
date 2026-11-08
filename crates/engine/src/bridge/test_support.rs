@@ -188,7 +188,7 @@ impl BridgeBackend for FakeBackend {
             "/Users/example/src/notes".into(),
         ]
     }
-    fn request_approval(&self, _: &str, _: &str) -> bool {
+    fn request_approval(&self, _: &str, _: &str, _: &str) -> bool {
         let delay = self.with(|s| s.approval_delay_ms);
         if delay > 0 {
             std::thread::sleep(std::time::Duration::from_millis(delay));

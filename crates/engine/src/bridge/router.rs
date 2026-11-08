@@ -208,7 +208,10 @@ impl Router {
             self.fail(connection);
             return;
         }
-        if !self.backend.request_approval(&name, &platform) {
+        if !self
+            .backend
+            .request_approval(&name, &platform, &connection.remote_address)
+        {
             reply_error(
                 connection,
                 id,

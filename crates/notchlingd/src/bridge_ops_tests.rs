@@ -200,15 +200,23 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
     let room = Arc::new(FakeRoom::default());
     let approvals = Arc::new(Approvals::new(room.clone(), Duration::from_secs(5)));
     assert!(
-        !approvals.request("Phone", "ios"),
+        !approvals.request("Phone", "ios", "192.168.1.40"),
         "no app attached: refused at once"
     );
     assert!(room.named(topics::BRIDGE_PAIR_REQUEST).is_empty());
 
+    // Attached is not enough: an app that doesn't follow the bridge topic would never see it.
     room.app.store(true, Ordering::SeqCst);
+    assert!(
+        !approvals.request("Phone", "ios", "192.168.1.40"),
+        "attached but not following the bridge: refused at once"
+    );
+    assert!(room.named(topics::BRIDGE_PAIR_REQUEST).is_empty());
+
+    room.following.lock().unwrap().push(topics::BRIDGE.into());
     let waiting = {
         let approvals = approvals.clone();
-        std::thread::spawn(move || approvals.request("Phone", "ios"))
+        std::thread::spawn(move || approvals.request("Phone", "ios", "192.168.1.40"))
     };
     let request = loop {
         if let Some(event) = room.named(topics::BRIDGE_PAIR_REQUEST).pop() {
@@ -217,6 +225,8 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
         std::thread::sleep(Duration::from_millis(10));
     };
     assert_eq!(request["name"], "Phone");
+    assert_eq!(request["platform"], "ios");
+    assert_eq!(request["address"], "192.168.1.40");
     let id = request["request"].as_str().unwrap();
     assert!(!approvals.answer("pair-999", true), "an unknown request");
     assert!(approvals.answer(id, true));
@@ -224,7 +234,104 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
     assert!(!approvals.answer(id, true), "answered once");
 
     let late = Arc::new(Approvals::new(room, Duration::from_millis(50)));
-    assert!(!late.request("Slow", "android"), "unanswered is refused");
+    assert!(
+        !late.request("Slow", "android", "10.0.0.2"),
+        "unanswered is refused"
+    );
+}
+
+/// The real server and the real room: `can_follow` is true only for an app client that has
+/// subscribed to `bridge`, and then the request reaches it and its `bridge.pair.answer` is what
+/// the phone gets.
+#[test]
+fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
+    use notchling_local_api::{
+        Allowlist, Client, ClientKind, ConnectOptions, Limits, Server, ServerConfig,
+    };
+    let dir = scratch("room");
+    let short = PathBuf::from(format!("/tmp/nl-pr-{}", std::process::id()));
+    std::fs::create_dir_all(&short).unwrap();
+    let socket = short.join("s.sock");
+    let room = Arc::new(crate::daemon::LateRoom::default());
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let setup = BridgeSetup {
+        data_dir: dir.0.join("AgentConsole"),
+        home: dir.0.join("home"),
+        images_dir: dir.0.join("phone-images"),
+        projects_dir: dir.0.join("home/.claude/projects"),
+        lan_port: 0,
+        tunnel_port: 0,
+        loopback_only: true,
+        approval_wait: Duration::from_secs(10),
+    };
+    let acting = Arc::new(ActingOps::new(
+        Arc::new(Acting::in_memory(false)),
+        sessions.clone(),
+        Roots {
+            main_dir: PathBuf::from("/nonexistent/claude"),
+            lanes_file: PathBuf::from("/nonexistent/lanes.json"),
+        },
+        room.clone(),
+        Box::new(NoTerminal),
+    ));
+    let bridge = Arc::new(BridgeOps::new(
+        setup,
+        sessions.clone(),
+        acting.clone(),
+        room.clone(),
+    ));
+    let handler = crate::daemon::Ops::with_acting(sessions, acting).with_bridge(bridge.clone());
+    let server = Server::bind(
+        ServerConfig {
+            socket: socket.clone(),
+            allowlist: Allowlist::new([std::env::current_exe().unwrap()]),
+            audit: None,
+            version: "9.9.9".into(),
+            limits: Limits::default(),
+        },
+        Arc::new(handler),
+    )
+    .unwrap();
+    let (handle, _thread) = server.spawn().unwrap();
+    room.set(handle.clone());
+
+    let options = ConnectOptions {
+        check_server: false,
+        ..ConnectOptions::default()
+    };
+    let mut app = Client::connect_with(&socket, ClientKind::App, "0.1.0", &options).unwrap();
+    assert!(room.can_answer(), "attached");
+    assert!(
+        !room.can_follow(topics::BRIDGE),
+        "attached is not following the bridge"
+    );
+    let approvals = bridge.approvals();
+    assert!(!approvals.request("Phone", "ios", "192.168.1.40"));
+
+    app.subscribe(&[topics::BRIDGE]).unwrap();
+    assert!(room.can_follow(topics::BRIDGE));
+    let asking = {
+        let approvals = approvals.clone();
+        std::thread::spawn(move || approvals.request("Pixel 9", "android", "192.168.1.40"))
+    };
+    let event = app
+        .next_event(Duration::from_secs(5))
+        .unwrap()
+        .expect("the request");
+    assert_eq!(event.event, topics::BRIDGE_PAIR_REQUEST);
+    assert_eq!(event.data["address"], "192.168.1.40");
+    let answered = app
+        .call(
+            ops::BRIDGE_PAIR_ANSWER,
+            json!({"request": event.data["request"], "allow": false}),
+        )
+        .unwrap();
+    assert_eq!(answered["answered"], true);
+    assert!(!asking.join().unwrap(), "Deny is no");
+
+    drop(app);
+    handle.shutdown();
+    let _ = std::fs::remove_dir_all(&short);
 }
 
 fn job_session() -> Session {

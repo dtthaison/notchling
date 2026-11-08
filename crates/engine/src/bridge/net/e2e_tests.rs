@@ -47,7 +47,7 @@ impl Sources for FixtureSources {
     fn claude_sessions(&self) -> Vec<Session> {
         self.sessions.lock().unwrap().clone()
     }
-    fn request_approval(&self, _: &str, _: &str) -> bool {
+    fn request_approval(&self, _: &str, _: &str, _: &str) -> bool {
         true
     }
     fn now_ms(&self) -> f64 {

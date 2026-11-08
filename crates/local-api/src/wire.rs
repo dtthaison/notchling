@@ -69,7 +69,7 @@ pub mod topics {
     pub const ACTING_CHANGED: &str = "settings.acting";
     /// The phone bridge (app tier).
     pub const BRIDGE: &str = "bridge";
-    /// `{"request", "name", "platform"}`: a phone gave the right code and waits for the person at
+    /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at
     /// the computer (`bridge.pair.answer`). Unanswered, it is refused.
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     /// The status after a change (`bridge.status`'s answer).

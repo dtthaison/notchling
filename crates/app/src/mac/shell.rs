@@ -17,6 +17,7 @@ use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
 use crate::phone::bridge::{now_ms, Bridge};
+use crate::phone::pairing::PairingFeed;
 use crate::session_source::SessionSource;
 
 /// The app's state while it runs.
@@ -44,6 +45,12 @@ impl Global for AppActions {}
 pub struct AppBridge(pub Arc<Bridge>);
 
 impl Global for AppBridge {}
+
+/// The follower of the daemon's `bridge` topic: the phones waiting to pair, which `mac::pair_prompt`
+/// shows in a window of their own. Not set in a render.
+pub struct AppPairing(pub Arc<PairingFeed>);
+
+impl Global for AppPairing {}
 
 /// How often the app reads the bridge while no panel is open.
 const BRIDGE_POLL: Duration = Duration::from_secs(5);
@@ -79,6 +86,12 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         cx.set_global(AppActions(actions.clone()));
         let bridge = Arc::new(Bridge::for_run(root.as_ref()));
         cx.set_global(AppBridge(bridge.clone()));
+        let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
+        cx.set_global(AppPairing(pairing.clone()));
+        if pairing.is_live() {
+            // The daemon asks the person only while this follows `bridge`.
+            super::pair_prompt::watch(cx, pairing, bridge.clone());
+        }
         if bridge.is_live() {
             // Off at every daemon start: this brings the daemon back to what the user chose.
             cx.spawn(async move |cx| loop {

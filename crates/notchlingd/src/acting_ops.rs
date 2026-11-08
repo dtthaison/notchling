@@ -81,6 +81,10 @@ pub trait Room: Send + Sync {
     fn publish(&self, topic: &str, event: &str, data: &Value);
     /// An app-tier client is attached (later a paired phone too).
     fn can_answer(&self) -> bool;
+    /// An app-tier client is attached and follows `topic`, so an event published there is seen.
+    /// Attached alone says nothing about what the client reads: the pairing request needs this,
+    /// not [`Room::can_answer`].
+    fn can_follow(&self, topic: &str) -> bool;
 }
 
 /// Opens the attach terminal of a background job: `claude attach <job>` in a pty of

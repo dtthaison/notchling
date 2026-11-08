@@ -237,6 +237,12 @@ impl ServerHandle {
         self.shared.hub.app_client_attached()
     }
 
+    /// Whether the app is attached and follows `topic`: attached alone says nothing about what
+    /// it reads (a pairing request published to no follower is seen by nobody).
+    pub fn app_following(&self, topic: &str) -> bool {
+        self.shared.hub.app_client_following(topic)
+    }
+
     /// Open connections, hello said or not.
     pub fn connections(&self) -> usize {
         self.shared.hub.len()

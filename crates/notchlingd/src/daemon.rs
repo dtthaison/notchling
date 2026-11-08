@@ -228,6 +228,10 @@ impl Room for LateRoom {
     fn can_answer(&self) -> bool {
         self.0.get().is_some_and(ServerHandle::app_attached)
     }
+
+    fn can_follow(&self, topic: &str) -> bool {
+        self.0.get().is_some_and(|h| h.app_following(topic))
+    }
 }
 
 /// The session list now, as JSON with the engine's field names.
