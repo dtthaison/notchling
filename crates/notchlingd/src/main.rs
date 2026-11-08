@@ -1,24 +1,14 @@
-//! `notchlingd`: prints its name and version, then exits. The real work arrives in later phases.
+//! `notchling`: the daemon (`notchling daemon`) and its command line. See the library's docs.
 
-/// The line the binary prints: `<name> <version>`.
-pub fn version_line() -> String {
-    format!(
-        "{} {}",
-        env!("CARGO_PKG_NAME").trim_start_matches("notchling-"),
-        env!("CARGO_PKG_VERSION")
-    )
-}
+use notchling_notchlingd::cli;
 
 fn main() {
-    println!("{}", version_line());
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_line_is_name_then_version() {
-        assert_eq!(version_line(), "notchlingd 0.1.0");
-    }
+    let command = match cli::parse(std::env::args().skip(1)) {
+        Ok(command) => command,
+        Err(message) => {
+            eprintln!("notchling: {message}\n\n{}", cli::usage());
+            std::process::exit(2);
+        }
+    };
+    std::process::exit(notchling_notchlingd::run(command));
 }

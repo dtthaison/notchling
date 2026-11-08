@@ -3331,10 +3331,23 @@ dependencies = [
 [[package]]
 name = "notchling-local-api"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "notchling-platform",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "notchling-notchlingd"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "notchling-engine",
+ "notchling-local-api",
+ "notchling-platform",
+ "serde_json",
+]
 
 [[package]]
 name = "notchling-platform"

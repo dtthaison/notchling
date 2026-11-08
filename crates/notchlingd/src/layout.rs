@@ -1,0 +1,151 @@
+//! Which folders the daemon reads and where its socket goes.
+//!
+//! - `NOTCHLING_DATA_ROOT=<dir>` (the M1 fixture convention): `<dir>/claude` is read as `~/.claude`
+//!   and `<dir>/notchling` is the data folder. A fixture root keeps finished rows however old,
+//!   since a fixture's dates are fixed.
+//! - Otherwise `~/.claude` and the OS's data folder (`platform::paths`).
+//! - The socket is `<data dir>/notchlingd.sock` unless `--socket` names another. The lock and the
+//!   audit log sit beside the socket, so a daemon given a test socket never writes to the real
+//!   data folder.
+
+use notchling_engine::sessions::Roots;
+use notchling_local_api::{AUDIT_NAME, SOCKET_NAME};
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
+/// The variable naming a fixture root.
+pub const DATA_ROOT_ENV: &str = "NOTCHLING_DATA_ROOT";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Layout {
+    /// Read as `~/.claude`.
+    pub claude_dir: PathBuf,
+    /// Notchling's data folder (`lanes.json`).
+    pub data_dir: PathBuf,
+    pub socket: PathBuf,
+    /// True when `--socket` chose the socket: its folder is then not ours to tighten.
+    pub socket_given: bool,
+    /// True for a fixture root.
+    pub fixture: bool,
+}
+
+impl Layout {
+    /// Works the layout out from `--socket`, the data root variable and the real folders
+    /// (`home`, data folder), which are asked for only when there's no data root.
+    pub fn resolve(
+        socket: Option<&Path>,
+        data_root: Option<&OsStr>,
+        real: impl FnOnce() -> Option<(PathBuf, PathBuf)>,
+    ) -> Option<Layout> {
+        let (claude_dir, data_dir, fixture) = match data_root.filter(|v| !v.is_empty()) {
+            Some(root) => {
+                let root = PathBuf::from(root);
+                (root.join("claude"), root.join("notchling"), true)
+            }
+            None => {
+                let (home, data) = real()?;
+                (home.join(".claude"), data, false)
+            }
+        };
+        let socket_given = socket.is_some();
+        let socket = socket
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| data_dir.join(SOCKET_NAME));
+        Some(Layout {
+            claude_dir,
+            data_dir,
+            socket,
+            socket_given,
+            fixture,
+        })
+    }
+
+    /// From the process environment.
+    pub fn from_env(socket: Option<&Path>) -> Option<Layout> {
+        Layout::resolve(socket, std::env::var_os(DATA_ROOT_ENV).as_deref(), || {
+            Some((
+                notchling_platform::paths::home()?,
+                notchling_platform::paths::data_dir()?,
+            ))
+        })
+    }
+
+    pub fn roots(&self) -> Roots {
+        Roots {
+            main_dir: self.claude_dir.clone(),
+            lanes_file: self.data_dir.join("lanes.json"),
+        }
+    }
+
+    /// The folder holding the socket, its lock and the audit log.
+    pub fn state_dir(&self) -> PathBuf {
+        self.socket
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    pub fn audit_path(&self) -> PathBuf {
+        self.state_dir().join(AUDIT_NAME)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn real() -> Option<(PathBuf, PathBuf)> {
+        Some((
+            "/Users/me".into(),
+            "/Users/me/Library/Application Support/Notchling".into(),
+        ))
+    }
+
+    #[test]
+    fn the_real_folders_and_the_default_socket() {
+        let l = Layout::resolve(None, None, real).unwrap();
+        assert_eq!(l.claude_dir, PathBuf::from("/Users/me/.claude"));
+        assert_eq!(
+            l.socket,
+            PathBuf::from("/Users/me/Library/Application Support/Notchling/notchlingd.sock")
+        );
+        assert_eq!(l.audit_path(), l.data_dir.join("audit.jsonl"));
+        assert!(!l.fixture && !l.socket_given);
+    }
+
+    #[test]
+    fn a_data_root_replaces_both_folders_and_never_asks_for_the_real_ones() {
+        let l = Layout::resolve(None, Some(OsStr::new("/r")), || {
+            panic!("read the real home")
+        })
+        .unwrap();
+        assert_eq!(l.claude_dir, PathBuf::from("/r/claude"));
+        assert_eq!(l.data_dir, PathBuf::from("/r/notchling"));
+        assert_eq!(l.socket, PathBuf::from("/r/notchling/notchlingd.sock"));
+        assert!(l.fixture);
+        assert_eq!(
+            l.roots().lanes_file,
+            PathBuf::from("/r/notchling/lanes.json")
+        );
+    }
+
+    #[test]
+    fn an_explicit_socket_moves_the_lock_and_audit_with_it() {
+        let l = Layout::resolve(
+            Some(Path::new("/tmp/t/x.sock")),
+            Some(OsStr::new("/r")),
+            real,
+        )
+        .unwrap();
+        assert_eq!(l.socket, PathBuf::from("/tmp/t/x.sock"));
+        assert_eq!(l.audit_path(), PathBuf::from("/tmp/t/audit.jsonl"));
+        assert!(l.socket_given);
+    }
+
+    #[test]
+    fn an_empty_data_root_is_ignored_and_no_home_is_none() {
+        let l = Layout::resolve(None, Some(OsStr::new("")), real).unwrap();
+        assert!(!l.fixture);
+        assert!(Layout::resolve(None, None, || None).is_none());
+    }
+}
