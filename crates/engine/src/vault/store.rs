@@ -298,23 +298,23 @@ impl VaultStore {
         self.save(&entry.renamed(name), None, Some(entry), now)
     }
 
-    /// Removes an entry and its value; false when there was none by that name.
+    /// Removes an entry and its value; false when the list has none by that name. A value under a
+    /// name the list doesn't hold is left alone: the item may hold the Swift app's values too.
     pub fn remove(&self, name: &str) -> Result<bool, VaultError> {
         let _held = self.lock();
         let generation = self.generation();
         let index = list::read_index(&self.index)?;
         let id = name.to_lowercase();
+        let left: Vec<VaultEntry> = index.iter().filter(|e| e.id() != id).cloned().collect();
+        if left.len() == index.len() {
+            return Ok(false);
+        }
         let mut values = self.load(generation)?;
-        let had = values.remove(&id).is_some();
-        if had {
+        if values.remove(&id).is_some() {
             self.store(generation, values)?;
         }
-        let left: Vec<VaultEntry> = index.iter().filter(|e| e.id() != id).cloned().collect();
-        let listed = left.len() != index.len();
-        if listed {
-            list::write_index(&self.index, &left)?;
-        }
-        Ok(had || listed)
+        list::write_index(&self.index, &left)?;
+        Ok(true)
     }
 
     /// Turns "ask before each use" off for these ids (the approval's Always Allow).
