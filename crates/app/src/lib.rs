@@ -17,6 +17,7 @@ pub mod dock;
 pub mod mac;
 pub mod menu;
 pub mod notch;
+pub mod session_source;
 #[cfg(test)]
 mod testutil;
 pub mod transcripts;

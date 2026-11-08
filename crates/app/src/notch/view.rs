@@ -2,6 +2,8 @@
 //! of the camera housing, and what it holds in each state. Read-only: rows open a conversation,
 //! tabs switch, Back and Close move between states; nothing replies or answers.
 
+use std::sync::Arc;
+
 use gpui::{
     div, prelude::*, px, relative, AnyView, App, Context, Div, Render, ScrollHandle, SharedString,
     Stateful, Window,
@@ -25,6 +27,7 @@ use super::model::{
 };
 use super::renders;
 use super::source::Source;
+use crate::session_source::{SessionSource, DAEMON_DOWN_NOTE};
 
 /// The notch's root view: a transparent canvas with the shape at its top centre.
 pub struct NotchView {
@@ -35,6 +38,8 @@ pub struct NotchView {
     pub(super) ns_window: Option<Retained<NSWindow>>,
     pub(super) geometry: Option<Geometry>,
     pub(super) source: Option<Source>,
+    /// Where the rows come from first: the daemon, else `source` reads the files.
+    pub(super) sessions: Option<Arc<SessionSource>>,
     /// The conversation scrolls to its end when it opens and when a line arrives.
     scroll: ScrollHandle,
     scrolled_for: Option<(String, usize)>,
@@ -48,6 +53,7 @@ impl NotchView {
             ns_window: None,
             geometry: None,
             source: None,
+            sessions: None,
             scroll: ScrollHandle::new(),
             scrolled_for: None,
         }
@@ -156,8 +162,15 @@ impl NotchView {
             .flex_shrink_0()
             .flex()
             .items_center()
-            .justify_end()
-            .pr(px(14.0))
+            .justify_between()
+            .px(px(14.0))
+            // Beside the camera, only while the list is open: the collapsed shape is too small.
+            .child(
+                div().children(
+                    (m.daemon_down && m.state == NotchState::List)
+                        .then(|| text(DAEMON_DOWN_NOTE, TypeRole::Meta, Ink::TextFaint)),
+                ),
+            )
             .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))
     }
 

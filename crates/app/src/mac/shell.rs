@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::{App, Application, Global, WindowId};
 use objc2::MainThreadMarker;
@@ -13,6 +14,7 @@ use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
+use crate::session_source::SessionSource;
 
 /// The app's state while it runs.
 struct Shell {
@@ -22,6 +24,8 @@ struct Shell {
     titled: HashSet<WindowId>,
     /// Where Chat reads from; `None` when the environment names no home folder.
     root: Option<DataRoot>,
+    /// The session rows, from the daemon when it answers; shared by Chat and the notch.
+    sessions: Arc<SessionSource>,
 }
 
 impl Global for Shell {}
@@ -49,16 +53,21 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         if tray.is_none() {
             eprintln!("no menu bar item: not on the main thread");
         }
+        // A fixture root reads files only and never touches a daemon (`session_source::config_for`).
+        let exe = std::env::current_exe().ok();
+        let sessions = Arc::new(SessionSource::for_run(root.as_ref(), exe.as_deref()));
+        let for_notch = sessions.clone();
         cx.set_global(Shell {
             state,
             tray,
             titled: HashSet::new(),
             root,
+            sessions,
         });
         cx.on_window_closed(update_dock).detach();
         // Not titled, so it never counts toward the Dock icon.
         if let Some(source) = notch {
-            crate::notch::panel::open(cx, source);
+            crate::notch::panel::open(cx, source, for_notch);
         }
     });
     0
@@ -103,9 +112,12 @@ fn open_chat(cx: &mut App) {
         }
         None => {
             let root = cx.global::<Shell>().root.clone();
+            let sessions = cx.global::<Shell>().sessions.clone();
             let id = match root {
-                Some(root) => open_main_window(cx, |window, cx| ChatView::new(root, window, cx))
-                    .map(|h| h.window_id()),
+                Some(root) => open_main_window(cx, |window, cx| {
+                    ChatView::with_source(root, sessions, window, cx)
+                })
+                .map(|h| h.window_id()),
                 None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
                     .map(|h| h.window_id()),
             };

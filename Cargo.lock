@@ -3301,6 +3301,7 @@ dependencies = [
  "gpui",
  "notchling-engine",
  "notchling-kit",
+ "notchling-local-api",
  "notchling-platform",
  "objc2",
  "objc2-app-kit",
