@@ -9,16 +9,20 @@ import XCTest
 /// returns at once, printing why, unless NOTCHLING_RECORD=1. Steps are in tools/record-reply-fixtures.sh.
 ///
 ///     NOTCHLING_RECORD=1                    turn it on
-///     NOTCHLING_RECORD_JOB=<id>             a scratch background job (its folder is named *notchling-record*)
+///     NOTCHLING_RECORD_JOB=<id>             a scratch background job (see "Safety")
 ///     NOTCHLING_RECORD_OUT=<folder>         where the files go (never under ~/.claude)
 ///     NOTCHLING_RECORD_ASK_JOB=<id>         optional: a scratch job with an AskUserQuestion open
 ///     NOTCHLING_RECORD_ANSWER=1             optional: also answer that question (option|text|multi by _MODE)
 ///     NOTCHLING_RECORD_PERMISSION_JOB=<id>  optional: a scratch job blocked on a permission dialog
-///     NOTCHLING_RECORD_TRUST_DIR=<folder>   optional: a never-trusted *notchling-record* folder (starts `claude`)
+///     NOTCHLING_RECORD_TRUST_DIR=<folder>   optional: a never-trusted scratch folder (starts `claude`)
 ///     NOTCHLING_RECORD_TRANSCRIPT=<path>    optional: the main job's transcript, to read `popAll` back
 ///     NOTCHLING_RECORD_ONLY=a,b             optional: only these behaviors
 ///
-/// Safety: every job and folder must be a scratch one (`RecordGuard`). It types real replies into those
+/// Safety: every job and folder must be a scratch one (`RecordGuard`): the folder's own name is
+/// `notchling-record` or starts with `notchling-record-`, and it holds a `.notchling-record-scratch`
+/// file (`tools/record-reply-fixtures.sh --prepare` makes the folder with it). A job counts by the copy
+/// `claude attach` will run in (the newest, as `AgentMonitor.environment(forJob:)` picks it), not the
+/// first config folder's. It types real replies into those
 /// sessions, which cost a model turn each, and never touches another session, Keychain or a login.
 /// It owns its attach (a forkpty with the same size, TERM and env the app uses, teeing every byte read)
 /// because `ReplySender` and `TerminalSession` keep the bytes to themselves; the keys, pauses, parsers and
@@ -58,10 +62,108 @@ final class RecordReplyFixturesTests: XCTestCase {
         XCTAssertTrue(RecordGuard.isScratchFolder("/tmp/notchling-record-1"))
         XCTAssertTrue(RecordGuard.isScratchFolder("/Users/me/notchling-record"))
         XCTAssertFalse(RecordGuard.isScratchFolder("/Users/me/work/app"))
+        XCTAssertTrue(RecordGuard.isScratchFolder("/tmp/notchling-record-"), "the prefix then anything")
+        XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/notchling-recorder"), "not a substring match")
+        XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/notchling-recorded-1"))
+        XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/my-notchling-record"), "it has to start the name")
+        XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/mynotchling-record-1"))
+        XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/notchling-record.d"))
         XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/notchling-record/sub"), "only the folder's own name counts")
         XCTAssertFalse(RecordGuard.isScratchFolder("/tmp/notchling-record/../real"), "dot-dot is resolved first")
         XCTAssertFalse(RecordGuard.isScratchFolder("notchling-record"), "a relative path is not a place")
         XCTAssertFalse(RecordGuard.isScratchFolder(""))
+    }
+
+    /// A temp folder to build scratch and look-alike folders in, removed at the end of the test.
+    private func tempBase() throws -> URL {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("recorder-guard-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: base) }
+        return base
+    }
+
+    func testAScratchFolderNeedsTheSentinelFile() throws {
+        let base = try tempBase()
+        let scratch = base.appendingPathComponent("notchling-record-1")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        XCTAssertTrue(RecordGuard.isScratchFolder(scratch.path), "the name is right")
+        XCTAssertFalse(RecordGuard.hasSentinel(scratch.path))
+        XCTAssertThrowsError(try RecordGuard.requireScratchFolder(scratch.path), "named right but never prepared")
+
+        // A folder of the sentinel's name is not the file.
+        let sentinel = scratch.appendingPathComponent(RecordGuard.sentinelName)
+        try FileManager.default.createDirectory(at: sentinel, withIntermediateDirectories: true)
+        XCTAssertFalse(RecordGuard.hasSentinel(scratch.path))
+        try FileManager.default.removeItem(at: sentinel)
+
+        FileManager.default.createFile(atPath: sentinel.path, contents: Data())
+        XCTAssertTrue(RecordGuard.hasSentinel(scratch.path))
+        XCTAssertNoThrow(try RecordGuard.requireScratchFolder(scratch.path))
+
+        // A name that is merely close, with the sentinel in it, is still refused.
+        let close = base.appendingPathComponent("notchling-recorder")
+        try FileManager.default.createDirectory(at: close, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: close.appendingPathComponent(RecordGuard.sentinelName).path, contents: Data())
+        XCTAssertThrowsError(try RecordGuard.requireScratchFolder(close.path))
+    }
+
+    func testALinkIsNotAScratchFolderOrASentinel() throws {
+        let base = try tempBase()
+        // A real project with the sentinel in it, reached through a scratch-looking link.
+        let real = base.appendingPathComponent("real-project")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: real.appendingPathComponent(RecordGuard.sentinelName).path, contents: Data())
+        let link = base.appendingPathComponent("notchling-record-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        XCTAssertFalse(RecordGuard.isScratchFolder(link.path), "the folder behind the link is somebody's project")
+        XCTAssertThrowsError(try RecordGuard.requireScratchFolder(link.path))
+
+        // A scratch folder whose sentinel is a link to a file elsewhere.
+        let scratch = base.appendingPathComponent("notchling-record-2")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let elsewhere = base.appendingPathComponent("elsewhere")
+        FileManager.default.createFile(atPath: elsewhere.path, contents: Data())
+        try FileManager.default.createSymbolicLink(
+            at: scratch.appendingPathComponent(RecordGuard.sentinelName), withDestinationURL: elsewhere)
+        XCTAssertFalse(RecordGuard.hasSentinel(scratch.path))
+    }
+
+    func testTheJobCheckReadsTheCopyAttachWillUse() throws {
+        let base = try tempBase()
+        let scratch = base.appendingPathComponent("notchling-record-3")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: scratch.appendingPathComponent(RecordGuard.sentinelName).path, contents: Data())
+        let early = "2026-11-08T08:00:00.000Z", late = "2026-11-08T09:00:00.000Z"
+        let scratchCopy: (String, String) -> [String: Any] = { state, updated in
+            ["state": state, "cwd": scratch.path, "updatedAt": updated]
+        }
+        let realCopy: (String, String) -> [String: Any] = { state, updated in
+            ["state": state, "cwd": "/Users/me/work/app", "updatedAt": updated]
+        }
+
+        // The session moved to a lane: the main folder keeps a stopped scratch copy, but attach runs
+        // the lane's live one, in a real folder. The first config folder's copy would have passed.
+        let moved: [RecordGuard.JobCopy] = [(nil, scratchCopy("stopped", early)), ("/lanes/b", realCopy("working", late))]
+        XCTAssertEqual(RecordGuard.attachCopy(moved)?.dir, "/lanes/b")
+        XCTAssertThrowsError(try RecordGuard.requireScratchJob("aa11bb22", copies: moved))
+
+        // The other way round: a real stopped copy is left behind and the scratch one is current.
+        let back: [RecordGuard.JobCopy] = [(nil, realCopy("stopped", early)), ("/lanes/b", scratchCopy("working", late))]
+        XCTAssertEqual(RecordGuard.attachCopy(back)?.dir, "/lanes/b")
+        XCTAssertEqual(try RecordGuard.requireScratchJob("aa11bb22", copies: back), "aa11bb22")
+
+        // It is the app's own choice, not a second opinion.
+        for copies in [moved, back] {
+            XCTAssertEqual(RecordGuard.attachCopy(copies)?.dir, AgentMonitor.newestFirst(copies).first ?? nil)
+        }
+
+        // A single copy: named right and prepared passes; not prepared, no cwd and no job do not.
+        XCTAssertNoThrow(try RecordGuard.requireScratchJob("aa11bb22", copies: [(nil, scratchCopy("working", late))]))
+        try FileManager.default.removeItem(at: scratch.appendingPathComponent(RecordGuard.sentinelName))
+        XCTAssertThrowsError(try RecordGuard.requireScratchJob("aa11bb22", copies: [(nil, scratchCopy("working", late))]))
+        XCTAssertThrowsError(try RecordGuard.requireScratchJob("aa11bb22", copies: [(nil, ["state": "working"])]))
+        XCTAssertThrowsError(try RecordGuard.requireScratchJob("aa11bb22", copies: []))
+        XCTAssertThrowsError(try RecordGuard.requireScratchJob("../x", copies: moved))
     }
 
     func testJobIDsAreSimpleNames() {
@@ -97,10 +199,13 @@ final class RecordReplyFixturesTests: XCTestCase {
 
 enum RecordGuard {
     enum Refusal: Error, CustomStringConvertible {
-        case notScratch(String), noSuchJob(String), badID(String), badOutput(String)
+        case notScratch(String), noSentinel(String), noSuchJob(String), badID(String), badOutput(String)
         var description: String {
             switch self {
-            case .notScratch(let what): return "\(what) is not a scratch folder (its name must contain notchling-record)"
+            case .notScratch(let what):
+                return "\(what) is not a scratch folder (its own name must be notchling-record or start with notchling-record-)"
+            case .noSentinel(let path):
+                return "\(path) has no \(RecordGuard.sentinelName) file: tools/record-reply-fixtures.sh --prepare makes the folder with it"
             case .noSuchJob(let id): return "no job \(id) found under any config folder"
             case .badID(let id): return "\(id) is not a job id"
             case .badOutput(let why): return "output folder refused: \(why)"
@@ -109,35 +214,69 @@ enum RecordGuard {
     }
 
     static let marker = "notchling-record"
+    /// The file `tools/record-reply-fixtures.sh --prepare` puts in a scratch folder. A folder is not
+    /// scratch for being named right: someone has to have made it for recording.
+    static let sentinelName = ".notchling-record-scratch"
 
-    /// An absolute folder whose own name contains the marker, after `..` is resolved.
+    /// An absolute folder, `..` and symlinks resolved, whose own name is the marker or starts with
+    /// `<marker>-` (not a substring: `notchling-recorder` is somebody's project).
     static func isScratchFolder(_ path: String) -> Bool {
         guard path.hasPrefix("/") else { return false }
-        return URL(fileURLWithPath: path).standardizedFileURL.lastPathComponent.contains(marker)
+        let name = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().lastPathComponent
+        return name == marker || name.hasPrefix(marker + "-")
+    }
+
+    /// Whether the folder holds the sentinel as a regular file (a link to one doesn't count).
+    static func hasSentinel(_ path: String) -> Bool {
+        let folder = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+        let file = folder.appendingPathComponent(sentinelName).path
+        let type = (try? FileManager.default.attributesOfItem(atPath: file))?[.type] as? FileAttributeType
+        return type == .typeRegular
     }
 
     static func isJobID(_ id: String) -> Bool {
         id.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
     }
 
+    /// A scratch folder by name that also holds the sentinel.
+    @discardableResult
     static func requireScratchFolder(_ path: String) throws -> String {
         guard isScratchFolder(path) else { throw Refusal.notScratch(path) }
+        guard hasSentinel(path) else { throw Refusal.noSentinel(path) }
         return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
-    /// The job must exist and have been started in a scratch folder: its `cwd` in `jobs/<id>/state.json`.
-    @discardableResult
-    static func requireScratchJob(_ id: String) throws -> String {
-        guard isJobID(id) else { throw Refusal.badID(id) }
-        for (dir, _) in LaneStore.configDirs() {
+    typealias JobCopy = (dir: String?, job: [String: Any])
+
+    /// Every config folder's `jobs/<id>/state.json`, as `AgentMonitor.jobDirs(forJob:)` reads them:
+    /// `dir` is the lane's path, nil for ~/.claude.
+    static func copies(ofJob id: String) -> [JobCopy] {
+        LaneStore.configDirs().compactMap { dir, lane in
             let state = dir.appendingPathComponent("jobs").appendingPathComponent(id).appendingPathComponent("state.json")
             guard let data = try? Data(contentsOf: state),
-                  let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
-            let cwd = json["cwd"] as? String ?? ""
-            guard isScratchFolder(cwd) else { throw Refusal.notScratch(cwd.isEmpty ? "job \(id)'s folder" : cwd) }
-            return id
+                  let job = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            return (lane?.path, job)
         }
-        throw Refusal.noSuchJob(id)
+    }
+
+    /// The copy `claude attach` will run in: the first of `AgentMonitor.newestFirst`, which is what
+    /// `AgentMonitor.environment(forJob:)` picks the `CLAUDE_CONFIG_DIR` from. A session moved to
+    /// another account leaves its stopped copy behind, so the first config folder's copy may not be it.
+    static func attachCopy(_ copies: [JobCopy]) -> JobCopy? {
+        guard let newest = AgentMonitor.newestFirst(copies).first else { return nil }
+        return copies.first { $0.dir == newest }
+    }
+
+    /// The job must exist and the copy attach will use must have been started in a scratch folder:
+    /// its `cwd` in that copy's `state.json`, named right and holding the sentinel.
+    @discardableResult
+    static func requireScratchJob(_ id: String, copies: [JobCopy]? = nil) throws -> String {
+        guard isJobID(id) else { throw Refusal.badID(id) }
+        guard let copy = attachCopy(copies ?? self.copies(ofJob: id)) else { throw Refusal.noSuchJob(id) }
+        let cwd = copy.job["cwd"] as? String ?? ""
+        guard !cwd.isEmpty else { throw Refusal.notScratch("job \(id)'s folder") }
+        try requireScratchFolder(cwd)
+        return id
     }
 
     /// An absolute folder, created if missing, that is not Claude Code's own config.
