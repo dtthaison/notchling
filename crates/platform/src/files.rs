@@ -36,10 +36,38 @@ fn create_private(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
+/// How many links in a row are followed before it counts as a loop (Linux's own limit is 40).
+const MAX_LINK_HOPS: usize = 40;
+
+/// Follows `path` while it is a symlink, a dangling one included, to the file the write is really for.
+/// A lane's shared files are links into `~/.claude`: renaming over the link would unshare them.
+fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    for _ in 0..MAX_LINK_HOPS {
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let link = fs::read_link(&current)?;
+                current = match current.parent() {
+                    Some(parent) if link.is_relative() => parent.join(link),
+                    _ => link,
+                };
+            }
+            _ => return Ok(current),
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "too many levels of symbolic links: {}",
+        path.display()
+    )))
+}
+
 /// Writes `data` to `path` so no reader sees a half-written file and no other user can read it:
 /// a 0600 temp file in the same folder, flushed to disk, then renamed over the target. The temp
-/// file is removed when anything fails, and the old content stays.
+/// file is removed when anything fails, and the old content stays. When `path` is a symlink the
+/// write goes to the file it points at (the link stays a link), with the temp file beside that file.
 pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
+    let path = resolve_links(path)?;
+    let path = path.as_path();
     let temp = temp_beside(path);
     let result = (|| -> std::io::Result<()> {
         let mut file = create_private(&temp)?;
@@ -70,7 +98,8 @@ fn sync_parent(path: &Path) {
 }
 
 /// Creates `path` and any missing parents as 0700 folders, and tightens `path` itself if it
-/// already exists with looser access.
+/// already exists with looser access. A symlink is left as it is: the folder it points at (a lane's
+/// shared one, say) is not ours to change.
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
@@ -83,6 +112,9 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        if fs::symlink_metadata(path)?.file_type().is_symlink() {
+            return Ok(());
+        }
         let mode = fs::metadata(path)?.permissions().mode();
         if mode & 0o077 != 0 {
             fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
@@ -207,6 +239,89 @@ mod tests {
         ensure_private_dir(&d).unwrap();
         let mode = std::fs::metadata(&d).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writing_to_a_symlink_writes_through_to_its_target() {
+        // A lane's shared files are links into ~/.claude; replacing the link would unshare them.
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        let real = dir.path().join("real/settings");
+        std::fs::write(&real, b"old").unwrap();
+        let link = dir.path().join("link");
+        symlink(&real, &link).unwrap();
+        write_private(&link, b"new").unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&real).unwrap(), b"new");
+        assert_eq!(std::fs::read(&link).unwrap(), b"new");
+        let names: Vec<_> = std::fs::read_dir(dir.path().join("real"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("settings")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_link_and_a_chain_of_links_are_followed() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let real = dir.path().join("sub/real");
+        std::fs::write(&real, b"old").unwrap();
+        symlink("sub/real", dir.path().join("one")).unwrap();
+        symlink("one", dir.path().join("two")).unwrap();
+        write_private(&dir.path().join("two"), b"new").unwrap();
+        assert_eq!(std::fs::read(&real).unwrap(), b"new");
+        assert!(std::fs::symlink_metadata(dir.path().join("two"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_is_filled_in_at_its_target() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        let target = dir.path().join("not-yet");
+        symlink(&target, dir.path().join("link")).unwrap();
+        write_private(&dir.path().join("link"), b"hello").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_loop_is_an_error_not_a_hang() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        symlink(dir.path().join("b"), dir.path().join("a")).unwrap();
+        symlink(dir.path().join("a"), dir.path().join("b")).unwrap();
+        assert!(write_private(&dir.path().join("a"), b"x").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_dir_is_not_chmodded_through_the_link() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = TempDir::new();
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = dir.path().join("link");
+        symlink(&shared, &link).unwrap();
+        ensure_private_dir(&link).unwrap();
+        let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]
