@@ -112,7 +112,8 @@ fn a_lane_login_that_the_profile_says_is_another_account_never_goes_back() {
         &json!({"claudeAiOauth": oauth(2, 2, LATER)}).to_string(),
     );
     w.answers_profile(3);
-    assert!(w.store.close_lane(&lane.name).unwrap());
+    // And the lane keeps it: closing would lose it (tests_safe.rs).
+    assert!(w.store.close_lane(&lane.name).is_err());
     assert_eq!(
         w.saved_item(2)["claudeAiOauth"]["refreshToken"],
         "test-refresh-2-1"

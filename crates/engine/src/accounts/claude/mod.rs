@@ -190,6 +190,7 @@ impl ClaudeAccounts {
                     lane.email, lane.name
                 )));
             }
+            self.live_is_saved(&state)?;
             self.activate(id)?;
             state.active = Some(id.to_string());
         }
@@ -333,6 +334,28 @@ impl ClaudeAccounts {
 
     // MARK: Switching
 
+    /// Ok when Claude Code has no login, or its `claudeAiOauth` reads back from the active
+    /// account's saved slot unchanged: only then may a switch replace it, since Claude Code renews
+    /// it in place and the live item can hold the only working refresh token.
+    fn live_is_saved(&self, state: &State) -> Result<(), AccountError> {
+        let live = self.env.keys.read_json(LIVE_SERVICE, &self.env.keys.user)?;
+        let Some(oauth) = live.and_then(|l| l.object("claudeAiOauth")) else {
+            return Ok(());
+        };
+        let saved = match &state.active {
+            Some(active) => self
+                .saved_login(active)?
+                .and_then(|s| s.object("claudeAiOauth")),
+            None => None,
+        };
+        if saved.as_ref() == Some(&oauth) {
+            return Ok(());
+        }
+        Err(err(
+            "Claude Code's current login couldn't be saved (Notchling can't tell which account it is), so the account wasn't changed. Run claude once so it names the account, then try again.",
+        ))
+    }
+
     fn activate(&self, id: &str) -> Result<(), AccountError> {
         let saved = self.saved_login(id)?;
         let (Some(oauth), Some(account)) = (
@@ -419,5 +442,7 @@ fn upsert(list: &mut Vec<ClaudeAccount>, account: ClaudeAccount) {
 mod tests;
 #[cfg(test)]
 mod tests_lanes;
+#[cfg(test)]
+mod tests_safe;
 #[cfg(test)]
 mod tests_support;
