@@ -7,11 +7,14 @@
 //! `codex login` in a scratch `CODEX_HOME`, so the account in use stays signed in.
 //!
 //! Never renews a token. Saved copies are base64 in the Keychain item `Notchling Codex`, because
-//! `security -w` prints a value containing newlines as hex.
+//! `security -w` prints a value containing newlines as hex; a real login is too long for one
+//! `security -i` line, so it is split over several items ([`crate::accounts::chunked`]). A switch
+//! writes `auth.json` only once the login it replaces reads back from its saved copy byte for byte.
 
 use super::live::{auth_path, write_live, LOCK_WAIT};
 use super::login::{self, Identity, RunningWork};
 use crate::accounts::book::{self, Saved};
+use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{Keychain, KeychainError};
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
 use crate::providers::usage::{GroupedUsage, UsageReport};
@@ -140,17 +143,50 @@ impl CodexStore {
     // MARK: The login
 
     fn saved(&self, id: &str) -> Option<Vec<u8>> {
-        let text = self.deps.keychain.read(SERVICE, id)?;
-        STANDARD.decode(text.trim()).ok()
+        self.saved_checked(id).ok().flatten()
+    }
+
+    /// The saved copy, put back together if it was split; a damaged one is an error.
+    fn saved_checked(&self, id: &str) -> Result<Option<Vec<u8>>, KeychainError> {
+        let Some(text) = chunked::read(&Plain(self.deps.keychain.as_ref()), SERVICE, id)? else {
+            return Ok(None);
+        };
+        STANDARD
+            .decode(text.trim())
+            .map(Some)
+            .map_err(|_| KeychainError::Damaged)
     }
 
     fn store(&self, login: &[u8], id: &str) -> Result<(), KeychainError> {
         if self.saved(id).as_deref() == Some(login) {
             return Ok(());
         }
-        self.deps
-            .keychain
-            .write(SERVICE, id, &STANDARD.encode(login))
+        let keychain = Plain(self.deps.keychain.as_ref());
+        chunked::write(&keychain, SERVICE, id, &STANDARD.encode(login))
+    }
+
+    /// Ok when the live login is safely saved (read back byte for byte) or there is none, so a
+    /// switch may overwrite `auth.json`. Codex renews the login in place, so the live file can be
+    /// the only copy of a working refresh token.
+    fn live_is_saved(&self) -> Result<(), AccountError> {
+        let refuse = |why: &str| {
+            Err(AccountError::new(&format!(
+                "Codex's current login couldn't be saved in the Keychain, so the account wasn't changed ({why})."
+            )))
+        };
+        let live = match std::fs::read(auth_path(&self.paths.home)) {
+            Ok(live) => live,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return refuse("auth.json couldn't be read"),
+        };
+        let Some(who) = login::identity(&live) else {
+            return refuse("it names no ChatGPT account");
+        };
+        match self.saved_checked(&who.id) {
+            Ok(Some(saved)) if saved == live => Ok(()),
+            Ok(_) => refuse("the saved copy doesn't match it"),
+            Err(e) => refuse(&e.to_string()),
+        }
     }
 
     fn save_book(&self, accounts: &[Saved]) {
@@ -469,7 +505,7 @@ impl AccountProvider for CodexStore {
 
     fn remove(&self, id: &str) {
         let _op = lock(&self.op);
-        self.deps.keychain.delete(SERVICE, id);
+        let _ = chunked::delete(&Plain(self.deps.keychain.as_ref()), SERVICE, id);
         let mut inner = lock(&self.inner);
         inner.accounts.retain(|a| a.id != id);
         inner.usage.remove(id);
@@ -494,9 +530,17 @@ impl AccountProvider for CodexStore {
 impl CodexStore {
     fn switch_locked(&self, id: &str) -> Result<(), AccountError> {
         self.capture();
-        let login = self.saved(id).ok_or_else(|| {
-            AccountError::new("Notchling has no saved login for this account. Add it again.")
-        })?;
+        self.live_is_saved()?;
+        let login = self
+            .saved_checked(id)
+            .map_err(|e| {
+                AccountError::new(&format!(
+                    "Couldn't read the saved login for this account, so nothing changed: {e}."
+                ))
+            })?
+            .ok_or_else(|| {
+                AccountError::new("Notchling has no saved login for this account. Add it again.")
+            })?;
         // The ChatGPT app quits first and opens again, so it never reads a half-changed login.
         let reopen = self.deps.apps.quit(APP_BUNDLE_ID).map_err(|_| {
             AccountError::new(

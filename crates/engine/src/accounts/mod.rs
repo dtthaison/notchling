@@ -31,6 +31,7 @@
 
 pub mod antigravity;
 pub mod book;
+pub mod chunked;
 pub mod claude;
 pub mod codex;
 pub mod desktop;
