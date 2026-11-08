@@ -1,6 +1,7 @@
 //! The settings file: JSON, written atomically, mode 0600.
 
 use super::keys::{spec, KeySpec};
+use notchling_platform::files;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -116,7 +117,7 @@ impl Settings {
         saved
     }
 
-    /// Writes the file: a temp file beside it, mode 0600, then a rename.
+    /// Writes the file: a temp file beside it, mode 0600, then a rename (platform's `write_private`).
     pub fn save(&self) -> Result<(), SettingsError> {
         let mut root = Map::new();
         root.insert("version".to_string(), Value::from(VERSION));
@@ -149,33 +150,15 @@ fn parse(data: &[u8]) -> Result<Map<String, Value>, SettingsError> {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("settings.json");
-    let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-    let _ = std::fs::remove_file(&temp);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+/// Platform's private write (a uniquely named 0600 temp file, flushed, then renamed). A folder that is
+/// missing is made 0700; one that is already there is not ours to change.
+fn write_atomic(path: &Path, bytes: &[u8]) -> notchling_platform::Result<()> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        if !dir.is_dir() {
+            files::ensure_private_dir(dir)?;
+        }
     }
-    let result = (|| {
-        let mut file = options.open(&temp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        std::fs::rename(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
+    files::write_private(path, bytes)
 }
 
 #[cfg(test)]
@@ -237,6 +220,55 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(names, vec!["settings.json"]);
+    }
+
+    #[test]
+    fn saving_from_many_threads_at_once_never_fails() {
+        // A temp name made of the pid alone was shared by every thread: one deleted another's file.
+        let tmp = TempDir::new("set-threads");
+        let path = tmp.path("data/settings.json");
+        std::thread::scope(|scope| {
+            for t in 0..8 {
+                let path = path.clone();
+                scope.spawn(move || {
+                    let mut s = Settings::open(&path).expect("open");
+                    for i in 0..40 {
+                        s.set("showPet", json!((t + i) % 2 == 0)).expect("save");
+                    }
+                });
+            }
+        });
+        assert!(Settings::open(&path).is_ok(), "the file is whole");
+        let names: Vec<_> = std::fs::read_dir(tmp.path("data"))
+            .expect("dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["settings.json"], "no temp file is left");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_data_folder_is_private_and_an_existing_one_is_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: std::path::PathBuf| {
+            std::fs::metadata(p).expect("meta").permissions().mode() & 0o777
+        };
+        let tmp = TempDir::new("set-dirmode");
+        let mut s = open(&tmp);
+        s.set("showPet", json!(false)).expect("set");
+        assert_eq!(mode(tmp.path("data")), 0o700);
+
+        let shared = tmp.path("shared");
+        std::fs::create_dir(&shared).expect("mkdir");
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let mut s = Settings::open(&shared.join("settings.json")).expect("open");
+        s.set("showPet", json!(false)).expect("set");
+        assert_eq!(
+            mode(shared),
+            0o755,
+            "a folder that was already there is not ours to change"
+        );
     }
 
     #[test]
