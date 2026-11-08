@@ -3,6 +3,7 @@
 //! `--data-root`, by `NOTCHLING_DATA_ROOT`, or for a render the checked-in `crates/app/fixtures/chat`.
 //! A render never reads the real `~/.claude`. Everything here only reads files.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
@@ -12,7 +13,7 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
-use crate::notch::source::DATA_ROOT_ENV;
+use crate::notch::source::{DataRoot as NotchRoot, Source, DATA_ROOT_ENV};
 use crate::transcripts::Locator;
 
 /// Which tool a session belongs to.
@@ -72,19 +73,56 @@ impl DataRoot {
 
     /// The fixture root the environment names (`NOTCHLING_DATA_ROOT`), if any.
     pub fn from_env() -> Option<DataRoot> {
-        std::env::var_os(DATA_ROOT_ENV)
-            .filter(|v| !v.is_empty())
-            .map(|v| DataRoot::fixture(Path::new(&v)))
+        DataRoot::named(None, std::env::var_os(DATA_ROOT_ENV).as_deref())
+    }
+
+    /// The fixture root a `--data-root` argument names, else the environment variable's value
+    /// (empty names nothing).
+    fn named(data_root: Option<&Path>, env: Option<&OsStr>) -> Option<DataRoot> {
+        let dir = match data_root {
+            Some(dir) => dir.to_path_buf(),
+            None => PathBuf::from(env.filter(|v| !v.is_empty())?),
+        };
+        Some(DataRoot::fixture(&dir))
     }
 
     /// What a render reads: the `--data-root` folder, else the environment's, else the fixture this
     /// crate carries. Never the real home.
     pub fn for_render(data_root: Option<&Path>) -> DataRoot {
-        match data_root {
-            Some(dir) => DataRoot::fixture(dir),
-            None => DataRoot::from_env().unwrap_or_else(|| {
-                DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"))
-            }),
+        DataRoot::named(data_root, std::env::var_os(DATA_ROOT_ENV).as_deref()).unwrap_or_else(
+            || DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat")),
+        )
+    }
+
+    /// What the running app reads, for Chat and the notch alike: the `--data-root` folder, else the
+    /// environment's, else the user's real folders (`None` without a home).
+    pub fn for_run(data_root: Option<&Path>) -> Option<DataRoot> {
+        DataRoot::resolve_run(
+            data_root,
+            std::env::var_os(DATA_ROOT_ENV).as_deref(),
+            DataRoot::real,
+        )
+    }
+
+    /// [`DataRoot::for_run`] with the environment and the real folders passed in.
+    fn resolve_run(
+        data_root: Option<&Path>,
+        env: Option<&OsStr>,
+        real: impl FnOnce() -> Option<DataRoot>,
+    ) -> Option<DataRoot> {
+        DataRoot::named(data_root, env).or_else(real)
+    }
+
+    /// The notch's source over this root: the same folders, and a fixture's finished rows stay.
+    pub fn notch_source(&self) -> Source {
+        let root = NotchRoot {
+            claude_dir: self.claude_dir.clone(),
+            data_dir: self.data_dir.clone(),
+            fixture: self.fixture.clone(),
+        };
+        match self.fixture {
+            Some(_) => Source::keeping_everything(root),
+            None => Source::new(root),
         }
     }
 
@@ -242,6 +280,68 @@ mod tests {
                 .new_monitor()
                 .completed_window_ms
                 > 1 << 50
+        );
+    }
+
+    fn real_stand_in() -> Option<DataRoot> {
+        Some(DataRoot {
+            claude_dir: "/Users/me/.claude".into(),
+            data_dir: "/Users/me/Library/Application Support/Notchling".into(),
+            codex_dir: "/Users/me/.codex".into(),
+            home: "/Users/me".into(),
+            fixture: None,
+        })
+    }
+
+    #[test]
+    fn the_running_app_reads_the_argument_then_the_environment_then_the_real_folders() {
+        let env = std::ffi::OsString::from("/from-env");
+        let arg = Path::new("/from-arg");
+        let picked = DataRoot::resolve_run(Some(arg), Some(&env), real_stand_in);
+        assert_eq!(
+            picked.unwrap().claude_dir,
+            PathBuf::from("/from-arg/claude")
+        );
+        let picked = DataRoot::resolve_run(None, Some(&env), real_stand_in);
+        assert_eq!(
+            picked.unwrap().claude_dir,
+            PathBuf::from("/from-env/claude")
+        );
+        let empty = std::ffi::OsString::new();
+        let picked = DataRoot::resolve_run(None, Some(&empty), real_stand_in).unwrap();
+        assert_eq!(picked.fixture, None, "an empty variable names nothing");
+        let picked = DataRoot::resolve_run(None, None, real_stand_in).unwrap();
+        assert_eq!(picked.claude_dir, PathBuf::from("/Users/me/.claude"));
+        assert_eq!(DataRoot::resolve_run(None, None, || None), None);
+    }
+
+    #[test]
+    fn the_notch_reads_the_same_root_chat_does() {
+        let fixture = DataRoot::fixture(Path::new("/f"));
+        let source = fixture.notch_source();
+        assert_eq!(source.root.claude_dir, PathBuf::from("/f/claude"));
+        assert_eq!(source.root.data_dir, PathBuf::from("/f/notchling"));
+        assert_eq!(source.root.fixture, Some(PathBuf::from("/f")));
+
+        let real = real_stand_in().unwrap().notch_source();
+        assert_eq!(real.root.claude_dir, PathBuf::from("/Users/me/.claude"));
+        assert_eq!(
+            real.root.data_dir,
+            PathBuf::from("/Users/me/Library/Application Support/Notchling")
+        );
+        assert_eq!(real.root.fixture, None);
+    }
+
+    #[test]
+    fn a_fixture_notch_keeps_finished_rows_however_old() {
+        let root = DataRoot::fixture(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/chat"));
+        // Years after the fixture's dates: a real source would have aged every Done row out.
+        let far = 1_900_000_000_000;
+        let loaded = root.notch_source().load(far);
+        assert!(
+            loaded.agents.iter().any(|a| a.name == "shell mode"),
+            "{:?}",
+            loaded.agents.iter().map(|a| &a.name).collect::<Vec<_>>()
         );
     }
 
