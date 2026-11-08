@@ -128,7 +128,10 @@ fn reply(r: &mut LineReader<UnixStream>) -> Value {
 
 /// True when the server closed the connection (EOF or reset).
 fn closed(s: &mut UnixStream) -> bool {
-    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    // macOS refuses setsockopt (EINVAL) on a socket whose peer has already shut it down.
+    if s.set_read_timeout(Some(Duration::from_secs(5))).is_err() {
+        return true;
+    }
     let mut buf = [0u8; 4096];
     loop {
         match s.read(&mut buf) {
