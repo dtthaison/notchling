@@ -104,3 +104,26 @@ class MemoryChatCache implements ChatCache {
   @override
   Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) async => images['$sessionId|$imageId|$width'] = jpeg;
 }
+
+/// One computer's view of the cache: its session ids carry its scope (decision 0012), so `s1` on two computers
+/// are two entries. The empty scope passes ids through, which is what a phone paired before 0012 has on disk.
+class ScopedChatCache implements ChatCache {
+  const ScopedChatCache(this._inner, this.scope);
+  final ChatCache _inner;
+  final String scope;
+
+  String _key(String sessionId) => scope.isEmpty ? sessionId : '$scope/$sessionId';
+
+  @override
+  Future<List<ChatMessage>> loadMessages(String sessionId) => _inner.loadMessages(_key(sessionId));
+
+  @override
+  Future<void> saveMessages(String sessionId, List<ChatMessage> messages) => _inner.saveMessages(_key(sessionId), messages);
+
+  @override
+  Future<Uint8List?> loadImage(String sessionId, String imageId, int width) => _inner.loadImage(_key(sessionId), imageId, width);
+
+  @override
+  Future<void> saveImage(String sessionId, String imageId, int width, Uint8List jpeg) =>
+      _inner.saveImage(_key(sessionId), imageId, width, jpeg);
+}

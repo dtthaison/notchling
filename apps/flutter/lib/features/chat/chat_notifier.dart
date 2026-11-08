@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../connection/connection.dart';
+import '../macs/computers.dart';
 import '../sessions/sessions_notifier.dart';
 import 'chat_cache.dart';
 
@@ -125,10 +126,17 @@ class ChatNotifier extends Notifier<ChatState> {
   final String sessionId;
   static const int pageSize = 50;
 
+  /// What this build reads from: the computer in use and its cache. A page that comes back after the computer
+  /// changed is dropped, so one computer's messages never show under another's session.
+  BridgeClient? _client;
+  late ChatCache _cache;
+
   @override
   ChatState build() {
     final BridgeClient? client = ref.watch(bridgeClientProvider);
     ref.watch(connectedCountProvider);
+    _client = client;
+    _cache = ref.watch(scopedChatCacheProvider);
     if (client != null) {
       final StreamSubscription<BridgeEvent> events = client.events.listen((BridgeEvent event) {
         if (event is ChatEvent && event.sessionId == sessionId) _append(event.messages);
@@ -142,8 +150,8 @@ class ChatNotifier extends Notifier<ChatState> {
   /// Shows what the phone kept from last time at once, then asks the Mac only for what is newer. With nothing
   /// kept, the first page is fetched (the screen shows its skeleton until then).
   Future<void> _start(BridgeClient? client) async {
-    final List<ChatMessage> kept = await ref.read(chatCacheProvider).loadMessages(sessionId);
-    if (!ref.mounted) return;
+    final List<ChatMessage> kept = await _cache.loadMessages(sessionId);
+    if (!ref.mounted || !identical(client, _client)) return;
     if (kept.isNotEmpty) {
       client?.rememberNewest(sessionId, kept.last.id);
       state = state.copyWith(phase: LoadPhase.ready, messages: _dedupe(_merge(kept, state.messages)), hasMore: true);
@@ -156,12 +164,12 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  void _persist() => unawaited(ref.read(chatCacheProvider).saveMessages(sessionId, state.messages));
+  void _persist() => unawaited(_cache.saveMessages(sessionId, state.messages));
 
   Future<void> _loadFirstPage(BridgeClient client) async {
     try {
       final ({List<ChatMessage> messages, bool hasMore, bool reset}) page = await client.chatGet(sessionId, limit: pageSize);
-      if (!ref.mounted) return;
+      if (!ref.mounted || !identical(client, _client)) return;
       state = state.copyWith(phase: LoadPhase.ready, messages: _dedupe(_merge(page.messages, state.messages)), hasMore: page.hasMore);
       _persist();
     } on BridgeException catch (error) {
@@ -189,7 +197,7 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       final ({List<ChatMessage> messages, bool hasMore, bool reset}) page =
           await client.chatGet(sessionId, limit: pageSize, before: state.messages.first.id);
-      if (!ref.mounted) return;
+      if (!ref.mounted || !identical(client, _client)) return;
       state = state.copyWith(messages: _merge(page.messages, state.messages), hasMore: page.hasMore, loadingOlder: false);
     } on BridgeException {
       if (!ref.mounted) return;
@@ -248,7 +256,7 @@ class ChatNotifier extends Notifier<ChatState> {
     state = state.copyWith(refreshing: true);
     try {
       final ({List<ChatMessage> messages, bool hasMore, bool reset}) page = await client.chatGet(sessionId, limit: pageSize, after: settled.last.id);
-      if (!ref.mounted) return;
+      if (!ref.mounted || !identical(client, _client)) return;
       final bool replace = page.reset || page.hasMore;
       state = state.copyWith(
         phase: LoadPhase.ready,
@@ -285,7 +293,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   Future<void> _deliver(PendingSend entry) async {
-    final BridgeClient? client = ref.read(bridgeClientProvider);
+    final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
       _markFailed(entry.id, null);
       return;
@@ -319,7 +327,7 @@ class ChatNotifier extends Notifier<ChatState> {
   /// to switch to, or null when the Mac refused (the reason is in [ChatState.takeover]).
   Future<String?> takeOver({bool stopOriginal = false}) async {
     if (state.takeover is TakeoverRunning) return null;
-    final BridgeClient? client = ref.read(bridgeClientProvider);
+    final BridgeClient? client = clientForSession(ref, sessionId);
     if (client == null) {
       state = state.copyWith(takeover: const TakeoverFailed('Chưa kết nối tới Mac.'));
       return null;
@@ -341,16 +349,23 @@ class ChatNotifier extends Notifier<ChatState> {
 
   void dismissSendError() => state = state.copyWith(send: const SendIdle());
 
-  Future<void> allow(PendingPrompt prompt, {required bool allow}) => _answer(() => ref.read(bridgeClientProvider)!.promptAllow(prompt.requestId, allow: allow));
+  Future<void> allow(PendingPrompt prompt, {required bool allow}) =>
+      _answer((BridgeClient client) => client.promptAllow(prompt.requestId, allow: allow));
 
   /// [choices] has one entry per question: the 1-based option number.
   Future<void> choose(PendingPrompt prompt, List<int> choices) =>
-      _answer(() => ref.read(bridgeClientProvider)!.promptChoose(prompt.requestId, choices.cast<Object>()));
+      _answer((BridgeClient client) => client.promptChoose(prompt.requestId, choices.cast<Object>()));
 
-  Future<void> _answer(Future<void> Function() action) async {
+  /// Answers go to this session's own computer ([clientForSession]).
+  Future<void> _answer(Future<void> Function(BridgeClient client) action) async {
     state = state.copyWith(clearAnswerError: true);
+    final BridgeClient? client = clientForSession(ref, sessionId);
+    if (client == null) {
+      state = state.copyWith(answerError: 'Chưa kết nối tới Mac.');
+      return;
+    }
     try {
-      await action();
+      await action(client);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
       state = state.copyWith(answerError: error.message);
