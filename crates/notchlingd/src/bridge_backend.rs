@@ -42,9 +42,11 @@ impl Approvals {
         }
     }
 
-    /// Publishes `bridge.pair.request` and waits for the answer; false when there's none.
-    pub fn request(&self, name: &str, platform: &str) -> bool {
-        if !self.room.can_answer() {
+    /// Publishes `bridge.pair.request` and waits for the answer; false when there's none. Needs an
+    /// app that follows the `bridge` topic: one that is merely attached would not see the request
+    /// and the phone would wait out the whole time to be refused.
+    pub fn request(&self, name: &str, platform: &str, address: &str) -> bool {
+        if !self.room.can_follow(topics::BRIDGE) {
             return false;
         }
         let id = {
@@ -57,7 +59,7 @@ impl Approvals {
         self.room.publish(
             topics::BRIDGE,
             topics::BRIDGE_PAIR_REQUEST,
-            &json!({"request": id, "name": name, "platform": platform}),
+            &json!({"request": id, "name": name, "platform": platform, "address": address}),
         );
         let allowed = rx.recv_timeout(self.wait).unwrap_or(false);
         lock(&self.waiting).remove(&id);
@@ -114,8 +116,8 @@ impl Sources for DaemonSources {
         Some(self.projects_dir.clone())
     }
 
-    fn request_approval(&self, device_name: &str, platform: &str) -> bool {
-        self.approvals.request(device_name, platform)
+    fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool {
+        self.approvals.request(device_name, platform, address)
     }
 
     fn now_ms(&self) -> f64 {

@@ -95,6 +95,11 @@ impl BridgeOps {
         BRIDGE_OPS.contains(&op).then_some(OpSpec::APP)
     }
 
+    /// The pairing requests waiting for the app.
+    pub fn approvals(&self) -> Arc<Approvals> {
+        self.approvals.clone()
+    }
+
     pub fn is_on(&self) -> bool {
         self.bridge.is_on()
     }
