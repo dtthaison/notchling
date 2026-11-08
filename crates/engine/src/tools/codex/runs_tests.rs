@@ -356,3 +356,108 @@ fn a_waiting_message_without_a_folder_runs_where_the_session_does() {
     idle(&runs);
     assert_eq!(spawner.specs()[1].cwd, "/work");
 }
+
+fn switch(runs: &CodexRuns) -> Arc<AtomicBool> {
+    let on = Arc::new(AtomicBool::new(true));
+    let flag = on.clone();
+    runs.set_may_start(Arc::new(move || flag.load(Ordering::SeqCst)));
+    on
+}
+
+#[test]
+fn a_waiting_message_does_not_start_once_starting_is_off() {
+    let (runs, spawner, sink) = setup();
+    let on = switch(&runs);
+    spawner.push(FakeRun::held(&[]));
+    spawner.push(FakeRun::ok(&[DONE]));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    runs.send(request("second", Some("abc"))).expect("queues");
+    on.store(false, Ordering::SeqCst);
+    spawner.processes()[0].release();
+    sink.wait_for(3);
+    idle(&runs);
+    assert_eq!(
+        spawner.specs().len(),
+        1,
+        "the waiting message never started"
+    );
+    assert_eq!(runs.waiting("abc"), 0, "and was dropped");
+    assert!(!runs.is_running("abc"));
+}
+
+#[test]
+fn nothing_is_sent_or_queued_while_starting_is_off() {
+    let (runs, spawner, _sink) = setup();
+    let on = switch(&runs);
+    spawner.push(FakeRun::held(&[]));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    on.store(false, Ordering::SeqCst);
+    assert_eq!(
+        runs.send(request("more", Some("abc"))),
+        Err(SendError::NotAllowed)
+    );
+    assert_eq!(runs.send(request("new", None)), Err(SendError::NotAllowed));
+    assert_eq!(
+        runs.send(request("other", Some("zzz"))),
+        Err(SendError::NotAllowed)
+    );
+    assert_eq!(runs.waiting("abc"), 0);
+    assert_eq!(spawner.specs().len(), 1);
+    spawner.processes()[0].release();
+    idle(&runs);
+}
+
+#[test]
+fn a_turn_that_started_as_starting_went_off_is_interrupted() {
+    // The switch goes off after the check and before the process is registered: `stop_all` found
+    // nothing to stop, so the start itself must notice.
+    let (runs, spawner, sink) = setup();
+    let on = switch(&runs);
+    spawner.push(FakeRun::held(&[]));
+    spawner.on_spawn(Box::new(move || on.store(false, Ordering::SeqCst)));
+    runs.send(request("go", Some("abc"))).expect("sends");
+    assert_eq!(sink.wait_for(2), [started("abc"), ended("abc", None)]);
+    assert_eq!(spawner.processes()[0].interrupts(), 1);
+    idle(&runs);
+}
+
+#[test]
+fn a_message_that_restarts_as_the_switch_goes_off_is_interrupted() {
+    let (runs, spawner, sink) = setup();
+    let on = switch(&runs);
+    spawner.push(FakeRun::held(&[]));
+    spawner.push(FakeRun::held(&[]));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    runs.send(request("second", Some("abc"))).expect("queues");
+    // The restart's spawn flips the switch, as `set_acting(false)` can between `finish` and the
+    // registration of the new process.
+    spawner.on_spawn(Box::new(move || on.store(false, Ordering::SeqCst)));
+    spawner.processes()[0].release();
+    sink.wait_for(5);
+    assert_eq!(spawner.processes()[1].interrupts(), 1);
+    idle(&runs);
+}
+
+#[test]
+fn a_message_queued_while_a_turn_is_starting_runs_in_its_folder() {
+    // The turn is reserved but not registered yet: the folder is the starting request's.
+    let (runs, spawner, sink) = setup();
+    spawner.push(FakeRun::held(&[]));
+    spawner.push(FakeRun::ok(&[]));
+    let queued = Arc::new(Mutex::new(None));
+    let (again, slot) = (runs.clone(), queued.clone());
+    spawner.on_spawn(Box::new(move || {
+        let mut next = request("second", Some("abc"));
+        next.folder = String::new();
+        *slot.lock().unwrap() = Some(again.send(next));
+    }));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    assert!(matches!(
+        queued.lock().unwrap().take(),
+        Some(Ok(Sent::Queued { .. }))
+    ));
+    spawner.processes()[0].release();
+    sink.wait_for(5);
+    idle(&runs);
+    assert_eq!(spawner.specs()[1].cwd, "/work");
+}

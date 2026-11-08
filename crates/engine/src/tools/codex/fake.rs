@@ -132,10 +132,14 @@ impl ToolProcess for FakeProcess {
     }
 }
 
+/// Runs once, in the thread that spawns, before the process exists.
+type SpawnHook = Box<dyn FnOnce() + Send>;
+
 #[derive(Default)]
 pub struct FakeSpawner {
     runs: Mutex<VecDeque<Result<FakeRun, SpawnError>>>,
     spawned: Mutex<Vec<(TurnSpec, Arc<FakeProcess>)>>,
+    hook: Mutex<Option<SpawnHook>>,
 }
 
 impl FakeSpawner {
@@ -146,6 +150,12 @@ impl FakeSpawner {
     /// The next spawn is this run (an empty queue runs an empty one that exits 0).
     pub fn push(&self, run: FakeRun) {
         self.queue().push_back(Ok(run));
+    }
+
+    /// Runs `hook` at the start of the next spawn, once: a test's way to do something in the
+    /// window between a start's checks and its process being registered.
+    pub fn on_spawn(&self, hook: SpawnHook) {
+        *self.hook.lock().unwrap_or_else(|e| e.into_inner()) = Some(hook);
     }
 
     /// The next spawn fails.
@@ -174,6 +184,10 @@ impl FakeSpawner {
 
 impl ToolSpawner for FakeSpawner {
     fn spawn(&self, spec: &TurnSpec) -> Result<Arc<dyn ToolProcess>, SpawnError> {
+        let hook = self.hook.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(hook) = hook {
+            hook();
+        }
         let run = match self.queue().pop_front() {
             Some(answer) => answer?,
             None => FakeRun::ok(&[]),

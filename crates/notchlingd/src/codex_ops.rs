@@ -38,7 +38,9 @@ use notchling_engine::tools::codex::plan::{
     MAX_PROMPT_BYTES,
 };
 use notchling_engine::tools::codex::process::{RealSpawner, ToolSpawner};
-use notchling_engine::tools::codex::runs::{CodexRuns, Request, Sent, TurnEvent, TurnSink};
+use notchling_engine::tools::codex::runs::{
+    CodexRuns, Request, SendError, Sent, TurnEvent, TurnSink,
+};
 use notchling_engine::transcript::codex::meta;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
@@ -91,9 +93,14 @@ impl CodexOps {
             sessions_dir: setup.codex_home.join("sessions"),
         });
         let home = setup.home.clone();
+        let runs = CodexRuns::new(spawner, PathBuf::new(), None, sink);
+        // Asked under the runs' lock right before a process starts, and again once it has: a
+        // start can't slip past `acting_off`.
+        let switch = acting.clone();
+        runs.set_may_start(Arc::new(move || switch.is_on()));
         CodexOps {
             acting,
-            runs: CodexRuns::new(spawner, PathBuf::new(), None, sink),
+            runs,
             launcher,
             setup,
             resolve: Box::new(move || system_codex(&home)),
@@ -139,6 +146,12 @@ impl CodexOps {
     /// The daemon is stopping: running turns are asked to stop, which Codex does cleanly, rather
     /// than left with a pipe nobody reads.
     pub fn close(&self) {
+        self.runs.stop_all();
+    }
+
+    /// Acting was turned off: running turns are asked to stop and what waited behind them is
+    /// dropped, since nothing may act while the Swift app owns the sessions.
+    pub fn acting_off(&self) {
         self.runs.stop_all();
     }
 
@@ -211,7 +224,10 @@ impl CodexOps {
                 folder,
                 pick,
             })
-            .map_err(|e| ApiError::new(ErrorCode::Failed, e.to_string()))?;
+            .map_err(|e| match e {
+                SendError::NotAllowed => forbidden(ACTING_OFF),
+                other => ApiError::new(ErrorCode::Failed, other.to_string()),
+            })?;
         Ok(match sent {
             Sent::Started { session } => {
                 json!({"id": row_id(&session), "session": session, "state": "started"})

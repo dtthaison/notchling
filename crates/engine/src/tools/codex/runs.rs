@@ -10,11 +10,11 @@
 use super::events::{parse_line, Event};
 use super::plan::{failure_of, turn_spec, Pick, Turn, TurnSpec};
 use super::process::{Next, Stream, ToolProcess, ToolSpawner};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// How many turns may run at once, over all sessions. Each is a `codex` process.
@@ -52,6 +52,10 @@ pub trait TurnSink: Send + Sync {
     fn event(&self, event: TurnEvent);
 }
 
+/// Whether a turn may start now: the daemon's `acting` switch. Asked under the state lock right
+/// before a process is spawned, and again once it has been (the switch may have gone off between).
+pub type MayStart = Arc<dyn Fn() -> bool + Send + Sync>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sent {
     Started { session: String },
@@ -66,6 +70,8 @@ pub enum SendError {
     Spawn(String),
     /// A new session's turn ended, or took too long, before Codex named the session.
     NotStarted(String),
+    /// Starting turns is switched off (see [`MayStart`]).
+    NotAllowed,
 }
 
 impl std::fmt::Display for SendError {
@@ -74,6 +80,7 @@ impl std::fmt::Display for SendError {
             SendError::TooMany => write!(f, "{MAX_RUNNING} Codex turns are running already"),
             SendError::Spawn(why) => f.write_str(why),
             SendError::NotStarted(why) => f.write_str(why),
+            SendError::NotAllowed => f.write_str("Codex turns may not start right now"),
         }
     }
 }
@@ -94,8 +101,9 @@ struct Waiting {
 #[derive(Default)]
 struct State {
     running: HashMap<String, Live>,
-    /// Sessions a turn is being started for (between the check and the registration).
-    reserved: HashSet<String>,
+    /// Sessions a turn is being started for (between the check and the registration), with the
+    /// folder it runs in, so a message queued meanwhile can run there too.
+    reserved: HashMap<String, String>,
     outbox: HashMap<String, VecDeque<Waiting>>,
     /// Turns that hold a slot: running, starting or about to start the next waiting message.
     active: usize,
@@ -108,6 +116,7 @@ struct Inner {
     sink: Arc<dyn TurnSink>,
     network: AtomicBool,
     announce_ms: AtomicU64,
+    may_start: OnceLock<MayStart>,
     state: Mutex<State>,
 }
 
@@ -135,6 +144,7 @@ impl CodexRuns {
                 sink,
                 network: AtomicBool::new(true),
                 announce_ms: AtomicU64::new(ANNOUNCE_WAIT.as_millis() as u64),
+                may_start: OnceLock::new(),
                 state: Mutex::new(State::default()),
             }),
         }
@@ -158,6 +168,15 @@ impl CodexRuns {
         self.inner.announce_ms.store(ms, Ordering::SeqCst);
     }
 
+    /// What decides whether a turn may start (once; without it any may).
+    pub fn set_may_start(&self, may_start: MayStart) {
+        let _ = self.inner.may_start.set(may_start);
+    }
+
+    fn may_start(&self) -> bool {
+        self.inner.may_start.get().is_none_or(|may| may())
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.inner.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -171,7 +190,7 @@ impl CodexRuns {
 
     pub fn is_running(&self, session: &str) -> bool {
         let state = self.state();
-        state.running.contains_key(session) || state.reserved.contains(session)
+        state.running.contains_key(session) || state.reserved.contains_key(session)
     }
 
     /// Messages waiting behind `session`'s running turn.
@@ -189,10 +208,18 @@ impl CodexRuns {
     pub fn send(&self, request: Request) -> Result<Sent, SendError> {
         if let Some(session) = request.session.clone() {
             let mut state = self.state();
-            if state.running.contains_key(&session) || state.reserved.contains(&session) {
-                let folder = match state.running.get(&session) {
-                    Some(live) if request.folder.is_empty() => live.folder.clone(),
-                    _ => request.folder,
+            if !self.may_start() {
+                return Err(SendError::NotAllowed);
+            }
+            if state.running.contains_key(&session) || state.reserved.contains_key(&session) {
+                // A waiting message with no folder runs where the session's turn does, whether
+                // that turn is running or still starting.
+                let folder = if request.folder.is_empty() {
+                    let live = state.running.get(&session).map(|live| live.folder.clone());
+                    live.or_else(|| state.reserved.get(&session).cloned())
+                        .unwrap_or_default()
+                } else {
+                    request.folder
                 };
                 let queue = state.outbox.entry(session.clone()).or_default();
                 queue.push_back(Waiting {
@@ -212,7 +239,9 @@ impl CodexRuns {
                 return Err(SendError::TooMany);
             }
             state.active += 1;
-            state.reserved.insert(session.clone());
+            state
+                .reserved
+                .insert(session.clone(), request.folder.clone());
             drop(state);
             return match self.begin(&request, Some(&session), None) {
                 Ok(_) => Ok(Sent::Started { session }),
@@ -226,6 +255,9 @@ impl CodexRuns {
         }
         {
             let mut state = self.state();
+            if !self.may_start() {
+                return Err(SendError::NotAllowed);
+            }
             if state.active >= MAX_RUNNING {
                 return Err(SendError::TooMany);
             }
@@ -292,6 +324,10 @@ impl CodexRuns {
                     folder: request.folder.clone(),
                 },
             );
+        }
+        // The switch may have gone off while the process was starting, after `stop_all` looked.
+        if !self.may_start() {
+            process.interrupt();
         }
         // Before the thread starts, so `Started` always comes before this turn's `Ended`.
         if let Some(session) = session {
@@ -418,9 +454,14 @@ impl CodexRuns {
 
     /// Under one lock: the next waiting message, which keeps the session's slot, or nothing, which
     /// frees it. So a message sent in between is queued behind the turn that is ending, never lost.
+    /// With starting turns switched off, what waits is dropped instead of started.
     fn finish(&self, session: Option<&str>) -> Option<Waiting> {
         let mut state = self.state();
-        let next = session.and_then(|s| {
+        let allowed = self.may_start();
+        if let Some(s) = session.filter(|_| !allowed) {
+            state.outbox.remove(s);
+        }
+        let next = session.filter(|_| allowed).and_then(|s| {
             let queue = state.outbox.get_mut(s)?;
             let next = queue.pop_front();
             if queue.is_empty() {
@@ -447,6 +488,10 @@ impl CodexRuns {
                 folder: request.folder.clone(),
             },
         );
+        // As in `begin`: the switch may have gone off while the process was starting.
+        if !self.may_start() {
+            process.interrupt();
+        }
         Ok(process)
     }
 
