@@ -36,6 +36,7 @@ pub mod cli;
 pub mod clients;
 pub mod codex_ops;
 pub mod control_ops;
+pub mod cost_ops;
 pub mod daemon;
 pub mod delegate_cli;
 pub mod hook;
@@ -43,6 +44,7 @@ pub mod hook_ops;
 pub mod hook_output;
 pub mod late_reply;
 pub mod layout;
+pub mod limits_ops;
 pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
@@ -60,11 +62,15 @@ mod acting_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
+mod cost_ops_tests;
+#[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod limits_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;
 #[cfg(test)]

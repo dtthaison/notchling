@@ -25,6 +25,7 @@ use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_ops::ProvidersOps;
+use crate::limits_ops::LimitsOps;
 use crate::switches::{SwitchOps, Switches};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
@@ -557,6 +558,13 @@ pub fn run(
         switches.accounts.clone(),
         room.clone(),
     ));
+    // M6's limit watchers: behind `accounts`, off at every start. `cost.summary` only reads
+    // transcripts and needs no switch.
+    let limits = Arc::new(LimitsOps::for_daemon(
+        &layout,
+        switches.accounts.clone(),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -579,6 +587,7 @@ pub fn run(
                 ))
                 .with_group(accounts.clone())
                 .with_group(providers.clone())
+                .with_group(limits.clone())
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -594,6 +603,7 @@ pub fn run(
     }
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
     room.set(handle.clone());
+    limits.spawn_loop();
     eprintln!(
         "notchling daemon {} serving {}",
         env!("CARGO_PKG_VERSION"),
@@ -638,6 +648,7 @@ pub fn run(
     agy.close();
     providers.close();
     bridge.close();
+    limits.close();
     handle.shutdown();
     match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),
