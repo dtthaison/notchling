@@ -67,12 +67,21 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
     if let Some(reader) = reader {
         session.read_loop(reader);
     }
-    // Off the list, then let the writer send what is queued (a refusal's reply, say) before closing.
-    // A client that doesn't read holds this up only until the write timeout.
-    shared.hub.forget(id);
+    // Off the list (dropping the session does that, also when a handler panics), then let the
+    // writer send what is queued (a refusal's reply, say) before closing. A client that doesn't
+    // read holds this up only until the write timeout.
     drop(session);
     let _ = writer.join();
     let _ = stream.shutdown(Shutdown::Both);
+}
+
+/// Takes the connection off the hub however its thread ends. A panic in a handler unwinds through
+/// here: left on the hub, an app-tier entry would keep `app_attached` true and approval would fail
+/// open, and the hub's handle would keep the socket open.
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.shared.hub.forget(self.id);
+    }
 }
 
 fn write_loop(mut stream: Stream, rx: Receiver<Vec<u8>>) {

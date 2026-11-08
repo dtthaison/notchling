@@ -25,6 +25,8 @@ impl Handler for TestHandler {
             "settings.set" => Some(OpSpec::APP),
             // Stands for an op that would need the user's approval (approval.* comes later).
             "test.needsApproval" => Some(OpSpec::APPROVAL),
+            // A handler bug: the connection's thread unwinds.
+            "test.panic" => Some(OpSpec::AGENT),
             _ => None,
         }
     }
@@ -32,6 +34,7 @@ impl Handler for TestHandler {
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         match op {
             "echo" => Ok(json!({ "args": args, "tier": caller.tier })),
+            "test.panic" => panic!("a handler bug"),
             _ => Ok(json!("done")),
         }
     }
@@ -266,6 +269,22 @@ fn with_an_app_attached_the_approval_op_reaches_the_handler() {
         json!("done")
     );
     assert_eq!(c.call("settings.set", json!({})).unwrap(), json!("done"));
+}
+
+#[test]
+fn an_app_connection_whose_handler_panics_is_forgotten() {
+    // Left on the hub, it would keep `app_attached` true and approval would fail open.
+    let run = start_with(Allowlist::new([me()]), fast());
+    let mut app = Client::connect(&run.socket, ClientKind::App, "0.1.0").unwrap();
+    assert_eq!(app.tier(), Tier::App);
+    assert!(app.call("test.panic", json!({})).is_err());
+    drop(app);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while run.handle.connections() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(run.handle.connections(), 0);
+    assert_eq!(run.handle.status().clients.app, 0);
 }
 
 #[test]
