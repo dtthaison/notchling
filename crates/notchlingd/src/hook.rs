@@ -34,8 +34,6 @@ pub struct HookOptions {
     pub socket: PathBuf,
     /// Read as `~/.claude`: its `sessions/<pid>.json` say whether a session is headless.
     pub claude_dir: PathBuf,
-    /// The hook's own process, so the daemon notices when Claude Code gave up on it.
-    pub pid: u32,
     /// Its parent processes, nearest first: one of them is the Claude Code session.
     pub ancestors: Vec<u32>,
     pub wait: Duration,
@@ -51,7 +49,6 @@ impl HookOptions {
         HookOptions {
             socket,
             claude_dir,
-            pid: std::process::id(),
             ancestors: ancestors(parent_pid_of_self(), ANCESTORS),
             wait: HOOK_WAIT,
             slack: REPLY_SLACK,
@@ -81,9 +78,9 @@ pub fn decide(input: &[u8], options: &HookOptions) -> Option<Value> {
     )
     .ok()?;
     client.set_timeout(options.wait + options.slack);
+    // No pid: the daemon reads who this is from the socket.
     let args = json!({
         "event": event,
-        "pid": options.pid,
         "waitMs": options.wait.as_millis() as u64,
     });
     let response = client.call(ops::HOOK_REQUEST, args).ok()?;

@@ -148,6 +148,15 @@ impl NotchModel {
             .filter(|q| !self.answered.contains(&q.tool_use_id))
     }
 
+    /// The id of the prompt a hook holds for a session, while it isn't answered: what a card
+    /// answers it by.
+    pub fn prompt_id(&self, id: &str) -> Option<String> {
+        self.requests
+            .get(id)
+            .filter(|r| !self.answered.contains(&r.id))
+            .map(|r| r.id.clone())
+    }
+
     /// The permission prompt the hook holds for a session.
     pub fn permission(&self, id: &str) -> Option<&HookRequest> {
         self.requests
@@ -364,9 +373,27 @@ impl NotchModel {
             .iter()
             .filter_map(|a| Some((a.id.clone(), self.question(&a.id)?.tool_use_id)))
             .collect();
+        let old_prompts: HashMap<String, String> = self
+            .requests
+            .iter()
+            .map(|(row, r)| (row.clone(), r.id.clone()))
+            .collect();
         self.agents = agents;
         self.snapshots = snapshots;
         self.requests = requests;
+        // A session a hook holds a prompt for is waiting on you, whatever its files say yet.
+        for agent in &mut self.agents {
+            let held = self
+                .requests
+                .get(&agent.id)
+                .is_some_and(|r| !self.answered.contains(&r.id));
+            if held && agent.group != AgentGroup::NeedsInput {
+                agent.group = AgentGroup::NeedsInput;
+                agent.label = "Needs input".into();
+            }
+        }
+        // `TABS` order: needs input first, as the list keeps it.
+        self.agents.sort_by_key(|a| a.group);
         let current: HashMap<String, AgentGroup> = self
             .agents
             .iter()
@@ -376,6 +403,9 @@ impl NotchModel {
         let asked = self.agents.iter().find(|a| {
             self.question(&a.id)
                 .is_some_and(|q| old_questions.get(&a.id) != Some(&q.tool_use_id))
+                || self
+                    .prompt_id(&a.id)
+                    .is_some_and(|p| old_prompts.get(&a.id) != Some(&p))
         });
         let changed: Vec<&Agent> = self
             .agents

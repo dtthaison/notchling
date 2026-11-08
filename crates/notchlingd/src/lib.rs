@@ -20,6 +20,7 @@ pub mod clients;
 pub mod control_ops;
 pub mod daemon;
 pub mod hook;
+pub mod hook_ops;
 pub mod hook_output;
 pub mod layout;
 pub mod prompts;
@@ -30,6 +31,8 @@ pub mod signals;
 mod acting_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
+#[cfg(test)]
+mod hook_ops_tests;
 #[cfg(test)]
 mod hook_tests;
 

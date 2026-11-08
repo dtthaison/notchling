@@ -275,6 +275,24 @@ impl Session {
         {
             return Err(ApiError::bad_request(format!("no topic named {bad}")));
         }
+        // A topic for the app alone (the held prompts) is checked like an app-tier op.
+        let app_only = subscribe
+            .topics
+            .iter()
+            .any(|t| self.shared.handler.topic_tier(t) == Tier::App);
+        if app_only && (self.tier != Tier::App || !self.still_the_hello_process()) {
+            let result = if self.tier == Tier::App {
+                "peer_changed"
+            } else {
+                "forbidden"
+            };
+            self.shared
+                .audit(ops::EVENTS_SUBSCRIBE, Some(self.tier), self.peer(), result);
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "only the Notchling app may follow this topic",
+            ));
+        }
         self.shared.hub.subscribe(self.id, &subscribe.topics);
         self.subscribed |= !subscribe.topics.is_empty();
         Ok(serde_json::json!({ "topics": subscribe.topics }))
@@ -317,6 +335,8 @@ impl Session {
             tier: self.tier,
             client: self.kind.unwrap_or(ClientKind::Cli),
             peer: self.peer().map(Path::to_path_buf),
+            // Read now: whoever sent this line (the hook's own process, say).
+            pid: transport::peer(&self.probe).ok().map(|p| p.pid),
         };
         let result = handler.call(&caller, op, args);
         if spec.tier == Tier::App {

@@ -42,6 +42,15 @@ The Milestone 2 review found that a path read once, after accept, can be beaten:
 - **Follow-up for Phase 6.** Builds are signed ad hoc today, so the code signature can't be checked. When Developer ID signing lands, the app tier should also require the app's signing identity (on macOS, the audit token's code signature through the Security framework), which no exec trick can fake.
 - `NOTCHLING_APP_TIER_PATHS` is honored only by a daemon that itself runs from a cargo target folder (a dev build; the same rule `ensure_daemon` uses for what it may start), and `ensure_daemon` never passes it, or any other `NOTCHLING_*` variable, to the daemon it starts. An installed daemon's app tier is the installed app alone.
 
+## Note, 2026-11-08: files at rest are not a tier boundary
+
+The Milestone 3 review found that the daemon read its `acting` switch from `notchlingd-settings.json` at start. An agent that can run a shell can write any file this user can, then restart the daemon: the app tier was a file write away. The rule from here on: **nothing an agent can write turns on what only the app tier may**. A file this user owns says what the user (or anyone running as them) wrote, not what the app decided.
+
+- Every daemon run starts with acting off, whatever any file says. Only an app-tier `settings.set_acting` during that run turns it on.
+- The daemon no longer writes `notchlingd-settings.json`. One that still says on is ignored and the start is audit-logged (`file_said_on_ignored`).
+- The app keeps the user's choice in its own settings (`actingOn`) and sends `settings.set_acting` again whenever the daemon says off after a (re)connect. That record is a file too, so it is only as strong as the app tier itself; it moves the decision to the app, which is the process the tier trusts, and the Phase 6 signing follow-up above is what makes that trust hold.
+- The same goes for identity: the hook's process is read from the socket's peer credentials, never from its arguments, and it must descend from the Claude Code process whose `sessions/<pid>.json` names the event's session.
+
 ## Date
 
 2026-11-07

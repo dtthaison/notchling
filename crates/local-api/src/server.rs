@@ -55,6 +55,10 @@ pub struct Caller {
     pub tier: Tier,
     pub client: ClientKind,
     pub peer: Option<PathBuf>,
+    /// The process that sent this request, from the socket's peer credentials (never from the
+    /// request): on macOS the audit token of the last sender, on Linux `SO_PEERCRED`'s pid.
+    /// `None` when the kernel wouldn't say.
+    pub pid: Option<u32>,
 }
 
 /// The daemon's ops. Called on the connection's own thread, so a slow op holds up only its caller.
@@ -66,6 +70,10 @@ pub trait Handler: Send + Sync + 'static {
     /// The topics `events.subscribe` accepts.
     fn topics(&self) -> &[&str] {
         &[]
+    }
+    /// The tier a client needs to follow `topic`; the agent tier unless the handler says so.
+    fn topic_tier(&self, _topic: &str) -> Tier {
+        Tier::Agent
     }
     /// The acting switch, for `daemon.status`; `None` when the handler has none.
     fn acting(&self) -> Option<bool> {
