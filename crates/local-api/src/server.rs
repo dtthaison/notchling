@@ -139,17 +139,16 @@ pub(crate) struct Slot {
 }
 
 impl Slot {
-    /// A slot, or `None` when every one is taken.
+    /// A slot, or `None` when every one is taken. Only the accept loop takes slots (connections
+    /// only give them back), so reading the count and then adding to it can't overshoot.
     fn take(shared: &Arc<Shared>) -> Option<Slot> {
         let limits = shared.limits;
-        let mut reserved = false;
-        shared
-            .open
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |open| {
-                reserved = open >= limits.max_clients.saturating_sub(limits.app_reserved);
-                (open < limits.max_clients).then_some(open + 1)
-            })
-            .ok()?;
+        let open = shared.open.load(Ordering::SeqCst);
+        if open >= limits.max_clients {
+            return None;
+        }
+        shared.open.fetch_add(1, Ordering::SeqCst);
+        let reserved = open >= limits.max_clients.saturating_sub(limits.app_reserved);
         Some(Slot {
             shared: shared.clone(),
             reserved,

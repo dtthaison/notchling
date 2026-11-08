@@ -1,7 +1,8 @@
 //! The daemon end to end over a copy of the M1 notch fixture in a temp data root: it serves
 //! `sessions.list`, sends `sessions.changed` after a fixture file changes, refuses a second daemon,
 //! starts past a stale socket and stops cleanly on SIGTERM, removing its socket. It never sees the
-//! real data folder: every run sets `NOTCHLING_DATA_ROOT` and a fake `HOME`.
+//! real data folder: every run sets `NOTCHLING_DATA_ROOT` and a fake `HOME`. A guard stops every
+//! daemon a test starts, detached ones included, even when an assert fails midway.
 #![cfg(unix)]
 
 use notchling_local_api::{ensure_daemon_with, Client, ClientKind, SpawnOptions, Started};
@@ -70,6 +71,69 @@ fn wait_for_socket(socket: &Path) {
     panic!("no daemon on {}", socket.display());
 }
 
+/// Stops a daemon a test started, however the test ends: an assert that fails mid-test must not
+/// leave a daemon running. SIGTERM, a short wait, then SIGKILL.
+struct Daemon {
+    /// Started here as a child.
+    child: Option<Child>,
+    /// Started detached by `ensure_daemon`: found by its socket, its pid asked of it.
+    socket: Option<PathBuf>,
+}
+
+impl Daemon {
+    fn child(child: Child) -> Daemon {
+        Daemon {
+            child: Some(child),
+            socket: None,
+        }
+    }
+
+    fn detached(socket: &Path) -> Daemon {
+        Daemon {
+            child: None,
+            socket: Some(socket.to_path_buf()),
+        }
+    }
+}
+
+fn alive(pid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only asks whether the process exists.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn stop_pid(pid: libc::pid_t) {
+    // SAFETY: a daemon this test started.
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if alive(pid) {
+        // SAFETY: as above.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+}
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.child {
+            if matches!(child.try_wait(), Ok(None)) {
+                stop_pid(child.id() as libc::pid_t);
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        if let Some(socket) = &self.socket {
+            let pid = Client::connect(socket, ClientKind::Cli, "0.1.0")
+                .and_then(|mut c| c.status())
+                .map(|s| s.pid);
+            if let Ok(pid) = pid {
+                stop_pid(pid as libc::pid_t);
+            }
+        }
+    }
+}
+
 fn terminate(child: &mut Child) -> std::process::ExitStatus {
     // SAFETY: signalling our own child by its pid.
     unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
@@ -100,7 +164,7 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
 
-    let mut child = daemon(&root, &dir.0).spawn().unwrap();
+    let mut running = Daemon::child(daemon(&root, &dir.0).spawn().unwrap());
     wait_for_socket(&socket);
 
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();
@@ -167,7 +231,7 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     assert!(String::from_utf8_lossy(&sessions.stdout).contains("notch layout"));
 
     drop(client);
-    let status = terminate(&mut child);
+    let status = terminate(running.child.as_mut().unwrap());
     assert!(status.success(), "{status:?}");
     assert!(!socket.exists(), "the socket is removed on SIGTERM");
     // The lock file stays (it holds nothing once the process is gone); nothing else was written
@@ -197,6 +261,8 @@ fn ensure_daemon_starts_one_and_then_finds_it() {
         data_root: Some(root.clone()),
         ..SpawnOptions::default()
     };
+    // Detached, so not our child to kill: the guard finds it by its socket if the test fails.
+    let _running = Daemon::detached(&socket);
     assert_eq!(
         ensure_daemon_with(binary, &socket, &options).unwrap(),
         Started::Spawned

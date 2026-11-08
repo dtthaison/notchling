@@ -450,7 +450,8 @@ fn the_cap_is_counted_at_accept_so_a_burst_cannot_pass_it() {
         .map(|_| UnixStream::connect(&run.socket).unwrap())
         .collect();
     for s in &burst {
-        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        // macOS refuses this (EINVAL) on a socket the server already shut: one that was turned away.
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
     }
     let served = burst
         .iter_mut()
