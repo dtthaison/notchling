@@ -1,0 +1,100 @@
+//! The words to draw bold in a snippet, made safe for the text layer. The daemon sends byte
+//! ranges into the snippet; GPUI's `StyledText` assumes its highlight runs are sorted, disjoint
+//! and on character boundaries, and slices the text with them while it lays out (a range in the
+//! middle of a character, or inside another range, panics there). So whatever arrives is
+//! cleaned here first, and a daemon that sends overlapping or stray ranges costs a missing bold
+//! word, never a crash.
+
+use std::ops::Range;
+
+/// `raw` as sorted, disjoint, non-empty ranges inside `snippet`, each on character boundaries.
+/// A range that reaches past the end is cut at it; one that starts or ends inside a character
+/// shrinks to the whole characters within it; ranges that overlap or touch are joined.
+pub fn clean(snippet: &str, raw: &[(usize, usize)]) -> Vec<Range<usize>> {
+    let mut ranges: Vec<Range<usize>> = raw
+        .iter()
+        .filter_map(|&(start, end)| {
+            let end = floor(snippet, end.min(snippet.len()));
+            let start = ceil(snippet, start.min(snippet.len()));
+            (start < end).then_some(start..end)
+        })
+        .collect();
+    ranges.sort_by_key(|r| (r.start, r.end));
+    let mut out: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match out.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => out.push(range),
+        }
+    }
+    out
+}
+
+/// The nearest character boundary at or before `at` (`at` is within the text).
+fn floor(text: &str, mut at: usize) -> usize {
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// The nearest character boundary at or after `at` (`at` is within the text).
+fn ceil(text: &str, mut at: usize) -> usize {
+    while !text.is_char_boundary(at) {
+        at += 1;
+    }
+    at
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slices<'a>(text: &'a str, ranges: &[Range<usize>]) -> Vec<&'a str> {
+        ranges.iter().map(|r| &text[r.clone()]).collect()
+    }
+
+    #[test]
+    fn overlapping_ranges_are_joined() {
+        // "bridge b" over "the bridge’s state": the daemon marks "b" and "bridge" separately.
+        let text = "the bridge\u{2019}s state";
+        let ranges = clean(text, &[(4, 5), (4, 10)]);
+        assert_eq!(ranges, [4..10]);
+        assert_eq!(slices(text, &ranges), ["bridge"]);
+        // "cache c" over "cache—stale".
+        let text = "cache\u{2014}stale";
+        let ranges = clean(text, &[(0, 1), (0, 5), (2, 3)]);
+        assert_eq!(ranges, [0..5]);
+    }
+
+    #[test]
+    fn touching_ranges_join_and_apart_ones_stay_sorted() {
+        let text = "abc def abc";
+        assert_eq!(clean(text, &[(8, 11), (0, 2), (2, 3)]), [0..3, 8..11]);
+        assert_eq!(clean(text, &[(4, 7), (0, 3)]), [0..3, 4..7]);
+    }
+
+    #[test]
+    fn ranges_are_cut_to_the_text_and_to_whole_characters() {
+        // ’ is bytes 10..13.
+        let text = "the bridge\u{2019}s state";
+        // Past the end: cut at the end.
+        assert_eq!(clean(text, &[(14, 999)]), [14..text.len()]);
+        // Both ends inside the character: nothing is left.
+        assert!(clean(text, &[(11, 12)]).is_empty());
+        // Start inside it moves on past it, end inside it moves back before it.
+        assert_eq!(clean(text, &[(11, 15)]), [13..15]);
+        assert_eq!(clean(text, &[(4, 12)]), [4..10]);
+        for r in clean(text, &[(1, 11), (12, 20), (9, 14)]) {
+            assert!(text.is_char_boundary(r.start) && text.is_char_boundary(r.end));
+        }
+    }
+
+    #[test]
+    fn empty_backwards_and_stray_ranges_are_dropped() {
+        let text = "abc";
+        assert!(clean(text, &[(1, 1), (2, 1), (7, 9)]).is_empty());
+        assert!(clean("", &[(0, 3)]).is_empty());
+        assert!(clean(text, &[]).is_empty());
+    }
+}
