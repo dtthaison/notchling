@@ -318,6 +318,18 @@ impl ActingOps {
         Ok(data)
     }
 
+    /// Every Claude Code row in the current session list (Move All's plan reads them).
+    pub(crate) fn agents_now(&self) -> Vec<Agent> {
+        let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        list.as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| serde_json::from_value(r.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The row `args.id` names in the current session list.
     pub(crate) fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
         let id = text_arg(args, "id")?;
