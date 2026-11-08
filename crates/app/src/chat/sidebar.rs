@@ -59,14 +59,17 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
 }
 
 /// The sidebar row a search hit opens (`SessionRef` from the search panel): a Codex row is keyed
-/// `codex:<session id>`; a Claude Code row by Claude Code's own session id, else by its
-/// transcript's file stem. Antigravity rows aren't in Chat yet (Milestone 5, Task 6), so none.
+/// `codex:<session id>`, an Antigravity row `agy:<session id>`; a Claude Code row by Claude Code's
+/// own session id, else by its transcript's file stem.
 pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
     let id = target.session_id.as_str();
     let found = match target.tool {
         SessionTool::Codex => sessions
             .iter()
             .find(|s| s.tool == Tool::Codex && s.agent.id == format!("codex:{id}")),
+        SessionTool::Antigravity => sessions
+            .iter()
+            .find(|s| s.tool == Tool::Antigravity && s.agent.id == format!("agy:{id}")),
         SessionTool::Claude => sessions
             .iter()
             .filter(|s| s.tool == Tool::Claude)
@@ -78,7 +81,6 @@ pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
                         .and_then(|stem| stem.to_str())
                         == Some(id)
             }),
-        SessionTool::Antigravity => None,
     };
     found.map(|s| s.agent.id.clone())
 }
@@ -191,7 +193,13 @@ mod tests {
             cwd: "/w/p".into(),
         };
         let codex = session("codex:0199a1b2", AgentGroup::Completed, None, Tool::Codex);
-        let sessions = vec![by_transcript, resumed, codex];
+        let agy = session(
+            "agy:d674-13c2",
+            AgentGroup::Completed,
+            None,
+            Tool::Antigravity,
+        );
+        let sessions = vec![by_transcript, resumed, codex, agy];
         assert_eq!(
             row_for(&sessions, &target(SessionTool::Claude, "3f1c2a9e")).as_deref(),
             Some("job-1"),
@@ -215,9 +223,12 @@ mod tests {
             None
         );
         assert_eq!(
+            row_for(&sessions, &target(SessionTool::Antigravity, "d674-13c2")).as_deref(),
+            Some("agy:d674-13c2")
+        );
+        assert_eq!(
             row_for(&sessions, &target(SessionTool::Antigravity, "x")),
-            None,
-            "not in Chat yet"
+            None
         );
     }
 }

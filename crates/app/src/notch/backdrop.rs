@@ -18,27 +18,29 @@ use crate::actions::Actions;
 /// scene sets: acting, the pet, picks already made.
 pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     let shown = renders::shown(name)?;
-    let scene = renders::scene(shown);
+    Some(build_scene(renders::scene(shown), cx))
+}
+
+/// A notch over a backdrop showing `scene` (the tools' renders bring their own).
+pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
     let actions = Arc::new(Actions::fixed(scene.acting));
-    Some(
-        cx.new(|cx| {
-            let mut view = NotchView::new(scene.model, true, actions, cx);
-            view.forced_pet = scene.pet;
-            view.walk.motion = scene.motion;
-            view.perch = scene.perch;
-            view.scene_window = scene.window;
-            view.sync_draft();
-            if let Some(q) = scene.question {
-                for (tab, option) in scene.picks {
-                    view.draft.select_tab(tab);
-                    view.draft.choose(&q, option);
-                }
+    cx.new(|cx| {
+        let mut view = NotchView::new(scene.model, true, actions, cx);
+        view.forced_pet = scene.pet;
+        view.walk.motion = scene.motion;
+        view.perch = scene.perch;
+        view.scene_window = scene.window;
+        view.sync_draft();
+        if let Some(q) = scene.question {
+            for (tab, option) in scene.picks {
+                view.draft.select_tab(tab);
+                view.draft.choose(&q, option);
             }
-            view.draft.select_tab(scene.tab);
-            view
-        })
-        .into(),
-    )
+        }
+        view.draft.select_tab(scene.tab);
+        view
+    })
+    .into()
 }
 
 impl NotchView {

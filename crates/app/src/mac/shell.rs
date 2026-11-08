@@ -24,6 +24,8 @@ use crate::search::library::Library;
 use crate::search::panel::AppSearch;
 use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
+use crate::tools::second_opinion::store_for_run;
+use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 
 /// The app's state while it runs.
 struct Shell {
@@ -60,6 +62,12 @@ impl Global for AppBridge {}
 pub struct AppPairing(pub Arc<PairingFeed>);
 
 impl Global for AppPairing {}
+
+/// The second opinions asked in Chat (the engine's store over the app's own data folder, running
+/// this binary's `delegate`); `None` over a fixture root, which never starts a tool.
+pub struct AppOpinions(pub Option<SecondOpinionStore>);
+
+impl Global for AppOpinions {}
 
 /// How often the app reads the bridge while no panel is open.
 const BRIDGE_POLL: Duration = Duration::from_secs(5);
@@ -98,6 +106,7 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
         cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
+        cx.set_global(AppOpinions(store_for_run(root.as_ref(), exe.as_deref())));
         if pairing.is_live() {
             // The daemon asks the person only while this follows `bridge`.
             super::pair_prompt::watch(cx, pairing, bridge.clone());
@@ -156,7 +165,13 @@ fn handle(command: Command, cx: &mut App) {
             shell.state.keep_display_on = !shell.state.keep_display_on;
             refresh_tray(shell);
         }
-        Command::Quit => cx.quit(),
+        Command::Quit => {
+            // A review still running is stopped with the app, as the Swift store did.
+            if let Some(store) = cx.try_global::<AppOpinions>().and_then(|o| o.0.clone()) {
+                store.stop_all();
+            }
+            cx.quit()
+        }
     }
 }
 

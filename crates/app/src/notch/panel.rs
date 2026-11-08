@@ -27,6 +27,8 @@ use super::view::NotchView;
 use crate::actions::Actions;
 use crate::mac::capture::ns_window;
 use crate::session_source::{Link, SessionSource};
+use crate::tools::live::ToolLive;
+use crate::tools::requests::{agy_conversation, parse_conversation};
 
 const TICK: Duration = Duration::from_millis(50);
 const POLL: Duration = Duration::from_secs(2);
@@ -92,6 +94,16 @@ pub fn open(
             let mut view = NotchView::new(model, false, actions, cx);
             view.ns_window = ns;
             view.geometry = Some(geometry);
+            let mut source = source;
+            // An open Antigravity session's lines come from the daemon (a read, peeking so the
+            // poll never keeps an idle process alive); the notch can't read its files.
+            let reader = view.actions.clone();
+            source.agy_reader = Some(Arc::new(move |id: &str| {
+                let reply = reader.read(&agy_conversation(id, true)).ok()?;
+                parse_conversation(&reply)
+                    .filter(|c| c.open)
+                    .map(|c| c.conversation)
+            }));
             view.source = Some(source);
             view.sessions = Some(sessions);
             cx.spawn(async move |this, cx| loop {
@@ -194,18 +206,18 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, prompts, note) = match answer {
+        let (claude, prompts, live, note) = match answer {
             Some(answer) => {
                 let note = answer.note();
-                (answer.agents, answer.prompts, note)
+                (answer.agents, answer.prompts, answer.tools, note)
             }
-            None => (None, None, None),
+            None => (None, None, ToolLive::default(), None),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = source.load_from(claude, prompts, now_ms());
+                    let loaded = source.load_live(claude, prompts, &live, now_ms());
                     (source, loaded)
                 })
                 .await;

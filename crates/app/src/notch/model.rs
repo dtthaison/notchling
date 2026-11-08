@@ -33,7 +33,7 @@ const PEEK_PLAIN: i64 = 8_000;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Card {
     Question(PendingQuestion),
-    Permission(HookRequest),
+    Permission(Box<HookRequest>),
 }
 
 impl Card {
@@ -44,7 +44,10 @@ impl Card {
             Card::Question(q) => q.items.first().map_or(0.0, |item| {
                 question_height(item.question.chars().count(), item.options.len())
             }),
-            Card::Permission(r) => permission_height(r.summary.chars().count(), r.can_always_allow),
+            Card::Permission(r) => match &r.agy {
+                Some(agy) => agy.height(),
+                None => permission_height(r.summary.chars().count(), r.can_always_allow),
+            },
         }
     }
 }
@@ -178,7 +181,7 @@ impl NotchModel {
     /// The card to show for a session: a permission, else a question.
     pub fn card(&self, id: &str) -> Option<Card> {
         if let Some(r) = self.permission(id) {
-            return Some(Card::Permission(r.clone()));
+            return Some(Card::Permission(Box::new(r.clone())));
         }
         self.question(id).map(Card::Question)
     }

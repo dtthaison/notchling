@@ -57,6 +57,7 @@ pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
         .chain(crate::phone::renders::VIEWS.iter())
         .chain(crate::search::renders::VIEWS.iter())
         .chain(crate::pages::renders::VIEWS.iter())
+        .chain(crate::tools::renders::VIEWS.iter())
 }
 
 #[cfg(test)]
