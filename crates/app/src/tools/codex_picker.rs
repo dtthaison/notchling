@@ -213,11 +213,7 @@ mod tests {
         p.choose_effort("gpt-6.1-sol", "high");
         p.choose_model("gpt-6.1-mini");
         assert_eq!(p.pick.effort, None, "mini has no high");
-        assert_eq!(
-            p.rows()[1].efforts[0].selected,
-            true,
-            "so its default shows"
-        );
+        assert!(p.rows()[1].efforts[0].selected, "so its default shows");
         p.choose_effort("gpt-6.1-mini", "medium");
         p.choose_model("gpt-6.1-sol");
         assert_eq!(p.pick.effort.as_deref(), Some("medium"));

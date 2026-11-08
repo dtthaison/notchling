@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::codex_picker::CodexPicker;
 use super::requests::Pick;
-use super::second_opinion::{ModelOption, OpinionTool, SecondOpinionSheet, Subject};
+use super::second_opinion::SecondOpinionSheet;
 use crate::acting::Acting;
 use crate::chat::data::DataRoot as ChatRoot;
 use crate::notch::layout::NotchState;
@@ -20,6 +20,8 @@ use crate::notch::renders::Scene;
 use crate::notch::requests::HookRequest;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
 use crate::views::ViewSpec;
+use notchling_engine::delegate::options::Tool;
+use notchling_engine::delegate::second_opinion::{codex_options, ModelOption, Subject};
 
 pub const AGY_PERMISSION_CARD: &str = "agy-permission-card";
 pub const CODEX_MODEL_PICKER: &str = "codex-model-picker";
@@ -160,11 +162,13 @@ pub fn second_opinion() -> SecondOpinionSheet {
     };
     let mut sheet = SecondOpinionSheet::new(
         subject,
+        "codex:demo",
+        "item-7",
         "/Users/me/work/notchling",
-        vec![OpinionTool::Codex, OpinionTool::Agy],
+        vec![Tool::Codex, Tool::Agy],
     );
     let root = ChatRoot::for_render(None);
-    sheet.codex_models = ModelOption::from_codex(&models::load(&root.codex_dir));
+    sheet.codex_models = codex_options(&models::load(&root.codex_dir));
     sheet.agy_models = vec![ModelOption {
         model: "gemini-3-pro".to_owned(),
         name: "gemini-3-pro".to_owned(),

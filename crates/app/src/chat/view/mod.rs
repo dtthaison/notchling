@@ -10,6 +10,7 @@ mod composer;
 mod conversation;
 mod header;
 mod inspector;
+mod opinions;
 mod phone;
 mod sheets;
 mod sidebar;
@@ -280,6 +281,10 @@ impl ChatView {
                 self.gate.changed();
             }
         }
+        // A second opinion's card changes when its command ends, which nothing else signals.
+        if opinions::any_running(self, cx) {
+            cx.notify();
+        }
         if self.gate.due(now_ms()) {
             self.start_load(cx);
         }
@@ -303,7 +308,7 @@ impl Render for ChatView {
                     .flex()
                     .flex_col()
                     .child(header::render(self, a, cx))
-                    .child(conversation::render(self, a))
+                    .child(conversation::render(self, a, cx))
                     .child(composer::render(self, a, window, cx)),
             )
             .child(inspector::render(self, a))

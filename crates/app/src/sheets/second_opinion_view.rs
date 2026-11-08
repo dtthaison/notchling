@@ -3,8 +3,6 @@
 //! hover, while acting isn't on, and while nothing runs opinions yet (`OpinionRunner`, see
 //! `tools::second_opinion`).
 
-use std::sync::Arc;
-
 use gpui::{
     div, prelude::*, px, Context, Div, EventEmitter, FocusHandle, Render, SharedString, Stateful,
     Window,
@@ -17,12 +15,14 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::mac::gate;
 use crate::notch::answer::{type_key, Typed};
-use crate::tools::second_opinion::{OpinionRunner, OpinionTool, SecondOpinionSheet, NO_TOOLS};
+use crate::tools::second_opinion::{tool_name, SecondOpinionSheet, Stage, NO_TOOLS};
+use notchling_engine::delegate::options::Tool;
+use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 
 pub struct SecondOpinionView {
     pub model: SecondOpinionSheet,
     acts: Acts,
-    runner: Option<Arc<dyn OpinionRunner>>,
+    store: Option<SecondOpinionStore>,
     focus: FocusHandle,
 }
 
@@ -32,46 +32,34 @@ impl SecondOpinionView {
     pub fn new(
         model: SecondOpinionSheet,
         acts: Acts,
-        runner: Option<Arc<dyn OpinionRunner>>,
+        store: Option<SecondOpinionStore>,
         cx: &mut Context<Self>,
     ) -> SecondOpinionView {
         SecondOpinionView {
             model,
             acts,
-            runner,
+            store,
             focus: cx.focus_handle(),
         }
     }
 
+    /// Run: the store records the opinion and starts `notchling delegate`; the sheet closes and
+    /// the card under the message shows it running.
     fn run(&mut self, cx: &mut Context<Self>) {
         let control = self
             .model
-            .run_control(self.acts.acting(), self.runner.is_some());
-        let Some(runner) = self.runner.clone().filter(|_| control.enabled) else {
+            .run_control(self.acts.acting(), self.store.is_some());
+        let Some(store) = self.store.clone().filter(|_| control.enabled) else {
             return;
         };
-        let request = self.model.request();
-        let started = cx
-            .background_executor()
-            .spawn(async move { runner.start(&request) });
-        cx.spawn(async move |this, cx| {
-            let result = started.await;
-            this.update(cx, |view, cx| {
-                view.model.started(result);
-                if matches!(
-                    view.model.stage,
-                    crate::tools::second_opinion::Stage::Running(_)
-                ) {
-                    cx.emit(Dismiss);
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
+        let run = store.start(&self.model.request());
+        self.model.started(Ok(run.id));
+        cx.emit(Dismiss);
+        cx.notify();
     }
 
     /// A row of pills, "Default" first, the picked one filled.
+    #[allow(clippy::too_many_arguments)]
     fn choice_row(
         &self,
         title: &str,
@@ -125,15 +113,15 @@ impl SecondOpinionView {
                 .rounded(px(RADIUS_MD))
                 .fill(Ink::Raised, a)
                 .children(self.model.tools.iter().map(|tool| {
-                    let tool: OpinionTool = *tool;
+                    let tool: Tool = *tool;
                     let kind = if self.model.tool == tool {
                         ButtonKind::Secondary
                     } else {
                         ButtonKind::Ghost
                     };
                     button(
-                        SharedString::from(format!("tool-{}", tool.arg())),
-                        tool.name(),
+                        SharedString::from(format!("tool-{}", tool.raw())),
+                        tool_name(tool),
                         kind,
                         PartState::Rest,
                         a,
@@ -190,11 +178,8 @@ impl SecondOpinionView {
     fn footer(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
         let control = self
             .model
-            .run_control(self.acts.acting(), self.runner.is_some());
-        let failed = matches!(
-            self.model.stage,
-            crate::tools::second_opinion::Stage::Failed(_)
-        );
+            .run_control(self.acts.acting(), self.store.is_some());
+        let failed = matches!(self.model.stage, Stage::Failed(_));
         let cancel = button(
             "cancel",
             "Cancel",
@@ -285,7 +270,7 @@ impl Render for SecondOpinionView {
                     |m, v| m.pick_effort(v),
                 ))
                 .child(label(
-                    &format!("Prompt · {}", self.model.subject.title()),
+                    &format!("Prompt · {}", self.model.subject_title()),
                     TypeRole::Section,
                     Ink::TextFaint,
                     a,

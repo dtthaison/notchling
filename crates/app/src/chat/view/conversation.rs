@@ -1,12 +1,13 @@
 //! The conversation column: the rows of `chat::rows`, drawn with the kit.
 
-use gpui::{div, prelude::*, px, relative, Div, FontWeight, Stateful};
+use gpui::{div, prelude::*, px, relative, Context, Div, FontWeight, Stateful};
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::ui::{claude_mark, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::ChatView;
+use super::{opinions, ChatView};
+use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
 
 /// Replies and tools sit in from the left, under Claude's mark.
@@ -228,7 +229,44 @@ fn row_element(row: &Row, a: Appearance) -> Div {
     }
 }
 
-pub fn render(view: &ChatView, a: Appearance) -> Stateful<Div> {
+/// A row with its Second Opinion buttons and the cards of the opinions asked under it, when the
+/// item has something to review.
+fn row_with_opinions(
+    view: &ChatView,
+    i: usize,
+    row: &Row,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let element = row_element(row, a);
+    let Some(item) = view.conversation.items.get(i) else {
+        return element;
+    };
+    let subjects = opinions::subjects(item);
+    if subjects.is_empty() {
+        return element;
+    }
+    let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
+    let buttons = div().pl(px(INDENT)).flex().gap(px(4.0)).children(
+        subjects
+            .into_iter()
+            .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, a, cx)),
+    );
+    let cards = view
+        .selected
+        .as_deref()
+        .and_then(|session| opinions::cards(session, &anchors, a, cx))
+        .map(|cards| cards.pl(px(INDENT)));
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(element)
+        .child(buttons)
+        .children(cards)
+}
+
+pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
     let rows = rows(&view.conversation);
     let column = div()
         .id("conversation")
@@ -259,12 +297,21 @@ pub fn render(view: &ChatView, a: Appearance) -> Stateful<Div> {
         );
     }
     if rows.is_empty() {
-        return column.child(label(
-            "No transcript yet for this session",
-            TypeRole::Meta,
-            Ink::TextMuted,
-            a,
-        ));
+        let note = match view.selected_session().map(|s| s.tool) {
+            // Loaded through the daemon, which holds the session open only while acting is on.
+            Some(Tool::Antigravity) if !view.tools.agy.as_ref().is_some_and(|c| c.open) => {
+                match view.acting(cx) {
+                    crate::acting::Acting::On => "Loading from Antigravity…",
+                    _ => "Antigravity sessions load through the daemon while acting is on.",
+                }
+            }
+            _ => "No transcript yet for this session",
+        };
+        return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
-    column.children(rows.iter().map(|row| row_element(row, a)))
+    column.children(
+        rows.iter()
+            .enumerate()
+            .map(|(i, row)| row_with_opinions(view, i, row, a, cx)),
+    )
 }

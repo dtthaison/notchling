@@ -128,10 +128,8 @@ fn status(view: &ChatView, control: crate::acting::Control, a: Appearance) -> Op
             },
             Ink::TextMuted,
         )
-    } else if let Some(why) = control.tooltip {
-        (why.to_owned(), Ink::TextFaint)
     } else {
-        return None;
+        (control.tooltip?.to_owned(), Ink::TextFaint)
     };
     Some(
         label(&text, TypeRole::Meta, ink, a)
