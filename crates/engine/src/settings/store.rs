@@ -156,15 +156,16 @@ fn parse(data: &[u8]) -> Result<Map<String, Value>, SettingsError> {
     }
 }
 
-/// Platform's private write (a uniquely named 0600 temp file, flushed, then renamed). A folder that is
-/// missing is made 0700; one that is already there is not ours to change.
+/// Platform's private write (a uniquely named 0600 temp file, flushed, then renamed), refusing a
+/// symlink: the file is Notchling's own, so a link planted in its place must not steer the write. A
+/// folder that is missing is made 0700; one that is already there is not ours to change.
 fn write_atomic(path: &Path, bytes: &[u8]) -> notchling_platform::Result<()> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         if !dir.is_dir() {
             files::ensure_private_dir(dir)?;
         }
     }
-    files::write_private(path, bytes)
+    files::write_private_no_follow(path, bytes)
 }
 
 #[cfg(test)]
@@ -226,6 +227,26 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(names, vec!["settings.json"]);
+    }
+
+    /// The settings file is Notchling's own: a link planted there must not steer the write to a file
+    /// of the user's (`write_private` follows links, for the lanes' shared files).
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_settings_file_is_refused_not_written_through() {
+        let tmp = TempDir::new("set-symlink");
+        let before = r#"{"version":1,"values":{}}"#;
+        let victim = tmp.write("victim.json", before);
+        std::fs::create_dir_all(tmp.path("data")).expect("dir");
+        std::os::unix::fs::symlink(&victim, tmp.path("data/settings.json")).expect("link");
+        let mut s = Settings::open(&tmp.path("data/settings.json")).expect("opens");
+        assert!(s.set("showPet", json!(false)).is_err());
+        assert_eq!(std::fs::read_to_string(&victim).expect("read"), before);
+        assert_eq!(
+            s.get_bool("showPet"),
+            Some(true),
+            "the failed save is undone"
+        );
     }
 
     #[test]
