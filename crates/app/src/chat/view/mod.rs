@@ -29,7 +29,7 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::reload::{watch_config, ReloadGate};
-use crate::chat::sidebar::row_for;
+use crate::chat::sidebar::{row_for, Pending, PendingSession};
 use crate::phone::bridge::Bridge;
 use crate::phone::view::PhonePanelView;
 use crate::search::wire::SessionRef;
@@ -74,7 +74,7 @@ pub struct ChatView {
     /// Whether the Phone button's dot is lit, so a change redraws it.
     phone_dot: bool,
     /// A session the search panel asked for that isn't listed yet: selected when it appears.
-    pending_session: Option<SessionRef>,
+    pending_session: Option<PendingSession>,
     _appearance_changes: Subscription,
 }
 
@@ -156,7 +156,7 @@ impl ChatView {
                 self.select(&id, cx);
             }
             None => {
-                self.pending_session = Some(target);
+                self.pending_session = Some(PendingSession::new(target, now_ms()));
                 self.gate.changed();
                 cx.notify();
             }
@@ -201,15 +201,17 @@ impl ChatView {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
         self.sessions = loaded.sessions;
-        // The search panel's session, now that the list has it.
-        if let Some(id) = self
-            .pending_session
-            .as_ref()
-            .and_then(|target| row_for(&self.sessions, target))
-        {
-            self.pending_session = None;
-            self.select(&id, cx);
-            return;
+        // The search panel's session, now that the list has it, or never.
+        if let Some(pending) = self.pending_session.as_mut() {
+            match pending.after_load(&self.sessions, now_ms()) {
+                Pending::Found(id) => {
+                    self.pending_session = None;
+                    self.select(&id, cx);
+                    return;
+                }
+                Pending::Waiting => {}
+                Pending::GaveUp => self.pending_session = None,
+            }
         }
         if self.selected == asked {
             self.selected = loaded.selected;
