@@ -31,6 +31,7 @@ pub fn build(
             let root = DataRoot::fixture(data_root?);
             Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
         }
+        notch if notch.starts_with("notch-") => crate::notch::view::build_render(notch, cx),
         _ => None,
     }
 }

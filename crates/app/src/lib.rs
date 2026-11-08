@@ -16,6 +16,7 @@ pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod menu;
+pub mod notch;
 pub mod views;
 
 /// What `main` prints on a system the app isn't built for yet.

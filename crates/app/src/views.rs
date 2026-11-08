@@ -46,7 +46,12 @@ pub const NAMES: [&str; 5] = [
 ];
 
 pub fn spec(name: &str) -> Option<&'static ViewSpec> {
-    ALL.iter().find(|v| v.name == name)
+    every().find(|v| v.name == name)
+}
+
+/// Every renderable view: these, then each part's own (the notch's).
+pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
+    ALL.iter().chain(crate::notch::renders::VIEWS.iter())
 }
 
 /// Views that read sessions, and so take `--data-root` when rendered.

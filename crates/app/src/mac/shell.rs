@@ -57,6 +57,8 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
             root,
         });
         cx.on_window_closed(update_dock).detach();
+        // Not titled, so it never counts toward the Dock icon.
+        crate::notch::panel::open(cx);
     });
     0
 }
