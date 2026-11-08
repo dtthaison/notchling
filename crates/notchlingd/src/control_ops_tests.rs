@@ -121,7 +121,7 @@ fn new_session_starts_claude_bg_and_names_the_job() {
         call(
             &s,
             ops::SESSION_NEW,
-            json!({"folder": "/w/api", "flags": ["--model", "opus"]})
+            json!({"folder": "/w/api", "flags": ["--model", "claude-opus-5-5"]})
         ),
         Ok(json!({"jobId": "6ce4c19c"}))
     );
@@ -137,7 +137,7 @@ fn new_session_starts_claude_bg_and_names_the_job() {
     assert_eq!(
         fake.commands(),
         [
-            main_login(&["claude", "--model", "opus", "--bg"]).in_dir("/w/api"),
+            main_login(&["claude", "--model", "claude-opus-5-5", "--bg"]).in_dir("/w/api"),
             Command::new(&["claude", "--bg"])
                 .in_dir("/w/api")
                 .for_config_dir(Some("/lanes/b")),
@@ -153,6 +153,14 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": ""}),
         json!({"folder": "/w", "flags": "--bg"}),
         json!({"folder": "/w", "config_dir": "/somewhere/else"}),
+        // Only `--model <a picker model>`: nothing that changes what the session may do.
+        json!({"folder": "/w", "flags": ["--dangerously-skip-permissions"]}),
+        json!({"folder": "/w", "flags": ["--model", "opus"]}),
+        json!({"folder": "/w", "flags": ["--model"]}),
+        json!({"folder": "/w", "flags": ["--model=claude-opus-5-5"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5", "--settings", "/x"]}),
+        json!({"folder": "/w", "flags": ["--settings", "/x", "--model", "claude-opus-5-5"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-4-6"]}),
     ] {
         assert_eq!(
             call(&s, ops::SESSION_NEW, args.clone()).unwrap_err().0,
@@ -168,32 +176,111 @@ fn new_session_refuses_a_folder_it_cannot_use() {
     assert!(m.contains("not trusted"), "{m}");
 }
 
+/// `session.new` in `folder`, refused by Claude Code as untrusted.
+fn refused_new(s: &Setup, fake: &FakeLauncher, folder: &str) {
+    fake.push_output(Ok(LaunchOutput::failed(
+        1,
+        &format!("Workspace not trusted: {folder}"),
+    )));
+    let (c, _) = call(s, ops::SESSION_NEW, json!({"folder": folder})).unwrap_err();
+    assert_eq!(c, ErrorCode::Failed);
+}
+
 #[test]
 fn trust_plays_the_trust_script_in_a_hidden_pty() {
-    let (_d, s, fake) = control("trust", true);
+    let (d, s, fake) = control("trust", true);
+    let new = d.0.join("work/new");
+    std::fs::create_dir_all(&new).unwrap();
+    let folder = new.to_str().unwrap();
+    refused_new(&s, &fake, folder);
     assert_eq!(
-        call(&s, ops::FOLDER_TRUST, json!({"folder": "/w/new"})),
+        call(&s, ops::FOLDER_TRUST, json!({"folder": folder})),
         Ok(json!({"trusted": true}))
     );
+    refused_new(&s, &fake, folder);
     assert_eq!(
         call(
             &s,
             ops::FOLDER_TRUST,
-            json!({"folder": "/w/new", "config_dir": "/lanes/b"})
+            json!({"folder": folder, "config_dir": "/lanes/b"})
         ),
         Ok(json!({"trusted": true}))
     );
+    let ptys: Vec<Call> = fake
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, Call::Pty(_)))
+        .collect();
     assert_eq!(
-        fake.calls(),
+        ptys,
         [
-            Call::Pty(plan_trust_folder("/w/new", None)),
-            Call::Pty(plan_trust_folder("/w/new", Some("/lanes/b")))
+            Call::Pty(plan_trust_folder(folder, None)),
+            Call::Pty(plan_trust_folder(folder, Some("/lanes/b")))
         ]
     );
+    refused_new(&s, &fake, folder);
     fake.push_pty(Ok(false));
-    let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": "/w/new"})).unwrap_err();
+    let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": folder})).unwrap_err();
     assert_eq!(c, ErrorCode::Failed);
     assert!(m.starts_with("Couldn't trust the folder"), "{m}");
+}
+
+#[test]
+fn trust_takes_only_a_real_folder_that_session_new_was_just_refused() {
+    let (d, s, fake) = control("trustbad", true);
+    let home = d.0.clone();
+    let work = d.0.join("work/api");
+    std::fs::create_dir_all(&work).unwrap();
+    let file = d.0.join("work/notes.txt");
+    std::fs::write(&file, "x").unwrap();
+    let folder = work.to_str().unwrap().to_string();
+    // Never refused: nothing to trust.
+    let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": folder})).unwrap_err();
+    assert_eq!(c, ErrorCode::BadRequest, "{m}");
+    // Not absolute, missing, a file, the root, the home folder (also by another spelling).
+    let dotted = format!("{}/work/..", home.display());
+    for bad in [
+        "work/api".to_string(),
+        format!("{}/work/missing", home.display()),
+        file.to_string_lossy().into_owned(),
+        "/".to_string(),
+        home.to_string_lossy().into_owned(),
+        dotted,
+    ] {
+        refused_new(&s, &fake, &bad);
+        let (c, m) = call(&s, ops::FOLDER_TRUST, json!({"folder": bad})).unwrap_err();
+        assert_eq!(c, ErrorCode::BadRequest, "{bad}: {m}");
+    }
+    // Refused for another folder: still nothing to trust here.
+    let other = d.0.join("work/other");
+    std::fs::create_dir_all(&other).unwrap();
+    refused_new(&s, &fake, other.to_str().unwrap());
+    assert_eq!(
+        call(&s, ops::FOLDER_TRUST, json!({"folder": folder}))
+            .unwrap_err()
+            .0,
+        ErrorCode::BadRequest
+    );
+    // A refusal older than ten minutes is too old.
+    refused_new(&s, &fake, &folder);
+    s.ops.age_refusals(std::time::Duration::from_secs(11 * 60));
+    assert_eq!(
+        call(&s, ops::FOLDER_TRUST, json!({"folder": folder}))
+            .unwrap_err()
+            .0,
+        ErrorCode::BadRequest
+    );
+    assert!(
+        !fake.calls().iter().any(|c| matches!(c, Call::Pty(_))),
+        "nothing was trusted"
+    );
+    // The same folder by another spelling is the same folder.
+    refused_new(&s, &fake, &folder);
+    let spelled = format!("{}/work/../work/api/", home.display());
+    assert_eq!(
+        call(&s, ops::FOLDER_TRUST, json!({"folder": spelled})),
+        Ok(json!({"trusted": true}))
+    );
 }
 
 #[test]

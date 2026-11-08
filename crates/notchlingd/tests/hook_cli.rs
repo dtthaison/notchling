@@ -262,9 +262,7 @@ fn a_settings_file_that_says_on_is_ignored_at_every_start() {
     }
     let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
     assert_eq!(
-        audit
-            .matches("\"result\":\"file_said_on_ignored\"")
-            .count(),
+        audit.matches("\"result\":\"file_said_on_ignored\"").count(),
         2,
         "{audit}"
     );

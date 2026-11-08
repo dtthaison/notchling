@@ -116,11 +116,7 @@ fn claim_session(d: &Daemon) {
     let parent = unsafe { libc::getppid() };
     let session = json!({"pid": parent, "sessionId": crate::acting_ops_tests::SESSION,
         "cwd": "/tmp/demo", "entrypoint": "cli"});
-    std::fs::write(
-        sessions.join(format!("{parent}.json")),
-        session.to_string(),
-    )
-    .unwrap();
+    std::fs::write(sessions.join(format!("{parent}.json")), session.to_string()).unwrap();
 }
 
 fn connect(socket: &Path, kind: ClientKind) -> Client {
@@ -421,7 +417,10 @@ fn a_hook_from_another_session_is_refused_and_passes() {
     );
     assert_eq!(out, None, "refused, so the hook passes");
     assert!(d.ops.prompts().list().is_empty());
-    assert!(matches!(app.next_event(Duration::from_millis(200)), Ok(None)));
+    assert!(matches!(
+        app.next_event(Duration::from_millis(200)),
+        Ok(None)
+    ));
     // The one it belongs to is held, under the caller's own pid whatever it says.
     let mut hook = connect(&d.socket, ClientKind::Hook);
     let waiter = std::thread::spawn(move || {
@@ -436,10 +435,7 @@ fn a_hook_from_another_session_is_refused_and_passes() {
         assert!(Instant::now() < deadline, "never held");
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(
-        d.ops.prompts().list()[0].hook_pid,
-        Some(std::process::id())
-    );
+    assert_eq!(d.ops.prompts().list()[0].hook_pid, Some(std::process::id()));
     assert_eq!(waiter.join().unwrap()["reason"], "timeout");
 }
 

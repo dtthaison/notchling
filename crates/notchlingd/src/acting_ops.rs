@@ -21,14 +21,11 @@
 //! else it types into the row's dialog), never found from a row: a prompt is the one the app showed.
 //! A typing failure (a dialog open, the question gone) is code `failed`.
 //!
-//! The hook is who its process is. Its pid comes from the socket's peer credentials
-//! ([`Caller::pid`]), never from its arguments, and that process must descend from the Claude Code
-//! process whose `sessions/<pid>.json` (in the main config folder or a lane's) holds the event's
-//! `session_id`. Anything else is `forbidden`, and `notchling hook` passes on it.
+//! The hook is who its process is, never what it says: see [`crate::hook_ops`].
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::hook_output::is_prompt_event;
-use crate::prompts::{pass, question_json, Kind, Prompt, PromptStore};
+use crate::hook_ops::Parents;
+use crate::prompts::{question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
 use notchling_engine::reply::plan::{self, Plan, PlanError};
@@ -36,23 +33,20 @@ use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
 use notchling_engine::sessions::jobs::config_dir_for_job;
-use notchling_engine::sessions::{config_dirs, Agent, AgentGroup, AgentTarget, Roots};
-use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec};
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec};
 use serde_json::{json, Value};
-use std::sync::mpsc::RecvTimeoutError;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The longest a hook is held (the Swift hook's `waitSeconds`), under Claude Code's 300 s timeout.
 pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
-/// How far up from the hook's process its Claude Code is looked for (Claude Code runs a hook
-/// through a shell or two).
-pub const LINEAGE_DEPTH: usize = 16;
-
-/// A process's parent: the kernel's (`proc_pidinfo` on macOS, `/proc/<pid>/stat` on Linux),
-/// swapped in tests.
-pub type Parents = Box<dyn Fn(u32) -> Option<u32> + Send + Sync>;
+/// After an Esc, a session that still shows working is stopping for this long, and a second Esc
+/// isn't sent (`ChatModel.isStopping`): on a session that went idle meanwhile it would open rewind.
+pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
 /// The ops that act on a session, refused while acting is off.
 pub const ACTING_OPS: [&str; 11] = [
@@ -115,7 +109,7 @@ fn unimplemented(message: &str) -> ApiError {
     ApiError::new(ErrorCode::Unimplemented, message)
 }
 
-fn forbidden(message: &str) -> ApiError {
+pub(crate) fn forbidden(message: &str) -> ApiError {
     ApiError::new(ErrorCode::Forbidden, message)
 }
 
@@ -140,11 +134,11 @@ impl Launcher for NoLaunch {
 
 /// The ops, with what they need.
 pub struct ActingOps {
-    acting: Arc<Acting>,
-    prompts: PromptStore,
+    pub(crate) acting: Arc<Acting>,
+    pub(crate) prompts: PromptStore,
     sessions: Arc<Mutex<Value>>,
     pub(crate) roots: Roots,
-    room: Arc<dyn Room>,
+    pub(crate) room: Arc<dyn Room>,
     attacher: Box<dyn Attacher>,
     /// Starts `claude stop`, `rm`, `--bg` and the trust pty (session control).
     pub(crate) launcher: Arc<dyn Launcher>,
@@ -152,9 +146,14 @@ pub struct ActingOps {
     /// One attach at a time, so a question read can't move the tabs under an answer.
     typing: Mutex<()>,
     /// How often a held hook looks at the app and its own process.
-    tick: Duration,
+    pub(crate) tick: Duration,
     /// Walks a hook's process up to its Claude Code.
-    parent_of: Parents,
+    pub(crate) parent_of: Parents,
+    /// Sessions sent an Esc, and when (by row id).
+    stopping: Mutex<HashMap<String, Instant>>,
+    /// Folders `session.new` was refused as untrusted, canonical, and when: `folder.trust` takes
+    /// only these ([`crate::control_ops`]).
+    pub(crate) refused: Mutex<HashMap<PathBuf, Instant>>,
 }
 
 impl ActingOps {
@@ -177,39 +176,21 @@ impl ActingOps {
             typing: Mutex::new(()),
             tick: Duration::from_millis(250),
             parent_of: Box::new(crate::hook::parent_pid),
+            stopping: Mutex::new(HashMap::new()),
+            refused: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Finds a process's parent with `parents` (tests).
-    pub fn with_parents(mut self, parents: Parents) -> ActingOps {
-        self.parent_of = parents;
-        self
+    /// Moves every stopping mark `by` into the past (tests).
+    #[cfg(test)]
+    pub(crate) fn age_stopping(&self, by: Duration) {
+        age(&self.stopping, by);
     }
 
-    /// Whether `pid` descends from the Claude Code process whose `sessions/<pid>.json`, in any
-    /// config folder, holds `session_id`.
-    fn started_by_session(&self, pid: u32, session_id: &str) -> bool {
-        if session_id.is_empty() {
-            return false;
-        }
-        let folders: Vec<std::path::PathBuf> = config_dirs(&self.roots)
-            .into_iter()
-            .map(|c| c.dir.join("sessions"))
-            .collect();
-        let mut next = (self.parent_of)(pid);
-        for _ in 0..LINEAGE_DEPTH {
-            let Some(p) = next.filter(|p| *p > 1) else {
-                return false;
-            };
-            if folders
-                .iter()
-                .any(|f| session_file_holds(&f.join(format!("{p}.json")), session_id))
-            {
-                return true;
-            }
-            next = (self.parent_of)(p);
-        }
-        false
+    /// Moves every recorded refusal `by` into the past (tests).
+    #[cfg(test)]
+    pub(crate) fn age_refusals(&self, by: Duration) {
+        age(&self.refused, by);
     }
 
     /// Session control runs through `launcher`, and waits with `pause`.
@@ -304,6 +285,17 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
     ) -> Result<Outcome, ApiError> {
+        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        self.play_locked(agent, plan, log)
+    }
+
+    /// [`ActingOps::play`] for a caller that holds `typing` already.
+    fn play_locked(
+        &self,
+        agent: &Agent,
+        plan: &Plan,
+        log: &mut dyn QueueLog,
+    ) -> Result<Outcome, ApiError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
         }
@@ -313,7 +305,6 @@ impl ActingOps {
         };
         // A lane's job is reachable only through its own config folder.
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
         let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
         execute(plan, pty.as_mut(), self.attacher.screen_check(), log)
             .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))
@@ -329,14 +320,31 @@ impl ActingOps {
         Ok(json!({"sent": true}))
     }
 
+    /// Esc for a working session, once: the row and its stopping mark are read under the typing
+    /// lock, so two interrupts can't both see it working and both send Esc, and a second one within
+    /// [`STOPPING_FOR`] of the first is a no-op (`{"sent": false, "stopping": true}`).
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {
+        let id = text_arg(args, "id")?.to_string();
+        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
         let agent = self.agent(args)?;
-        let plan = plan::interrupt(agent.group == AgentGroup::Working).map_err(|e| match e {
+        let working = agent.group == AgentGroup::Working;
+        {
+            let mut marks = self.stopping.lock().unwrap_or_else(|e| e.into_inner());
+            marks.retain(|_, at| at.elapsed() < STOPPING_FOR);
+            if working && marks.contains_key(&id) {
+                return Ok(json!({"sent": false, "stopping": true}));
+            }
+        }
+        let plan = plan::interrupt(working).map_err(|e| match e {
             PlanError::NotWorking => bad(
                 "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
             ),
         })?;
-        self.play(&agent, &plan, &mut NoLog)?;
+        self.play_locked(&agent, &plan, &mut NoLog)?;
+        self.stopping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, Instant::now());
         Ok(json!({"sent": true}))
     }
 
@@ -425,7 +433,7 @@ impl ActingOps {
         Ok(())
     }
 
-    fn resolved(&self, prompt: &Prompt, outcome: &str, by: &str) {
+    pub(crate) fn resolved(&self, prompt: &Prompt, outcome: &str, by: &str) {
         let data =
             json!({"id": prompt.id, "sessionId": prompt.session_id, "outcome": outcome, "by": by});
         self.room
@@ -447,73 +455,6 @@ impl ActingOps {
         Err(unimplemented(
             "reading a question off the screen isn't ported yet (ReplySender.readQuestion)",
         ))
-    }
-
-    /// Holds a hook's prompt until the app decides, the hook's deadline, the app leaving or the
-    /// hook's process going; every way but a decision is a pass. Only a client that said hello as
-    /// the hook, from a process the event's Claude Code session started, gets here.
-    fn hook_request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        if caller.client != ClientKind::Hook {
-            return Err(forbidden(
-                "hook.request is only for `notchling hook` (hello as client \"hook\")",
-            ));
-        }
-        let event = args
-            .get("event")
-            .filter(|e| e.is_object())
-            .ok_or_else(|| bad("hook.request takes {\"event\": {...}}"))?;
-        if !self.acting.is_on() {
-            return Ok(pass("acting is off"));
-        }
-        if !is_prompt_event(event) {
-            return Ok(pass("not a question or permission"));
-        }
-        // Who the hook is comes from the kernel, and it must be this session's.
-        let session = event.get("session_id").and_then(Value::as_str).unwrap_or("");
-        let Some(pid) = caller
-            .pid
-            .filter(|pid| self.started_by_session(*pid, session))
-        else {
-            return Err(forbidden(
-                "hook.request comes only from a hook the event's Claude Code session started",
-            ));
-        };
-        if !self.room.can_answer() {
-            return Ok(pass("no app is attached"));
-        }
-        let wait = args
-            .get("waitMs")
-            .and_then(Value::as_u64)
-            .map(Duration::from_millis)
-            .map_or(HOOK_WAIT, |w| w.min(HOOK_WAIT));
-        let Some((prompt, rx)) = self.prompts.open(event.clone(), Some(pid), now_ms()) else {
-            return Ok(pass("the daemon is stopping"));
-        };
-        self.room
-            .publish(topics::PROMPTS, topics::PROMPT_PENDING, &prompt.to_json());
-        let started = Instant::now();
-        loop {
-            match rx.recv_timeout(self.tick) {
-                Ok(decision) => return Ok(decision),
-                Err(RecvTimeoutError::Disconnected) => return Ok(pass("closed")),
-                Err(RecvTimeoutError::Timeout) => {}
-            }
-            let why = if started.elapsed() >= wait {
-                "timeout"
-            } else if !self.room.can_answer() {
-                "no_app"
-            } else if !alive(pid) {
-                "hook_gone"
-            } else {
-                continue;
-            };
-            if self.prompts.forget(&prompt.id).is_some() {
-                self.resolved(&prompt, "pass", why);
-                return Ok(pass(why));
-            }
-            // Decided just now: take the decision.
-            return Ok(rx.try_recv().unwrap_or_else(|_| pass(why)));
-        }
     }
 }
 
@@ -572,30 +513,13 @@ fn question_arg(args: &Value) -> Result<PendingQuestion, ApiError> {
     })
 }
 
-/// Whether the Claude Code session file at `path` names `session_id`.
-fn session_file_holds(path: &std::path::Path, session_id: &str) -> bool {
-    std::fs::read(path)
-        .ok()
-        .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
-        .is_some_and(|s| s.get("sessionId").and_then(Value::as_str) == Some(session_id))
+#[cfg(test)]
+fn age<K>(marks: &Mutex<HashMap<K, Instant>>, by: Duration) {
+    for at in marks.lock().unwrap_or_else(|e| e.into_inner()).values_mut() {
+        *at = at.checked_sub(by).unwrap_or(*at);
+    }
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
-}
-
-/// The hook's process still runs.
-#[cfg(unix)]
-fn alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only asks whether the process exists.
-    let r = unsafe { libc::kill(pid, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn alive(_pid: u32) -> bool {
-    true
 }

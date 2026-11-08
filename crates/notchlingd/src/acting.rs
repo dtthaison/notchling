@@ -92,7 +92,13 @@ mod tests {
         let dir = temp("file");
         let file = dir.join(SETTINGS_NAME);
         assert!(!file_says_on(&file));
-        for odd in ["", "[]", "{\"acting\": \"yes\"}", "not json", "{\"acting\": false}"] {
+        for odd in [
+            "",
+            "[]",
+            "{\"acting\": \"yes\"}",
+            "not json",
+            "{\"acting\": false}",
+        ] {
             std::fs::write(&file, odd).unwrap();
             assert!(!file_says_on(&file), "{odd}");
         }
