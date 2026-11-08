@@ -138,5 +138,6 @@ fn not_in_transcript(error: ImageError) -> BridgeFailure {
     match error {
         ImageError::NotAllowed => BridgeFailure::invalid("Ảnh này nằm ngoài các thư mục cho phép."),
         ImageError::NotFound => BridgeFailure::not_found("Không thấy ảnh này trong transcript."),
+        ImageError::TooLarge => BridgeFailure::invalid("Ảnh này quá lớn (trên 20 MB)."),
     }
 }
