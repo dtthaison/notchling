@@ -17,6 +17,10 @@ notchling-protocol = { path = "../protocol" }
 # Stable message ids (SHA-256, as the Swift app's `stableUUID`) and photo chunks (base64).
 sha2 = "0.10"
 base64 = "0.22"
+# Visualize (E15) finds mermaid blocks, local URLs and device names in transcripts; the Swift app used NSRegularExpression.
+regex = "1"
+# Chat pictures go to the phone as JPEG (E15). Swift used ImageIO; HEIC has no decoder here.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

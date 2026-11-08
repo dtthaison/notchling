@@ -73,6 +73,11 @@ impl Router {
         (self.now)()
     }
 
+    /// Photos being uploaded right now.
+    pub fn pending_uploads(&self) -> usize {
+        self.uploads.pending()
+    }
+
     /// Answers one text frame. Blocks until the backend has (a `pair` waits for the person at the
     /// computer), so the transport calls it off its reading thread; frames of one connection may be
     /// handled at the same time.

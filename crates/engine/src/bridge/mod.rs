@@ -44,6 +44,25 @@
 //! [`live::Acting`] (what it does, through its acting ops, so the acting switch applies;
 //! [`live::ActingOff`] refuses everything).
 //!
+//! # Extras (E15)
+//!
+//! [`extras::Extras`] holds what `LiveBackend` needs beyond the sessions, each behind a seam:
+//!
+//! - Visualize (`viz.get`): the pure engine in [`crate::viz`]; git goes through the `Launcher`.
+//!   Entity specs need the schema readers, which are not ported: [`crate::viz::Schemas`] answers
+//!   "unsupported" until they are.
+//! - Chat pictures (`chat.image`): a phone names only a picture the chat listed; the bytes are read
+//!   again on demand and turned into a JPEG by [`images::Imaging`] (the `image` crate; HEIC is
+//!   unsupported). Pictures named by file are served only from home and `/tmp`, symlinks resolved
+//!   at fetch time.
+//! - Photo uploads (`session.image.*`): see [`uploads`]; the path is typed through
+//!   [`live::Acting`], so it is refused while acting is off, and the refused file is deleted.
+//! - Web snapshots (`web.snapshot`): [`snapshot::WebSnapshots`] checks the URL is local and
+//!   answers, then asks a [`snapshot::Snapshotter`]. No renderer exists here yet
+//!   ([`snapshot::Unsupported`], answered `not_reachable`).
+//! - The device-window stream (`subscribe {phone}`): [`stream::WindowStreamer`] over a
+//!   [`stream::ScreenCapture`]; no capture exists here yet ([`stream::UnsupportedStreamer`]).
+//!
 //! # Rulings
 //!
 //! - The generated `notchling_protocol` types are the wire for everything that matches it: chat
@@ -59,12 +78,16 @@
 
 pub mod backend;
 pub mod connection;
+pub mod extras;
 pub mod foreign;
 pub mod hub;
+pub mod images;
 pub mod live;
 pub mod model;
 pub mod router;
 mod router_ops;
+pub mod snapshot;
+pub mod stream;
 pub mod uploads;
 pub mod wire;
 
@@ -76,6 +99,8 @@ pub use router_ops::local_url;
 pub use wire::BridgeFailure;
 
 #[cfg(test)]
+mod extras_tests;
+#[cfg(test)]
 mod fixtures_data;
 #[cfg(test)]
 mod fixtures_tests;
@@ -84,10 +109,18 @@ mod foreign_tests;
 #[cfg(test)]
 mod hub_tests;
 #[cfg(test)]
+mod images_tests;
+#[cfg(test)]
 mod live_tests;
 #[cfg(test)]
 mod router_tests;
 #[cfg(test)]
+mod snapshot_tests;
+#[cfg(test)]
+mod stream_tests;
+#[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod uploads_tests;
 #[cfg(test)]
 mod wire_tests;

@@ -97,55 +97,10 @@ fn back_up_to_line_start<R: Read + Seek>(file: &mut R, start: u64) -> Option<(u6
     None
 }
 
-const BASE64_MARKER: &str = "\"type\":\"base64\"";
-const MEDIA_MARKER: &[u8] = b"\"type\":\"base64\",\"media_type\":\"";
-const DATA_KEY: &[u8] = b"\",\"data\":\"";
-
 /// A line with a picture in it is the usual reason a line is big. The base64 is cut out before the JSON
 /// is read (the `data` string becomes empty), so the size limit judges the rest of the line.
 pub fn strip_base64(line: &str) -> Cow<'_, str> {
-    if !line.contains(BASE64_MARKER) {
-        return Cow::Borrowed(line);
-    }
-    let bytes = line.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len().min(200_000));
-    let mut index = 0;
-    while index < bytes.len() {
-        let Some(found) = find(MEDIA_MARKER, bytes, index) else {
-            break;
-        };
-        // The media type runs to its closing quote, then comes `","data":"`.
-        let after_marker = found + MEDIA_MARKER.len();
-        let mut cursor = after_marker;
-        while cursor < bytes.len() && bytes[cursor] != b'"' {
-            cursor += 1;
-        }
-        if !bytes[cursor.min(bytes.len())..].starts_with(DATA_KEY) {
-            out.extend_from_slice(&bytes[index..after_marker]);
-            index = after_marker;
-            continue;
-        }
-        let data_start = cursor + DATA_KEY.len();
-        let mut data_end = data_start;
-        while data_end < bytes.len() && bytes[data_end] != b'"' {
-            data_end += 1;
-        }
-        out.extend_from_slice(&bytes[index..data_start]);
-        index = data_end;
-    }
-    out.extend_from_slice(&bytes[index..]);
-    // Every cut sits on an ASCII quote, so what remains is still valid UTF-8.
-    Cow::Owned(String::from_utf8_lossy(&out).into_owned())
-}
-
-fn find(needle: &[u8], haystack: &[u8], from: usize) -> Option<usize> {
-    if haystack.len() < needle.len() || from > haystack.len() - needle.len() {
-        return None;
-    }
-    haystack[from..]
-        .windows(needle.len())
-        .position(|w| w == needle)
-        .map(|i| from + i)
+    super::images::strip_base64_blocks(line).0
 }
 
 #[cfg(test)]
