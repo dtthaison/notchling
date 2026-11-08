@@ -15,6 +15,7 @@ pub mod engine;
 pub mod engine_check;
 pub mod engine_fix;
 pub mod engine_plan;
+pub mod forms;
 pub mod github;
 pub mod masks;
 pub mod offers;
@@ -34,3 +35,5 @@ mod tests_engine_fix;
 mod tests_engine_offers;
 #[cfg(test)]
 pub mod tests_engine_world;
+#[cfg(test)]
+mod tests_forms;
