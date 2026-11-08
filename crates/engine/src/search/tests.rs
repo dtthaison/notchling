@@ -464,6 +464,8 @@ fn highlights_are_byte_ranges_on_char_boundaries() {
 }
 
 #[test]
+// The list of one range is the answer being checked.
+#[allow(clippy::single_range_in_vec_init)]
 fn highlights_are_disjoint_when_words_overlap() {
     // "b" sits inside "bridge", and "c" twice inside "cache": the ranges merge, so a drawing layer
     // that assumes disjoint runs never sees one inside another.

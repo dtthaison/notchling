@@ -47,6 +47,8 @@ fn ceil(text: &str, mut at: usize) -> usize {
 }
 
 #[cfg(test)]
+// Several tests compare against a list of one range, which is the point of them.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
 
