@@ -139,6 +139,8 @@ pub struct Setup {
     pub audit: Option<PathBuf>,
     /// Rules tried before the batch answer.
     pub runner: ScriptedRunner,
+    /// The Running switch's script; `toggle <mac|linux> <on|off>` when `None`.
+    pub toggle: Option<super::engine::ToggleScript>,
 }
 
 impl Setup {
@@ -154,6 +156,7 @@ impl Setup {
             offers_file: None,
             audit: None,
             runner: ScriptedRunner::new(),
+            toggle: None,
         }
     }
 
@@ -200,12 +203,14 @@ impl Setup {
             steps: self.steps,
             usages: self.usages,
             deliver: self.deliver,
-            toggle_script: Arc::new(|linux, on| {
-                format!(
-                    "toggle {} {}",
-                    if linux { "linux" } else { "mac" },
-                    if on { "on" } else { "off" }
-                )
+            toggle_script: self.toggle.unwrap_or_else(|| {
+                Arc::new(|linux, on| {
+                    format!(
+                        "toggle {} {}",
+                        if linux { "linux" } else { "mac" },
+                        if on { "on" } else { "off" }
+                    )
+                })
             }),
             offers_replace: Arc::new(|r| r.is_some_and(|r| r.state.is_pass())),
         };

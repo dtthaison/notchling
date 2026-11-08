@@ -330,11 +330,13 @@ impl SetupEngine {
         None
     }
 
+    /// Turns the worker on or off with the script the sheet showed (`expected`), and only that one.
     pub(super) fn toggle_running(
         &self,
         machine: &str,
         on: bool,
         admin: &AdminAnswer,
+        expected: &str,
     ) -> FixOutcome {
         let Some(m) = self.machine(machine) else {
             return fail(format!("no machine named {machine}"));
@@ -348,15 +350,18 @@ impl SetupEngine {
         if let Some(why) = self.refusal(&step, &m, admin, needs_admin, false, on) {
             return fail(why);
         }
-        let script = (self.catalog.toggle_script)(m.is_linux(), on);
-        let password = (needs_admin && m.admin() == AdminAccess::Sudo)
-            .then(|| admin.password().cloned())
-            .flatten();
         let title = if on {
             "Turn Running on"
         } else {
             "Turn Running off"
         };
+        let script = (self.catalog.toggle_script)(m.is_linux(), on);
+        if script != expected {
+            return fail(format!("{title} needs a look; Set up again"));
+        }
+        let password = (needs_admin && m.admin() == AdminAccess::Sudo)
+            .then(|| admin.password().cloned())
+            .flatten();
         let outcome = self.perform(StepId::RUNNING, title, &m, password, |ctx| {
             let r = if needs_admin {
                 run::admin(ctx, &script, 900)

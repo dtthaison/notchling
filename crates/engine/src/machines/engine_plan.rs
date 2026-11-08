@@ -223,7 +223,7 @@ impl SetupEngine {
         match &plan.kind {
             PlanKind::Fix(id) => self.run_fix(&plan.machine, id, &admin, &display),
             PlanKind::Replace(id) => self.run_replace(&plan.machine, id, &display),
-            PlanKind::Running(on) => self.toggle_running(&plan.machine, *on, &admin),
+            PlanKind::Running(on) => self.toggle_running(&plan.machine, *on, &admin, &display),
             PlanKind::SendAgain(usage) => self.send_again(usage),
             PlanKind::Update(secret) => {
                 let outcomes = self.update_machines(secret);

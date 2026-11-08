@@ -512,3 +512,43 @@ fn a_second_fix_on_a_machine_is_refused_even_after_both_passed_the_refusals() {
     go_tx.send(()).unwrap();
     assert_eq!(running.join().unwrap(), FixOutcome::ok("slow done"));
 }
+
+#[test]
+fn the_running_switch_runs_only_the_script_it_showed() {
+    let mut s = Setup::new(|_, _| {
+        vec![StepBuilder::new("running")
+            .fix(StepFix::Toggle { needs_admin: false })
+            .build()]
+    });
+    // the plan and the check before the run see one script; the run would build another
+    let built = Arc::new(Mutex::new(0));
+    let b = built.clone();
+    s.toggle = Some(Arc::new(move |_, on| {
+        let mut n = lock(&b);
+        *n += 1;
+        let state = if on { "on" } else { "off" };
+        if *n <= 2 {
+            format!("toggle shown {state}")
+        } else {
+            format!("toggle other {state}")
+        }
+    }));
+    s.runner.on_script("toggle", CommandResult::ok(""));
+    let w = s.build();
+    let plan = w.engine.plan("m1", PlanKind::Running(false)).unwrap();
+    assert_eq!(plan.steps[0].display, "toggle shown off");
+    let out = w
+        .engine
+        .run(w.engine.confirm(plan.id, AdminAnswer::None).unwrap());
+    assert_eq!(
+        out,
+        FixOutcome::fail("Turn Running off needs a look; Set up again")
+    );
+    assert!(
+        !w.runner
+            .calls()
+            .iter()
+            .any(|c| c.text().contains("toggle other") || c.text().contains("toggle shown")),
+        "no script ran"
+    );
+}
