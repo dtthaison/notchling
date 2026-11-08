@@ -3409,11 +3409,13 @@ name = "notchling-engine"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "image",
  "libc",
  "notchling-platform",
  "notchling-protocol",
  "p12",
  "rcgen",
+ "regex",
  "ring",
  "rustls",
  "rustls-native-certs",

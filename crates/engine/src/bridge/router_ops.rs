@@ -262,7 +262,7 @@ impl Router {
             .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
             .ok_or_else(missing)?;
         self.uploads
-            .append(upload_id, connection.id, sequence, &chunk)
+            .append(upload_id, connection.id, sequence, &chunk, self.now_ms())
             .map_err(upload_failure)?;
         Ok(json!({"received": sequence}))
     }
@@ -275,7 +275,7 @@ impl Router {
         let upload_id = require(body, "uploadId")?;
         let upload = self
             .uploads
-            .finish(upload_id, connection.id)
+            .finish(upload_id, connection.id, self.now_ms())
             .map_err(upload_failure)?;
         let ext = ImageStore::detect(&upload.data)
             .ok_or_else(|| BridgeFailure::invalid("Chỉ nhận ảnh JPEG, PNG, GIF hoặc WebP."))?;
@@ -289,7 +289,13 @@ impl Router {
                 .save(&upload.data, ext, self.now_ms())
                 .map_err(|_| BridgeFailure::internal("Mac không lưu được ảnh."))?;
             let message = ImageStore::message(&upload.caption, &file.to_string_lossy());
-            self.backend.send_message(&message, &target)
+            // The path reaches the session only through the backend, which refuses while acting is
+            // off; a photo nobody was told about is not kept.
+            let sent = self.backend.send_message(&message, &target);
+            if sent.is_err() {
+                let _ = std::fs::remove_file(&file);
+            }
+            sent
         })?;
         self.audit(
             connection,
