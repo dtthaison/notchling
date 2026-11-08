@@ -6,11 +6,13 @@
 
 pub mod bridge;
 pub mod control;
+pub mod pages;
 pub mod reply;
 pub mod search;
 pub mod sessions;
 pub mod settings;
 pub mod terminal;
+pub mod tools;
 pub mod transcript;
 pub mod viz;
 
