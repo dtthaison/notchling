@@ -1,10 +1,11 @@
 //! When Chat reads its folders again, pure so it is tested on every system.
 //!
-//! The watcher (`platform::watch`) reports a batch only after the folders have been quiet for its
-//! debounce time, so a session writing every few hundred milliseconds would never flush one. Chat
-//! therefore asks the watcher for no debounce (a batch per poll that saw a change) and coalesces
-//! here instead: a [`ReloadGate`] reloads at most every [`MIN_GAP_MS`] while changes keep arriving,
-//! and at least every [`FULL_EVERY_MS`] for the ages and the Done window, which move on their own.
+//! The watcher (`platform::watch`) sends a batch once the folders have been quiet for its debounce
+//! time, or `max_latency` after the first change when they never are (a session appending to its
+//! transcript every few hundred milliseconds); Chat asks for both in [`watch_config`]. A
+//! [`ReloadGate`] then decides when to read: at most every [`MIN_GAP_MS`] while batches keep
+//! arriving, and at least every [`FULL_EVERY_MS`] for the ages and the Done window, which move on
+//! their own.
 
 use std::time::Duration;
 
@@ -15,11 +16,13 @@ pub const MIN_GAP_MS: i64 = 2_000;
 /// A reload with no change at all, for ages and the Done window.
 pub const FULL_EVERY_MS: i64 = 30_000;
 
-/// How Chat's watcher looks: every second, with no debounce (see the module note).
+/// How Chat's watcher looks: every second, a batch after half a second of quiet or one second after
+/// the first change, whichever comes first, so steady writes still get through.
 pub fn watch_config() -> WatchConfig {
     WatchConfig {
         poll: Duration::from_secs(1),
-        debounce: Duration::ZERO,
+        debounce: Duration::from_millis(500),
+        max_latency: Duration::from_secs(1),
     }
 }
 
@@ -114,18 +117,19 @@ mod tests {
     fn steady_writes_still_make_the_watcher_report() {
         let scratch = crate::testutil::Scratch::new("steady-writes");
         let file = scratch.write("transcript.jsonl", "x");
-        // The production config, polled faster so the test is short.
-        let config = WatchConfig {
-            poll: Duration::from_millis(20),
-            ..watch_config()
-        };
+        // The production config as it is: a poll a second, so the test takes a few seconds.
+        let config = watch_config();
+        assert!(
+            config.max_latency > config.debounce,
+            "or the debounce never waits"
+        );
         let (_watcher, batches) =
             Watcher::start(vec![scratch.path().to_path_buf()], config).expect("a watcher");
         let started = Instant::now();
         let mut reported = 0;
         let mut size = 1;
-        // Faster than a half-second quiet spell, the way a working session appends.
-        while started.elapsed() < Duration::from_millis(1_200) {
+        // Faster than the half-second quiet spell, the way a working session appends.
+        while started.elapsed() < Duration::from_millis(3_500) {
             size += 1;
             std::fs::write(&file, vec![b'x'; size]).expect("append");
             std::thread::sleep(Duration::from_millis(30));
@@ -134,8 +138,8 @@ mod tests {
             }
         }
         assert!(
-            reported >= 5,
-            "{reported} batches in 1.2 s of steady writes: a debounce starves the reload"
+            reported >= 1,
+            "no batch in 3.5 s of steady writes: a debounce alone starves the reload"
         );
     }
 }
