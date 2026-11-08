@@ -17,6 +17,7 @@ use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
+use crate::pages::window::AppPagesDir;
 use crate::phone::bridge::{now_ms, Bridge};
 use crate::phone::pairing::PairingFeed;
 use crate::search::hotkey::{self, Registration};
@@ -110,6 +111,10 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
         cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
+        if let Some(root) = root.as_ref() {
+            // A page's copy is only ever loaded from here.
+            cx.set_global(AppPagesDir(root.data_dir.join("pages")));
+        }
         let opinions = store_for_run(root.as_ref(), exe.as_deref());
         if let Some(store) = opinions.clone() {
             // Every way out of the app comes through here: ⌘Q, the Dock's Quit, the tray's Quit and
