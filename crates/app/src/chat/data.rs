@@ -121,6 +121,14 @@ impl DataRoot {
         }
     }
 
+    /// The app's own folder under the data folder, for what only the app keeps: the second
+    /// opinions. Beside `daemon/` (the daemon's) and apart
+    /// from the Swift app's files in the data folder itself, which a Swift app running next to
+    /// this one keeps writing.
+    pub fn app_dir(&self) -> PathBuf {
+        self.data_dir.join("app")
+    }
+
     /// The Antigravity list, read through a copy in our own folder.
     pub fn new_agy_list(&self) -> AgyList {
         AgyList::new(
