@@ -27,6 +27,9 @@ pub struct Turn<'a> {
     pub pick: &'a Pick,
     /// "Allow Network in Codex Turns" (the `codexNetwork` setting, on unless turned off).
     pub network: bool,
+    /// The `CODEX_HOME` the turn runs with: the folder the daemon reads sessions from, so the turn
+    /// writes its rollout where it is looked for and never into whatever home the environment names.
+    pub codex_home: Option<&'a Path>,
 }
 
 /// A process to start: the program, its arguments and folder, and the environment changes
@@ -102,6 +105,12 @@ pub fn turn_spec(codex: &Path, turn: &Turn<'_>, path: Option<&str>) -> TurnSpec 
     let mut env = vec![("NO_COLOR".to_string(), None)];
     if let Some(path) = path {
         env.push(("PATH".to_string(), Some(path.to_string())));
+    }
+    if let Some(home) = turn.codex_home {
+        env.push((
+            "CODEX_HOME".to_string(),
+            Some(home.to_string_lossy().into_owned()),
+        ));
     }
     TurnSpec {
         program: codex.to_path_buf(),
@@ -202,6 +211,13 @@ pub fn find_binary(home: &Path, path: &str, is_file: impl Fn(&Path) -> bool) -> 
                 .map(|dir| Path::new(dir).join("codex")),
         )
         .find(|candidate| is_file(candidate))
+}
+
+/// The `codex` command over a fixture root: only `<root>/.local/bin/codex`. A developer's own
+/// Codex in `/opt/homebrew/bin` or on the PATH is never run against a fixture, where it would
+/// act on whatever login the environment names.
+pub fn find_fixture_binary(root: &Path, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    Some(root.join(".local").join("bin").join("codex")).filter(|c| is_file(c))
 }
 
 #[cfg(test)]

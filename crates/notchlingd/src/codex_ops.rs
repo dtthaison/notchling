@@ -34,8 +34,8 @@ use notchling_engine::sessions::AgentGroup;
 use notchling_engine::tools::codex::list::{find_rollout, session as row_of};
 use notchling_engine::tools::codex::models;
 use notchling_engine::tools::codex::plan::{
-    augmented_path, find_binary, valid_effort, valid_model, valid_session_id, Pick,
-    MAX_PROMPT_BYTES,
+    augmented_path, find_binary, find_fixture_binary, valid_effort, valid_model, valid_session_id,
+    Pick, MAX_PROMPT_BYTES,
 };
 use notchling_engine::tools::codex::process::{RealSpawner, ToolSpawner};
 use notchling_engine::tools::codex::runs::{
@@ -66,6 +66,8 @@ pub struct CodexSetup {
     pub home: PathBuf,
     /// Notchling's data folder, for `settings.json` (`codexNetwork`).
     pub data_dir: PathBuf,
+    /// True over a fixture root: only that root's own `.local/bin/codex` is run.
+    pub fixture: bool,
 }
 
 /// The `codex` command and the PATH its tools are found in; `None` when Codex isn't installed.
@@ -92,18 +94,20 @@ impl CodexOps {
             room: room.clone(),
             sessions_dir: setup.codex_home.join("sessions"),
         });
-        let home = setup.home.clone();
+        let found = setup.clone();
         let runs = CodexRuns::new(spawner, PathBuf::new(), None, sink);
         // Asked under the runs' lock right before a process starts, and again once it has: a
         // start can't slip past `acting_off`.
         let switch = acting.clone();
         runs.set_may_start(Arc::new(move || switch.is_on()));
+        // The home the sessions are listed from, not whatever `CODEX_HOME` the daemon has.
+        runs.set_codex_home(setup.codex_home.clone());
         CodexOps {
             acting,
             runs,
             launcher,
             setup,
-            resolve: Box::new(move || system_codex(&home)),
+            resolve: Box::new(move || system_codex(&found)),
             room,
         }
     }
@@ -122,6 +126,7 @@ impl CodexOps {
                 codex_home: layout.codex_dir(),
                 home: layout.home(),
                 data_dir: layout.data_dir.clone(),
+                fixture: layout.fixture,
             },
             Arc::new(RealSpawner),
             Arc::new(RealLauncher::with_claude(claude.to_path_buf())),
@@ -262,7 +267,8 @@ impl CodexOps {
             &codex.to_string_lossy(),
             &["delete".into(), "--force".into(), session.clone()],
         )
-        .with_env("PATH", Some(&path));
+        .with_env("PATH", Some(&path))
+        .with_env("CODEX_HOME", Some(&self.setup.codex_home.to_string_lossy()));
         let done = self
             .launcher
             .run(&command, DELETE_TIMEOUT)
@@ -361,10 +367,25 @@ fn row_id(session: &str) -> String {
 }
 
 /// `codex` from the usual places or the process's PATH, and the PATH it runs with.
-fn system_codex(home: &Path) -> Option<(PathBuf, String)> {
+fn system_codex(setup: &CodexSetup) -> Option<(PathBuf, String)> {
     let path = std::env::var("PATH").unwrap_or_default();
-    let codex = find_binary(home, &path, Path::is_file)?;
-    Some((codex, augmented_path(&path, home)))
+    locate(setup, &path, Path::is_file)
+}
+
+/// The `codex` to run and its PATH, given the PATH the daemon has. Over a fixture root only that
+/// root's own `.local/bin/codex` counts: the machine's Codex would run against a fixture while
+/// naming the real login.
+fn locate(
+    setup: &CodexSetup,
+    path: &str,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<(PathBuf, String)> {
+    let codex = if setup.fixture {
+        find_fixture_binary(&setup.home, is_file)?
+    } else {
+        find_binary(&setup.home, path, is_file)?
+    };
+    Some((codex, augmented_path(path, &setup.home)))
 }
 
 /// Publishes a turn's events and the row it changes.

@@ -59,6 +59,7 @@ fn setup(tag: &str, on: bool) -> Setup {
             codex_home: home.join("codex"),
             home,
             data_dir: dir.join("data"),
+            fixture: false,
         },
         spawner.clone(),
         launcher.clone(),
@@ -564,6 +565,66 @@ fn delete_runs_codex_delete_force_after_stopping_the_turn() {
     let last = changed.last().expect("an event");
     assert_eq!(last["deleted"], json!(true));
     assert_eq!(last["row"], Value::Null);
+}
+
+#[test]
+fn turns_and_delete_run_with_the_codex_home_the_daemon_reads() {
+    let s = setup("codexhome", true);
+    let home = s.ops.setup.codex_home.to_string_lossy().into_owned();
+    s.spawner.push(FakeRun::ok(&[DONE]));
+    s.call(
+        ops::CODEX_SEND,
+        json!({"id": format!("codex:{SESSION}"), "text": "go"}),
+    )
+    .expect("sent");
+    s.idle();
+    assert!(
+        s.spawner.specs()[0]
+            .env
+            .contains(&("CODEX_HOME".to_string(), Some(home.clone()))),
+        "{:?}",
+        s.spawner.specs()[0].env
+    );
+    s.call(ops::CODEX_DELETE, json!({"id": format!("codex:{SESSION}")}))
+        .expect("deleted");
+    assert_eq!(
+        s.launcher.commands()[0].env.get("CODEX_HOME"),
+        Some(&Some(home)),
+        "codex delete removes the file from the home the daemon lists"
+    );
+}
+
+#[test]
+fn over_a_fixture_root_a_codex_elsewhere_on_the_machine_is_not_run() {
+    let root = std::env::temp_dir().join(format!("nl-codexops-fixture-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let only = |wanted: PathBuf| move |p: &Path| p == wanted;
+    let setup = |fixture| CodexSetup {
+        codex_home: root.join("codex"),
+        home: root.clone(),
+        data_dir: root.join("notchling"),
+        fixture,
+    };
+    let own = root.join(".local/bin/codex");
+    // The machine has /opt/homebrew/bin/codex (and the PATH names it): a real install, not the root's.
+    let found = locate(
+        &setup(true),
+        "/opt/homebrew/bin",
+        only(PathBuf::from("/opt/homebrew/bin/codex")),
+    );
+    assert_eq!(found, None);
+    let found = locate(&setup(true), "/usr/bin", only(own.clone()));
+    assert_eq!(found.map(|(codex, _)| codex), Some(own));
+    // Over the real folders the usual places still count.
+    let found = locate(
+        &setup(false),
+        "",
+        only(PathBuf::from("/opt/homebrew/bin/codex")),
+    );
+    assert_eq!(
+        found.map(|(codex, _)| codex),
+        Some(PathBuf::from("/opt/homebrew/bin/codex"))
+    );
 }
 
 #[test]

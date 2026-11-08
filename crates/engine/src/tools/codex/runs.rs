@@ -113,6 +113,8 @@ struct Inner {
     spawner: Arc<dyn ToolSpawner>,
     codex: Mutex<PathBuf>,
     path: Mutex<Option<String>>,
+    /// `CODEX_HOME` for every turn, once set.
+    home: OnceLock<PathBuf>,
     sink: Arc<dyn TurnSink>,
     network: AtomicBool,
     announce_ms: AtomicU64,
@@ -141,6 +143,7 @@ impl CodexRuns {
                 spawner,
                 codex: Mutex::new(codex),
                 path: Mutex::new(path),
+                home: OnceLock::new(),
                 sink,
                 network: AtomicBool::new(true),
                 announce_ms: AtomicU64::new(ANNOUNCE_WAIT.as_millis() as u64),
@@ -160,6 +163,12 @@ impl CodexRuns {
     pub fn set_command(&self, codex: PathBuf, path: Option<String>) {
         *self.inner.codex.lock().unwrap_or_else(|e| e.into_inner()) = codex;
         *self.inner.path.lock().unwrap_or_else(|e| e.into_inner()) = path;
+    }
+
+    /// The Codex home every turn runs with (`CODEX_HOME`), once: the folder whose sessions the
+    /// daemon lists, so a turn can't write its rollout into another home the environment names.
+    pub fn set_codex_home(&self, home: PathBuf) {
+        let _ = self.inner.home.set(home);
     }
 
     /// How long a new session may take to be named (tests shorten it).
@@ -296,6 +305,7 @@ impl CodexRuns {
                 folder: &request.folder,
                 pick: &request.pick,
                 network: self.inner.network.load(Ordering::SeqCst),
+                codex_home: self.inner.home.get().map(PathBuf::as_path),
             },
             path.as_deref(),
         )
