@@ -1,7 +1,10 @@
 //! An Antigravity permission as the daemon publishes it (`prompt.pending` with `tool: "agy"`,
 //! plus `rpcId`, `options` and `diff`): what the tool would do, and Antigravity's own options in
 //! the order the notch lists them (`NotchForeign.orderedOptions`, `preview`, `AgyPermissionCard`).
-//! Answering goes through `agy.permission` by the row id, the rpc id and the option picked.
+//! Answering goes through `agy.permission` by the prompt's own session id, the rpc id and the
+//! option picked.
+
+use std::collections::HashSet;
 
 use notchling_engine::bridge::foreign::PermissionOption;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
@@ -139,6 +142,37 @@ impl AgyPermission {
     }
 }
 
+/// A permission the daemon holds for a row, with what answering it needs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeldPrompt {
+    /// The prompt's id, to hide it once answered.
+    pub prompt_id: String,
+    /// The session the prompt belongs to, as the daemon named it: what the answer is sent for.
+    /// Not whichever row Chat has selected when the button is pressed.
+    pub session_id: String,
+    pub permission: AgyPermission,
+}
+
+/// The Antigravity permission waiting on `row` among the daemon's held `prompts`, unless it was
+/// already answered here.
+pub fn held_prompt(prompts: &[Value], row: &str, answered: &HashSet<String>) -> Option<HeldPrompt> {
+    prompts.iter().find_map(|p| {
+        let session_id = p.get("sessionId").and_then(Value::as_str)?;
+        if session_id != row {
+            return None;
+        }
+        let prompt_id = p.get("id")?.as_str()?;
+        if answered.contains(prompt_id) {
+            return None;
+        }
+        Some(HeldPrompt {
+            prompt_id: prompt_id.to_owned(),
+            session_id: session_id.to_owned(),
+            permission: AgyPermission::from_prompt(p)?,
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +235,30 @@ mod tests {
         let mut no_options = prompt();
         no_options["options"] = json!([]);
         assert_eq!(AgyPermission::from_prompt(&no_options), None);
+    }
+
+    #[test]
+    fn a_held_prompt_carries_its_own_session_and_skips_answered_and_foreign_ones() {
+        let mut other = prompt();
+        other["id"] = json!("agy-perm:agy:s2:1");
+        other["sessionId"] = json!("agy:s2");
+        let mut claude = prompt();
+        claude["id"] = json!("claude-prompt");
+        claude["tool"] = json!("claude");
+        let prompts = vec![claude, other, prompt()];
+        let none = HashSet::new();
+        let held = held_prompt(&prompts, "agy:s1", &none).expect("s1's prompt");
+        assert_eq!(held.session_id, "agy:s1", "named by the prompt");
+        assert_eq!(held.prompt_id, "agy-perm:agy:s1:1");
+        assert_eq!(held.permission.rpc_id, "1");
+        assert_eq!(
+            held_prompt(&prompts, "agy:s2", &none).map(|h| h.session_id),
+            Some("agy:s2".to_owned())
+        );
+        // Answered here, and not Antigravity's, and nobody's.
+        let answered: HashSet<String> = ["agy-perm:agy:s1:1".to_owned()].into();
+        assert_eq!(held_prompt(&prompts, "agy:s1", &answered), None);
+        assert_eq!(held_prompt(&prompts, "agy:s3", &none), None);
+        assert_eq!(held_prompt(&[], "agy:s1", &none), None);
     }
 }

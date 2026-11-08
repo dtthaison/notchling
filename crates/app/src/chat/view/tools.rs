@@ -17,7 +17,7 @@ use crate::acting::{Acting, Control, Request};
 use crate::chat::data::Tool;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
-use crate::tools::agy_permission::AgyPermission;
+use crate::tools::agy_permission::{held_prompt, HeldPrompt};
 use crate::tools::codex_picker::CodexPicker;
 use crate::tools::fetch_gate::{Ask, FetchGate};
 use crate::tools::live::ToolLive;
@@ -272,19 +272,12 @@ impl ChatView {
         );
     }
 
-    /// An option of the Antigravity permission card.
-    pub(super) fn answer_agy(
-        &mut self,
-        prompt_id: String,
-        rpc_id: String,
-        option: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(id) = self.selected.clone() else {
-            return;
-        };
+    /// An option of the Antigravity permission card: the answer goes for the session the prompt
+    /// belongs to, which is what the daemon named, not whichever row is selected now.
+    pub(super) fn answer_agy(&mut self, held: &HeldPrompt, option: String, cx: &mut Context<Self>) {
+        let prompt_id = held.prompt_id.clone();
         self.spawn_send(
-            agy_permission(&id, &rpc_id, Some(&option)),
+            agy_permission(&held.session_id, &held.permission.rpc_id, Some(&option)),
             move |view, result, _| match result {
                 Ok(_) => {
                     view.tools.answered.insert(prompt_id);
@@ -296,19 +289,10 @@ impl ChatView {
     }
 
     /// The Antigravity permission waiting on the selected row, from the daemon's held prompts.
-    pub(super) fn agy_prompt(&self) -> Option<(String, AgyPermission)> {
+    pub(super) fn agy_prompt(&self) -> Option<HeldPrompt> {
         let id = self.selected.as_deref()?;
         let prompts = self.source.view().prompts?;
-        prompts.iter().find_map(|p| {
-            if p.get("sessionId").and_then(Value::as_str) != Some(id) {
-                return None;
-            }
-            let prompt_id = p.get("id")?.as_str()?.to_owned();
-            if self.tools.answered.contains(&prompt_id) {
-                return None;
-            }
-            AgyPermission::from_prompt(p).map(|agy| (prompt_id, agy))
-        })
+        held_prompt(&prompts, id, &self.tools.answered)
     }
 
     /// Opens or closes the picker the selected row has: Codex's models, Antigravity's options.
