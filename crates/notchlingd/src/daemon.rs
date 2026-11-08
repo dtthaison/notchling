@@ -21,6 +21,7 @@ use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
 use crate::layout::Layout;
+use crate::limits_ops::{AccountsFlag, LimitsOps, TOPIC_LIMITS};
 use crate::pages_ops::{PagesOps, PagesSetup};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
@@ -119,6 +120,7 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
+    limits: Option<Arc<LimitsOps>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
     /// What `sessions.list` waits for, and for how long.
@@ -135,6 +137,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
+            limits: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -171,6 +174,9 @@ impl Ops {
         if self.codex.is_some() || self.agy.is_some() {
             list.push(topics::TOOLS);
         }
+        if self.limits.is_some() {
+            list.push(TOPIC_LIMITS);
+        }
         self.topic_list = list;
         self
     }
@@ -185,6 +191,13 @@ impl Ops {
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
         self.pages = Some(pages);
         self
+    }
+
+    /// M6's limit watchers and token cost ([`LimitsOps`]): `limits.status`, `limits.set_mode`
+    /// (app tier) and `cost.summary` (agent tier, read only), and the `limits` topic.
+    pub fn with_limits(mut self, limits: Arc<LimitsOps>) -> Ops {
+        self.limits = Some(limits);
+        self.with_topics()
     }
 
     /// `sessions.list` waits up to `wait` for `first`, then answers with what the list holds.
@@ -237,6 +250,7 @@ impl Handler for Ops {
                 .pages
                 .as_ref()
                 .and_then(|p| p.spec(op))
+                .or_else(|| self.limits.as_ref().and_then(|l| l.spec(op)))
                 .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
@@ -257,6 +271,9 @@ impl Handler for Ops {
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
             return pages.call(op, args);
         }
+        if let Some(limits) = self.limits.as_ref().filter(|l| l.spec(op).is_some()) {
+            return limits.call(op, args);
+        }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
             (op, Some(acting)) => acting.call(caller, op, args),
@@ -272,7 +289,7 @@ impl Handler for Ops {
     /// pairing requests.
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
-            topics::PROMPTS | topics::BRIDGE => Tier::App,
+            topics::PROMPTS | topics::BRIDGE | TOPIC_LIMITS => Tier::App,
             _ => Tier::Agent,
         }
     }
@@ -512,6 +529,14 @@ pub fn run(
         room.clone(),
     ));
     acting_ops.attach_agy(agy.clone());
+    // M6's limit watchers: behind `accounts`, off at every start. No account store feeds them in
+    // this build, so with the switch on or off they call nothing; `cost.summary` only reads
+    // transcripts and needs no switch.
+    let limits = Arc::new(LimitsOps::for_daemon(
+        &layout,
+        Arc::new(AccountsFlag::off()),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -525,6 +550,7 @@ pub fn run(
                 .with_bridge(bridge.clone())
                 .with_codex(codex_ops.clone())
                 .with_agy(agy.clone())
+                .with_limits(limits.clone())
                 .with_pages(Arc::new(
                     PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
                 ))
@@ -543,6 +569,7 @@ pub fn run(
     }
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
     room.set(handle.clone());
+    limits.spawn_loop();
     eprintln!(
         "notchling daemon {} serving {}",
         env!("CARGO_PKG_VERSION"),
@@ -586,6 +613,7 @@ pub fn run(
     codex_ops.close();
     agy.close();
     bridge.close();
+    limits.close();
     handle.shutdown();
     match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),

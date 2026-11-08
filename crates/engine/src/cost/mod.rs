@@ -18,6 +18,7 @@
 pub mod account_log;
 pub mod cache;
 pub mod other;
+pub mod paths;
 pub mod prices;
 pub mod service;
 pub mod summary;
