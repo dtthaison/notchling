@@ -96,6 +96,8 @@ mod pages_ops_tests;
 #[cfg(test)]
 mod providers_ops_tests;
 #[cfg(test)]
+mod providers_sync_tests;
+#[cfg(test)]
 mod vault_ops_lock_tests;
 
 use cli::{Command, ServiceAction};
