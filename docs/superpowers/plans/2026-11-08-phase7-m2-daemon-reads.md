@@ -23,9 +23,10 @@
   - Error codes: `bad_request`, `unknown_op`, `forbidden`, `needs_approval`, `internal`.
   - The first op on a connection must be `hello` with `{"client": "app"|"cli"|"hook", "version": "<semver>", "api": 1}`. Its reply is `{"api": 1, "daemon": "<version>", "tier": "app"|"agent"}`.
 - **Tiers** (0007).
-  - The peer's executable path comes from `LOCAL_PEERPID` + `proc_pidpath` on macOS, `SO_PEERCRED` + `/proc/<pid>/exe` on Linux, and `GetNamedPipeClientProcessId` on Windows.
+  - The peer's executable path comes from `LOCAL_PEERTOKEN` + `proc_pidpath_audittoken` on macOS, `SO_PEERCRED` + `/proc/<pid>/exe` on Linux, and `GetNamedPipeClientProcessId` on Windows.
+  - The peer is read at accept and again at `hello` (and before each app-tier request). The app tier needs one process throughout: the same pid and pid version (macOS) or start time and file (Linux). This closes the connect-fork-exec race on macOS; on Linux it is best effort, since an exec before accept can't be seen (0007's note of 2026-11-08). The code signature joins the check with Developer ID in Phase 6.
   - The peer's uid must equal the daemon's uid; otherwise the connection is closed.
-  - The app tier needs an executable path in the daemon's allowlist. That is the installed app bundle's binary, or for dev a path in the env `NOTCHLING_APP_TIER_PATHS` read only at daemon start. Everything else is the agent tier.
+  - The app tier needs an executable path in the daemon's allowlist. That is the installed app bundle's binary, or for dev a path in the env `NOTCHLING_APP_TIER_PATHS` read only at daemon start, and only by a daemon running from a cargo target folder. `ensure_daemon` passes no `NOTCHLING_*` variable on. Everything else is the agent tier.
   - A copy of the app elsewhere is the agent tier.
 - **M2 ops.**
   - `hello`.

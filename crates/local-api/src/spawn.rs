@@ -301,8 +301,13 @@ mod tests {
         let dir = TempDir::new("spawn-env");
         let binary = file(dir.path(), "repo/target/debug/notchling");
         let socket = dir.path().join("notchlingd.sock");
-        let inherited = ["PATH", "NOTCHLING_APP_TIER_PATHS", "NOTCHLING_DATA_ROOT", "HOME"]
-            .map(OsString::from);
+        let inherited = [
+            "PATH",
+            "NOTCHLING_APP_TIER_PATHS",
+            "NOTCHLING_DATA_ROOT",
+            "HOME",
+        ]
+        .map(OsString::from);
         let command =
             daemon_command(&binary, &socket, &SpawnOptions::default(), inherited).unwrap();
         let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();

@@ -455,3 +455,6 @@ fn shutdown_closes_open_clients() {
     run.handle.shutdown();
     assert!(closed(&mut s));
 }
+
+#[path = "server_exec_tests.rs"]
+mod exec;

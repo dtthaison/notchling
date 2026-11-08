@@ -11,6 +11,7 @@
 //! canonicalized once, at load: a symlink in it names the file it pointed at then, and retargeting
 //! the link later grants nothing. A path that doesn't exist at load is dropped.
 
+use crate::peer::PeerInfo;
 use crate::wire::Tier;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -71,6 +72,16 @@ impl Allowlist {
         }
     }
 
+    /// The tier for a connection whose peer was `at_accept` when it connected and `at_hello` when
+    /// it said hello: the app tier only when both are the same process still running the same
+    /// listed file (see the exec race in [`crate::peer`]).
+    pub fn tier_for(&self, at_accept: &PeerInfo, at_hello: Option<&PeerInfo>) -> Tier {
+        match at_hello {
+            Some(now) if at_accept.same_process(now) => self.tier_of(now.exe.as_deref()),
+            _ => Tier::Agent,
+        }
+    }
+
     pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
         self.paths.iter()
     }
@@ -108,6 +119,38 @@ mod tests {
         assert_eq!(list.tier_of(Some(&other)), Tier::Agent);
         assert_eq!(list.tier_of(None), Tier::Agent);
         assert_eq!(Allowlist::empty().tier_of(Some(&app)), Tier::Agent);
+    }
+
+    #[test]
+    fn the_app_tier_needs_the_same_process_at_accept_and_at_hello() {
+        let dir = TempDir::new("tier-twice");
+        let app = exe(&dir, "app");
+        let list = Allowlist::new([&app]);
+        let peer = |pid: u32, exe: &Path, generation: u64| PeerInfo {
+            uid: 501,
+            pid,
+            exe: Some(exe.to_path_buf()),
+            generation: Some(generation),
+        };
+        let at_accept = peer(10, &app, 1);
+        assert_eq!(list.tier_for(&at_accept, Some(&at_accept)), Tier::App);
+        // The hello came from another process (the fork), or the same pid after an exec.
+        assert_eq!(
+            list.tier_for(&at_accept, Some(&peer(11, &app, 1))),
+            Tier::Agent
+        );
+        assert_eq!(
+            list.tier_for(&at_accept, Some(&peer(10, &app, 2))),
+            Tier::Agent
+        );
+        // The process exec'd into the app after accept: the files differ.
+        let other = exe(&dir, "other");
+        assert_eq!(
+            list.tier_for(&peer(10, &other, 1), Some(&peer(10, &app, 1))),
+            Tier::Agent
+        );
+        // No second read at all.
+        assert_eq!(list.tier_for(&at_accept, None), Tier::Agent);
     }
 
     #[test]
@@ -202,7 +245,7 @@ mod tests {
         // The installed app's own path is listed whatever the variable says.
         let app = exe(&dir, "app");
         let release = dir.path().join("usr/local/bin/notchling");
-        let list = Allowlist::for_daemon(&[app.clone()], Some(&joined), Some(&release));
+        let list = Allowlist::for_daemon(std::slice::from_ref(&app), Some(&joined), Some(&release));
         assert_eq!(list.tier_of(Some(&app)), Tier::App);
     }
 }

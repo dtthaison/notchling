@@ -30,7 +30,7 @@ impl Hub {
         self.entries.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Adds a connection that hasn't said hello yet.
+    /// Adds a connection that hasn't said hello yet (its tier is settled at hello).
     pub(crate) fn add(&self, tier: Tier, tx: SyncSender<Vec<u8>>, stream: Stream) -> u64 {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         self.entries().insert(
@@ -46,9 +46,11 @@ impl Hub {
         id
     }
 
-    pub(crate) fn hello(&self, id: u64, kind: ClientKind) {
+    /// The client said hello as `kind`; the server now knows its tier.
+    pub(crate) fn hello(&self, id: u64, kind: ClientKind, tier: Tier) {
         if let Some(entry) = self.entries().get_mut(&id) {
             entry.kind = Some(kind);
+            entry.tier = tier;
         }
     }
 
