@@ -1,5 +1,5 @@
 //! The Settings sheet, pure (part U8, the Swift `SettingsPage`): the Milestone 1 settings keys in
-//! the Swift app's sections, each row reading the store (or the key's default), and the daemon's
+//! the Swift app's sections, each row reading the store (or the key's default), after the daemon's
 //! acting switch shown read-only with its state. Launch at login is the system's login item, not a
 //! key, so it waits for its part.
 
@@ -124,7 +124,23 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Sec
             },
         });
     }
+    // The daemon's switch first: it decides whether anything here can act at all.
     vec![
+        Section {
+            title: "Daemon",
+            rows: vec![Row {
+                key: "",
+                title: "Acting on sessions",
+                field: Field::ReadOnly {
+                    value: acting.word().to_owned(),
+                    note: acting.message().map(str::to_owned),
+                },
+            }],
+            footer: Some(
+                "Only the maintainer turns acting on, with the daemon's settings.set_acting. \
+                 Until then the Swift app answers, replies and starts sessions.",
+            ),
+        },
         Section {
             title: "Keep Mac Awake",
             rows: vec![
@@ -172,21 +188,6 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Sec
             title: "Codex",
             rows: vec![toggle(read, "codexNetwork", "Allow Network in Codex Turns")],
             footer: None,
-        },
-        Section {
-            title: "Daemon",
-            rows: vec![Row {
-                key: "",
-                title: "Acting on sessions",
-                field: Field::ReadOnly {
-                    value: acting.word().to_owned(),
-                    note: acting.message().map(str::to_owned),
-                },
-            }],
-            footer: Some(
-                "Only the maintainer turns acting on, with the daemon's settings.set_acting. \
-                 Until then the Swift app answers, replies and starts sessions.",
-            ),
         },
     ]
 }
@@ -302,7 +303,7 @@ mod tests {
 
     #[test]
     fn acting_shows_read_only_with_its_state() {
-        let daemon = sections(&|_| None, Acting::Off).pop().unwrap();
+        let daemon = sections(&|_| None, Acting::Off).remove(0);
         assert_eq!(daemon.title, "Daemon");
         let acting = &daemon.rows[0];
         assert_eq!(
@@ -313,7 +314,7 @@ mod tests {
             }
         );
         assert_eq!(change(acting, "+1"), None, "never changed here");
-        let on = sections(&|_| None, Acting::On).pop().unwrap();
+        let on = sections(&|_| None, Acting::On).remove(0);
         assert_eq!(
             on.rows[0].field,
             Field::ReadOnly {

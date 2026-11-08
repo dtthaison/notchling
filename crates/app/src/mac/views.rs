@@ -32,6 +32,6 @@ pub fn build(
             Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
         }
         notch if notch.starts_with("notch-") => crate::notch::backdrop::build_render(notch, cx),
-        _ => None,
+        sheet => crate::sheets::view::build_render(sheet, cx),
     }
 }

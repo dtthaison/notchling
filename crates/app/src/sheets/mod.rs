@@ -4,4 +4,9 @@
 
 pub mod banner;
 pub mod new_session;
+pub mod renders;
 pub mod settings;
+#[cfg(target_os = "macos")]
+pub mod settings_view;
+#[cfg(target_os = "macos")]
+pub mod view;
