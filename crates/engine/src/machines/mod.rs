@@ -74,6 +74,8 @@ mod tests_engine_offers;
 #[cfg(test)]
 pub mod tests_engine_world;
 #[cfg(test)]
+mod tests_engine_writes;
+#[cfg(test)]
 mod tests_forms;
 #[cfg(test)]
 mod tests_machine_steps;

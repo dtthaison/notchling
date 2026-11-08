@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineOs {
@@ -458,6 +459,15 @@ fn read(path: &Path) -> Raw {
         },
         other => Raw::Unreadable(format!("version {other} is not supported")),
     }
+}
+
+static WRITES: Mutex<()> = Mutex::new(());
+
+/// Held around every read-modify-write of `machines.json` in this process: the facts a refresh
+/// learned (a background thread) and the window's edits (the UI thread) each load, change and save
+/// under it, so neither saves over what the other just wrote.
+pub fn write_lock() -> MutexGuard<'static, ()> {
+    WRITES.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Pretty JSON with every object's keys sorted, and a final newline.

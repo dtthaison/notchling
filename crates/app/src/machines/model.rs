@@ -21,7 +21,7 @@ use notchling_engine::machines::forms::{
 use notchling_engine::machines::morning::{self, GhIssue, MorningItem};
 use notchling_engine::machines::poller::{LastReport, MachinePoller};
 use notchling_engine::machines::registry::{
-    backup_path, AdminAccess, Machine, MachineOs, RegistryFiles, RegistryState,
+    backup_path, write_lock, AdminAccess, Machine, MachineOs, RegistryFiles, RegistryState,
 };
 use notchling_engine::machines::runner::Runner;
 use notchling_engine::machines::shell::is_safe_machine_path;
@@ -392,18 +392,23 @@ impl MachinesModel {
     // MARK: Changing the record (never touches a machine)
 
     fn commit(&mut self, change: impl FnOnce(&mut Vec<Machine>) -> bool) -> Result<(), String> {
-        // the latest file, not the last render: the engine saves what the checks learn
-        let mut list = match self.parts.registry.load() {
-            RegistryState::Loaded { machines, .. } => machines,
-            RegistryState::Missing => Vec::new(),
-            RegistryState::Unreadable(_) => {
-                return Err("machines.json can't be read, so nothing can be changed".into())
+        // the latest file, not the last render: the engine saves what the checks learn, under the
+        // same lock, so the load, the change and the save are one step against it
+        let saved = {
+            let _writing = write_lock();
+            let mut list = match self.parts.registry.load() {
+                RegistryState::Loaded { machines, .. } => machines,
+                RegistryState::Missing => Vec::new(),
+                RegistryState::Unreadable(_) => {
+                    return Err("machines.json can't be read, so nothing can be changed".into())
+                }
+            };
+            if !change(&mut list) {
+                return Err("no such machine".into());
             }
+            self.parts.registry.save(&list)
         };
-        if !change(&mut list) {
-            return Err("no such machine".into());
-        }
-        if !self.parts.registry.save(&list) {
+        if !saved {
             self.registry_problem = Some("Couldn't save machines.json".into());
             return Err("Couldn't save machines.json".into());
         }

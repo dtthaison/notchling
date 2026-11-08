@@ -426,8 +426,19 @@ impl SetupEngine {
             .collect()
     }
 
-    /// Writes the facts the checks learned into the registry, when they changed anything.
+    /// Writes the facts the checks learned into the registry, when they changed anything. The
+    /// load, the change and the save are one step under the registry's write lock, so an edit the
+    /// window saves meanwhile is neither lost nor saved over.
     fn save_facts(&self, names: &BTreeSet<String>) {
+        let expiries = self.save_facts_locked(names);
+        for (secret, day) in expiries {
+            let _ = self.deps.secrets.set_expires(&secret, Some(&day));
+        }
+    }
+
+    /// The registry part of [`SetupEngine::save_facts`]; the token expiries for the vault.
+    fn save_facts_locked(&self, names: &BTreeSet<String>) -> Vec<(String, String)> {
+        let _writing = super::registry::write_lock();
         let mut list = self.deps.store.machines();
         let mut changed = false;
         let mut expiries = Vec::new();
@@ -452,11 +463,8 @@ impl SetupEngine {
                 changed = true;
             }
         }
-        for (secret, day) in expiries {
-            let _ = self.deps.secrets.set_expires(&secret, Some(&day));
-        }
         if !changed {
-            return;
+            return expiries;
         }
         let saved = self.deps.store.save(&list);
         let mut s = lock(&self.state);
@@ -467,6 +475,7 @@ impl SetupEngine {
                 s.facts.remove(&m.name);
             }
         }
+        expiries
     }
 }
 
