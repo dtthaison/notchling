@@ -1,7 +1,11 @@
 //! The app's follower of Milestone 6's app-tier topics: `settings` (the switches), `accounts`,
 //! `providers`, `limits` and `vault`. One connection of its own, like the pairing feed
-//! (`phone::pairing`): it subscribes, reads `settings.switches`, asserts the user's choice for a
-//! switch the daemon has off, then follows. The views poll it: the [`Switches`] every control is
+//! (`phone::pairing`): it subscribes, reads `settings.switches`, then follows. It never turns a
+//! switch on by itself: a switch the user chose on that a (restarted) daemon has off is only
+//! offered back by the restart notice ([`super::restart`]); only [`SwitchFeed::choose`], from a
+//! click in this app, sends `settings.set_switch`. It is the one owner of the three Milestone 6
+//! switches' state in the app (the handover checklist reads it too). The views poll it: the
+//! [`Switches`] every control is
 //! drawn from, a counter per area that says "ask again" ([`Changes`]), the vault's pending
 //! approvals and request forms (the daemon asks the person only while an app follows `vault`), and
 //! the limit watchers' notices.
@@ -14,12 +18,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use notchling_engine::settings::Settings;
 use notchling_local_api::{
     ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, SOCKET_NAME,
 };
 use serde_json::{json, Value};
 
+use super::restart::{Area, RestartNotice, Said};
 use super::{Switch, Switches};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -54,17 +58,17 @@ pub struct SettingsChoice {
 
 impl SwitchChoice for SettingsChoice {
     fn get(&self, switch: Switch) -> bool {
-        Settings::open(&self.file)
-            .ok()
-            .and_then(|s| s.raw(switch.choice_key()).and_then(Value::as_bool))
-            .unwrap_or(false)
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .get(switch.choice_key())
     }
 
     fn set(&self, switch: Switch, on: bool) -> Result<(), String> {
-        let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
-        let mut values = store.values().clone();
-        values.insert(switch.choice_key().into(), Value::Bool(on));
-        store.replace_all(values).map_err(|e| e.to_string())
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .set_choice(switch.choice_key(), on)
     }
 }
 
@@ -121,6 +125,7 @@ struct State {
 struct Shared {
     state: Mutex<State>,
     stop: AtomicBool,
+    restart: Arc<RestartNotice>,
 }
 
 /// Adds `data` to `list` unless one with its id is there.
@@ -146,6 +151,20 @@ impl Shared {
         match event.event.as_str() {
             topics::SWITCH_CHANGED => {
                 let before = s.switches;
+                if let Some(switch) = event
+                    .data
+                    .get("switch")
+                    .and_then(Value::as_str)
+                    .and_then(Switch::parse)
+                {
+                    let on = event.data.get("on").and_then(Value::as_bool) == Some(true);
+                    if on {
+                        self.restart.observe(Area::of(switch), Said::On, true);
+                    } else {
+                        // Turned off while the app follows: on purpose, not a restart.
+                        self.restart.chose(Area::of(switch), false);
+                    }
+                }
                 if s.switches.apply(&event.data) {
                     if before.is_on(Switch::Vault) && !s.switches.is_on(Switch::Vault) {
                         // Off denies every use still waiting and ends every form.
@@ -221,6 +240,7 @@ impl SwitchFeed {
                     ..State::default()
                 }),
                 stop: AtomicBool::new(false),
+                restart: Arc::default(),
             }),
             transport: None,
             choice: Arc::new(NoChoice),
@@ -232,8 +252,9 @@ impl SwitchFeed {
         SwitchFeed::fixed(Switches::detached())
     }
 
-    /// The running app's: the daemon's socket, or nothing for a fixture root.
-    pub fn for_run(root: Option<&DataRoot>) -> SwitchFeed {
+    /// The running app's: the daemon's socket, or nothing for a fixture root. What it learns about
+    /// a restart goes to `restart`.
+    pub fn for_run(root: Option<&DataRoot>, restart: Arc<RestartNotice>) -> SwitchFeed {
         match root.and_then(config_for) {
             Some(config) => {
                 let transport = Socket {
@@ -243,7 +264,7 @@ impl SwitchFeed {
                 let choice = SettingsChoice {
                     file: config.socket.with_file_name("settings.json"),
                 };
-                SwitchFeed::start(config, Arc::new(transport), Arc::new(choice))
+                SwitchFeed::start(config, Arc::new(transport), Arc::new(choice), restart)
             }
             None => SwitchFeed::none(),
         }
@@ -254,10 +275,14 @@ impl SwitchFeed {
         config: FeedConfig,
         transport: Arc<dyn Transport>,
         choice: Arc<dyn SwitchChoice>,
+        restart: Arc<RestartNotice>,
     ) -> SwitchFeed {
         let mut feed = SwitchFeed::none();
         feed.transport = Some(transport);
         feed.choice = choice.clone();
+        if let Some(shared) = Arc::get_mut(&mut feed.shared) {
+            shared.restart = restart;
+        }
         let shared = feed.shared.clone();
         let spawned = std::thread::Builder::new()
             .name("notchling-switches".into())
@@ -314,16 +339,21 @@ impl SwitchFeed {
         self.choice.get(switch)
     }
 
-    /// The user chose: keeps it, then tells the daemon (`settings.set_switch`). Blocking. The
-    /// reply is applied at once; the event that follows says the same.
+    /// The user chose, with a click in this app: tells the daemon (`settings.set_switch`), then
+    /// keeps the choice. Blocking. The daemon goes first, so "off" always reaches it even when the
+    /// settings file can't be written. The reply is applied at once; the event that follows says
+    /// the same.
     pub fn choose(&self, switch: Switch, on: bool) -> Result<Switches, String> {
         let Some(transport) = &self.transport else {
             return Err(crate::acting::DETACHED_MESSAGE.into());
         };
-        self.choice.set(switch, on)?;
         let (op, args) = switch.set_request(on);
         match transport.call(op, args) {
             Ok(reply) => {
+                self.shared.restart.chose(Area::of(switch), on);
+                if let Err(e) = self.choice.set(switch, on) {
+                    eprintln!("{}: the choice isn't kept ({e})", switch.wire());
+                }
                 let mut s = self.shared.state();
                 s.switches.apply(&reply);
                 Ok(s.switches)
@@ -359,9 +389,15 @@ const TOPICS: [&str; 5] = [
 fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     let mut failures = 0u32;
     while !shared.stopped() {
-        match connect(config, choice) {
+        match connect(config) {
             Ok((client, switches)) => {
                 failures = 0;
+                for switch in Switch::ALL {
+                    let said = Said::from_bool(switches.is_on(switch));
+                    shared
+                        .restart
+                        .observe(Area::of(switch), said, choice.get(switch));
+                }
                 {
                     let mut s = shared.state();
                     s.following = true;
@@ -380,12 +416,9 @@ fn run(config: &FeedConfig, shared: &Shared, choice: &dyn SwitchChoice) {
     }
 }
 
-/// Connects, subscribes, reads the switches and asserts the user's choices on the same
-/// connection, so the first events seen are not older than what is read.
-fn connect(
-    config: &FeedConfig,
-    choice: &dyn SwitchChoice,
-) -> Result<(Client, Switches), ClientError> {
+/// Connects, subscribes and reads the switches on the same connection, so the first events seen
+/// are not older than what is read. Nothing is turned on.
+fn connect(config: &FeedConfig) -> Result<(Client, Switches), ClientError> {
     let options = ConnectOptions {
         check_server: config.check_server,
         ..ConnectOptions::default()
@@ -399,24 +432,11 @@ fn connect(
             Err(e) => return Err(e),
         }
     }
-    let mut switches = match client.call(ops::SETTINGS_SWITCHES, json!({})) {
+    let switches = match client.call(ops::SETTINGS_SWITCHES, json!({})) {
         Ok(reply) => Switches::from_reply(&reply),
         Err(ClientError::Api(_)) => Switches::all_off(),
         Err(e) => return Err(e),
     };
-    // Every daemon run starts off; the app brings it back to what the user chose.
-    for switch in Switch::ALL {
-        if !switches.is_on(switch) && choice.get(switch) {
-            let (op, args) = switch.set_request(true);
-            match client.call(op, args) {
-                Ok(reply) => {
-                    switches.apply(&reply);
-                }
-                Err(ClientError::Api(_)) => {}
-                Err(e) => return Err(e),
-            }
-        }
-    }
     Ok((client, switches))
 }
 
@@ -442,148 +462,8 @@ fn sleep(total: Duration, shared: &Shared) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn event(name: &str, data: Value) -> Event {
-        Event {
-            event: name.to_owned(),
-            data,
-        }
-    }
-
-    fn shared() -> Shared {
-        Shared {
-            state: Mutex::new(State {
-                switches: Switches::all_on(),
-                following: true,
-                ..State::default()
-            }),
-            stop: AtomicBool::new(false),
-        }
-    }
-
-    #[test]
-    fn pending_vault_items_come_and_go_by_id_and_off_drops_them() {
-        let s = shared();
-        s.apply(&event(
-            topics::VAULT_APPROVAL_PENDING,
-            json!({"id": "a1", "names": ["github"]}),
-        ));
-        s.apply(&event(
-            topics::VAULT_APPROVAL_PENDING,
-            json!({"id": "a1", "names": ["github"]}),
-        ));
-        s.apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r1"})));
-        s.apply(&event(
-            topics::VAULT_REQUEST_PENDING,
-            json!({"name": "no id"}),
-        ));
-        assert_eq!(s.state().approvals.len(), 1, "the same id once");
-        assert_eq!(
-            s.state().requests.len(),
-            1,
-            "an item without an id is nothing"
-        );
-        s.apply(&event(
-            topics::VAULT_APPROVAL_RESOLVED,
-            json!({"id": "a1", "decision": "once"}),
-        ));
-        assert!(s.state().approvals.is_empty());
-        s.apply(&event(topics::VAULT_CHANGED, json!({"names": ["github"]})));
-        assert_eq!(s.state().changes.vault, 1);
-        // The vault switch going off ends the form still open.
-        s.apply(&event(
-            topics::SWITCH_CHANGED,
-            json!({"switch": "vault", "on": false}),
-        ));
-        assert!(s.state().requests.is_empty());
-        assert!(!s.state().switches.vault);
-        assert_eq!(s.state().changes.vault, 2);
-    }
-
-    #[test]
-    fn the_areas_count_their_events_and_the_accounts_switch_moves_all_three() {
-        let s = shared();
-        s.apply(&event(topics::ACCOUNTS_CHANGED, json!({})));
-        s.apply(&event(topics::ACCOUNTS_ADD_ENDED, json!({})));
-        s.apply(&event(
-            topics::PROVIDERS_CHANGED,
-            json!({"provider": "codex"}),
-        ));
-        s.apply(&event(
-            "limits.notice",
-            json!({"at": 1.0, "text": "me is at 91%"}),
-        ));
-        s.apply(&event("limits.notice", json!({"at": 2.0, "text": ""})));
-        s.apply(&event("something.else", json!({})));
-        let c = s.state().changes;
-        assert_eq!((c.accounts, c.providers, c.limits, c.vault), (2, 1, 2, 0));
-        assert_eq!(
-            s.state().notices,
-            vec![Notice {
-                at: 1.0,
-                text: "me is at 91%".into()
-            }]
-        );
-        s.apply(&event(
-            topics::SWITCH_CHANGED,
-            json!({"switch": "accounts", "on": false}),
-        ));
-        let c = s.state().changes;
-        assert_eq!((c.accounts, c.providers, c.limits), (3, 2, 3));
-        // The same again changes nothing.
-        s.apply(&event(
-            topics::SWITCH_CHANGED,
-            json!({"switch": "accounts", "on": false}),
-        ));
-        assert_eq!(s.state().changes.accounts, 3);
-    }
-
-    #[test]
-    fn notices_are_capped_and_a_lost_daemon_detaches_everything() {
-        let s = shared();
-        for i in 0..25 {
-            s.apply(&event(
-                "limits.notice",
-                json!({"at": i as f64, "text": format!("n{i}")}),
-            ));
-        }
-        let notices = s.state().notices.clone();
-        assert_eq!(notices.len(), NOTICES_KEPT);
-        assert_eq!(notices[0].text, "n5");
-        s.apply(&event(topics::VAULT_APPROVAL_PENDING, json!({"id": "a1"})));
-        s.lost();
-        let st = s.state();
-        assert!(!st.following && !st.switches.attached);
-        assert!(st.approvals.is_empty());
-    }
-
-    #[test]
-    fn a_feed_with_no_daemon_shows_its_fixed_switches_and_cannot_choose() {
-        let feed = SwitchFeed::fixed(Switches::all_on());
-        assert!(!feed.is_live() && !feed.following());
-        assert!(feed.switches().is_on(Switch::Vault));
-        assert!(feed.approvals().is_empty() && feed.requests().is_empty());
-        assert!(!feed.chosen(Switch::Vault));
-        assert!(feed.choose(Switch::Vault, true).is_err());
-        let none = SwitchFeed::none();
-        assert_eq!(none.switches(), Switches::detached());
-    }
-
-    #[test]
-    fn the_choice_is_kept_in_the_apps_own_settings() {
-        let scratch = crate::testutil::Scratch::new("switch-choice");
-        let file = scratch.path().join("settings.json");
-        let choice = SettingsChoice { file: file.clone() };
-        assert!(!choice.get(Switch::Vault));
-        choice.set(Switch::Vault, true).unwrap();
-        assert!(SettingsChoice { file: file.clone() }.get(Switch::Vault));
-        assert!(!choice.get(Switch::Accounts));
-        let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("vaultOn"), "{text}");
-    }
-}
+#[path = "feed_unit_tests.rs"]
+mod tests;
 
 #[cfg(all(test, unix))]
 #[path = "feed_tests.rs"]

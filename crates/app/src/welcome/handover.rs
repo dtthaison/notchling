@@ -12,7 +12,7 @@ use crate::phone::bridge::Snapshot;
 use crate::phone::wire::BridgeState;
 
 pub const TITLE: &str = "Handover";
-pub const INTRO: &str = "Each area has one owner at a time. The Swift app owns all of them until you turn one over here. Nothing is turned over by itself, and every switch is off again whenever the daemon starts; this app asks for the ones you chose.";
+pub const INTRO: &str = "Each area has one owner at a time. The Swift app owns all of them until you turn one over here. Nothing is turned over by itself, and every switch is off again whenever the daemon starts. This app never turns one back on by itself: it shows a notice, and only your Turn Back On does it.";
 
 /// Who has a resource now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub struct State {
 
 const ACTING_STEPS: &[&str] = &[
     "Record the reply fixtures against a real session (docs/recording.md).",
-    "Turn this on. The daemon starts with it off every time; this app asks again at its start.",
+    "Turn this on. The daemon starts with it off every time; after a restart this app offers it back in a notice and turns it on only when you confirm.",
     "Try a reply and an answer from Chat. The Swift app keeps the hook until the hook row below is handed over.",
 ];
 

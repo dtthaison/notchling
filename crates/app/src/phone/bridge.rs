@@ -1,19 +1,19 @@
 //! What the app knows about the phone bridge, and what it asks the daemon (Milestone 4, U6).
 //!
 //! The daemon ships with the bridge off: it binds no port until the app sends `bridge.set
-//! {on: true}`, and it comes back off at every start. The user's choice is the app's to keep
-//! (`bridgeOn` in the app's own `settings.json`, the way `actingOn` is for acting): when the
-//! daemon says off and the user chose on, [`Bridge::refresh`] sends `bridge.set` again, so a
-//! restarted daemon returns to what the user chose.
+//! {on: true}`, and it comes back off at every start. The app never turns it back on by itself:
+//! [`Bridge::refresh`] only reads. The user's choice (`bridgeOn` in the app's own `settings.json`)
+//! decides only whether the restart notice offers it ([`crate::switches::restart`]); only
+//! [`Bridge::choose`], from the Phone panel's switch or the handover's confirmation, sends
+//! `bridge.set`.
 //!
 //! Every call blocks, so the caller makes it off the UI thread. A [`Bridge`] keeps a
 //! [`Snapshot`] of what the daemon last said; the panel draws from that and never reads a socket.
 //! A render has no transport at all ([`Bridge::fixed`]).
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use notchling_engine::settings::Settings;
 use notchling_local_api::{ClientError, SOCKET_NAME};
 use serde_json::Value;
 
@@ -24,6 +24,7 @@ use super::wire::{
 use crate::acting::{self, Acting};
 use crate::actions::{Choice, Socket, Transport};
 use crate::chat::data::DataRoot;
+use crate::switches::restart::{Area, RestartNotice, Said};
 
 /// The key in the app's `settings.json` that holds the user's choice. Like `actingOn`, it isn't in
 /// the engine's key list, so it is written past the store's key check.
@@ -35,10 +36,6 @@ pub const DETACHED_MESSAGE: &str =
 /// What a control says while the bridge is off.
 pub const OFF_MESSAGE: &str = "The phone bridge is off. Turn on Let phones connect first";
 
-/// How long after a failed `bridge.set` the app waits before re-asserting the choice, so a port
-/// the Swift app still holds isn't tried every poll.
-const RETRY_AFTER_MS: i64 = 30_000;
-
 /// The user's choice in the app's own settings file.
 pub struct SettingsChoice {
     pub file: PathBuf,
@@ -46,17 +43,17 @@ pub struct SettingsChoice {
 
 impl Choice for SettingsChoice {
     fn get(&self) -> bool {
-        Settings::open(&self.file)
-            .ok()
-            .and_then(|s| s.raw(BRIDGE_CHOICE_KEY).and_then(Value::as_bool))
-            .unwrap_or(false)
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .get(BRIDGE_CHOICE_KEY)
     }
 
     fn set(&self, on: bool) -> Result<(), String> {
-        let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
-        let mut values = store.values().clone();
-        values.insert(BRIDGE_CHOICE_KEY.into(), Value::Bool(on));
-        store.replace_all(values).map_err(|e| e.to_string())
+        crate::welcome::own::Flags {
+            file: self.file.clone(),
+        }
+        .set_choice(BRIDGE_CHOICE_KEY, on)
     }
 }
 
@@ -107,8 +104,7 @@ pub struct Bridge {
     transport: Option<Box<dyn Transport>>,
     snapshot: Mutex<Snapshot>,
     choice: Box<dyn Choice>,
-    /// Not before this time (ms) is the choice sent again after a refusal.
-    retry_at_ms: Mutex<i64>,
+    restart: Option<Arc<RestartNotice>>,
 }
 
 /// A refusal's line: the daemon's own message, else the error's.
@@ -143,7 +139,7 @@ impl Bridge {
             transport: Some(transport),
             snapshot: Mutex::new(Snapshot::detached()),
             choice: Box::new(NoChoice),
-            retry_at_ms: Mutex::new(0),
+            restart: None,
         }
     }
 
@@ -153,13 +149,19 @@ impl Bridge {
         self
     }
 
+    /// Tells `notice` what the daemon says about the bridge and what the user chose.
+    pub fn with_restart(mut self, notice: Arc<RestartNotice>) -> Bridge {
+        self.restart = Some(notice);
+        self
+    }
+
     /// No daemon behind it, showing `snapshot` as given: a render's.
     pub fn fixed(snapshot: Snapshot) -> Bridge {
         Bridge {
             transport: None,
             snapshot: Mutex::new(snapshot),
             choice: Box::new(NoChoice),
-            retry_at_ms: Mutex::new(0),
+            restart: None,
         }
     }
 
@@ -211,9 +213,9 @@ impl Bridge {
     }
 
     /// Reads the bridge, the phones and the tunnel (`bridge.status`, `bridge.devices`,
-    /// `bridge.tunnel.status`), and sends the user's choice again when the daemon says off and
-    /// the user chose on. Blocking. `now_ms` spaces the re-assertions.
-    pub fn refresh(&self, now_ms: i64) {
+    /// `bridge.tunnel.status`). Blocking. Only reads: a daemon that says off while the user chose
+    /// on is offered back by the restart notice, never turned on here.
+    pub fn refresh(&self) {
         if self.transport.is_none() {
             return;
         }
@@ -230,33 +232,23 @@ impl Bridge {
                 return;
             }
         };
-        let Some(mut status) = status else {
+        let Some(status) = status else {
             self.update(|s| {
                 s.attached = true;
                 s.error = Some("The daemon's bridge status isn't one this app reads".into());
             });
             return;
         };
-        let mut error = None;
-        if status.state == BridgeState::Off
-            && self.choice.get()
-            && now_ms >= *lock(&self.retry_at_ms)
-        {
-            match self.call(&Call::set(true)) {
-                Ok(v) => {
-                    if let Some(now) = parse_status(&v) {
-                        status = now;
-                    }
-                }
-                Err(e) => {
-                    if detaches(&e) {
-                        return;
-                    }
-                    *lock(&self.retry_at_ms) = now_ms + RETRY_AFTER_MS;
-                    error = Some(message(&e));
-                }
-            }
+        if let Some(notice) = &self.restart {
+            let said = match status.state {
+                BridgeState::Off => Said::Off,
+                BridgeState::On(_) | BridgeState::Starting => Said::On,
+                // A bridge that failed to start says nothing about a restart.
+                BridgeState::Failed(_) => Said::Detached,
+            };
+            notice.observe(Area::Bridge, said, self.choice.get());
         }
+        let mut error = None;
         let on = status.state.is_on();
         // The lists are readable while the bridge is off (they only read the pairing files); a
         // refusal there matters only while it is on.
@@ -293,15 +285,21 @@ impl Bridge {
         });
     }
 
-    /// The user flipped the switch: keeps it in the app's settings, then tells the daemon.
-    /// Blocking. Turning it off also drops the pairing code on show.
+    /// The user flipped the switch in this app: tells the daemon, then keeps the choice in the
+    /// app's settings (the daemon first, so "off" always reaches it). Blocking. Turning it off
+    /// also drops the pairing code on show.
     pub fn choose(&self, on: bool) -> Result<(), String> {
         if self.transport.is_none() {
             return Err(DETACHED_MESSAGE.into());
         }
-        self.choice.set(on)?;
         match self.call(&Call::set(on)) {
             Ok(v) => {
+                if let Some(notice) = &self.restart {
+                    notice.chose(Area::Bridge, on);
+                }
+                if let Err(e) = self.choice.set(on) {
+                    eprintln!("bridge: the choice isn't kept ({e})");
+                }
                 let status = parse_status(&v);
                 self.update(|s| {
                     s.attached = true;

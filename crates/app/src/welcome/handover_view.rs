@@ -16,12 +16,14 @@ use super::facts::{SwiftApp, SwiftProbe};
 use super::handover::{confirm, rows, Confirm, Control, Owner, Row, State, INTRO, TITLE};
 use super::hooks::Hooks;
 use super::renders::{handover_state, pending_confirm, shown, Shown};
-use super::switches::{Known, Switches};
+use super::switches::Known;
 use crate::acting::Acting;
 use crate::actions::Actions;
 use crate::mac::gate;
-use crate::phone::bridge::{now_ms, Bridge};
+use crate::phone::bridge::Bridge;
 use crate::phone::view::switch;
+use crate::switches::feed::SwitchFeed;
+use crate::switches::Switch;
 
 /// How often the live checklist asks the daemon again.
 const REFRESH: Duration = Duration::from_secs(3);
@@ -30,7 +32,7 @@ const REFRESH: Duration = Duration::from_secs(3);
 pub struct Services {
     pub actions: Arc<Actions>,
     pub bridge: Arc<Bridge>,
-    pub switches: Arc<Switches>,
+    pub switches: Arc<SwitchFeed>,
     pub hooks: Arc<Hooks>,
     pub probe: Arc<dyn SwiftProbe>,
 }
@@ -39,8 +41,8 @@ impl Services {
     /// Asks everything once. Blocking.
     fn read(&self) -> State {
         let acting = self.actions.refresh();
-        self.bridge.refresh(now_ms());
-        let switches = self.switches.refresh();
+        self.bridge.refresh();
+        let switches = Known::from_feed(self.switches.switches());
         State {
             swift: self.probe.find(),
             acting,
@@ -55,7 +57,10 @@ impl Services {
         match control {
             Control::Acting => self.actions.choose(on).map(|_| ()),
             Control::Bridge => self.bridge.choose(on),
-            Control::Switch(name) => self.switches.choose(name, on),
+            Control::Switch(name) => {
+                let switch = Switch::parse(name).ok_or(format!("no switch named {name}"))?;
+                self.switches.choose(switch, on).map(|_| ())
+            }
         }
     }
 }

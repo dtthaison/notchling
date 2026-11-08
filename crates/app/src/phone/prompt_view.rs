@@ -71,7 +71,7 @@ impl PairPromptView {
                 .background_executor()
                 .spawn(async move {
                     let result = feed.answer(&request, allow);
-                    bridge.refresh(now_ms());
+                    bridge.refresh();
                     result
                 })
                 .await;

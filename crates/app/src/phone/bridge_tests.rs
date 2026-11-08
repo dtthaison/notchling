@@ -1,6 +1,7 @@
 //! The bridge's tests, over a fake transport.
 
 use super::*;
+use crate::switches::restart::{Area, RestartNotice};
 use notchling_local_api::{ApiError, ErrorCode};
 use serde_json::json;
 use std::io;
@@ -83,7 +84,7 @@ fn nothing_is_known_until_the_daemon_answers() {
 #[test]
 fn refresh_reads_status_phones_and_tunnel() {
     let (bridge, calls, _) = fake(daemon("running"));
-    bridge.refresh(0);
+    bridge.refresh();
     let s = bridge.snapshot();
     assert!(s.attached);
     assert_eq!(s.state, BridgeState::On(Some(47821)));
@@ -97,47 +98,51 @@ fn refresh_reads_status_phones_and_tunnel() {
 }
 
 #[test]
-fn a_choice_of_on_is_sent_again_to_a_daemon_that_came_up_off() {
+fn a_remembered_choice_never_turns_the_bridge_on_it_only_offers_the_notice() {
     let (bridge, calls, chosen) = fake(|op, _| match op {
         "bridge.status" => Ok(json!({"state": "off"})),
         "bridge.set" => Ok(json!({"state": "running", "port": 47821})),
         _ => Ok(json!({"devices": []})),
     });
-    // The user never chose: the daemon stays off and is not asked.
-    bridge.refresh(0);
+    let notice = Arc::new(RestartNotice::default());
+    let bridge = bridge.with_restart(notice.clone());
+    // The user never chose: nothing is offered.
+    bridge.refresh();
+    assert_eq!(notice.state().offer(), []);
+    // The file says on, the daemon says off: still nothing is sent, the notice offers it.
+    *lock(&chosen) = true;
+    bridge.refresh();
+    bridge.refresh();
     assert_eq!(bridge.snapshot().state, BridgeState::Off);
     assert!(!ops_of(&calls).contains(&"bridge.set".to_owned()));
-    *lock(&chosen) = true;
-    bridge.refresh(1);
-    assert_eq!(bridge.snapshot().state, BridgeState::On(Some(47821)));
-    let sent = lock(&calls)
-        .iter()
-        .find(|(op, _)| op == "bridge.set")
-        .map(|(_, a)| a.clone());
-    assert_eq!(sent, Some(json!({"on": true})));
+    assert_eq!(notice.state().offer(), [Area::Bridge]);
+    // Only the user's own switch turns it on, and the notice goes.
+    assert_eq!(bridge.choose(true), Ok(()));
+    assert_eq!(notice.state().offer(), []);
 }
 
 #[test]
-fn a_refused_choice_is_not_retried_every_poll() {
-    let (bridge, calls, chosen) = fake(|op, _| match op {
-        "bridge.status" => Ok(json!({"state": "off"})),
-        "bridge.set" => Err(ClientError::Api(ApiError::new(
-            ErrorCode::Failed,
-            "port 47821 is busy",
-        ))),
-        _ => Ok(json!({"devices": []})),
-    });
-    *lock(&chosen) = true;
-    bridge.refresh(1_000);
-    let s = bridge.snapshot();
-    assert_eq!(s.state, BridgeState::Off);
-    assert_eq!(s.error.as_deref(), Some("port 47821 is busy"));
-    let sets = |c: &Calls| ops_of(c).iter().filter(|o| *o == "bridge.set").count();
-    assert_eq!(sets(&calls), 1);
-    bridge.refresh(2_000);
-    assert_eq!(sets(&calls), 1, "inside the wait");
-    bridge.refresh(1_000 + RETRY_AFTER_MS);
-    assert_eq!(sets(&calls), 2, "after the wait");
+fn off_reaches_the_daemon_even_when_the_choice_cant_be_kept() {
+    let calls: Calls = Arc::default();
+    let bridge = Bridge::over(Box::new(Fake {
+        calls: calls.clone(),
+        answer: Box::new(daemon("off")),
+    }))
+    .with_choice(Box::new(Broken));
+    assert_eq!(bridge.choose(false), Ok(()));
+    assert_eq!(ops_of(&calls), ["bridge.set"]);
+}
+
+/// A choice that can't be kept.
+struct Broken;
+
+impl Choice for Broken {
+    fn get(&self) -> bool {
+        true
+    }
+    fn set(&self, _: bool) -> Result<(), String> {
+        Err("settings file can't be read".into())
+    }
 }
 
 #[test]
@@ -152,10 +157,10 @@ fn a_lost_daemon_detaches_and_forgets() {
             Err(gone())
         }
     });
-    bridge.refresh(0);
+    bridge.refresh();
     assert!(bridge.snapshot().attached);
     *lock(&up) = false;
-    bridge.refresh(1);
+    bridge.refresh();
     assert_eq!(bridge.snapshot(), Snapshot::detached());
 }
 
@@ -167,7 +172,7 @@ fn a_daemon_without_the_bridge_is_attached_with_a_reason() {
             "unknown op bridge.status",
         )))
     });
-    bridge.refresh(0);
+    bridge.refresh();
     let s = bridge.snapshot();
     assert!(s.attached, "a refusal is an answer");
     assert_eq!(s.state, BridgeState::Off);
@@ -199,7 +204,7 @@ fn turning_the_bridge_off_drops_the_code_on_show() {
         }
         other => daemon("running")(other, a),
     });
-    bridge.refresh(0);
+    bridge.refresh();
     assert_eq!(bridge.begin_pairing(), Ok(()));
     assert!(bridge.snapshot().pairing.is_some());
     assert_eq!(bridge.choose(false), Ok(()));
@@ -215,7 +220,7 @@ fn a_refused_switch_says_why_and_keeps_the_state() {
         ))),
         _ => Ok(json!({"state": "off"})),
     });
-    bridge.refresh(0);
+    bridge.refresh();
     assert_eq!(bridge.choose(true), Err("port 47821 is busy".to_owned()));
     let s = bridge.snapshot();
     assert_eq!(s.state, BridgeState::Off);
@@ -226,7 +231,7 @@ fn a_refused_switch_says_why_and_keeps_the_state() {
 fn pairing_and_revoking_are_refused_unsent_while_the_bridge_is_off() {
     let (bridge, calls, _) = fake(daemon("off"));
     assert_eq!(bridge.begin_pairing(), Err(DETACHED_MESSAGE.to_owned()));
-    bridge.refresh(0);
+    bridge.refresh();
     let before = lock(&calls).len();
     assert_eq!(bridge.begin_pairing(), Err(OFF_MESSAGE.to_owned()));
     assert_eq!(bridge.revoke("d1"), Err(OFF_MESSAGE.to_owned()));
@@ -236,7 +241,7 @@ fn pairing_and_revoking_are_refused_unsent_while_the_bridge_is_off() {
 #[test]
 fn pairing_keeps_the_code_and_revoking_removes_the_phone() {
     let (bridge, calls, _) = fake(daemon("running"));
-    bridge.refresh(0);
+    bridge.refresh();
     assert_eq!(bridge.begin_pairing(), Ok(()));
     let pairing = bridge.snapshot().pairing;
     assert_eq!(pairing.as_ref().map(|p| p.code.as_str()), Some("K7M4XQ2P"));
@@ -263,7 +268,7 @@ fn a_pairing_the_app_cannot_read_is_an_error() {
         "bridge.pair.begin" => Ok(json!({"code": "ABCD"})),
         other => daemon("running")(other, a),
     });
-    bridge.refresh(0);
+    bridge.refresh();
     assert!(bridge.begin_pairing().is_err());
     assert_eq!(bridge.snapshot().pairing, None);
     assert!(bridge.snapshot().error.is_some());
@@ -277,17 +282,17 @@ fn a_bridge_that_goes_off_by_itself_drops_the_code() {
         "bridge.status" => Ok(json!({"state": *lock(&seen)})),
         other => daemon("running")(other, a),
     });
-    bridge.refresh(0);
+    bridge.refresh();
     assert_eq!(bridge.begin_pairing(), Ok(()));
     *lock(&state) = "off";
-    bridge.refresh(1);
+    bridge.refresh();
     assert_eq!(bridge.snapshot().pairing, None);
 }
 
 #[test]
 fn a_fixed_bridge_never_calls_and_refuses() {
     let bridge = Bridge::fixed(Snapshot::detached());
-    bridge.refresh(0);
+    bridge.refresh();
     assert_eq!(bridge.choose(true), Err(DETACHED_MESSAGE.to_owned()));
     assert_eq!(bridge.begin_pairing(), Err(DETACHED_MESSAGE.to_owned()));
     assert_eq!(bridge.revoke("d1"), Err(DETACHED_MESSAGE.to_owned()));

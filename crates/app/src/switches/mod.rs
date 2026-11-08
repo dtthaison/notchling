@@ -7,11 +7,15 @@
 //! refused op would give. The daemon's `settings.switch {switch, on}` events keep [`Switches`]
 //! current ([`Switches::apply`]); the first read is `settings.switches`.
 //!
-//! The user's choice per switch is the app's to keep (`accountsOn`, `vaultOn`, `installOn` in the
-//! app's own `settings.json`, like `actingOn`): [`feed::SwitchFeed`] asserts a chosen switch again
-//! when a daemon says it is off, so a restarted daemon comes back to what the user chose.
+//! The user's choice per switch is kept in the app's own `settings.json` (`accountsOn`, `vaultOn`,
+//! `installOn`, like `actingOn`), but the app never turns a switch on from that file: a file any
+//! agent can write must not hand out the vault or the logins. After a daemon restart the
+//! [`restart`] notice offers the switches back, and only the person's confirmation sends them.
 
 pub mod feed;
+pub mod restart;
+#[cfg(target_os = "macos")]
+pub mod restart_view;
 
 use notchling_local_api::{ClientError, ErrorCode};
 use serde_json::{json, Value};

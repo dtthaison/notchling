@@ -35,7 +35,7 @@ pub fn watch(cx: &mut App, feed: Arc<PairingFeed>, bridge: Arc<Bridge>) {
                 seen = changes;
                 let asked = bridge.clone();
                 cx.background_executor()
-                    .spawn(async move { asked.refresh(now_ms()) })
+                    .spawn(async move { asked.refresh() })
                     .detach();
             }
             let waiting = feed.prompt(now_ms()).is_some();
