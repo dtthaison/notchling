@@ -16,7 +16,9 @@ use notchling_kit::ui::{label, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::cost::Range;
-use super::flows::{move_all_alert, move_all_banner, remove_alert, Alert, Banner};
+use super::flows::{
+    move_all_alert, move_all_banner, remove_alert, sign_in_page, Alert, Banner, NOT_A_SIGN_IN_PAGE,
+};
 use super::limits::Zone;
 use super::model::{page, tabs, Page, Tab, CLAUDE_CODE};
 use super::store::{Accounts, Snapshot};
@@ -46,6 +48,8 @@ enum Done {
     Nothing,
     Alert(Alert, Pending),
     Open(String),
+    /// A Claude Code sign-in began: open its page and poll for its end.
+    SignIn(String),
     /// How a Move All went, kept under the rows until the next action.
     Banner(Option<Banner>),
 }
@@ -168,7 +172,7 @@ impl AccountsView {
         cx.notify();
     }
 
-    fn switches(&self) -> Switches {
+    pub(super) fn switches(&self) -> Switches {
         match &self.fixed {
             Some((_, s)) => *s,
             None => self.feed.switches(),
@@ -225,9 +229,23 @@ impl AccountsView {
                 match result {
                     Ok(Done::Nothing) => view.alert = None,
                     Ok(Done::Alert(alert, pending)) => view.alert = Some((alert, pending)),
-                    Ok(Done::Open(url)) => {
+                    // Only a known sign-in page opens: the link comes from the daemon.
+                    Ok(Done::Open(url)) if sign_in_page(&url) => {
                         view.alert = None;
                         cx.open_url(&url);
+                    }
+                    Ok(Done::Open(_)) => {
+                        view.alert = None;
+                        view.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                    }
+                    Ok(Done::SignIn(url)) => {
+                        view.alert = None;
+                        if sign_in_page(&url) {
+                            cx.open_url(&url);
+                        } else {
+                            view.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                        }
+                        view.poll_add(cx);
                     }
                     Ok(Done::Banner(banner)) => {
                         view.alert = None;
@@ -300,16 +318,13 @@ impl AccountsView {
         let provider = self.provider.clone();
         let s = self.store.snapshot();
         match event {
-            AddEvent::Add if provider == CLAUDE_CODE => {
-                self.run(
-                    |s, sw| {
-                        s.clear_add();
-                        s.begin_add_claude(sw).map(Done::Open)
-                    },
-                    cx,
-                );
-                self.poll_add(cx);
-            }
+            AddEvent::Add if provider == CLAUDE_CODE => self.run(
+                |s, sw| {
+                    s.clear_add();
+                    s.begin_add_claude(sw).map(Done::SignIn)
+                },
+                cx,
+            ),
             AddEvent::Add => self.run(
                 move |s, sw| match s.add_provider(sw, &provider, false)? {
                     Outcome::NeedsConfirmation {
@@ -333,7 +348,12 @@ impl AccountsView {
             ),
             AddEvent::Open => {
                 if let Some(url) = super::view_tabs::sign_in_url(&s, &provider) {
-                    cx.open_url(&url);
+                    if sign_in_page(&url) {
+                        cx.open_url(&url);
+                    } else {
+                        self.note = Some(NOT_A_SIGN_IN_PAGE.into());
+                        cx.notify();
+                    }
                 }
             }
             AddEvent::CopyLink => {
@@ -356,26 +376,6 @@ impl AccountsView {
                 cx.notify();
             }
         }
-    }
-
-    /// While a Claude Code sign-in waits, asks the daemon for its end every few seconds.
-    fn poll_add(&self, cx: &mut Context<Self>) {
-        let (store, switches) = (self.store.clone(), self.switches());
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            let waiting = store.snapshot().add.is_some_and(|a| a.state == "waiting");
-            if !waiting {
-                return;
-            }
-            let (s, sw) = (store.clone(), switches);
-            cx.background_executor()
-                .spawn(async move { s.poll_add_claude(&sw, false).ok() })
-                .await;
-            if this.update(cx, |_, cx| cx.notify()).is_err() {
-                return;
-            }
-        })
-        .detach();
     }
 
     fn alert_answered(&mut self, yes: bool, cx: &mut Context<Self>) {

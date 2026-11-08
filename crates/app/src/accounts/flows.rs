@@ -179,6 +179,31 @@ pub fn remove_alert(provider: &str, email: &str, in_use: bool) -> Alert {
 }
 
 /// The Move All alert for a dry run's plan: `email` is the target's.
+/// The hosts a sign-in page may be on, mirroring the engine's: Claude Code's authorize page
+/// (`claude.com`, `AUTHORIZE_URL`) and its success page (`platform.claude.com`), claude.ai, Codex's
+/// (`auth.openai.com`, `SIGN_IN_PREFIX`) and Google's for Antigravity.
+pub const SIGN_IN_HOSTS: [&str; 5] = [
+    "claude.com",
+    "claude.ai",
+    "platform.claude.com",
+    "auth.openai.com",
+    "accounts.google.com",
+];
+
+/// Said instead of opening a link that isn't one of those pages.
+pub const NOT_A_SIGN_IN_PAGE: &str =
+    "Notchling didn't open that link: it isn't a sign-in page it knows. Use Copy Link to look at it.";
+
+/// Whether the daemon's sign-in link may be opened in the browser: `https://`, no user or port,
+/// and exactly one of [`SIGN_IN_HOSTS`].
+pub fn sign_in_page(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    SIGN_IN_HOSTS.contains(&host)
+}
+
 /// The line a Move All leaves in the window: how many moved, and each one that didn't, with why.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Banner {
@@ -259,6 +284,35 @@ pub fn move_all_alert(email: &str, plan: &MovePlan) -> Alert {
 mod tests {
     use super::*;
     use crate::accounts::wire::{AddProgress, Provider, ProviderList};
+
+    #[test]
+    fn only_the_known_sign_in_pages_open_in_the_browser() {
+        for url in [
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=x",
+            "https://claude.ai/oauth/authorize?x=1",
+            "https://platform.claude.com/oauth/code/success?app=claude-code",
+            "https://auth.openai.com/oauth/authorize?client_id=app",
+            "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+            "https://auth.openai.com",
+        ] {
+            assert!(sign_in_page(url), "{url}");
+        }
+        for url in [
+            "http://claude.com/cai/oauth/authorize",
+            "https://claude.com.evil.example/cai",
+            "https://evil.example/?https://claude.com/",
+            "https://claude.com@evil.example/",
+            "https://evil.claude.ai.example/",
+            "https://claude.com:8443/cai",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "HTTPS://CLAUDE.COM/x",
+            "https://",
+            "",
+        ] {
+            assert!(!sign_in_page(url), "{url}");
+        }
+    }
     use crate::switches::ACCOUNTS_OFF;
 
     #[test]

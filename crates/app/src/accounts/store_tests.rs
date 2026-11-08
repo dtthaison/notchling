@@ -303,3 +303,45 @@ fn refreshes_never_overlap_and_one_asked_meanwhile_runs_once_after() {
     first.join().unwrap();
     assert_eq!(lists(&calls), 2, "the ones asked meanwhile run once, after");
 }
+
+#[test]
+fn one_sign_in_poll_at_a_time_and_one_that_ends_early_resets_the_row() {
+    let (store, calls) = fake(daemon(true));
+    let on = Switches::all_on();
+    store.begin_add_claude(&on).unwrap();
+    assert!(store.claim_add_poll(), "the first poller");
+    assert!(
+        !store.claim_add_poll(),
+        "a second Add while one polls starts none"
+    );
+    // The poll that saw the end stops; the row shows how it ended.
+    assert!(!store.add_poll_step(&on));
+    assert_eq!(store.snapshot().add.unwrap().state, "added");
+    store.end_add_poll(&on);
+    assert_eq!(store.snapshot().add.unwrap().state, "added", "an end stays");
+    assert!(store.claim_add_poll(), "free again");
+    store.end_add_poll(&on);
+
+    // A poll that ends while the sign-in still waits (the window closed, the daemon went away)
+    // gives the daemon's sign-in up and puts the Add button back, rather than "Waiting" forever.
+    store.clear_add();
+    store.begin_add_claude(&on).unwrap();
+    calls.lock().unwrap().clear();
+    assert!(store.claim_add_poll());
+    store.end_add_poll(&on);
+    assert!(store.snapshot().add.is_none());
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .last()
+            .map(|c| (c.0.clone(), c.1["cancel"].clone())),
+        Some(("accounts.add.finish".to_owned(), json!(true)))
+    );
+    // A poll the daemon refuses ends too.
+    store.begin_add_claude(&on).unwrap();
+    assert!(store.claim_add_poll());
+    assert!(!store.add_poll_step(&Switches::all_off()));
+    store.end_add_poll(&Switches::all_off());
+    assert!(store.snapshot().add.is_none());
+}

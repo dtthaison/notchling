@@ -1,7 +1,9 @@
 //! The Accounts window's header (Accounts | Token Cost, refresh, Done in a sheet) and its Token
-//! Cost tab over GPUI (macOS), with the small lookups the rows share.
+//! Cost tab over GPUI (macOS), with the small lookups the rows share and the Claude Code sign-in's
+//! poll.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, Context, Div, Stateful};
 use notchling_kit::metric::SIDE_PADDING;
@@ -20,6 +22,36 @@ use crate::mac::gate;
 use crate::sheets::view::Dismiss;
 
 impl AccountsView {
+    /// While a Claude Code sign-in waits, asks the daemon for its end every few seconds. Started
+    /// once the sign-in has begun, never twice (the store holds the claim); however it ends, a
+    /// sign-in left waiting is given up so the row doesn't hang.
+    pub(super) fn poll_add(&self, cx: &mut Context<Self>) {
+        if !self.store.claim_add_poll() {
+            return;
+        }
+        let (store, switches) = (self.store.clone(), self.switches());
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                let s = store.clone();
+                let again = cx
+                    .background_executor()
+                    .spawn(async move { s.add_poll_step(&switches) })
+                    .await;
+                let shown = this.update(cx, |_, cx| cx.notify()).is_ok();
+                if !again || !shown {
+                    break;
+                }
+            }
+            let s = store.clone();
+            cx.background_executor()
+                .spawn(async move { s.end_add_poll(&switches) })
+                .await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .detach();
+    }
+
     pub(super) fn header(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
         let tabs: Vec<(String, String)> = Tab::ALL
             .iter()

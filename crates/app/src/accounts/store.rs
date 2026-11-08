@@ -9,6 +9,7 @@
 //! control that slipped past its disabled state still reaches no login.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use notchling_engine::limits::report::UsageReport;
@@ -62,6 +63,8 @@ pub struct Accounts {
     flight: Mutex<Flight>,
     /// When the last syncing refresh went out (seconds since 1970).
     last_sync: Mutex<Option<f64>>,
+    /// A Claude Code sign-in is being polled (one poller at a time).
+    add_polling: AtomicBool,
 }
 
 fn message(e: &ClientError) -> String {
@@ -83,6 +86,7 @@ impl Accounts {
             snapshot: Mutex::new(Snapshot::default()),
             flight: Mutex::default(),
             last_sync: Mutex::new(None),
+            add_polling: AtomicBool::new(false),
         }
     }
 
@@ -93,6 +97,7 @@ impl Accounts {
             snapshot: Mutex::new(snapshot),
             flight: Mutex::default(),
             last_sync: Mutex::new(None),
+            add_polling: AtomicBool::new(false),
         }
     }
 
@@ -310,6 +315,37 @@ impl Accounts {
             self.update(|s| s.add = Some(progress));
         }
         Ok(())
+    }
+
+    /// Claims polling the Claude Code sign-in: false when another poller has it.
+    pub fn claim_add_poll(&self) -> bool {
+        self.add_polling
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// One poll of the sign-in. Blocking. Whether to poll again: it still waits and the daemon
+    /// answered.
+    pub fn add_poll_step(&self, switches: &Switches) -> bool {
+        if !self.add_waiting() {
+            return false;
+        }
+        self.poll_add_claude(switches, false).is_ok() && self.add_waiting()
+    }
+
+    /// The poller is done. A sign-in still shown as waiting with no one polling it is given up in
+    /// the daemon (best effort) and the row goes back to its Add button, rather than "Waiting"
+    /// forever. Blocking.
+    pub fn end_add_poll(&self, switches: &Switches) {
+        if self.add_waiting() {
+            let _ = self.poll_add_claude(switches, true);
+            self.clear_add();
+        }
+        self.add_polling.store(false, Ordering::SeqCst);
+    }
+
+    fn add_waiting(&self) -> bool {
+        self.snapshot().add.is_some_and(|a| a.state == "waiting")
     }
 
     /// Forgets how the last sign-in ended.
