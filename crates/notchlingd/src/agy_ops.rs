@@ -17,7 +17,7 @@
 //! session this daemon started, never from the caller; a draft's `draft_folder` is an absolute
 //! folder that exists. One turn runs per session: `agy.send` while one runs is `failed` ("busy").
 //!
-//! Events: `session.changed {id, change, error?}` on `sessions` (chunks at most every 250 ms),
+//! Events: `session.changed {id, session, row, change, error?}` on `tools` (as Codex's; chunks at most every 250 ms),
 //! and on `prompts` (app tier) `agy.permission.pending` / `agy.permission.resolved`, each also as
 //! `prompt.pending` / `prompt.resolved`, so the notch shares one answered state with Chat. A
 //! pending permission is a `prompts.list` row too. Its id is `agy-perm:<row id>:<rpc id>`.
@@ -26,15 +26,17 @@
 
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{now_ms, text_arg, Room};
+use crate::layout::Layout;
 use notchling_engine::bridge::foreign::PROMPT_PREFIX;
-use notchling_engine::tools::acp::Spawner;
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
+use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::agy::{self, Change, Permission, RunError, Runner, Sink, Timing};
 use notchling_local_api::{topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const SESSIONS: &str = "agy.sessions";
@@ -45,8 +47,6 @@ pub const CANCEL: &str = "agy.cancel";
 pub const SET_OPTION: &str = "agy.set_option";
 pub const PERMISSION: &str = "agy.permission";
 
-/// The event for a session's change (`sessions` topic).
-pub const SESSION_CHANGED: &str = "session.changed";
 pub const PERMISSION_PENDING: &str = "agy.permission.pending";
 pub const PERMISSION_RESOLVED: &str = "agy.permission.resolved";
 
@@ -83,6 +83,7 @@ struct Shared {
     pending: Mutex<BTreeMap<String, Value>>,
     last_chunk: Mutex<HashMap<String, Instant>>,
     started: Mutex<HashMap<String, Started>>,
+    runner: OnceLock<Runner>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -103,12 +104,60 @@ impl Shared {
         self.room.publish(topics::PROMPTS, prompt_event, data);
     }
 
+    /// `session.changed` on the `tools` topic, as Codex's: `{id, session, row, change, error?}`.
+    /// `row` is the session as `sessions.list` would give it, or null when this daemon no longer
+    /// holds it (read `agy.sessions` again).
     fn session_changed(&self, session: &str, change: &str, error: Option<String>) {
-        let mut data = json!({"id": row_id(session), "change": change});
+        let mut data = json!({"id": row_id(session), "session": session,
+                              "row": self.row(session), "change": change});
         if let Some(error) = error {
             data["error"] = json!(error);
         }
-        self.room.publish(topics::SESSIONS, SESSION_CHANGED, &data);
+        self.room
+            .publish(topics::TOOLS, topics::SESSION_CHANGED, &data);
+    }
+
+    /// The row of a session the runner holds, working or idle by its own word.
+    fn row(&self, session: &str) -> Value {
+        let Some(runner) = self.runner.get() else {
+            return Value::Null;
+        };
+        let Some(folder) = runner.folder(session) else {
+            return Value::Null;
+        };
+        let working = runner.is_working(session);
+        let name = runner
+            .title(session)
+            .or_else(|| lock(&self.started).get(session).map(|s| s.name.clone()));
+        let agent = Agent {
+            id: row_id(session),
+            name: name.unwrap_or_else(|| "Antigravity Session".to_string()),
+            project: Path::new(&folder)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            cwd: folder.clone(),
+            group: if working {
+                AgentGroup::Working
+            } else {
+                AgentGroup::Completed
+            },
+            label: if working { "Working" } else { "Antigravity" }.to_string(),
+            detail: None,
+            since_ms: (now_secs() * 1000.0) as i64,
+            target: AgentTarget::Resume {
+                session_id: session.to_string(),
+                cwd: folder,
+            },
+            suggested_reply: None,
+            transcript_path: None,
+            host: "Antigravity".to_string(),
+            headless: false,
+            config_dir: None,
+            command: None,
+            resume_session_id: None,
+        };
+        serde_json::to_value(agent).unwrap_or(Value::Null)
     }
 
     /// `prompt.pending`'s shape (as a hook prompt's) plus `tool`, `rpcId`, `options` and `diff`.
@@ -140,10 +189,9 @@ impl Shared {
     }
 }
 
-/// A runner's sink that knows each session's folder through the runner.
+/// What the runner reports to.
 struct DaemonSink {
     shared: Arc<Shared>,
-    runner: std::sync::OnceLock<Runner>,
 }
 
 impl Sink for DaemonSink {
@@ -172,7 +220,7 @@ impl Sink for DaemonSink {
                 shared.session_changed(session, "closed", None);
             }
             Change::PermissionPending(p) => {
-                let folder = self
+                let folder = shared
                     .runner
                     .get()
                     .and_then(|r| r.folder(session))
@@ -241,19 +289,18 @@ impl AgyOps {
             pending: Mutex::new(BTreeMap::new()),
             last_chunk: Mutex::new(HashMap::new()),
             started: Mutex::new(HashMap::new()),
-        });
-        let sink = Arc::new(DaemonSink {
-            shared: shared.clone(),
-            runner: std::sync::OnceLock::new(),
+            runner: OnceLock::new(),
         });
         let runner = Runner::new(
             spawner,
             setup.binary.clone(),
-            sink.clone(),
+            Arc::new(DaemonSink {
+                shared: shared.clone(),
+            }),
             Arc::new(now_secs),
             setup.timing,
         );
-        let _ = sink.runner.set(runner.clone());
+        let _ = shared.runner.set(runner.clone());
         AgyOps {
             acting,
             shared,
@@ -495,21 +542,30 @@ fn session_json(id: &str, name: &str, folder: &str, modified: f64, working: bool
     })
 }
 
-/// `agy` and its list: `root` is `~/.gemini/antigravity-cli`, `copy_dir` our own folder. Over a
-/// fixture root only `<home>/.local/bin/agy` counts, never the machine's own install.
-pub fn setup_for(root: PathBuf, copy_dir: PathBuf, home: &Path, fixture: bool) -> AgySetup {
-    let binary = if fixture {
-        let own = home.join(".local/bin/agy");
-        own.is_file().then_some(own)
-    } else {
-        agy::find_binary(home)
-    };
-    AgySetup {
-        root,
-        copy_dir,
-        binary: binary.map(|p| p.to_string_lossy().into_owned()),
-        start_wait: Duration::from_secs(4),
-        timing: Timing::default(),
+impl AgyOps {
+    /// The daemon's: `agy` as the system has it, run by [`RealSpawner`], its list read from the
+    /// layout's Antigravity folder. Over a fixture root only `<home>/.local/bin/agy` counts, never
+    /// the machine's own install.
+    pub fn for_daemon(layout: &Layout, acting: Arc<Acting>, room: Arc<dyn Room>) -> AgyOps {
+        let home = layout.home();
+        let binary = if layout.fixture {
+            let own = home.join(".local/bin/agy");
+            own.is_file().then_some(own)
+        } else {
+            agy::find_binary(&home)
+        };
+        AgyOps::new(
+            acting,
+            room,
+            Arc::new(RealSpawner::new(&home)),
+            AgySetup {
+                root: layout.antigravity_dir(),
+                copy_dir: layout.antigravity_copy_dir(),
+                binary: binary.map(|p| p.to_string_lossy().into_owned()),
+                start_wait: Duration::from_secs(4),
+                timing: Timing::default(),
+            },
+        )
     }
 }
 

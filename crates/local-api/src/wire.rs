@@ -38,6 +38,13 @@ pub mod ops {
     pub const SESSION_QUESTION: &str = "session.question";
     pub const HOOK_REQUEST: &str = "hook.request";
 
+    /// Milestone 5's Codex ops (E6a), app tier and refused while acting is off:
+    /// `codex.send {id | draft_folder, text, model?, effort?}`, `codex.stop {id}`,
+    /// `codex.delete {id}`.
+    pub const CODEX_SEND: &str = "codex.send";
+    pub const CODEX_STOP: &str = "codex.stop";
+    pub const CODEX_DELETE: &str = "codex.delete";
+
     /// Milestone 4's phone bridge, app tier. The bridge is off at every start; `bridge.set
     /// {"on": bool}` and `bridge.status` answer `{state, port, fingerprint, ...}`.
     pub const BRIDGE_SET: &str = "bridge.set";
@@ -69,6 +76,15 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
+    /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
+    pub const TOOLS: &str = "tools";
+    /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
+    /// "failed", "waiting"?, "error"?}`.
+    pub const CODEX_TURN: &str = "codex.turn";
+    /// `{"id", "session", "row": <a sessions.list row> | null, "deleted"?: true}`: a session
+    /// another tool runs changed (its row is given as `sessions.list` would, or `null` when it is
+    /// gone).
+    pub const SESSION_CHANGED: &str = "session.changed";
     /// The phone bridge (app tier).
     pub const BRIDGE: &str = "bridge";
     /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at

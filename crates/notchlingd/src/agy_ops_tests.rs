@@ -126,7 +126,7 @@ impl Rig {
         let end = Instant::now() + Duration::from_secs(10);
         while !self
             .room
-            .named(SESSION_CHANGED)
+            .named(topics::SESSION_CHANGED)
             .iter()
             .any(|d| d["change"] == change)
         {
@@ -373,6 +373,18 @@ fn a_draft_starts_a_session_in_its_folder_and_sends_the_first_message() {
     assert_eq!(reply, json!({"id": "agy:fresh-1", "sent": true}));
     assert_eq!(rig.spawner.calls()[0].2, folder);
     rig.change("turn_ended");
+    // The change event carries the row as sessions.list gives rows, as Codex's does.
+    let ended = rig
+        .room
+        .named(topics::SESSION_CHANGED)
+        .into_iter()
+        .find(|d| d["change"] == "turn_ended")
+        .unwrap();
+    assert_eq!(ended["id"], "agy:fresh-1");
+    assert_eq!(ended["session"], "fresh-1");
+    assert_eq!(ended["row"]["id"], "agy:fresh-1");
+    assert_eq!(ended["row"]["host"], "Antigravity");
+    assert_eq!(ended["row"]["group"], "completed");
     // The new session is listed before Antigravity's database has it, titled from the message.
     let list = rig.call(SESSIONS, json!({})).unwrap();
     let fresh = list
