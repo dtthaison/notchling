@@ -24,6 +24,7 @@ use crate::codex_ops::CodexOps;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
+use crate::providers_ops::ProvidersOps;
 use crate::switches::{SwitchOps, Switches};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
@@ -551,6 +552,11 @@ pub fn run(
         room.clone(),
     ));
     accounts.attach_acting(acting_ops.clone());
+    let providers = Arc::new(ProvidersOps::for_daemon(
+        &layout,
+        switches.accounts.clone(),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -572,6 +578,7 @@ pub fn run(
                         .with_audit(AuditLog::new(layout.audit_path())),
                 ))
                 .with_group(accounts.clone())
+                .with_group(providers.clone())
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -629,6 +636,7 @@ pub fn run(
     acting_ops.close();
     codex_ops.close();
     agy.close();
+    providers.close();
     bridge.close();
     handle.shutdown();
     match thread.join() {

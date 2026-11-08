@@ -102,6 +102,17 @@ pub mod ops {
     pub const LANES_CREATE: &str = "lanes.create";
     pub const LANES_REMOVE: &str = "lanes.remove";
     pub const LANES_SWITCH: &str = "lanes.switch";
+
+    /// Milestone 6's other providers (E8b: Codex, Antigravity, Claude Desktop), app tier, behind
+    /// the daemon's `accounts` switch; the shapes are in `notchlingd`'s `providers_ops` module
+    /// docs. While the switch is off all answer `forbidden` except `providers.list`, which lists
+    /// the saved names from the daemon's own files.
+    pub const PROVIDERS_LIST: &str = "providers.list";
+    pub const PROVIDERS_SWITCH: &str = "providers.switch";
+    pub const PROVIDERS_ADD_BEGIN: &str = "providers.add.begin";
+    pub const PROVIDERS_ADD_CANCEL: &str = "providers.add.cancel";
+    pub const PROVIDERS_REMOVE: &str = "providers.remove";
+    pub const PROVIDERS_USAGE: &str = "providers.usage";
 }
 
 /// Event topics and the events they carry.
@@ -147,6 +158,12 @@ pub mod topics {
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     /// The status after a change (`bridge.status`'s answer).
     pub const BRIDGE_CHANGED: &str = "bridge.changed";
+    /// Accounts of the other providers (app tier): a switch that outlasted its reply, an add flow
+    /// that moved, a refresh that finished.
+    pub const PROVIDERS: &str = "providers";
+    /// `{"provider", "reason": "sync" | "usage" | "switch" | "add" | "remove", ...}`; the app asks
+    /// `providers.list` again.
+    pub const PROVIDERS_CHANGED: &str = "providers.changed";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.

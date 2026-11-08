@@ -47,6 +47,8 @@ pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
+pub mod providers_daemon;
+pub mod providers_ops;
 pub mod service;
 pub mod signals;
 pub mod switches;
@@ -65,6 +67,8 @@ mod hook_ops_tests;
 mod hook_tests;
 #[cfg(test)]
 mod pages_ops_tests;
+#[cfg(test)]
+mod providers_ops_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;

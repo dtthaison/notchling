@@ -3,6 +3,7 @@
 //! Everything OS-specific sits behind `cfg`; where an OS has no implementation yet the call returns
 //! [`Error::Unsupported`] so the caller can say so instead of silently doing nothing.
 
+pub mod apps;
 pub mod awake;
 pub mod files;
 pub mod notify;

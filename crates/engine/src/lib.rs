@@ -11,6 +11,7 @@ pub mod control;
 pub mod delegate;
 pub mod lanes;
 pub mod pages;
+pub mod providers;
 pub mod reply;
 pub mod search;
 pub mod sessions;
