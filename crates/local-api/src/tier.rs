@@ -1,8 +1,9 @@
 //! Which tier a peer gets, from its executable path (decision 0007).
 //!
 //! The app tier needs an executable path in the allowlist: the installed app bundle's binary, or for
-//! dev a path in `NOTCHLING_APP_TIER_PATHS`, read once at daemon start. Everything else, a copy of
-//! the app elsewhere included, is the agent tier.
+//! dev a path in `NOTCHLING_APP_TIER_PATHS`, read once at daemon start and only by a daemon that
+//! runs from a cargo target folder (an installed one ignores it, and `ensure_daemon` never passes
+//! it on). Everything else, a copy of the app elsewhere included, is the agent tier.
 //!
 //! Both sides are compared canonical (symlinks resolved). The kernel already reports the file a
 //! process really runs (`proc_pidpath` on macOS, `/proc/<pid>/exe` on Linux), so a peer started
@@ -43,10 +44,17 @@ impl Allowlist {
         Allowlist { paths }
     }
 
-    /// The daemon's list: the installed app's binaries plus `NOTCHLING_APP_TIER_PATHS`'s, read now.
-    pub fn for_daemon(installed: &[PathBuf], env_value: Option<&OsStr>) -> Allowlist {
+    /// The daemon's list: the installed app's binaries, plus `NOTCHLING_APP_TIER_PATHS`'s (read
+    /// now) only when the daemon itself, `own_exe`, runs from a cargo target folder: a dev build.
+    /// An installed daemon ignores the variable, so whoever starts it can't name its own tier.
+    pub fn for_daemon(
+        installed: &[PathBuf],
+        env_value: Option<&OsStr>,
+        own_exe: Option<&Path>,
+    ) -> Allowlist {
         let mut all: Vec<PathBuf> = installed.to_vec();
-        if let Some(value) = env_value {
+        let dev_build = own_exe.is_some_and(crate::spawn::in_cargo_target);
+        if let Some(value) = env_value.filter(|_| dev_build) {
             all.extend(std::env::split_paths(value).filter(|p| p.is_absolute()));
         }
         Allowlist::new(all)
@@ -156,9 +164,45 @@ mod tests {
         let dir = TempDir::new("tier-env");
         let app = exe(&dir, "app");
         let joined = std::env::join_paths([app.clone(), PathBuf::from("relative/app")]).unwrap();
-        let list = Allowlist::for_daemon(&[], Some(&joined));
+        let daemon = exe_at(&dir, "repo/target/debug/notchling");
+        let list = Allowlist::for_daemon(&[], Some(&joined), Some(&daemon));
         assert_eq!(list.paths().count(), 1);
         assert_eq!(list.tier_of(Some(&app)), Tier::App);
-        assert_eq!(Allowlist::for_daemon(&[], None).paths().count(), 0);
+        assert_eq!(
+            Allowlist::for_daemon(&[], None, Some(&daemon))
+                .paths()
+                .count(),
+            0
+        );
+    }
+
+    fn exe_at(dir: &TempDir, rel: &str) -> PathBuf {
+        let path = dir.path().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"binary").unwrap();
+        path
+    }
+
+    #[test]
+    fn an_installed_daemon_ignores_the_dev_variable() {
+        let dir = TempDir::new("tier-release");
+        let evil = exe(&dir, "evil");
+        let joined = std::env::join_paths([evil.clone()]).unwrap();
+        for release in [
+            exe_at(&dir, "Notchling.app/Contents/MacOS/notchling"),
+            exe_at(&dir, "usr/local/bin/notchling"),
+        ] {
+            let list = Allowlist::for_daemon(&[], Some(&joined), Some(&release));
+            assert_eq!(list.tier_of(Some(&evil)), Tier::Agent, "{release:?}");
+            assert_eq!(list.paths().count(), 0);
+        }
+        // A daemon that can't name its own file is not a dev build either.
+        let list = Allowlist::for_daemon(&[], Some(&joined), None);
+        assert_eq!(list.tier_of(Some(&evil)), Tier::Agent);
+        // The installed app's own path is listed whatever the variable says.
+        let app = exe(&dir, "app");
+        let release = dir.path().join("usr/local/bin/notchling");
+        let list = Allowlist::for_daemon(&[app.clone()], Some(&joined), Some(&release));
+        assert_eq!(list.tier_of(Some(&app)), Tier::App);
     }
 }

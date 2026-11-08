@@ -147,6 +147,7 @@ pub fn run(
     let allowlist = Allowlist::for_daemon(
         &installed_app_paths(),
         std::env::var_os(APP_TIER_PATHS_ENV).as_deref(),
+        std::env::current_exe().ok().as_deref(),
     );
     let mut lister = Lister::new(layout.clone());
     let sessions = Arc::new(Mutex::new(lister.poll()));
