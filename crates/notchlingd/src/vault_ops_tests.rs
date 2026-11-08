@@ -218,6 +218,30 @@ fn turning_it_off_drops_the_values_read_while_on() {
 }
 
 #[test]
+fn the_switch_going_off_forgets_and_ends_the_waits_at_once_with_no_call() {
+    let s = setup("forget-now", true);
+    // `gh` asks first; `reg` doesn't.
+    seed(&s, true);
+    let use_reg = json!({"names": ["reg"], "folder": "/w", "command": "true"});
+    s.ops.call(&agent(), ops::VAULT_USE, &use_reg).unwrap();
+    let reads = *s.item.reads.lock().unwrap();
+    // Off then on with no call between: the listener forgot the values, so the next use reads.
+    s.switch.set(false);
+    s.switch.set(true);
+    s.ops.call(&agent(), ops::VAULT_USE, &use_reg).unwrap();
+    assert_eq!(*s.item.reads.lock().unwrap(), reads + 1, "read again");
+
+    let (user, _) = pending_use(&s);
+    assert_eq!(s.ops.approvals.len(), 1);
+    s.switch.set(false);
+    assert!(
+        s.ops.approvals.is_empty(),
+        "ended by the switch, not a tick"
+    );
+    assert!(user.join().unwrap().is_err());
+}
+
+#[test]
 fn find_lists_entries_and_never_values() {
     let s = setup("find", true);
     seed(&s, false);

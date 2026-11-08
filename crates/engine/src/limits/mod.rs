@@ -9,8 +9,8 @@
 //!   `blocked_until`, `decide_switch`, [`logic::Candidate`].
 //! - [`mode`]: [`mode::LimitMode`] per provider with the Swift setting keys and defaults, and
 //!   [`mode::LimitConfig`], where the daemon keeps them.
-//! - [`sources`]: the traits the watchers need from the account stores. The stores are other
-//!   tasks; the daemon wires them at merge.
+//! - [`sources`]: the traits the watchers need from the account stores; the daemon implements
+//!   them over the real stores.
 //! - [`claude`]: [`claude::ClaudeWatcher`] (main login, lanes, jobs stopped on the limit).
 //! - [`provider`]: [`provider::ProviderLimitWatcher`] (Codex: Notify by default, switches only
 //!   when idle; Antigravity: Off or Notify).

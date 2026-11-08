@@ -10,4 +10,4 @@ pub mod store;
 #[cfg(test)]
 mod store_tests;
 
-pub use store::{ClaudeName, DesktopDeps, DesktopPaths, DesktopStore};
+pub use store::{ClaudeAccounts, ClaudeName, DesktopDeps, DesktopPaths, DesktopStore};

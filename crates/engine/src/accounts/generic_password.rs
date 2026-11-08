@@ -66,10 +66,11 @@ pub struct SecurityTool;
 impl SecurityTool {
     /// Runs `security`; the exit code and what it printed. Standard error is dropped.
     fn run(args: &[String], input: Option<&str>) -> Option<(i32, String)> {
-        let out = SystemSecurity
-            .run(args, input.map(str::as_bytes))
-            .ok()?;
-        Some((out.status, String::from_utf8_lossy(&out.stdout).into_owned()))
+        let out = SystemSecurity.run(args, input.map(str::as_bytes)).ok()?;
+        Some((
+            out.status,
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        ))
     }
 }
 
@@ -197,14 +198,25 @@ mod tests {
         assert_eq!(fake.get("gemini", "antigravity"), None);
         // The longest that fits still goes in on stdin.
         let fits = "x".repeat(1900);
-        assert_eq!(plan_write("gemini", "antigravity", &fits).unwrap().args, vec!["-i"]);
+        assert_eq!(
+            plan_write("gemini", "antigravity", &fits).unwrap().args,
+            vec!["-i"]
+        );
     }
 
     #[test]
     fn a_name_that_would_break_the_quoting_is_refused() {
         for bad in ["a\"b", "a\\b", "a\nb", ""] {
-            assert_eq!(plan_write(bad, "ok", "v"), Err(KeychainError::BadName), "{bad:?}");
-            assert_eq!(plan_write("ok", bad, "v"), Err(KeychainError::BadName), "{bad:?}");
+            assert_eq!(
+                plan_write(bad, "ok", "v"),
+                Err(KeychainError::BadName),
+                "{bad:?}"
+            );
+            assert_eq!(
+                plan_write("ok", bad, "v"),
+                Err(KeychainError::BadName),
+                "{bad:?}"
+            );
         }
         let fake = FakeKeychain::new();
         assert_eq!(fake.write("ok", "a\"b", "v"), Err(KeychainError::BadName));

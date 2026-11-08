@@ -9,9 +9,11 @@
 //!   when [`Waiters::drain`] drops every answer channel (the daemon stops). All of those are a
 //!   "no": the caller gets `None`.
 
+use crate::vault_args::Decision;
+use notchling_engine::vault::{VaultEntry, VaultStore};
 use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
-use std::sync::Mutex;
+use std::sync::{Mutex, Weak};
 use std::time::{Duration, Instant};
 
 /// Why a wait couldn't start.
@@ -110,6 +112,28 @@ impl<T> Waiters<T> {
         };
         self.close(&ticket.id);
         answer
+    }
+}
+
+/// What the switch going off clears: the values read while it was on, and every wait (which then
+/// ends with a no).
+pub(crate) struct OffHook {
+    pub(crate) store: Weak<VaultStore>,
+    pub(crate) approvals: Weak<Waiters<Decision>>,
+    pub(crate) requests: Weak<Waiters<Option<VaultEntry>>>,
+}
+
+impl OffHook {
+    pub(crate) fn run(&self) {
+        if let Some(store) = self.store.upgrade() {
+            store.forget();
+        }
+        if let Some(waiters) = self.approvals.upgrade() {
+            waiters.drain();
+        }
+        if let Some(waiters) = self.requests.upgrade() {
+            waiters.drain();
+        }
     }
 }
 

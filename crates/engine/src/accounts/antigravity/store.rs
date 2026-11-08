@@ -209,7 +209,13 @@ impl AntigravityStore {
             }
         }
         let unchanged = lock(&self.inner).last_saved.as_deref() == Some(login.as_str());
-        if !unchanged && self.deps.keychain.write(SERVICE, &account.id, &login).is_ok() {
+        if !unchanged
+            && self
+                .deps
+                .keychain
+                .write(SERVICE, &account.id, &login)
+                .is_ok()
+        {
             lock(&self.inner).last_saved = Some(login);
         }
         let mut inner = lock(&self.inner);

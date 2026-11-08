@@ -119,17 +119,17 @@ impl ProvidersOps {
         room: Arc<dyn Room>,
     ) -> ProvidersOps {
         let sh = Arc::new(Shared {
-                accounts: accounts.clone(),
-                registry,
-                room,
-                reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
-                poll_ms: AtomicU64::new(POLL_EVERY.as_millis() as u64),
-                add_limit_ms: AtomicU64::new(ADD_LIMIT.as_millis() as u64),
-                closing: AtomicBool::new(false),
-                busy: Mutex::new(HashSet::new()),
-                adding: Mutex::new(HashSet::new()),
-                wake: Condvar::new(),
-            });
+            accounts: accounts.clone(),
+            registry,
+            room,
+            reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
+            poll_ms: AtomicU64::new(POLL_EVERY.as_millis() as u64),
+            add_limit_ms: AtomicU64::new(ADD_LIMIT.as_millis() as u64),
+            closing: AtomicBool::new(false),
+            busy: Mutex::new(HashSet::new()),
+            adding: Mutex::new(HashSet::new()),
+            wake: Condvar::new(),
+        });
         // Off: a flow waiting for the user stops at once and touches nothing more (it doesn't
         // cancel the provider's own flow either, which could write a login back).
         let weak = Arc::downgrade(&sh);

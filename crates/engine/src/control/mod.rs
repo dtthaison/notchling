@@ -57,7 +57,9 @@ pub use plan::{
     CONFIG_DIR_VAR,
 };
 pub use run::{execute, job_id_in_launch_output, ControlError, Report};
-pub use session::{plan_move, plan_new_session, plan_remove, plan_stop, NewSession};
+pub use session::{
+    job_state_path, plan_move, plan_new_session, plan_remove, plan_respawn, plan_stop, NewSession,
+};
 pub use slash::{Route, SlashCommand};
 pub use takeover::{offers_takeover, prompt_for, TakeoverState};
 pub use trust::plan_trust_folder;

@@ -42,7 +42,7 @@ use crate::layout::Layout;
 use crate::op_group::OpGroup;
 pub use crate::switches::{SwitchFlag, VAULT_OFF};
 use crate::vault_args::{entry_from, entry_json, text, value_from, Decision};
-use crate::vault_wait::{Refused, Waiters};
+use crate::vault_wait::{OffHook, Refused, Waiters};
 use notchling_engine::vault::list::{self, label};
 use notchling_engine::vault::{
     now_iso, system_keychain, valid_name, Kind, PrefillChanges, Unsupported, VaultEntry,
@@ -53,7 +53,7 @@ use notchling_local_api::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// How long a use waits for the user's approval, and a request for the form.
@@ -108,28 +108,6 @@ pub struct VaultOps {
     approvals: Arc<Waiters<Decision>>,
     requests: Arc<Waiters<Option<VaultEntry>>>,
     timing: VaultTiming,
-}
-
-/// What the switch going off clears: the values read while it was on, and every wait (which then
-/// ends with a no).
-struct OffHook {
-    store: Weak<VaultStore>,
-    approvals: Weak<Waiters<Decision>>,
-    requests: Weak<Waiters<Option<VaultEntry>>>,
-}
-
-impl OffHook {
-    fn run(&self) {
-        if let Some(store) = self.store.upgrade() {
-            store.forget();
-        }
-        if let Some(waiters) = self.approvals.upgrade() {
-            waiters.drain();
-        }
-        if let Some(waiters) = self.requests.upgrade() {
-            waiters.drain();
-        }
-    }
 }
 
 fn failed(message: impl Into<String>) -> ApiError {
@@ -201,6 +179,18 @@ impl VaultOps {
 
     pub fn is_on(&self) -> bool {
         self.switch.is_on()
+    }
+
+    /// The names the `notchling-vault` skill's description lists (`github (api.github.com)`),
+    /// read from `vault.json` only while the vault is on: none while off, when nothing reads it.
+    pub fn skill_names(&self) -> Vec<String> {
+        if !self.switch.is_on() {
+            return Vec::new();
+        }
+        self.store
+            .entries()
+            .map(|entries| notchling_engine::vault::skill::names(&entries))
+            .unwrap_or_default()
     }
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {

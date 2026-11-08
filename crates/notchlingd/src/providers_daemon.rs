@@ -1,6 +1,10 @@
 //! The daemon's real providers for [`ProvidersOps`]: where each provider keeps its files, and which
 //! effects are real. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake, so a dev
 //! run never touches the real Keychain, apps or processes.
+//!
+//! [`ProviderStores`] keeps the concrete stores too: the limit watchers read Codex's and
+//! Antigravity's ([`crate::limits_sources::ProviderLimits`]), and Codex's watcher asks whether
+//! anything would be interrupted by a switch.
 
 use crate::acting_ops::Room;
 use crate::layout::Layout;
@@ -10,7 +14,9 @@ use notchling_engine::accounts::antigravity::{
     AntigravityDeps, AntigravityPaths, AntigravityStore,
 };
 use notchling_engine::accounts::codex::{CodexDeps, CodexPaths, CodexStore};
-use notchling_engine::accounts::desktop::{ClaudeName, DesktopDeps, DesktopPaths, DesktopStore};
+use notchling_engine::accounts::desktop::{
+    ClaudeAccounts as ClaudeNames, ClaudeName, DesktopDeps, DesktopPaths, DesktopStore,
+};
 use notchling_engine::accounts::generic_password::{FakeKeychain, Keychain, SecurityTool};
 use notchling_engine::accounts::procs::{
     Apps, FakeApps, FakeProcs, Procs, SystemApps, SystemProcs,
@@ -27,16 +33,30 @@ type Effects = (
     Arc<dyn Apps>,
 );
 
-impl ProvidersOps {
-    /// The daemon's providers. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake,
+/// The daemon's three provider stores.
+pub struct ProviderStores {
+    pub desktop: Arc<DesktopStore>,
+    pub codex: Arc<CodexStore>,
+    pub antigravity: Arc<AntigravityStore>,
+}
+
+impl ProviderStores {
+    /// In the Accounts window's order: Claude Code (E8a, apart), Claude Desktop, Codex,
+    /// Antigravity.
+    pub fn registry(&self) -> ProviderRegistry {
+        let mut registry = ProviderRegistry::new();
+        registry.register(self.desktop.clone());
+        registry.register(self.codex.clone());
+        registry.register(self.antigravity.clone());
+        registry
+    }
+
+    /// The daemon's stores. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake,
     /// so a dev run never touches the real Keychain, apps or processes; otherwise the real
-    /// `/usr/bin/security`, apps, processes and HTTPS. The saved account names and Claude Desktop's
-    /// copies are the daemon's own, in `<data dir>/daemon/accounts`.
-    pub fn for_daemon(
-        layout: &Layout,
-        accounts: Arc<SwitchFlag>,
-        room: Arc<dyn Room>,
-    ) -> ProvidersOps {
+    /// `/usr/bin/security`, apps, processes and HTTPS. The saved account names and Claude
+    /// Desktop's copies are the daemon's own, in `<data dir>/daemon/accounts`. `claude_accounts`
+    /// is E8a's account list, which Desktop's rows are matched against.
+    pub fn for_daemon(layout: &Layout, claude_accounts: ClaudeNames) -> ProviderStores {
         let home = layout.home();
         let state_dir = layout.data_dir.join("daemon").join("accounts");
         let (keychain, http, procs, apps): Effects = if layout.fixture {
@@ -73,22 +93,18 @@ impl ProvidersOps {
                 .map(|d| d.as_secs_f64())
                 .unwrap_or(0.0)
         });
-        let mut registry = ProviderRegistry::new();
-        // The Accounts window's order: Claude Code (E8a), Claude Desktop, Codex, Antigravity.
-        registry.register(Arc::new(DesktopStore::new(
+        let desktop = Arc::new(DesktopStore::new(
             DesktopDeps {
                 apps: apps.clone(),
-                // E8a's account list, once it lands: Desktop lists the Claude Code accounts it has
-                // a session for.
-                claude_accounts: Arc::new(Vec::<ClaudeName>::new),
+                claude_accounts,
             },
             DesktopPaths {
                 claude_dir,
                 store_dir: state_dir.join("desktop"),
                 apps_dir: apps_dir.clone(),
             },
-        )));
-        registry.register(Arc::new(CodexStore::new(
+        ));
+        let codex = Arc::new(CodexStore::new(
             CodexDeps {
                 keychain: keychain.clone(),
                 http: http.clone(),
@@ -100,13 +116,13 @@ impl ProvidersOps {
                 home: layout.codex_dir(),
                 state_dir: state_dir.clone(),
             },
-        )));
+        ));
         let gemini = layout
             .antigravity_dir()
             .parent()
             .map(std::path::Path::to_path_buf)
             .unwrap_or_else(|| home.join(".gemini"));
-        registry.register(Arc::new(AntigravityStore::new(
+        let antigravity = Arc::new(AntigravityStore::new(
             AntigravityDeps {
                 keychain,
                 http,
@@ -119,7 +135,24 @@ impl ProvidersOps {
                 apps_dir,
                 state_dir,
             },
-        )));
-        ProvidersOps::new(accounts, registry, room)
+        ));
+        ProviderStores {
+            desktop,
+            codex,
+            antigravity,
+        }
+    }
+}
+
+impl ProvidersOps {
+    /// The daemon's provider ops over [`ProviderStores::for_daemon`], with no Claude Code accounts
+    /// for Desktop to match (the daemon's wiring passes E8a's list).
+    pub fn for_daemon(
+        layout: &Layout,
+        accounts: Arc<SwitchFlag>,
+        room: Arc<dyn Room>,
+    ) -> ProvidersOps {
+        let stores = ProviderStores::for_daemon(layout, Arc::new(Vec::<ClaudeName>::new));
+        ProvidersOps::new(accounts, stores.registry(), room)
     }
 }

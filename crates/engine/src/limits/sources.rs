@@ -1,6 +1,7 @@
 //! What the watchers need from the account stores, as traits, so this part builds and tests with
-//! fakes. The daemon wires the real stores in (Milestone 6's `engine::accounts::*` and
-//! `engine::providers`) behind the `accounts` switch; until then nothing implements them.
+//! fakes. The daemon wires the real stores in (`notchlingd`'s `limits_sources`: Claude Code's
+//! accounts and lanes, the Codex and Antigravity providers, the session list's stopped jobs) behind
+//! the `accounts` switch.
 //!
 //! Every method may be slow or touch a login (a Keychain read, an HTTPS request): the watcher
 //! loop calls them only while `accounts` is on, and never otherwise. None of them may renew a

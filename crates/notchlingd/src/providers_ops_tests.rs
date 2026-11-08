@@ -351,7 +351,9 @@ fn a_confirmed_switch_replies_and_announces() {
     std::fs::write(rig.codex_auth(), &a).unwrap();
     {
         use base64_for_tests::encode;
-        rig.keychain.write("Notchling Codex", "u2:w2", &encode(&b)).unwrap();
+        rig.keychain
+            .write("Notchling Codex", "u2:w2", &encode(&b))
+            .unwrap();
     }
     let reply = rig
         .call(
@@ -566,6 +568,25 @@ fn an_add_flow_stops_touching_logins_the_moment_accounts_turn_off() {
             .code,
         ErrorCode::Forbidden
     );
+}
+
+#[test]
+fn a_waiting_add_flow_ends_when_accounts_turn_off_not_at_its_next_poll() {
+    let procs = FakeProcs::new().binary("codex", &PathBuf::from("/usr/local/bin/codex"));
+    let rig = Rig::new("addoffnow", true, procs, FakeApps::new());
+    // A poll so far away that only the switch's listener can end the wait in time.
+    rig.ops
+        .set_add_timing(Duration::from_secs(600), Duration::from_secs(900));
+    rig.call(ops::PROVIDERS_ADD_BEGIN, json!({"provider": "codex"}))
+        .unwrap();
+    let started = Instant::now();
+    rig.flag.set(false);
+    let ended = rig.wait_for(|e| e["reason"] == "add" && e["state"] == "cancelled");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(ended["error"], ACCOUNTS_OFF);
+    no_secrets(&ended);
+    // The provider's own flow is left alone: cancelling it could write a login back.
+    assert!(!rig.procs.login_state().lock().unwrap().killed);
 }
 
 #[test]

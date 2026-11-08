@@ -301,6 +301,28 @@ fn a_climb_is_said_once_and_sent_as_an_event() {
 }
 
 #[test]
+fn turning_accounts_off_drops_what_was_seen_and_the_next_round_on_syncs_afresh() {
+    let (_tmp, flag, _room, ops) = rig();
+    let claude = Arc::new(Claude::default());
+    *claude.me.lock().unwrap() = 50.0;
+    ops.set_claude(claude.clone(), Arc::new(NoJobs));
+    flag.set(true);
+    assert!(ops.tick_at(NOW));
+    assert_eq!(claude.syncs.load(Ordering::SeqCst), 1);
+    let status = ops.call(LIMITS_STATUS, &json!({})).unwrap();
+    assert_eq!(status["providers"][0]["active"], json!("me@x.com"));
+
+    flag.set(false);
+    let status = ops.call(LIMITS_STATUS, &json!({})).unwrap();
+    assert_eq!(status["providers"][0]["active"], Value::Null, "forgotten");
+    assert_eq!(status["providers"][0]["windows"], json!([]));
+    flag.set(true);
+    // Within the five minutes, yet the stores are asked again: what they said may be stale.
+    assert!(ops.tick_at(NOW + 10.0));
+    assert_eq!(claude.syncs.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn notify_and_switch_switches_only_through_the_store_and_only_when_on() {
     let (_tmp, flag, _room, ops) = rig();
     let claude = Arc::new(Claude::default());
