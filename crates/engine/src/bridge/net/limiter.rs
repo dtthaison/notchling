@@ -3,7 +3,21 @@
 //! the loopback cloudflared connects from.
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
+
+/// What an address is counted under: itself, or for IPv6 its /64, since one host may hold a whole
+/// /64 and pick a new address per try. Text that isn't an address is its own key.
+pub fn key(address: &str) -> String {
+    match address.parse::<IpAddr>().map(|ip| ip.to_canonical()) {
+        Ok(IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            format!("{}/64", Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+        }
+        Ok(ip) => ip.to_string(),
+        Err(_) => address.to_string(),
+    }
+}
 
 pub const MAX_FAILURES: u32 = 5;
 pub const LOCK_MS: i64 = 5 * 60 * 1000;
