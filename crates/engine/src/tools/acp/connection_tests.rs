@@ -254,9 +254,22 @@ fn stuck() -> Stuck {
             }),
         );
     });
-    // Long enough for the write to fill the pipe and block.
-    std::thread::sleep(Duration::from_millis(300));
+    // Wait until the prompt's write holds the process's lock. A sleep isn't enough: under load the
+    // thread may not have built and serialized its 8 MB message yet, and a message sent then
+    // takes the lock first, goes through the empty pipe, and nothing is blocked. Once the lock is
+    // held, the write can't finish: the child never reads, and the pipe holds far less than 8 MB.
+    let until = Instant::now() + Duration::from_secs(30);
+    while !writing(&conn) {
+        assert!(Instant::now() < until, "the prompt's write never started");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     Stuck { conn, writer }
+}
+
+/// A write holds the process's lock (the only thing that takes it).
+#[cfg(unix)]
+fn writing(conn: &Connection) -> bool {
+    matches!(conn.inner.process.try_lock(), Err(TryLockError::WouldBlock))
 }
 
 /// Runs `f` on another thread and says whether it returned within `limit`.

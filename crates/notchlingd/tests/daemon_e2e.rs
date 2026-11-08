@@ -154,6 +154,24 @@ fn terminate(child: &mut Child) -> std::process::ExitStatus {
     }
 }
 
+/// `sessions.list` once it holds at least `min` rows, within the load allowance.
+fn full_list(client: &mut Client, min: usize) -> Value {
+    let deadline = Instant::now() + START_ALLOWANCE;
+    loop {
+        let list = client
+            .call(
+                notchling_local_api::ops::SESSIONS_LIST,
+                serde_json::json!({}),
+            )
+            .unwrap();
+        if list.as_array().is_some_and(|rows| rows.len() >= min) {
+            return list;
+        }
+        assert!(Instant::now() < deadline, "the list never filled: {list}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn ids(list: &Value) -> Vec<String> {
     list.as_array()
         .unwrap()
@@ -177,14 +195,11 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();
     assert_eq!(client.tier(), notchling_local_api::Tier::Agent);
     client.subscribe(&["sessions"]).unwrap();
-    let list = client
-        .call(
-            notchling_local_api::ops::SESSIONS_LIST,
-            serde_json::json!({}),
-        )
-        .unwrap();
+    // The socket answers before the first read of the list, and `sessions.list` waits for that
+    // read only so long (4 s) before it answers with what it has: on a starved machine the first
+    // answer can be the empty list. Ask again within the load allowance.
+    let list = full_list(&mut client, 5);
     let rows = list.as_array().unwrap();
-    assert!(rows.len() >= 5, "{list}");
     // The engine's own field names, through serde.
     let first = &rows[0];
     for key in [
@@ -201,19 +216,29 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     let text = std::fs::read_to_string(&state).unwrap();
     std::fs::write(&state, text.replace("\"working\"", "\"blocked\"")).unwrap();
 
-    let event = client
-        .next_event(Duration::from_secs(15))
-        .unwrap()
-        .expect("a sessions.changed event");
-    assert_eq!(event.event, "sessions.changed");
-    let row = event
-        .data
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["id"] == "sess-notch")
-        .unwrap()
-        .clone();
+    // The first read went out as `sessions.changed` too, and this client may have subscribed
+    // before it did (the socket answers first): skip that one, still `working`, and wait for the
+    // event that shows the change.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let row = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let event = client
+            .next_event(left)
+            .unwrap()
+            .expect("a sessions.changed event showing the change");
+        assert_eq!(event.event, "sessions.changed");
+        let row = event
+            .data
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "sess-notch")
+            .unwrap()
+            .clone();
+        if row["group"] != "working" {
+            break row;
+        }
+    };
     assert_ne!(row["group"], "working", "{row}");
 
     // A second daemon on the same socket says so and exits 0, leaving the first serving.
