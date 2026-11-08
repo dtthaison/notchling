@@ -22,6 +22,8 @@ objc2-foundation = "=0.3.2"
 objc2-app-kit = "=0.3.2"
 objc2-core-graphics = { version = "=0.3.2", features = ["CGWindow", "CGImage", "CGGeometry"] }
 raw-window-handle = "=0.6.2"
+# Pages open in a web view in their own window (part U4, decision 0005): the Phase 1 spike's pin.
+wry = "=0.57.1"
 
 # The render tests read the PNG back. The version GPUI's `image` already locks, so no second copy.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
