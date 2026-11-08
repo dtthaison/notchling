@@ -193,6 +193,19 @@ Port these:
 
 Media pickup from `~/.codex/generated_images/<session>/` and `brain/<session>/`, and `--out` copies, take roots as parameters in tests.
 
+#### As built: Delegate
+
+Code: `crates/engine/src/delegate/` (module doc has the table), `crates/notchlingd/src/delegate_cli.rs`.
+
+- **Same as `--delegate`.** The output text, the `--json` shape, the exit codes (0, 1, 124, and 2 for a command line that can't run) and the 1800 s default are the Swift command's. `Notchling --delegate` is `notchling delegate`; `--delegate-models` is `notchling delegate-models`. `--prompt-file` is kept (the Second Opinion store uses it).
+- **Read-only.** Codex runs in its `read-only` sandbox (no network key) and takes `workspace-write` only with `--write`, with the network when `codexNetwork` is on. agy declines every permission request and lists it under `Declined`; with `--write` it sets accept-edits and allows `edit`, `delete` and `move` requests only.
+- **Hardening beyond Swift.** A session id (`--session`, or one a tool reports) that is not one plain folder name finds no media; only regular files directly in the session's folder are taken, never through a symlink (the folder or a file) and copied with `O_NOFOLLOW`; a Codex `--effort` or `--session` that could not be a level or an id is refused before anything starts.
+- **Nesting.** `NOTCHLING_DELEGATE_DEPTH` is read, a third level exits 2, and the tool's own processes get the depth plus one (Codex through its environment, agy through the process environment).
+- **Signals.** SIGINT, SIGTERM and SIGHUP interrupt the tool (SIGTERM five seconds later for Codex; `session/cancel`, then two seconds, for agy) and the command reports what it had with `Codex was stopped.` or `Stopped.`.
+- **Not behind `acting`, no daemon.** It reads `settings.json` in the data folder for `codexNetwork`, never writes it.
+- **Second opinions.** `SecondOpinion`, the prompt, the answer parser and `SecondOpinionStore` are pure, over a `Host` trait; `ProcessHost` is the real one (this binary, SIGTERM then SIGKILL after 8 s). The store's file is a parameter, JSON with camelCase keys and a Unix-seconds `started`: it is not the Swift app's `second-opinions.json` and doesn't read it.
+- **Skill text.** `delegate::skill::content(binary, tool, codex_model)`; nothing installs it before E13.
+
 ### 6. The app side of the tools (wave 2)
 
 - **Chat.**

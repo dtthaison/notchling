@@ -37,6 +37,11 @@ pub trait ToolProcess: Send + Sync {
     fn next(&self) -> Next;
     /// Stops the turn the way Ctrl+C would (SIGINT). Does nothing once it has ended.
     fn interrupt(&self);
+    /// Ends it harder (SIGTERM), for a turn that ignored [`ToolProcess::interrupt`]; by default
+    /// the same as an interrupt.
+    fn terminate(&self) {
+        self.interrupt();
+    }
 }
 
 /// Why a tool did not start.
@@ -227,6 +232,23 @@ impl ToolProcess for RealProcess {
     }
 
     fn interrupt(&self) {
+        #[cfg(unix)]
+        self.signal(libc::SIGINT);
+        #[cfg(not(unix))]
+        self.signal(0);
+    }
+
+    fn terminate(&self) {
+        #[cfg(unix)]
+        self.signal(libc::SIGTERM);
+        #[cfg(not(unix))]
+        self.signal(0);
+    }
+}
+
+impl RealProcess {
+    /// Sends `signal` (any number on a system without signals: the child is killed).
+    fn signal(&self, signal: i32) {
         let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
         // Reaped already: the pid may be someone else's now.
         if !matches!(child.try_wait(), Ok(None)) {
@@ -238,13 +260,13 @@ impl ToolProcess for RealProcess {
                 // SAFETY: `kill` takes a pid and a signal number and touches no memory; the child
                 // has not been reaped (checked above, under the lock that reaps it).
                 unsafe {
-                    libc::kill(pid, libc::SIGINT);
+                    libc::kill(pid, signal);
                 }
             }
         }
         #[cfg(not(unix))]
         {
-            let _ = self.pid;
+            let _ = (self.pid, signal);
             let _ = child.kill();
         }
     }
