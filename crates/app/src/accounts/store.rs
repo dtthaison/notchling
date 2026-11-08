@@ -45,9 +45,23 @@ pub struct Snapshot {
     pub error: Option<String>,
 }
 
+/// How often, at most, a refresh syncs the live logins and reads the providers' limits (the Swift
+/// app's rate). Refreshes between, on a tick or an event, read the lists without syncing.
+pub const SYNC_EVERY: f64 = 30.0;
+
+/// One refresh at a time; one asked for meanwhile runs once after.
+#[derive(Default)]
+struct Flight {
+    running: bool,
+    again: bool,
+}
+
 pub struct Accounts {
     transport: Option<Box<dyn Transport>>,
     snapshot: Mutex<Snapshot>,
+    flight: Mutex<Flight>,
+    /// When the last syncing refresh went out (seconds since 1970).
+    last_sync: Mutex<Option<f64>>,
 }
 
 fn message(e: &ClientError) -> String {
@@ -67,6 +81,8 @@ impl Accounts {
         Accounts {
             transport: Some(transport),
             snapshot: Mutex::new(Snapshot::default()),
+            flight: Mutex::default(),
+            last_sync: Mutex::new(None),
         }
     }
 
@@ -75,6 +91,8 @@ impl Accounts {
         Accounts {
             transport: None,
             snapshot: Mutex::new(snapshot),
+            flight: Mutex::default(),
+            last_sync: Mutex::new(None),
         }
     }
 
@@ -138,14 +156,62 @@ impl Accounts {
         })
     }
 
-    /// Reads every list. Blocking. `switches` says whether the switch is on, which decides
-    /// whether the live login is synced and the providers' limits are asked for.
+    /// Reads every list. Blocking. See [`Accounts::refresh_at`].
     pub fn refresh(&self, switches: &Switches) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        self.refresh_at(switches, now);
+    }
+
+    /// Reads every list at `now`. Blocking. Never two at once: one asked for while another runs
+    /// makes that one run once more after, and returns at once. With the switch on, the live login
+    /// is synced and the providers' limits read at most every [`SYNC_EVERY`] seconds; the
+    /// daemon publishes `providers.changed` for each list read, so syncing on every event would
+    /// feed itself.
+    pub fn refresh_at(&self, switches: &Switches, now: f64) {
         if self.transport.is_none() {
             return;
         }
+        {
+            let mut flight = lock(&self.flight);
+            if flight.running {
+                flight.again = true;
+                return;
+            }
+            flight.running = true;
+        }
+        loop {
+            self.read_lists(switches, now);
+            let mut flight = lock(&self.flight);
+            if flight.again {
+                flight.again = false;
+                continue;
+            }
+            flight.running = false;
+            return;
+        }
+    }
+
+    /// Whether this refresh syncs: the switch is on and the last sync is [`SYNC_EVERY`] old.
+    fn sync_due(&self, on: bool, now: f64) -> bool {
+        let mut last = lock(&self.last_sync);
+        if !on {
+            *last = None;
+            return false;
+        }
+        let due = last.is_none_or(|at| now - at >= SYNC_EVERY || now < at);
+        if due {
+            *last = Some(now);
+        }
+        due
+    }
+
+    fn read_lists(&self, switches: &Switches, now: f64) {
         let on = switches.is_on(Switch::Accounts);
-        let claude = match self.call(&Call::accounts_list(on)) {
+        let sync = self.sync_due(on, now);
+        let claude = match self.call(&Call::accounts_list(sync)) {
             Ok(v) => parse_claude_list(&v),
             Err(e) => {
                 if !switches::detaches(&e) {
@@ -161,7 +227,7 @@ impl Accounts {
         // went away mid-read has nothing more to say.
         let lanes = self.call(&Call::lanes_list()).map(|v| parse_lanes(&v));
         let providers = self
-            .call(&Call::providers_list(on))
+            .call(&Call::providers_list(sync))
             .map(|v| parse_providers(&v));
         let limits = self.call(&Call::limits_status()).map(|v| parse_limits(&v));
         if lanes.as_ref().err().is_some_and(switches::detaches)
@@ -171,7 +237,7 @@ impl Accounts {
             return;
         }
         let mut usage = BTreeMap::new();
-        if let (true, Ok(list)) = (on, &providers) {
+        if let (true, Ok(list)) = (sync, &providers) {
             for p in list.providers.iter().filter(|p| p.can(USAGE)) {
                 if let Ok(v) = self.call(&Call::providers_usage(&p.id, false)) {
                     usage.insert(p.id.clone(), parse_usage(&v));
@@ -190,9 +256,9 @@ impl Accounts {
             if let Ok(limits) = limits {
                 s.limits = limits;
             }
-            if on {
+            if sync {
                 s.usage = usage;
-            } else {
+            } else if !on {
                 s.usage.clear();
             }
             s.error = None;

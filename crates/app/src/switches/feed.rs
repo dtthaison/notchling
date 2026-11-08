@@ -180,6 +180,10 @@ impl Shared {
                 }
             }
             topics::ACCOUNTS_CHANGED | topics::ACCOUNTS_ADD_ENDED => s.changes.accounts += 1,
+            // The daemon publishes a "sync" change for every `providers.list`, the app's own
+            // refresh included; counting those would make each refresh ask for the next.
+            topics::PROVIDERS_CHANGED
+                if event.data.get("reason").and_then(Value::as_str) == Some("sync") => {}
             topics::PROVIDERS_CHANGED => s.changes.providers += 1,
             "limits.notice" => {
                 s.changes.limits += 1;

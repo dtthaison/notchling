@@ -241,3 +241,65 @@ fn a_refusal_is_kept_as_the_error_and_a_lost_daemon_detaches() {
     fixed.refresh(&Switches::all_on());
     assert!(fixed.begin_add_claude(&Switches::all_on()).is_err());
 }
+
+#[test]
+fn the_live_login_is_synced_at_most_every_30_seconds_and_usage_with_it() {
+    let (store, calls) = fake(daemon(true));
+    let on = Switches::all_on();
+    store.refresh_at(&on, 1_000.0);
+    let syncs = |c: &Calls| {
+        c.lock()
+            .unwrap()
+            .iter()
+            .filter(|(op, a)| op.ends_with(".list") && a.get("sync") == Some(&json!(true)))
+            .count()
+    };
+    let usage = |c: &Calls| sent(c).iter().filter(|o| *o == "providers.usage").count();
+    assert_eq!((syncs(&calls), usage(&calls)), (2, 1));
+    // An event a second later reads the lists without syncing and keeps the limits it has.
+    store.refresh_at(&on, 1_001.0);
+    store.refresh_at(&on, 1_029.0);
+    assert_eq!((syncs(&calls), usage(&calls)), (2, 1));
+    assert_eq!(
+        calls.lock().unwrap()[5].1,
+        json!({"sync": false}),
+        "accounts.list without sync"
+    );
+    assert_eq!(store.snapshot().usage["codex"]["u:a"].groups.len(), 1);
+    store.refresh_at(&on, 1_030.0);
+    assert_eq!((syncs(&calls), usage(&calls)), (4, 2));
+}
+
+#[test]
+fn refreshes_never_overlap_and_one_asked_meanwhile_runs_once_after() {
+    use std::sync::mpsc;
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let gate = Mutex::new(Some((entered_tx, release_rx)));
+    let inner = daemon(true);
+    let (store, calls) = fake(move |op, args| {
+        if op == "accounts.list" {
+            let taken = gate.lock().unwrap().take();
+            if let Some((entered, release)) = taken {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+        }
+        inner(op, args)
+    });
+    let store = Arc::new(store);
+    let first = {
+        let store = store.clone();
+        std::thread::spawn(move || store.refresh_at(&Switches::all_on(), 0.0))
+    };
+    entered_rx.recv().unwrap();
+    // Three more while the first is stuck: none runs alongside it.
+    store.refresh_at(&Switches::all_on(), 1.0);
+    store.refresh_at(&Switches::all_on(), 2.0);
+    store.refresh_at(&Switches::all_on(), 3.0);
+    let lists = |c: &Calls| sent(c).iter().filter(|o| *o == "accounts.list").count();
+    assert_eq!(lists(&calls), 1);
+    release_tx.send(()).unwrap();
+    first.join().unwrap();
+    assert_eq!(lists(&calls), 2, "the ones asked meanwhile run once, after");
+}

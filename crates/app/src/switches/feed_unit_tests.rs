@@ -69,6 +69,12 @@ fn the_areas_count_their_events_and_the_accounts_switch_moves_all_three() {
         topics::PROVIDERS_CHANGED,
         json!({"provider": "codex"}),
     ));
+    // The daemon publishes one of these for every providers.list, the app's own included: not a
+    // reason to read again.
+    s.apply(&event(
+        topics::PROVIDERS_CHANGED,
+        json!({"provider": null, "reason": "sync"}),
+    ));
     s.apply(&event(
         "limits.notice",
         json!({"at": 1.0, "text": "me is at 91%"}),
