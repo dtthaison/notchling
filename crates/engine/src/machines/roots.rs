@@ -42,6 +42,11 @@ impl MachineRoots {
         self.own_dir.join("audit.jsonl")
     }
 
+    /// The app's own `main` worktrees a merge from the morning items uses.
+    pub fn merge_dir(&self) -> PathBuf {
+        self.own_dir.join("merge")
+    }
+
     /// A private folder for files a Fix hands `gh` (a public key).
     pub fn scratch(&self) -> PathBuf {
         self.own_dir.join("scratch")

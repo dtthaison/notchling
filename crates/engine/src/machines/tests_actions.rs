@@ -35,6 +35,7 @@ pub(super) fn m1() -> Machine {
 pub(super) fn plan() -> MergePlan {
     MergePlan {
         home: "/Users/me".into(),
+        merge_root: "/data/notchling/daemon/machines/merge".into(),
         environment: Default::default(),
         git: "/usr/bin/git".into(),
         gh: "/usr/bin/gh".into(),

@@ -481,6 +481,7 @@ impl Fx {
         MergePlan {
             // the app's own worktree would go under here, never under the real home
             home: self.root.clone(),
+            merge_root: format!("{}/data/daemon/machines/merge", self.root),
             environment: Default::default(),
             git: GIT.into(),
             gh: "/usr/bin/gh".into(),

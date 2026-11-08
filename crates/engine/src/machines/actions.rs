@@ -84,7 +84,9 @@ impl MorningActions {
         MorningActions {
             runner,
             machines: Box::new(machines),
-            plan: MergePlan::from_process(),
+            // the window passes its data root's folder (`with_plan`); this keeps a bare one under
+            // the cache it was given, never the real home's Library
+            plan: MergePlan::from_process(&cache_root.join("merge")),
             merge_fn: None,
             retry_push_fn: None,
             undo_fn: None,
@@ -94,6 +96,10 @@ impl MorningActions {
     }
 
     /// The Mac's git, gh, home and environment; the default is this process's own.
+    pub fn plan(&self) -> &MergePlan {
+        &self.plan
+    }
+
     pub fn with_plan(mut self, plan: MergePlan) -> MorningActions {
         self.plan = plan;
         self

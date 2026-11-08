@@ -348,7 +348,8 @@ fn git_calls_use_full_paths_and_timeouts() {
 /// C13: git and gh come from the one lookup the rest of the Machines code uses.
 #[test]
 fn git_and_gh_come_from_the_tool_lookup() {
-    let here = MergePlan::from_process();
+    let here = MergePlan::from_process(std::path::Path::new("/data/merge"));
+    assert_eq!(here.merge_root, "/data/merge");
     assert_eq!(here.git, super::shell::tool_path("git"));
     assert_eq!(here.gh, super::shell::tool_path("gh"));
     let runner = happy(vec![], None);

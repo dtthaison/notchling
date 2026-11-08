@@ -16,6 +16,7 @@ use notchling_engine::machines::catalog;
 use notchling_engine::machines::engine::{Deps, SetupEngine};
 use notchling_engine::machines::github::{GitHubHttp, LiveGitHub, NoGitHub};
 use notchling_engine::machines::mac_facts;
+use notchling_engine::machines::merge::MergePlan;
 use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::process::ProcessRunner;
 use notchling_engine::machines::roots::{MachineRoots, VaultSecrets};
@@ -140,11 +141,14 @@ impl Setup {
             now_secs,
         ));
         let for_actions = registry.clone();
-        let actions = Arc::new(MorningActions::new(
-            runner.clone(),
-            move || for_actions.all(),
-            roots.own_dir.join("cache"),
-        ));
+        let actions = Arc::new(
+            MorningActions::new(
+                runner.clone(),
+                move || for_actions.all(),
+                roots.own_dir.join("cache"),
+            )
+            .with_plan(MergePlan::from_process(&roots.merge_dir())),
+        );
         let vault = Arc::new(VaultFiles {
             index: self.vault_index(),
             secrets,
@@ -263,6 +267,28 @@ mod tests {
         assert_eq!(r.code, notchling_engine::machines::runner::REFUSED);
         assert!(parts.vault.entries().is_empty());
         assert!(parts.vault.rename("a", "b").is_err());
+    }
+
+    #[test]
+    fn a_merge_makes_its_own_worktree_under_the_data_root() {
+        use notchling_engine::machines::merge::MergeTarget;
+        use notchling_engine::machines::registry::MachineRepo;
+        let parts = Setup::for_render(Some(Path::new("/f"))).parts();
+        let repo = MachineRepo {
+            github: "acme/app".into(),
+            local_path: "/Users/me/code/app".into(),
+            check_command: "just check".into(),
+            machine_path: None,
+            verify_skill: None,
+        };
+        assert_eq!(
+            parts.actions.plan().target(&repo, ""),
+            MergeTarget::Own(
+                PathBuf::from("/f/notchling/daemon/machines/merge/acme-app")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
     }
 
     #[test]

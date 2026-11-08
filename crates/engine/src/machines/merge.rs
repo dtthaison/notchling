@@ -47,8 +47,8 @@ pub(super) const FETCH_ORIGIN: [&str; 4] = [
 pub enum MergeTarget {
     /// A worktree that already has `main` checked out.
     Existing(String),
-    /// Notchling's own worktree for the repo, created with `git worktree add <path> main` the
-    /// first time (written with `~`, expanded when it is used).
+    /// Notchling's own worktree for the repo under the plan's `merge_root`, created with
+    /// `git worktree add <path> main` the first time.
     Own(String),
 }
 
@@ -84,21 +84,26 @@ impl MergeOutcome {
     }
 }
 
-/// The Mac this runs on: the home the app's own worktree goes under, the environment the check's
-/// shell is chosen from, and where `git` and `gh` live. Tests build one of their own.
+/// The Mac this runs on: the home the check's tools are found under, the folder the app's own
+/// worktrees go in, the environment the check's shell is chosen from, and where `git` and `gh`
+/// live. Tests build one of their own.
 #[derive(Clone, Debug)]
 pub struct MergePlan {
     pub home: String,
+    /// `<data>/daemon/machines/merge`: the app's own `main` worktrees, one folder per repo. Under
+    /// the data root, so a fixture root never reaches the real Library folder.
+    pub merge_root: String,
     pub environment: BTreeMap<String, String>,
     pub git: String,
     pub gh: String,
 }
 
 impl MergePlan {
-    /// This process's home, environment and tools.
-    pub fn from_process() -> MergePlan {
+    /// This process's home, environment and tools; the own worktrees under `merge_root`.
+    pub fn from_process(merge_root: &Path) -> MergePlan {
         MergePlan {
             home: std::env::var("HOME").unwrap_or_else(|_| "/var/empty".into()),
+            merge_root: merge_root.to_string_lossy().into_owned(),
             environment: std::env::vars().collect(),
             git: shell::tool_path("git"),
             gh: shell::tool_path("gh"),
@@ -107,7 +112,7 @@ impl MergePlan {
 
     /// The worktree that has `main` checked out, from `git worktree list --porcelain`; with none,
     /// Notchling's own folder for the repo.
-    pub fn target(repo: &MachineRepo, worktree_list: &str) -> MergeTarget {
+    pub fn target(&self, repo: &MachineRepo, worktree_list: &str) -> MergeTarget {
         for block in worktree_list.split("\n\n") {
             let mut path: Option<&str> = None;
             let mut on_main = false;
@@ -128,9 +133,12 @@ impl MergePlan {
             }
         }
         let slug = repo.github.replace('/', "-");
-        MergeTarget::Own(format!(
-            "~/Library/Application Support/Notchling/merge/{slug}"
-        ))
+        MergeTarget::Own(
+            Path::new(&self.merge_root)
+                .join(slug)
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     pub(super) fn git_call(&self, path: &str, args: &[&str], secs: u64) -> Call {
@@ -145,8 +153,8 @@ impl MergePlan {
         Call::secs(v, GIT_TIMEOUT)
     }
 
-    /// The folder to merge in, with `~` expanded and its parent made. Notchling's own worktree is
-    /// added the first time.
+    /// The folder to merge in, with its parent made. Notchling's own worktree is added the first
+    /// time.
     pub(super) fn resolve_target(
         &self,
         repo: &MachineRepo,
@@ -164,10 +172,12 @@ impl MergePlan {
                 tail(&list)
             ));
         }
-        match MergePlan::target(repo, &list.out) {
+        match self.target(repo, &list.out) {
             MergeTarget::Existing(path) => Ok(path),
-            MergeTarget::Own(raw) => {
-                let path = self.expand_home(&raw);
+            MergeTarget::Own(path) => {
+                if !Path::new(&path).is_absolute() {
+                    return Err(format!("the merge folder {path} is not absolute"));
+                }
                 let parent = Path::new(&path)
                     .parent()
                     .map(|p| p.to_string_lossy().into_owned())
@@ -192,16 +202,6 @@ impl MergePlan {
                 }
                 Ok(path)
             }
-        }
-    }
-
-    fn expand_home(&self, path: &str) -> String {
-        if path == "~" {
-            return self.home.clone();
-        }
-        match path.strip_prefix("~/") {
-            Some(rest) => format!("{}/{rest}", self.home),
-            None => path.into(),
         }
     }
 

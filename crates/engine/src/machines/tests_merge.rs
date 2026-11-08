@@ -18,6 +18,7 @@ pub(super) const OTHER: &str = "3333333333333333333333333333333333333333";
 pub(super) fn plan() -> MergePlan {
     MergePlan {
         home: "/Users/me".into(),
+        merge_root: "/data/notchling/daemon/machines/merge".into(),
         // no SHELL: the check runs in /bin/zsh
         environment: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
         git: "/usr/bin/git".into(),
@@ -94,7 +95,7 @@ fn merge_target_prefers_clean_main_worktree() {
                 worktree /Users/me/code/app main\nHEAD bbb\nbranch refs/heads/main\n\n\
                 worktree /tmp/other\nHEAD ccc\nbranch refs/heads/main-old\n\n";
     assert_eq!(
-        MergePlan::target(&repo(), list),
+        plan().target(&repo(), list),
         MergeTarget::Existing("/Users/me/code/app main".into())
     );
 }
@@ -103,8 +104,9 @@ fn merge_target_prefers_clean_main_worktree() {
 fn merge_target_makes_own_when_main_unchecked() {
     let list = "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/feature\n\nworktree /x\nHEAD bbb\ndetached\n";
     assert_eq!(
-        MergePlan::target(&repo(), list),
-        MergeTarget::Own("~/Library/Application Support/Notchling/merge/acme-app".into())
+        plan().target(&repo(), list),
+        MergeTarget::Own("/data/notchling/daemon/machines/merge/acme-app".into()),
+        "under the data root, never the home's Library"
     );
 }
 
@@ -117,14 +119,14 @@ fn a_bare_or_prunable_main_is_not_a_target() {
     ] {
         let list = format!("worktree /x\nHEAD aaa\nbranch refs/heads/main\n{flag}\n");
         assert!(
-            matches!(MergePlan::target(&repo(), &list), MergeTarget::Own(_)),
+            matches!(plan().target(&repo(), &list), MergeTarget::Own(_)),
             "{flag}"
         );
     }
 }
 
 #[test]
-fn own_worktree_is_made_under_the_home_folder() {
+fn own_worktree_is_made_under_the_data_folder() {
     let list = "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/feature\n";
     let runner = RuleRunner::new(
         vec![
@@ -136,12 +138,9 @@ fn own_worktree_is_made_under_the_home_folder() {
         happy_queues(),
     );
     let _ = merge(&entry(), &runner);
-    let own = "/Users/me/Library/Application Support/Notchling/merge/acme-app";
+    let own = "/data/notchling/daemon/machines/merge/acme-app";
     let lines = runner.lines();
-    assert_eq!(
-        lines[1],
-        "mkdir -p /Users/me/Library/Application Support/Notchling/merge"
-    );
+    assert_eq!(lines[1], "mkdir -p /data/notchling/daemon/machines/merge");
     assert_eq!(lines[2], format!("git -C {TARGET} worktree add {own} main"));
     assert_eq!(
         lines[3],
