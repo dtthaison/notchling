@@ -160,6 +160,9 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
         app.call(ops::SETTINGS_GET_ACTING, json!({})).unwrap(),
         json!({"acting": false})
     );
+    // The app reads the switch from `daemon.status` (`app::acting::from_status`).
+    let status = app.call(ops::DAEMON_STATUS, json!({})).unwrap();
+    assert_eq!(status["acting"], json!(false), "{status}");
 
     // An app is attached, so only the switch makes the hook pass.
     let (out, _) = hook(&dir.0, &[], &event("permission-request.json"));

@@ -50,15 +50,8 @@ pub fn bracketed(text: &str) -> String {
 }
 
 /// Words only a question or permission dialog shows (`ReplySender.dialogMarkers`, checked on
-/// 2.1.318). A reply typed into one of those answers it.
-pub const DIALOG_MARKERS: [&str; 6] = [
-    "Enter to select",
-    "Esc to cancel",
-    "Chat about this",
-    "Do you want to proceed?",
-    "Do you want to allow",
-    "Submit answers",
-];
+/// 2.1.318). A reply typed into one of those answers it. One list, the screen reader's (E3a).
+pub use crate::terminal::ask_dialog::DIALOG_MARKERS;
 
 /// How many drawn lines from the bottom the markers are looked for in.
 pub const DIALOG_LINES: usize = 6;

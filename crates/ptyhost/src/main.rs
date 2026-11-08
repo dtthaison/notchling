@@ -1,4 +1,4 @@
-//! `notchling-ptyhost`: the session host (`Sources/hostd/main.swift`).
+//! `notchling-ptyhost`: the session host (`legacy/macos/Sources/hostd/main.swift`).
 //!
 //!   notchling-ptyhost                          run the host
 //!   notchling-ptyhost --status                 print {"running":N,"total":M} and exit (asks the running host)

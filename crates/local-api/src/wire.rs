@@ -187,6 +187,10 @@ pub struct DaemonStatus {
     pub pid: u32,
     pub uptime_secs: u64,
     pub clients: ClientCounts,
+    /// Whether the daemon may act on sessions (Milestone 3's switch, off by default); left out by
+    /// a handler that has no switch ([`crate::Handler::acting`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting: Option<bool>,
 }
 
 /// `events.subscribe`'s arguments.

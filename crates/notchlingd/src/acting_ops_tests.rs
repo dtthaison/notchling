@@ -2,7 +2,8 @@
 //! is typed, and the held prompts.
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_ops::{ActingOps, Attacher, Room, ACTING_OPS, CONTROL_OPS};
+use crate::acting_ops::{ActingOps, Attacher, Room, ACTING_OPS};
+use notchling_engine::control::Launcher;
 use notchling_engine::reply::exec::{Markers, Pty, ScreenCheck};
 use notchling_engine::reply::keys;
 use notchling_engine::sessions::Roots;
@@ -124,14 +125,29 @@ pub(crate) fn sessions() -> Value {
     ])
 }
 
-struct Setup {
-    ops: ActingOps,
-    room: Arc<FakeRoom>,
-    attached: Attaches,
-    writes: Arc<Mutex<Vec<String>>>,
+pub(crate) struct Setup {
+    pub ops: ActingOps,
+    pub room: Arc<FakeRoom>,
+    pub attached: Attaches,
+    pub writes: Arc<Mutex<Vec<String>>>,
 }
 
 fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
+    let roots = Roots {
+        main_dir: PathBuf::from("/nonexistent/claude"),
+        lanes_file: PathBuf::from("/nonexistent/lanes.json"),
+    };
+    setup_in(on, screen, list, roots, None)
+}
+
+/// With `launcher`, session control runs through it, and its pauses take no time.
+pub(crate) fn setup_in(
+    on: bool,
+    screen: &[&str],
+    list: Value,
+    roots: Roots,
+    launcher: Option<Arc<dyn Launcher>>,
+) -> Setup {
     let room = Arc::new(FakeRoom::default());
     room.app.store(true, Ordering::SeqCst);
     let attacher = FakeAttacher {
@@ -139,17 +155,16 @@ fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
         ..FakeAttacher::default()
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
-    let roots = Roots {
-        main_dir: PathBuf::from("/nonexistent/claude"),
-        lanes_file: PathBuf::from("/nonexistent/lanes.json"),
-    };
-    let ops = ActingOps::new(
+    let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
         Arc::new(Mutex::new(list)),
         roots,
         room.clone(),
         Box::new(attacher),
     );
+    if let Some(launcher) = launcher {
+        ops = ops.with_launcher(launcher, Box::new(|_| {}));
+    }
     Setup {
         ops,
         room,
@@ -166,16 +181,16 @@ pub(crate) fn caller(client: ClientKind) -> Caller {
     }
 }
 
-fn app() -> Caller {
+pub(crate) fn app() -> Caller {
     caller(ClientKind::App)
 }
 
-fn code(result: Result<Value, ApiError>) -> (ErrorCode, String) {
+pub(crate) fn code(result: Result<Value, ApiError>) -> (ErrorCode, String) {
     let e = result.unwrap_err();
     (e.code, e.message)
 }
 
-const PROMPT: &[&str] = &["> ", "  ? for shortcuts"];
+pub(crate) const PROMPT: &[&str] = &["> ", "  ? for shortcuts"];
 
 #[test]
 fn every_acting_op_is_app_tier_and_refused_while_off() {
@@ -201,17 +216,6 @@ fn every_acting_op_is_app_tier_and_refused_while_off() {
         assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT), "{op}");
     }
     assert_eq!(s.ops.spec("git.status"), None);
-}
-
-#[test]
-fn control_ops_wait_for_e11_once_acting_is_on() {
-    let s = setup(true, PROMPT, sessions());
-    for op in CONTROL_OPS {
-        let (c, m) = code(s.ops.call(&app(), op, &json!({"id": "job-a"})));
-        assert_eq!(c, ErrorCode::Unimplemented, "{op}");
-        assert!(m.contains("E11"), "{m}");
-    }
-    assert!(s.attached.lock().unwrap().is_empty());
 }
 
 #[test]

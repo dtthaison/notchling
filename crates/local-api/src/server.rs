@@ -67,6 +67,10 @@ pub trait Handler: Send + Sync + 'static {
     fn topics(&self) -> &[&str] {
         &[]
     }
+    /// The acting switch, for `daemon.status`; `None` when the handler has none.
+    fn acting(&self) -> Option<bool> {
+        None
+    }
 }
 
 /// How long a connection may take, and how many there may be.
@@ -180,6 +184,7 @@ impl Shared {
             pid: std::process::id(),
             uptime_secs: self.started.elapsed().as_secs(),
             clients: self.hub.counts(),
+            acting: self.handler.acting(),
         }
     }
 }

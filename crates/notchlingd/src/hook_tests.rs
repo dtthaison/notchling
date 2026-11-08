@@ -275,6 +275,21 @@ fn passes_when_acting_is_off() {
 }
 
 #[test]
+fn daemon_status_carries_the_switch_for_the_app() {
+    for on in [false, true] {
+        let d = daemon(on, true);
+        let mut app = connect(&d.socket, ClientKind::App);
+        assert_eq!(app.status().unwrap().acting, Some(on));
+        let raw = app.call(ops::DAEMON_STATUS, json!({})).unwrap();
+        assert_eq!(raw["acting"], json!(on), "{raw}");
+        // It follows the switch without a reconnect.
+        app.call(ops::SETTINGS_SET_ACTING, json!({"on": !on}))
+            .unwrap();
+        assert_eq!(app.status().unwrap().acting, Some(!on));
+    }
+}
+
+#[test]
 fn prints_the_apps_decision_as_the_swift_hook_does() {
     let d = daemon(true, true);
     let app = answering_app(

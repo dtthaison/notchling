@@ -12,11 +12,13 @@
 //! | [`exec`] | The executor and its `Pty` and `ScreenCheck` traits |
 //! | [`shell`] | `!` commands copied from a terminal, put back together before they're sent |
 //! | [`popall`] | Reading `popAll` back from the transcript, which is how a take-back is known to have worked |
+//! | [`live`] | The executor's `Pty` on E3a's real terminal, the `AskDialog` screen check, the attach command, and session control's hidden-pty scripts played into a `Pty` |
 //!
-//! Nothing here starts `claude` or opens a pty: the daemon hands the executor a pty from E3a.
+//! Only [`live`] opens a pty, and only when the daemon asks it to.
 
 pub mod exec;
 pub mod keys;
+pub mod live;
 pub mod plan;
 pub mod popall;
 pub mod question;

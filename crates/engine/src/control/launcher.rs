@@ -147,20 +147,31 @@ pub struct RealLauncher {
     claude: PathBuf,
 }
 
+/// `claude` is `<home>/.local/bin/claude` when that is a file, else `/usr/local/bin/claude`. The
+/// reply attach (`reply::live`) runs the same one.
+pub fn claude_path(home: &Path) -> PathBuf {
+    let local = home.join(".local").join("bin").join("claude");
+    if local.is_file() {
+        local
+    } else {
+        PathBuf::from("/usr/local/bin/claude")
+    }
+}
+
 /// Variables never passed to a launched program.
 const DROPPED_ENV: [&str; 1] = ["NO_COLOR"];
 
 impl RealLauncher {
-    /// `claude` is `<home>/.local/bin/claude` when that is a file, else `/usr/local/bin/claude`.
+    /// `claude` is found by [`claude_path`].
     pub fn new(home: &Path) -> Self {
-        let local = home.join(".local").join("bin").join("claude");
         RealLauncher {
-            claude: if local.is_file() {
-                local
-            } else {
-                PathBuf::from("/usr/local/bin/claude")
-            },
+            claude: claude_path(home),
         }
+    }
+
+    /// The `claude` this launcher runs.
+    pub fn claude(&self) -> &Path {
+        &self.claude
     }
 
     pub fn with_claude(path: PathBuf) -> Self {

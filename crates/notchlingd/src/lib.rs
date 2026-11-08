@@ -8,13 +8,16 @@
 //! - `notchling hook [--socket <path>]` is Claude Code's hook ([`hook`]): it asks the daemon about a
 //!   permission or question and prints the answer; anything else, or any trouble, passes.
 //!
-//! Milestone 3 adds the acting ops ([`acting_ops`]), switched off by [`acting`] until the maintainer
-//! hands sessions over. Later milestones add `secret`, `delegate` and `page`.
+//! Milestone 3 adds the acting ops ([`acting_ops`], session control in [`control_ops`], the real
+//! terminal and launcher in [`attach`]), switched off by [`acting`] until the maintainer hands
+//! sessions over. Later milestones add `secret`, `delegate` and `page`.
 
 pub mod acting;
 pub mod acting_ops;
+pub mod attach;
 pub mod cli;
 pub mod clients;
+pub mod control_ops;
 pub mod daemon;
 pub mod hook;
 pub mod hook_output;
@@ -25,6 +28,8 @@ pub mod signals;
 
 #[cfg(test)]
 mod acting_ops_tests;
+#[cfg(test)]
+mod control_ops_tests;
 #[cfg(test)]
 mod hook_tests;
 

@@ -9,11 +9,11 @@
 //! | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
 //! | `session.interrupt` | app | `{id}` | `{"sent": true}` |
 //! | `session.take_back` | app | `{id}` | `{"taken": bool}` |
-//! | `session.stop`, `.remove`, `.new`, `.move`, `.command`, `folder.trust` | app | (E11) | `unimplemented` |
+//! | `session.stop`, `.remove`, `.new`, `.move`, `.command`, `folder.trust` | app | see [`crate::control_ops`] | |
 //! | `settings.set_acting` | app | `{on: bool}` | `{"acting": bool}` |
 //! | `prompts.list` | app | `{}` | `[prompt...]` |
 //! | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
-//! | `session.question` | agent | `{id}` | `{"promptId", "items"}` or (screen read, E3a) `unimplemented` |
+//! | `session.question` | agent | `{id}` | `{"promptId", "items"}`, or `unimplemented` for one only on screen (`ReplySender.readQuestion` isn't ported) |
 //! | `hook.request` | agent, `client: "hook"` only | `{event, pid?, waitMs?}` | a decision (`prompts`) |
 //!
 //! An `id` is a row id from `sessions.list`, or for `answer` and `permission` a prompt id from
@@ -22,6 +22,7 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::hook_output::is_prompt_event;
 use crate::prompts::{pass, question_json, Kind, Prompt, PromptStore};
+use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
 use notchling_engine::reply::plan::{self, Plan, PlanError};
 use notchling_engine::reply::question::{
@@ -53,7 +54,7 @@ pub const ACTING_OPS: [&str; 11] = [
     ops::SESSION_COMMAND,
 ];
 
-/// Session control, which E11 (`engine::control`) brings.
+/// Session control (E11, `engine::control`), run by [`crate::control_ops`].
 pub const CONTROL_OPS: [&str; 6] = [
     ops::SESSION_STOP,
     ops::SESSION_REMOVE,
@@ -82,14 +83,13 @@ pub trait Attacher: Send + Sync {
     fn screen_check(&self) -> &dyn ScreenCheck;
 }
 
-/// The attacher until E3a's pty is wired in: nothing can be typed.
+/// An attacher that opens nothing, for tests that must not type (the daemon uses
+/// [`crate::attach::ClaudeAttacher`]).
 pub struct NoTerminal;
 
 impl Attacher for NoTerminal {
     fn attach(&self, _job: &str, _config_dir: Option<&str>) -> Result<Box<dyn Pty>, ApiError> {
-        Err(unimplemented(
-            "typing into a session waits for the terminal port (E3a)",
-        ))
+        Err(unimplemented("this daemon types into no session"))
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
         &notchling_engine::reply::exec::Markers
@@ -104,8 +104,23 @@ fn forbidden(message: &str) -> ApiError {
     ApiError::new(ErrorCode::Forbidden, message)
 }
 
-fn bad(message: impl Into<String>) -> ApiError {
+pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError::bad_request(message)
+}
+
+/// Waits this many milliseconds (session control's pauses).
+pub type Pause = Box<dyn Fn(u64) + Send + Sync>;
+
+/// The launcher until [`ActingOps::with_launcher`] sets one: nothing starts.
+struct NoLaunch;
+
+impl Launcher for NoLaunch {
+    fn run(&self, _command: &Command, _timeout: Duration) -> Result<LaunchOutput, LaunchError> {
+        Err(LaunchError::Unsupported)
+    }
+    fn run_pty(&self, _script: &PtyScript) -> Result<bool, LaunchError> {
+        Err(LaunchError::Unsupported)
+    }
 }
 
 /// The ops, with what they need.
@@ -113,9 +128,12 @@ pub struct ActingOps {
     acting: Arc<Acting>,
     prompts: PromptStore,
     sessions: Arc<Mutex<Value>>,
-    roots: Roots,
+    pub(crate) roots: Roots,
     room: Arc<dyn Room>,
     attacher: Box<dyn Attacher>,
+    /// Starts `claude stop`, `rm`, `--bg` and the trust pty (session control).
+    pub(crate) launcher: Arc<dyn Launcher>,
+    pub(crate) pause: Pause,
     /// One attach at a time, so a question read can't move the tabs under an answer.
     typing: Mutex<()>,
     /// How often a held hook looks at the app and its own process.
@@ -137,9 +155,23 @@ impl ActingOps {
             roots,
             room,
             attacher,
+            launcher: Arc::new(NoLaunch),
+            pause: Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
             typing: Mutex::new(()),
             tick: Duration::from_millis(250),
         }
+    }
+
+    /// Session control runs through `launcher`, and waits with `pause`.
+    pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>, pause: Pause) -> ActingOps {
+        self.launcher = launcher;
+        self.pause = pause;
+        self
+    }
+
+    /// The switch, for `daemon.status`.
+    pub fn is_on(&self) -> bool {
+        self.acting.is_on()
     }
 
     pub fn prompts(&self) -> &PromptStore {
@@ -181,9 +213,7 @@ impl ActingOps {
             ops::SESSION_TAKE_BACK => self.take_back(args),
             ops::SESSION_PERMISSION => self.permission(args),
             ops::SESSION_ANSWER => self.answer(args),
-            op if CONTROL_OPS.contains(&op) => Err(unimplemented(&format!(
-                "{op} waits for session control (E11)"
-            ))),
+            op if CONTROL_OPS.contains(&op) => self.control(op, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
@@ -201,7 +231,7 @@ impl ActingOps {
     }
 
     /// The row `args.id` names in the current session list.
-    fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
+    pub(crate) fn agent(&self, args: &Value) -> Result<Agent, ApiError> {
         let id = text_arg(args, "id")?;
         let list = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let row = list
@@ -212,7 +242,7 @@ impl ActingOps {
     }
 
     /// Plays `plan` into the job's attach terminal, one attach at a time.
-    fn play(
+    pub(crate) fn play(
         &self,
         agent: &Agent,
         plan: &Plan,
@@ -355,7 +385,7 @@ impl ActingOps {
             return Err(forbidden(ACTING_OFF));
         }
         Err(unimplemented(
-            "reading a question off the screen waits for the terminal port (E3a)",
+            "reading a question off the screen isn't ported yet (ReplySender.readQuestion)",
         ))
     }
 
@@ -421,7 +451,7 @@ impl ActingOps {
     }
 }
 
-struct NoLog;
+pub(crate) struct NoLog;
 
 impl QueueLog for NoLog {
     fn mark(&mut self) {}
@@ -430,7 +460,7 @@ impl QueueLog for NoLog {
     }
 }
 
-fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiError> {
+pub(crate) fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiError> {
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| bad(format!("{key} is needed")))

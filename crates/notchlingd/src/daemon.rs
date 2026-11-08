@@ -9,8 +9,12 @@
 //! from the last one goes out as `sessions.changed` with the whole new list.
 
 use crate::acting::{Acting, SETTINGS_NAME};
-use crate::acting_ops::{ActingOps, NoTerminal, Room};
+use crate::acting_ops::{ActingOps, Room};
+use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::layout::Layout;
+use notchling_engine::control::launcher::claude_path;
+use notchling_engine::control::session::home_of;
+use notchling_engine::control::RealLauncher;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
@@ -95,6 +99,10 @@ impl Handler for Ops {
             Some(_) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
             None => &[topics::SESSIONS],
         }
+    }
+
+    fn acting(&self) -> Option<bool> {
+        self.acting.as_ref().map(|a| a.is_on())
     }
 }
 
@@ -228,13 +236,21 @@ pub fn run(
     // Read once, at start; off unless the maintainer turned it on (decision 0011).
     let acting = Arc::new(Acting::load(&layout.data_dir.join(SETTINGS_NAME)));
     let room = Arc::new(LateRoom::default());
-    let acting_ops = Arc::new(ActingOps::new(
-        acting,
-        sessions.clone(),
-        layout.roots(),
-        room.clone(),
-        Box::new(NoTerminal),
-    ));
+    // The real terminal and launcher, used only while acting is on.
+    let claude = claude_path(std::path::Path::new(&home_of(&layout.roots())));
+    let acting_ops = Arc::new(
+        ActingOps::new(
+            acting,
+            sessions.clone(),
+            layout.roots(),
+            room.clone(),
+            Box::new(ClaudeAttacher::new(&claude)),
+        )
+        .with_launcher(
+            Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
+            Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
+        ),
+    );
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
