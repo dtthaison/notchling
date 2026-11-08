@@ -18,6 +18,9 @@ pub const DENY: &str = "Deny";
 /// older than this is already refused, so its prompt goes away.
 pub const WAIT_MS: i64 = 120_000;
 
+/// The prompt window's size in points (width, height).
+pub const PROMPT_SIZE: (f32, f32) = (420.0, 244.0);
+
 /// One phone waiting to be let in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PairRequest {

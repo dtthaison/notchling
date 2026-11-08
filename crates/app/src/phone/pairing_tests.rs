@@ -143,9 +143,11 @@ fn the_app_follows_the_bridge_shows_each_request_and_answers_what_the_person_pic
     daemon
         .0
         .publish("bridge", "bridge.pair.request", &request("pair-2", "First"));
-    daemon
-        .0
-        .publish("bridge", "bridge.pair.request", &request("pair-3", "Second"));
+    daemon.0.publish(
+        "bridge",
+        "bridge.pair.request",
+        &request("pair-3", "Second"),
+    );
     wait_until("both requests", || {
         feed.prompt(now_ms())
             .is_some_and(|p| p.more.as_deref() == Some("1 more waiting"))
@@ -194,11 +196,9 @@ fn bridge_changed_is_counted_and_off_drops_the_waiting_phones() {
     wait_until("the follow", || feed.following());
     assert_eq!(feed.bridge_changes(), 0);
 
-    daemon.0.publish(
-        "bridge",
-        "bridge.pair.request",
-        &request("pair-1", "Phone"),
-    );
+    daemon
+        .0
+        .publish("bridge", "bridge.pair.request", &request("pair-1", "Phone"));
     wait_until("the prompt", || feed.prompt(now_ms()).is_some());
     daemon.0.publish(
         "bridge",
@@ -226,11 +226,9 @@ fn losing_the_daemon_drops_the_prompts_and_it_follows_again_when_the_daemon_is_b
     let daemon = serve(&socket, &answers);
     let feed = start(&socket);
     wait_until("the follow", || feed.following());
-    daemon.0.publish(
-        "bridge",
-        "bridge.pair.request",
-        &request("pair-1", "Phone"),
-    );
+    daemon
+        .0
+        .publish("bridge", "bridge.pair.request", &request("pair-1", "Phone"));
     wait_until("the prompt", || feed.prompt(now_ms()).is_some());
     daemon.0.shutdown();
     let _ = daemon.1.join();

@@ -7,11 +7,18 @@
 //! (the code as modules), [`bridge`] (the daemon's state and the user's `bridgeOn` choice) and
 //! [`panel`] (what is drawn, each control with the reason it is disabled). [`renders`] is
 //! `--render phone-panel`. The GPUI view is `view`, macOS only (`LINT-GPUI-MACOS-ONLY`).
+//!
+//! A phone that gave the right code waits for the person. The daemon asks only an app that follows
+//! its `bridge` topic, so [`pairing`] is that follower; [`approval`] is the pure Allow/Deny prompt
+//! and its queue; `prompt_view` (opened by `mac::pair_prompt`) draws it in a floating window
+//! whether or not the panel is open (`--render phone-pair-request`).
 
 pub mod approval;
 pub mod bridge;
 pub mod pairing;
 pub mod panel;
+#[cfg(target_os = "macos")]
+pub mod prompt_view;
 pub mod qr;
 pub mod renders;
 #[cfg(target_os = "macos")]

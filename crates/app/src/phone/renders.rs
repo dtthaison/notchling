@@ -1,6 +1,7 @@
 //! The Phone panel's views for `--render` (part U10): one per state, over made-up data (an example
 //! Mac and example phones), never the real daemon, certificate or pairings.
 
+use super::approval::PairRequest;
 use super::bridge::Snapshot;
 use super::wire::{BridgeState, Device, Pairing, Tunnel, TunnelState};
 use crate::views::ViewSpec;
@@ -8,7 +9,10 @@ use crate::views::ViewSpec;
 /// The fixed clock every render draws at.
 pub const NOW_MS: i64 = 1_800_000_000_000;
 
-pub const VIEWS: [ViewSpec; 5] = [
+/// `--render phone-pair-request`: the Allow/Deny prompt, not a panel state.
+pub const PAIR_REQUEST: &str = "phone-pair-request";
+
+pub const VIEWS: [ViewSpec; 6] = [
     ViewSpec {
         name: "phone-panel",
         size: (400.0, 800.0),
@@ -34,6 +38,11 @@ pub const VIEWS: [ViewSpec; 5] = [
         name: "phone-panel-detached",
         size: (400.0, 640.0),
         about: "the Phone panel with no daemon attached: every control disabled (made-up data)",
+    },
+    ViewSpec {
+        name: PAIR_REQUEST,
+        size: super::approval::PROMPT_SIZE,
+        about: "the Allow/Deny prompt for a phone that gave the right code, one more waiting (made-up data)",
     },
 ];
 
@@ -79,6 +88,24 @@ fn phones() -> Vec<Device> {
             platform: "ios".into(),
             paired_at_ms: Some(NOW_MS - 20 * 86_400_000),
             last_seen_ms: None,
+        },
+    ]
+}
+
+/// The phones a pairing-request render has asking: made-up names and addresses.
+pub fn pair_requests() -> Vec<PairRequest> {
+    vec![
+        PairRequest {
+            id: "pair-1".into(),
+            name: "Pixel 9".into(),
+            platform: "android".into(),
+            address: "192.168.1.42".into(),
+        },
+        PairRequest {
+            id: "pair-2".into(),
+            name: "Example iPhone".into(),
+            platform: "ios".into(),
+            address: "192.168.1.57".into(),
         },
     ]
 }
@@ -141,9 +168,11 @@ mod tests {
 
     #[test]
     fn every_view_has_its_state() {
-        for spec in VIEWS {
+        for spec in VIEWS.iter().filter(|s| s.name != PAIR_REQUEST) {
             assert!(shown(spec.name).is_some(), "{}", spec.name);
         }
+        assert!(crate::views::spec(PAIR_REQUEST).is_some());
+        assert_eq!(shown(PAIR_REQUEST), None, "a prompt, not a panel");
         assert_eq!(shown("chat"), None);
         assert!(crate::views::spec("phone-panel").is_some());
     }
