@@ -65,7 +65,7 @@ impl PhonePanelView {
                 match asking {
                     Ok(Some(bridge)) => {
                         cx.background_executor()
-                            .spawn(async move { bridge.refresh(now_ms()) })
+                            .spawn(async move { bridge.refresh() })
                             .await;
                     }
                     Ok(None) => {}
@@ -95,7 +95,7 @@ impl PhonePanelView {
         let bridge = self.bridge.clone();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .spawn(async move { bridge.refresh(now_ms()) })
+                .spawn(async move { bridge.refresh() })
                 .await;
             this.update(cx, |_, cx| cx.notify()).ok();
         })
@@ -119,7 +119,7 @@ impl PhonePanelView {
                 .background_executor()
                 .spawn(async move {
                     let result = job(&bridge);
-                    bridge.refresh(now_ms());
+                    bridge.refresh();
                     result
                 })
                 .await;

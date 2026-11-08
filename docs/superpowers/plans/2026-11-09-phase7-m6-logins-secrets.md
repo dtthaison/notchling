@@ -14,7 +14,7 @@ The daemon gets three more switches with M3's `acting` rule:
 
 - they are off at every start, whatever any file says;
 - only an app-tier `settings.set_switch {switch, on}` turns one on;
-- the app re-asserts the user's choice.
+- the app never turns one on from a file: after a daemon restart it offers the remembered ones back in one notice ("Notchling restarted: … are off", Turn Back On), and only that click, confirmed, sends them (review finding C1, 2026-11-09).
 
 | Switch | What it covers while off |
 | --- | --- |

@@ -153,6 +153,8 @@ impl<L: Launcher> CurlFetcher<L> {
     pub fn command(url: &str) -> Command {
         Command::new(&[
             "/usr/bin/curl",
+            // First, or curl reads ~/.curlrc, which could add an output file, a proxy or http.
+            "-q",
             "--silent",
             "--show-error",
             "--fail",
@@ -476,6 +478,7 @@ mod tests {
         assert_eq!(commands.len(), 2, "the http address was refused unsent");
         let argv = &commands[0].argv;
         assert_eq!(argv[0], "/usr/bin/curl");
+        assert_eq!(argv[1], "-q", "first, so no ~/.curlrc is read");
         assert!(argv.windows(2).any(|w| w == ["--proto", "=https"]));
         assert_eq!(argv.last().map(String::as_str), Some(FEED_URL));
         assert!(!argv

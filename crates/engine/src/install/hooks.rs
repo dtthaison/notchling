@@ -216,12 +216,25 @@ fn open(text: &str) -> Result<(String, Node), Refused> {
             "settings.json is not valid JSON ({e}); it was left as it is"
         ))
     })?;
-    match root.kind {
-        Kind::Object(_) => Ok((work, root)),
-        _ => Err(refuse(
+    if !matches!(root.kind, Kind::Object(_)) {
+        return Err(refuse(
             "settings.json does not hold a JSON object; it was left as it is",
-        )),
+        ));
     }
+    // Which of two equal keys counts is Claude Code's choice (the last), not the reader's (the
+    // first): a plan from the wrong one could remove the user's own hook. Nothing the message
+    // says comes from the file.
+    if root.count_key("hooks") > 1 {
+        return Err(refuse(
+            "settings.json has \"hooks\" twice; it was left as it is",
+        ));
+    }
+    if root.get("hooks").is_some_and(Node::has_repeated_key) {
+        return Err(refuse(
+            "a key is there twice inside \"hooks\"; settings.json was left as it is",
+        ));
+    }
+    Ok((work, root))
 }
 
 /// What is in the file now, with nothing changed. A file that cannot be read is refused.
@@ -381,11 +394,6 @@ fn check_shape(
     appends: &[&Slot],
     removals: &[&Entry],
 ) -> Result<Value, Refused> {
-    if root.count_key("hooks") > 1 {
-        return Err(refuse(
-            "settings.json has \"hooks\" twice; it was left as it is",
-        ));
-    }
     if let Some(hooks) = root.get("hooks") {
         let Some(members) = hooks.members() else {
             return Err(refuse("\"hooks\" is not an object; it was left as it is"));
@@ -395,11 +403,6 @@ fn check_shape(
             .map(|s| s.event)
             .chain(removals.iter().map(|e| e.found.event.as_str()));
         for event in events {
-            if hooks.count_key(event) > 1 {
-                return Err(refuse(format!(
-                    "\"{event}\" is there twice; settings.json was left as it is"
-                )));
-            }
             let value = members.iter().find(|m| m.key == event).map(|m| &m.value);
             if value.is_some_and(|v| v.items().is_none()) {
                 return Err(refuse(format!(

@@ -352,6 +352,32 @@ fn the_users_look_alike_commands_are_never_ours() {
 }
 
 #[test]
+fn a_wrapper_around_our_program_in_our_slot_is_the_users_and_is_never_removed() {
+    let wrapped = [
+        "tee /tmp/x | '/opt/notchling/bin/notchling' hook",
+        "sh -c '/opt/notchling/bin/notchling hook'",
+        "'/opt/notchling/bin/notchling' hook; rm -rf /tmp/x",
+    ];
+    for command in wrapped {
+        let text = format!(
+            r#"{{"hooks":{{"PermissionRequest":[{{"matcher":"*","hooks":[{{"type":"command","command":{}}}]}}]}}}}"#,
+            serde_json::to_string(command).unwrap()
+        );
+        assert!(detect(&text).unwrap().is_empty(), "{command}");
+        assert!(!plan(&text, &remove_all()).changed, "{command}");
+        let out = plan(&text, &install_all());
+        let v = value(&out.text);
+        // Theirs stays where it was; ours goes in beside it, not over it.
+        assert_eq!(
+            v["hooks"]["PermissionRequest"][0],
+            value(&text)["hooks"]["PermissionRequest"][0]
+        );
+        assert_eq!(ours(&v, "PermissionRequest").len(), 1, "{command}");
+        assert_eq!(without_ours(v), value(&text), "{command}");
+    }
+}
+
+#[test]
 fn an_empty_file_becomes_an_object_with_our_entries_and_a_missing_one_is_the_same() {
     for blank in ["", "  \n", "\u{feff}"] {
         let out = plan(blank, &install_all());

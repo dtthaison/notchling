@@ -7,8 +7,10 @@ pub mod gate;
 pub mod hotkey;
 pub mod pair_prompt;
 pub mod render;
+pub mod restart_notice;
 pub mod shell;
 pub mod tray;
+pub mod vault_prompts;
 pub mod views;
 pub mod window;
 

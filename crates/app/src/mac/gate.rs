@@ -15,6 +15,12 @@ pub struct Tip {
     appearance: Appearance,
 }
 
+impl Tip {
+    pub fn new(text: SharedString, appearance: Appearance) -> Tip {
+        Tip { text, appearance }
+    }
+}
+
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let a = self.appearance;
@@ -39,6 +45,18 @@ pub fn state(control: Control) -> PartState {
     } else {
         PartState::Disabled
     }
+}
+
+/// Puts a tooltip made at render time (a meter's numbers) on an element.
+pub fn tip_text(
+    element: Stateful<Div>,
+    text: SharedString,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    element.tooltip(move |_, cx| {
+        let text = text.clone();
+        cx.new(|_| Tip { text, appearance }).into()
+    })
 }
 
 /// Puts a control's tooltip on an element.

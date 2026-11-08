@@ -8,7 +8,8 @@
 //! list. `security -i` reads lines into a 4 KB buffer, so a longer command can't go that way. The
 //! Swift app then put the hex on the command line, where `ps` shows it; this port refuses such a
 //! value instead ([`KeychainError::TooLong`], the same rule as Claude Code's logins in
-//! [`super::keychain`]): a login never goes on a command line.
+//! [`super::keychain`]): a login never goes on a command line. The stores' own saved copies go
+//! through [`super::chunked`], which splits a long value over several items.
 //!
 //! Everything sits behind [`Keychain`] so no test touches a real item. The process itself is
 //! launched by [`super::keychain::SystemSecurity`], which Claude Code's logins use too (see the
@@ -118,6 +119,12 @@ impl FakeKeychain {
     pub fn with(self, service: &str, account: &str, value: &str) -> FakeKeychain {
         lock(&self.items).insert((service.into(), account.into()), value.into());
         self
+    }
+
+    /// Puts an item the way another tool would, past the line-length rule (Antigravity writes its
+    /// own item through the Security framework, so it can be longer than `security -i` takes).
+    pub fn set_as_other_tool(&self, service: &str, account: &str, value: &str) {
+        lock(&self.items).insert((service.into(), account.into()), value.into());
     }
 
     /// Writes fail from now on.

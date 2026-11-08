@@ -52,7 +52,7 @@ pub(crate) fn slot(id: &str, email: &str, n: &str) -> String {
 pub(crate) struct World {
     pub(crate) d: Dir,
     pub(crate) flag: Arc<SwitchFlag>,
-    room: Arc<FakeRoom>,
+    pub(crate) room: Arc<FakeRoom>,
     pub(crate) ops: AccountsOps,
 }
 
@@ -69,8 +69,12 @@ pub(crate) fn world(
         keys: Keys {
             runner: Arc::new(GatedSecurity {
                 flag: flag.clone(),
-                inner: runner,
+                inner: runner.clone(),
             }),
+            user: "me".into(),
+        },
+        undo_keys: Keys {
+            runner,
             user: "me".into(),
         },
         http: Arc::new(GatedHttp {

@@ -18,16 +18,16 @@ use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
 use crate::pages::window::AppPagesDir;
-use crate::phone::bridge::{now_ms, Bridge};
+use crate::phone::bridge::Bridge;
 use crate::phone::pairing::PairingFeed;
 use crate::search::hotkey::{self, Registration};
 use crate::search::library::Library;
 use crate::search::panel::AppSearch;
 use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
+use crate::switches::restart::{LiveTurnOn, RestartNotice};
 use crate::tools::second_opinion::store_for_run;
-use crate::welcome::switches::Switches;
-use crate::welcome::window::{self as welcome_window, AppSwitches, WelcomeSetup, Which};
+use crate::welcome::window::{self as welcome_window, WelcomeSetup, Which};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 
 /// The app's state while it runs.
@@ -55,7 +55,7 @@ pub struct AppActions(pub Arc<Actions>);
 impl Global for AppActions {}
 
 /// The phone bridge as the daemon last described it, shared by Chat's Phone panel and the poll that
-/// keeps it fresh and re-asserts the user's choice (`bridgeOn`). Not set in a render.
+/// keeps it fresh (it never turns the bridge on by itself). Not set in a render.
 pub struct AppBridge(pub Arc<Bridge>);
 
 impl Global for AppBridge {}
@@ -65,6 +65,23 @@ impl Global for AppBridge {}
 pub struct AppPairing(pub Arc<PairingFeed>);
 
 impl Global for AppPairing {}
+
+/// Milestone 6's switch feed (the `settings.switch` events, and the vault's pending prompts),
+/// shared by the Accounts window, the vault sheet and the prompt windows. The welcome window's
+/// `AppSwitches` polls the same switches for the handover checklist. Not set in a render.
+pub struct AppSwitchFeed(pub Arc<crate::switches::feed::SwitchFeed>);
+
+impl Global for AppSwitchFeed {}
+
+/// The accounts store (Claude Code, lanes, the other providers, limits, cost). Not set in a render.
+pub struct AppAccounts(pub Arc<crate::accounts::store::Accounts>);
+
+impl Global for AppAccounts {}
+
+/// The Secret Vault's store (entries without values). Not set in a render.
+pub struct AppVault(pub Arc<crate::vault::store::Vault>);
+
+impl Global for AppVault {}
 
 /// The second opinions asked in Chat (the engine's store over the app's own data folder, running
 /// this binary's `delegate`); `None` over a fixture root, which never starts a tool.
@@ -106,16 +123,41 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let exe = std::env::current_exe().ok();
         let sessions = Arc::new(SessionSource::for_run(root.as_ref(), exe.as_deref()));
         let for_notch = sessions.clone();
-        let actions = Arc::new(Actions::for_run(root.as_ref()));
+        // What the daemon says about each switch, so a restart is offered back, never acted on.
+        let restart = Arc::new(RestartNotice::default());
+        let actions = Arc::new(Actions::for_run(root.as_ref()).with_restart(restart.clone()));
         cx.set_global(AppActions(actions.clone()));
-        let bridge = Arc::new(Bridge::for_run(root.as_ref()));
+        let bridge = Arc::new(Bridge::for_run(root.as_ref()).with_restart(restart.clone()));
         cx.set_global(AppBridge(bridge.clone()));
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
-        let switches = Arc::new(Switches::for_run(root.as_ref()));
-        cx.set_global(AppSwitches(switches.clone()));
         cx.set_global(WelcomeSetup { root: root.clone() });
         cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
+        let feed = Arc::new(crate::switches::feed::SwitchFeed::for_run(
+            root.as_ref(),
+            restart.clone(),
+        ));
+        cx.set_global(AppSwitchFeed(feed.clone()));
+        if feed.is_live() {
+            super::restart_notice::watch(
+                cx,
+                restart,
+                Arc::new(LiveTurnOn {
+                    actions: actions.clone(),
+                    bridge: bridge.clone(),
+                    feed: feed.clone(),
+                }),
+            );
+        }
+        cx.set_global(AppAccounts(Arc::new(
+            crate::accounts::store::Accounts::for_run(root.as_ref()),
+        )));
+        let vault = Arc::new(crate::vault::store::Vault::for_run(root.as_ref()));
+        cx.set_global(AppVault(vault.clone()));
+        if feed.is_live() {
+            // The daemon asks the person about a secret only while this follows `vault`.
+            super::vault_prompts::watch(cx, feed, vault);
+        }
         if let Some(root) = root.as_ref() {
             // A page's copy is only ever loaded from here.
             cx.set_global(AppPagesDir(root.data_dir.join("pages")));
@@ -138,23 +180,16 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
             super::pair_prompt::watch(cx, pairing, bridge.clone());
         }
         if bridge.is_live() {
-            // Off at every daemon start: this brings the daemon back to what the user chose.
+            // Reads only: what the bridge and acting are now, for the panel, the notch and the
+            // restart notice. Nothing here turns either on.
+            let polled = actions.clone();
             cx.spawn(async move |cx| loop {
-                let asked = bridge.clone();
+                let (asked, acting) = (bridge.clone(), polled.clone());
                 cx.background_executor()
-                    .spawn(async move { asked.refresh(now_ms()) })
-                    .await;
-                cx.background_executor().timer(BRIDGE_POLL).await;
-            })
-            .detach();
-        }
-        if switches.is_live() {
-            // The daemon's accounts, vault and install switches are off at every start: this
-            // brings each one the user chose on back.
-            cx.spawn(async move |cx| loop {
-                let asked = switches.clone();
-                cx.background_executor()
-                    .spawn(async move { asked.refresh() })
+                    .spawn(async move {
+                        asked.refresh();
+                        acting.refresh();
+                    })
                     .await;
                 cx.background_executor().timer(BRIDGE_POLL).await;
             })
@@ -191,10 +226,13 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
     0
 }
 
-/// What a menu entry does. Accounts and Settings open Chat until their own parts land.
+/// What a menu entry does. Settings opens Chat until its own part lands.
 fn handle(command: Command, cx: &mut App) {
     match command {
-        Command::OpenChat | Command::Accounts | Command::Settings => open_chat(cx),
+        Command::OpenChat | Command::Settings => open_chat(cx),
+        Command::Accounts => {
+            crate::accounts::window::open(cx, None);
+        }
         Command::About => welcome_window::open(cx, Which::About),
         Command::Welcome => welcome_window::open(cx, Which::FirstRun),
         Command::Handover => welcome_window::open(cx, Which::Handover),

@@ -5,12 +5,15 @@
 //!   answer one without having been sent it, and only the app follows the topic it is sent on.
 //!   No randomness, no id, and the wait is refused.
 //! - At most `max` wait at once, so agents can't pile them up.
+//! - Each keeps the event that announced it ([`Waiters::describe`]), so an app that connects
+//!   later still sees it ([`Waiters::pending`]).
 //! - A wait ends at its deadline, when `still` says stop (the app left, the vault went off), or
 //!   when [`Waiters::drain`] drops every answer channel (the daemon stops). All of those are a
 //!   "no": the caller gets `None`.
 
 use crate::vault_args::Decision;
 use notchling_engine::vault::{VaultEntry, VaultStore};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Mutex, Weak};
@@ -25,11 +28,24 @@ pub enum Refused {
     NoId,
 }
 
+/// One open wait: where its answer goes, when it opened, and the event that announced it.
+struct Open<T> {
+    tx: SyncSender<T>,
+    order: u64,
+    event: Option<Value>,
+}
+
+/// The open waits, and how many have opened.
+struct Waiting<T> {
+    open: HashMap<String, Open<T>>,
+    opened: u64,
+}
+
 /// Open waits of one kind.
 pub struct Waiters<T> {
     prefix: &'static str,
     max: usize,
-    waiting: Mutex<HashMap<String, SyncSender<T>>>,
+    waiting: Mutex<Waiting<T>>,
 }
 
 /// One open wait: its id, and where its answer arrives.
@@ -43,46 +59,73 @@ impl<T> Waiters<T> {
         Waiters {
             prefix,
             max,
-            waiting: Mutex::new(HashMap::new()),
+            waiting: Mutex::new(Waiting {
+                open: HashMap::new(),
+                opened: 0,
+            }),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, SyncSender<T>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Waiting<T>> {
         self.waiting.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// A new wait under a fresh id.
     pub fn open(&self) -> Result<Ticket<T>, Refused> {
         let mut waiting = self.lock();
-        if waiting.len() >= self.max {
+        if waiting.open.len() >= self.max {
             return Err(Refused::Full);
         }
         let id = notchling_engine::vault::random_id(self.prefix).ok_or(Refused::NoId)?;
         let (tx, rx) = sync_channel(1);
-        waiting.insert(id.clone(), tx);
+        waiting.opened += 1;
+        let order = waiting.opened;
+        waiting.open.insert(
+            id.clone(),
+            Open {
+                tx,
+                order,
+                event: None,
+            },
+        );
         Ok(Ticket { id, rx })
+    }
+
+    /// Keeps the event that announces the wait under `id`, for [`Waiters::pending`].
+    pub fn describe(&self, id: &str, event: &Value) {
+        if let Some(open) = self.lock().open.get_mut(id) {
+            open.event = Some(event.clone());
+        }
+    }
+
+    /// The events of the waits still open, oldest first.
+    pub fn pending(&self) -> Vec<Value> {
+        let waiting = self.lock();
+        let mut open: Vec<&Open<T>> = waiting.open.values().collect();
+        open.sort_by_key(|o| o.order);
+        open.into_iter().filter_map(|o| o.event.clone()).collect()
     }
 
     /// The app's answer; false when nothing waits under `id` (answered, ended or never opened).
     pub fn answer(&self, id: &str, value: T) -> bool {
-        match self.lock().remove(id) {
-            Some(tx) => tx.try_send(value).is_ok(),
+        match self.lock().open.remove(id) {
+            Some(open) => open.tx.try_send(value).is_ok(),
             None => false,
         }
     }
 
     /// Ends a wait without an answer.
     pub fn close(&self, id: &str) {
-        self.lock().remove(id);
+        self.lock().open.remove(id);
     }
 
     /// Ends every wait without an answer.
     pub fn drain(&self) {
-        self.lock().clear();
+        self.lock().open.clear();
     }
 
     pub fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().open.len()
     }
 
     pub fn is_empty(&self) -> bool {

@@ -6,6 +6,7 @@
 //! the daemon (`session_source`) while it answers, and so do the other tools' live state and an
 //! Antigravity row's conversation (`tools`).
 
+mod accounts;
 mod composer;
 mod conversation;
 mod header;
@@ -75,6 +76,16 @@ pub struct ChatView {
     phone_dot: bool,
     /// A session the search panel asked for that isn't listed yet: selected when it appears.
     pending_session: Option<PendingSession>,
+    /// The accounts store the header's meters and account menu read, and the switch feed.
+    accounts: Arc<crate::accounts::store::Accounts>,
+    switches: Arc<crate::switches::feed::SwitchFeed>,
+    /// The header's account menu is open.
+    account_menu: bool,
+    /// When the accounts store was last read for the header (ms).
+    accounts_polled_ms: i64,
+    /// Whether `codex` is installed (the account menu's Codex Accounts…), looked up with the
+    /// accounts poll rather than on every render.
+    codex_installed: bool,
     _appearance_changes: Subscription,
 }
 
@@ -104,7 +115,13 @@ impl ChatView {
             this.update(cx, |_, cx| cx.notify()).ok();
         });
         let watch = Watcher::start(root.watch_folders(), watch_config()).ok();
+        let (accounts, switches) = crate::accounts::window::app_stores(cx);
         let mut view = ChatView {
+            accounts,
+            switches,
+            account_menu: false,
+            accounts_polled_ms: 0,
+            codex_installed: accounts::codex_installed(&root.home),
             loader: Some(Loader::new(root.clone())),
             root,
             sessions: Vec::new(),
@@ -290,6 +307,13 @@ impl ChatView {
         if self.gate.due(now_ms()) {
             self.start_load(cx);
         }
+        // The header's meters and account menu: the accounts store, every few seconds.
+        let now = now_ms();
+        if now - self.accounts_polled_ms >= accounts::POLL.as_millis() as i64 {
+            self.accounts_polled_ms = now;
+            self.codex_installed = accounts::codex_installed(&self.root.home);
+            self.poll_accounts(cx);
+        }
     }
 }
 
@@ -314,6 +338,7 @@ impl Render for ChatView {
                     .child(composer::render(self, a, window, cx)),
             )
             .child(inspector::render(self, a))
+            .children(accounts::render_menu(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
     }

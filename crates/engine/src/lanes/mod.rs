@@ -228,7 +228,12 @@ impl LaneStore {
     /// changes.
     pub fn set_profile(&self, lane: &Lane, profile: &Value) -> Result<(), LaneError> {
         let config = self.own_folder(lane)?.join(".claude.json");
-        let text = fs::read_to_string(&config).unwrap_or_else(|_| "{}".into());
+        // Only a missing file starts empty: one that can't be read is never written over.
+        let text = match fs::read_to_string(&config) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "{}".into(),
+            Err(e) => return Err(io(e)),
+        };
         let out = set_top_level(&text, "oauthAccount", profile)
             .map_err(|e| LaneError::BadConfig(e.to_string()))?;
         notchling_platform::files::write_private_no_follow(&config, out.as_bytes()).map_err(io)
