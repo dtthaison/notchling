@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use gpui::{div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
+use gpui::{deferred, div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
 use notchling_kit::metric::{AVATAR, METER_BAR, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{avatar, button, card, hsla, label, KitStyled, MONO_FONT};
@@ -227,7 +227,9 @@ pub fn account_row<V: 'static>(
             };
             items = items.child(entry);
         }
-        items
+        // Painted after every row and taking the clicks under it: a menu that reaches past its
+        // own row is drawn over the next one, not under it.
+        deferred(items.occlude()).with_priority(1)
     });
     card(a)
         .relative()

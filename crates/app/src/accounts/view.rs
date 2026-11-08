@@ -165,6 +165,11 @@ impl AccountsView {
         }
     }
 
+    /// A render's: the ⋯ menu of the row `key` (`<provider>-<id>`) open.
+    pub fn open_menu(&mut self, key: &str) {
+        self.menu_open = Some(key.to_owned());
+    }
+
     /// Opens on a provider's tab (Chat's Codex Accounts…).
     pub fn show_provider(&mut self, provider: &str, cx: &mut Context<Self>) {
         self.tab = Tab::Accounts;

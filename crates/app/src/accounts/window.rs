@@ -13,7 +13,7 @@ use notchling_kit::ui::{label, window_appearance, KitStyled};
 use notchling_kit::{Ink, TypeRole};
 
 use super::limits::{self, Zone};
-use super::model::{Tab, CLAUDE_CODE, CODEX};
+use super::model::{Tab, CLAUDE_CODE, CLAUDE_DESKTOP, CODEX};
 use super::renders::{self, Shown};
 use super::store::Accounts;
 use super::view::AccountsView;
@@ -146,8 +146,16 @@ pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
         Shown::Codex => cx
             .new(|_| AccountsView::fixed(store, feed, CODEX, Tab::Accounts, renders::NOW))
             .into(),
-        Shown::Claude | Shown::Off => cx
-            .new(|_| AccountsView::fixed(store, feed, CLAUDE_CODE, Tab::Accounts, renders::NOW))
-            .into(),
+        Shown::Claude | Shown::Off => {
+            // The menu render opens the first Claude Desktop row's ⋯: a short row, so the menu
+            // reaches over the next one.
+            let menu = name == renders::MENU_RENDER;
+            let tab = if menu { CLAUDE_DESKTOP } else { CLAUDE_CODE };
+            let mut view = AccountsView::fixed(store, feed, tab, Tab::Accounts, renders::NOW);
+            if menu {
+                view.open_menu(&format!("{CLAUDE_DESKTOP}-a1"));
+            }
+            cx.new(|_| view).into()
+        }
     })
 }
