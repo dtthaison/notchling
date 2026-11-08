@@ -124,7 +124,7 @@ Phase 5's parts that need no credential exist, in `tools/agents/` (Python standa
 
 Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), Flutter for the phone, and the engine as an always-on service.
 
-**The target's Rust tree is a skeleton.** Since Phase 4 the Cargo workspace (`Cargo.toml`, Rust 1.99.1 pinned in `rust-toolchain.toml`, `deny.toml`) holds the eight crates in the layout below. Seven are stubs: each builds, has one test, and does nothing else. `crates/protocol` has the bridge protocol's generated types. No GPUI yet; it comes with part U0 in Milestone 1. The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is only in git history (`git show e8c8cd2:spike/gpui/`; its branch `spike/gpui-phase1` was deleted on 2026-11-08, so records 0001 and 0008 point at a branch that no longer exists) and never goes into `main`.
+**The target's Rust tree is a skeleton.** Since Phase 4 the Cargo workspace (`Cargo.toml`, Rust 1.99.1 pinned in `rust-toolchain.toml`, `deny.toml`) holds the eight crates in the layout below. Seven are stubs: each builds, has one test, and does nothing else. `crates/protocol` has the bridge protocol's generated types. GPUI 0.2.2 is a macOS-only dependency of `crates/kit` and `crates/app` (`LINT-GPUI-MACOS-ONLY`; Linux needs system libraries CI doesn't install yet, Windows is unverified), with the `runtime_shaders` feature because this Mac has no Metal Toolchain. The GPUI spike is done ([0001](docs/decisions/0001-gpui-spike.md)). Its results are in `spike/RESULTS.md`; the throwaway code is only in git history (`git show e8c8cd2:spike/gpui/`; its branch `spike/gpui-phase1` was deleted on 2026-11-08, so records 0001 and 0008 point at a branch that no longer exists) and never goes into `main`.
 
 ```
   GPUI desktop app      hook            command line             phone, and apps on
@@ -171,9 +171,9 @@ Machines stays a separate tool, not inside the daemon, and is ported last (part 
 | `crates/notchlingd/` | The engine service | Exists as a stub that prints its version |
 | `crates/ptyhost/` | The separately restartable terminal host (port of hostd) | Exists as a stub that prints its version |
 | `crates/local-api/` | App and command line to daemon API, with tiers | Exists as a stub |
-| `crates/app/` | The GPUI desktop app | Exists as a stub (no GPUI yet) |
+| `crates/app/` | The GPUI desktop app | U0 shell (menu bar item, Dock presence, main window placeholder) and U10 `--render <view> --out <png>` exist, macOS only; other systems get a stub `main` |
 | `crates/platform/` | Notch and menu bar (macOS), tray and panel (Linux, Windows) | Exists as a stub |
-| `crates/kit/` | Our widget layer over GPUI | Exists as a stub |
+| `crates/kit/` | Our widget layer over GPUI | Tokens (every system) and the first GPUI widgets with `KitGallery` (macOS) exist, U0 |
 | `crates/protocol/` | The bridge protocol's Rust types, generated from `protocol/` | Exists |
 | `apps/flutter/` | The phone app | Exists (moved here from the old top-level phone folder in Phase 4) |
 | `legacy/macos/` | Today's Swift app and ConsoleCore, fixes only, until retired | Exists (moved from the repo root in Phase 4): `legacy/macos/Sources/`, `Tests/`, `Demo/`, `Icon/`, `Pet/`, `build.sh`, `release.sh`. `Package.swift` and a one-line `build.sh` wrapper stay at the root |
