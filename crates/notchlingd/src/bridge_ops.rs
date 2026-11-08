@@ -112,6 +112,8 @@ impl BridgeOps {
                     ApiError::bad_request("bridge.set takes {\"on\": true|false}")
                 })?;
                 if !on {
+                    // Halted first: a pair approved just before the refusal can't write either.
+                    self.bridge.halt();
                     self.approvals.refuse_all();
                 }
                 let status = self.bridge.set(on);

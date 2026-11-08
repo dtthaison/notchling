@@ -38,6 +38,8 @@ pub enum StoreError {
     Unreadable(String),
     Io(std::io::Error),
     Random,
+    /// The bridge is going off ([`DeviceStore::halt`]): nothing more is written.
+    Stopped,
 }
 
 impl std::fmt::Display for StoreError {
@@ -48,6 +50,7 @@ impl std::fmt::Display for StoreError {
             }
             StoreError::Io(e) => write!(f, "{e}"),
             StoreError::Random => f.write_str("the system's random source failed"),
+            StoreError::Stopped => f.write_str("the bridge is off"),
         }
     }
 }
@@ -129,6 +132,8 @@ struct State {
     seen: Option<(std::time::SystemTime, u64)>,
     readable: Result<(), String>,
     last_touch_write: HashMap<String, i64>,
+    /// Set by [`DeviceStore::halt`]; checked under this lock right before a write.
+    halted: bool,
 }
 
 /// The store over one `devices.json`.
@@ -147,10 +152,17 @@ impl DeviceStore {
                 seen: None,
                 readable: Ok(()),
                 last_touch_write: HashMap::new(),
+                halted: false,
             }),
         };
         store.refresh(&mut store.lock());
         store
+    }
+
+    /// No more writes, from now on: the bridge is going off. A write already past its check has
+    /// finished when this returns, since both hold the store's lock.
+    pub fn halt(&self) {
+        self.lock().halted = true;
     }
 
     pub fn file(&self) -> &Path {
@@ -217,6 +229,9 @@ impl DeviceStore {
     pub fn touch(&self, id: &str, now_ms: i64) -> Result<(), StoreError> {
         let write = {
             let mut state = self.lock();
+            if state.halted {
+                return Ok(());
+            }
             let Some(device) = state.devices.iter_mut().find(|d| d.id == id) else {
                 return Ok(());
             };
@@ -244,8 +259,14 @@ impl DeviceStore {
 
     /// Re-reads the file under its lock, applies `edit`, and writes when `edit` says it changed.
     fn change(&self, edit: impl FnOnce(&mut Vec<PairedDevice>) -> bool) -> Result<(), StoreError> {
+        if self.lock().halted {
+            return Err(StoreError::Stopped);
+        }
         let _lock = FileLock::acquire(&self.file).map_err(StoreError::Io)?;
         let mut state = self.lock();
+        if state.halted {
+            return Err(StoreError::Stopped);
+        }
         state.seen = None;
         self.refresh(&mut state);
         if let Err(why) = &state.readable {

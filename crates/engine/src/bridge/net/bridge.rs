@@ -165,6 +165,14 @@ impl Bridge {
         }
     }
 
+    /// The first step of bridge-off, before anything is refused or stopped: from here on nothing
+    /// in flight writes under the bridge folder ([`Core::halt`]).
+    pub fn halt(&self) {
+        if let Some(core) = self.core() {
+            core.halt();
+        }
+    }
+
     /// The bound (LAN, tunnel) ports while on.
     pub fn ports(&self) -> Option<(u16, u16)> {
         match &*self.lock() {
@@ -353,6 +361,7 @@ impl Drop for Bridge {
 }
 
 fn stop(mut running: Running) {
+    running.core.halt();
     running.core.codes.cancel();
     running.ticking.store(false, Ordering::SeqCst);
     if let Some(ticker) = running.ticker.take() {

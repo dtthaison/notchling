@@ -123,6 +123,13 @@ impl Core {
         self.router.closed(connection);
     }
 
+    /// Bridge-off has begun: from now on nothing under the bridge folder is written, whatever was
+    /// already on its way (a `hello`, a `pair` approved just before, a revoke).
+    pub fn halt(&self) {
+        self.devices.halt();
+        self.audit.halt();
+    }
+
     /// The 300 ms push: what changed goes to every subscriber.
     pub fn tick(&self) {
         self.hub.tick(self.backend.as_ref());
