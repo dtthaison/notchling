@@ -29,6 +29,7 @@ mod testutil;
 pub mod tools;
 pub mod transcripts;
 pub mod views;
+pub mod welcome;
 
 /// What `main` prints on a system the app isn't built for yet.
 pub const NOT_SUPPORTED: &str = "notchling-app: not supported yet on this system";
