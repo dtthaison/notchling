@@ -18,7 +18,13 @@
 //! Milestone 3 adds the acting ops ([`acting_ops`], session control in [`control_ops`], the real
 //! terminal and launcher in [`attach`]), switched off by [`acting`] until the maintainer hands
 //! sessions over. Later milestones add `secret`, `delegate` and `page`.
+//!
+//! Milestone 6 adds three more switches, all off at every start ([`switches`]: `accounts`, `vault`,
+//! `install`), served as op groups ([`op_group`]), and Claude Code's accounts and lanes behind
+//! `accounts` ([`accounts_ops`]).
 
+pub mod accounts_ops;
+mod accounts_signin;
 pub mod acting;
 pub mod acting_ops;
 pub mod agy_ops;
@@ -37,12 +43,16 @@ pub mod hook_ops;
 pub mod hook_output;
 pub mod late_reply;
 pub mod layout;
+pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
 pub mod prompts;
 pub mod service;
 pub mod signals;
+pub mod switches;
 
+#[cfg(test)]
+mod accounts_ops_tests;
 #[cfg(test)]
 mod acting_ops_tests;
 #[cfg(test)]

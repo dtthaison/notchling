@@ -108,7 +108,8 @@ impl ActingOps {
         self.run_raw(plan).map_err(failed)
     }
 
-    fn run_raw(&self, plan: &Plan) -> Result<Option<String>, ControlError> {
+    /// Runs a control plan through the daemon's launcher (Move All's stops and resumes too).
+    pub(crate) fn run_raw(&self, plan: &Plan) -> Result<Option<String>, ControlError> {
         let pause = |ms: u64| (self.pause)(ms);
         execute(plan, self.launcher.as_ref(), &pause).map(|report| report.job_id)
     }

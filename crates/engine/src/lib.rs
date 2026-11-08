@@ -2,11 +2,14 @@
 //!
 //! Milestone 1 fills `transcript` (E1), `sessions` (E2) and `settings` (E14); milestone 3 adds
 //! `control` (E11), which plans what the app does to a session and launches it through a trait,
-//! `terminal` (E3a) and `reply` (E3b), which plans what is typed into a session.
+//! `terminal` (E3a) and `reply` (E3b), which plans what is typed into a session. Milestone 6 adds
+//! `accounts` (E8: Claude Code's logins) and `lanes`.
 
+pub mod accounts;
 pub mod bridge;
 pub mod control;
 pub mod delegate;
+pub mod lanes;
 pub mod pages;
 pub mod reply;
 pub mod search;
