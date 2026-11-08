@@ -3,7 +3,7 @@
 
 use crate::framing::{encode_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
-use crate::server::{Caller, Shared};
+use crate::server::{Caller, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
     err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
@@ -17,7 +17,9 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::Instant;
 
-pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
+/// Serves one connection; `slot` is its place under `max_clients`, given back when this returns
+/// or unwinds.
+pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
     let peer = match transport::peer(&stream) {
         Ok(peer) => peer,
         Err(_) => {
@@ -27,6 +29,10 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
     };
     if !same_user(peer.uid, shared.my_uid) {
         shared.audit("connect", None, peer.exe.as_deref(), "other_user");
+        return;
+    }
+    // A slot kept for the app: anyone else goes now (and the app is checked again at hello).
+    if slot.reserved && shared.allowlist.tier_of(peer.exe.as_deref()) != Tier::App {
         return;
     }
     let limits = shared.limits;
@@ -59,6 +65,9 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
         tx,
         shared: shared.clone(),
         accepted: Instant::now(),
+        reserved: slot.reserved,
+        subscribed: false,
+        last_request: Instant::now(),
     };
     let reader = match stream.try_clone() {
         Ok(read_half) => Some(LineReader::new(read_half)),
@@ -73,6 +82,7 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>) {
     drop(session);
     let _ = writer.join();
     let _ = stream.shutdown(Shutdown::Both);
+    drop(slot);
 }
 
 /// Takes the connection off the hub however its thread ends. A panic in a handler unwinds through
@@ -105,6 +115,11 @@ struct Session {
     tx: SyncSender<Vec<u8>>,
     shared: Arc<Shared>,
     accepted: Instant,
+    /// In a slot kept for the app: closed at hello unless it gets the app tier.
+    reserved: bool,
+    /// Follows a topic, so it may wait for events as long as it likes.
+    subscribed: bool,
+    last_request: Instant,
 }
 
 impl Session {
@@ -126,6 +141,13 @@ impl Session {
                 Err(FrameError::TooLong | FrameError::PartialAtEof | FrameError::Io(_)) => return,
             }
             if self.kind.is_none() && self.accepted.elapsed() > limits.hello_within {
+                return;
+            }
+            // Idle and following nothing: a held slot doing no work.
+            if self.kind.is_some()
+                && !self.subscribed
+                && self.last_request.elapsed() > limits.idle_within
+            {
                 return;
             }
             if reader
@@ -161,6 +183,7 @@ impl Session {
 
     /// Handles one line; false closes the connection.
     fn on_line(&mut self, line: &[u8]) -> bool {
+        self.last_request = Instant::now();
         let request = match Request::parse(line) {
             Ok(request) => request,
             Err((id, e)) => {
@@ -226,6 +249,10 @@ impl Session {
             self.shared
                 .audit(ops::HELLO, Some(self.tier), self.peer(), "peer_changed");
         }
+        if self.reserved && self.tier != Tier::App {
+            // It took a slot kept for the app and isn't the app.
+            return false;
+        }
         self.kind = Some(hello.client);
         self.shared.hub.hello(self.id, hello.client, self.tier);
         let reply = HelloReply {
@@ -237,7 +264,7 @@ impl Session {
         self.reply(id, value)
     }
 
-    fn subscribe(&self, args: &Value) -> Result<Value, ApiError> {
+    fn subscribe(&mut self, args: &Value) -> Result<Value, ApiError> {
         let subscribe: Subscribe = serde_json::from_value(args.clone())
             .map_err(|e| ApiError::bad_request(format!("bad subscribe: {e}")))?;
         let known = self.shared.handler.topics();
@@ -249,6 +276,7 @@ impl Session {
             return Err(ApiError::bad_request(format!("no topic named {bad}")));
         }
         self.shared.hub.subscribe(self.id, &subscribe.topics);
+        self.subscribed |= !subscribe.topics.is_empty();
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }
 

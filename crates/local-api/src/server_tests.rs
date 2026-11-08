@@ -47,7 +47,9 @@ impl Handler for TestHandler {
 fn fast() -> Limits {
     Limits {
         max_clients: 8,
+        app_reserved: 0,
         hello_within: Duration::from_millis(600),
+        idle_within: Duration::from_millis(600),
         line_within: Duration::from_millis(600),
         write_within: Duration::from_millis(500),
         queue: 4,
@@ -425,6 +427,75 @@ fn clients_past_the_limit_are_closed_on_accept() {
     let _b = client(&run.socket);
     let (mut s, _r) = raw(&run.socket);
     assert!(closed(&mut s));
+}
+
+/// Says hello on a raw connection; true when the server answered it.
+fn hello_answered(s: &mut UnixStream) -> bool {
+    if s.write_all(format!("{HELLO}\n").as_bytes()).is_err() {
+        return false;
+    }
+    let mut r = LineReader::new(s.try_clone().unwrap());
+    matches!(r.next_line(), Ok(Some(line)) if serde_json::from_slice::<Value>(&line).is_ok_and(|v| v["ok"].is_object()))
+}
+
+#[test]
+fn the_cap_is_counted_at_accept_so_a_burst_cannot_pass_it() {
+    let limits = Limits {
+        max_clients: 2,
+        ..fast()
+    };
+    let run = start_with(Allowlist::empty(), limits);
+    // All at once, before any connection's thread has run.
+    let mut burst: Vec<UnixStream> = (0..12)
+        .map(|_| UnixStream::connect(&run.socket).unwrap())
+        .collect();
+    for s in &burst {
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    }
+    let served = burst
+        .iter_mut()
+        .map(hello_answered)
+        .filter(|served| *served)
+        .count();
+    assert_eq!(served, 2);
+}
+
+#[test]
+fn the_last_slots_are_kept_for_the_app() {
+    let limits = Limits {
+        max_clients: 4,
+        app_reserved: 2,
+        ..fast()
+    };
+    // Agents get two of the four.
+    let agents = start_with(Allowlist::empty(), limits);
+    let _a = client(&agents.socket);
+    let _b = client(&agents.socket);
+    let (mut third, _r) = raw(&agents.socket);
+    assert!(!hello_answered(&mut third));
+    // The app (this binary, listed) gets all four.
+    let apps = start_with(Allowlist::new([me()]), limits);
+    let held: Vec<Client> = (0..4)
+        .map(|_| connect_as(&apps.socket, ClientKind::App))
+        .collect();
+    assert!(held.iter().all(|c| c.tier() == Tier::App));
+    let (mut fifth, _r) = raw(&apps.socket);
+    assert!(!hello_answered(&mut fifth));
+}
+
+#[test]
+fn an_idle_client_that_follows_nothing_is_closed_and_a_follower_stays() {
+    let run = start();
+    let (mut idle, mut r) = raw(&run.socket);
+    send(&mut idle, HELLO);
+    assert!(reply(&mut r)["ok"].is_object());
+    let mut follower = client(&run.socket);
+    follower.subscribe(&["sessions"]).unwrap();
+    let started = Instant::now();
+    assert!(closed(&mut idle));
+    assert!(started.elapsed() >= Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(follower.status().is_ok(), "a follower waits for events");
 }
 
 #[test]
