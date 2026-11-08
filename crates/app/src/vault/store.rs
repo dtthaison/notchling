@@ -131,13 +131,12 @@ impl Vault {
             });
             return;
         }
-        match self.send(switches, &Call::list()) {
-            Ok(v) => self.update(|s| {
+        if let Ok(v) = self.send(switches, &Call::list()) {
+            self.update(|s| {
                 s.attached = true;
                 s.entries = parse_entries(&v);
                 s.error = None;
-            }),
-            Err(_) => {}
+            });
         }
     }
 
@@ -157,8 +156,7 @@ impl Vault {
                 s.entries
                     .retain(|e| e.id() != saved.id() && Some(e.name.as_str()) != replacing);
                 s.entries.push(saved);
-                s.entries
-                    .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                s.entries.sort_by_key(|e| e.name.to_lowercase());
                 s.error = None;
             });
         }

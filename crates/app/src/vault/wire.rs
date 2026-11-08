@@ -90,7 +90,7 @@ pub fn parse_entries(v: &Value) -> Vec<VaultEntry> {
                 .collect()
         })
         .unwrap_or_default();
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|e| e.name.to_lowercase());
     entries
 }
 

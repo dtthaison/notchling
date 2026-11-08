@@ -35,7 +35,7 @@ pub const VIEWS: [ViewSpec; 5] = [
     },
     ViewSpec {
         name: "limit-bars",
-        size: (420.0, 320.0),
+        size: (420.0, 460.0),
         about: "grouped limit bars in every fill, and the Chat header's meters (made-up data)",
     },
     ViewSpec {

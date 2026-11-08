@@ -92,7 +92,7 @@ fn daemon(on: bool) -> impl Fn(&str, &Value) -> Result<Value, ClientError> + Sen
         "providers.add.begin" => Ok(json!({"state": "waiting", "sign_in_url": "https://x"})),
         "providers.add.cancel" => Ok(json!({"cancelled": true})),
         "providers.remove" => Ok(json!({"removed": true})),
-        other => Err(ClientError::Api(ApiError::bad_request(&format!(
+        other => Err(ClientError::Api(ApiError::bad_request(format!(
             "unknown {other}"
         )))),
     }

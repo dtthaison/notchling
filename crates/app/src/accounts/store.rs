@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 use notchling_engine::limits::report::UsageReport;
 use notchling_local_api::{ClientError, SOCKET_NAME};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::wire::{
     parse_add, parse_claude_list, parse_cost, parse_lanes, parse_limits, parse_move_plan,
@@ -249,6 +249,15 @@ impl Accounts {
     /// Forgets how the last sign-in ended.
     pub fn clear_add(&self) {
         self.update(|s| s.add = None);
+    }
+
+    /// Makes a lane for a saved account (`lanes.create`): the lane's config folder. Blocking.
+    pub fn create_lane(&self, switches: &Switches, account: &str) -> Result<Lane, String> {
+        let v = self.send(switches, &Call::lanes_create(account))?;
+        let lane = v.get("lane").cloned().unwrap_or(Value::Null);
+        parse_lanes(&json!({ "lanes": [lane] }))
+            .pop()
+            .ok_or_else(|| "The daemon made a lane this app can't read".to_owned())
     }
 
     /// Move All: a dry run's plan, or the move itself (`accounts.move_all`). Blocking.

@@ -264,27 +264,29 @@ mod tests {
                 ..
             }
         ));
-        s.add.as_mut().map(|a| {
+        if let Some(a) = s.add.as_mut() {
             a.state = "added".into();
-            a.email = Some("new@example.com".into())
-        });
+            a.email = Some("new@example.com".into());
+        }
         assert_eq!(
             add_panel(CLAUDE_CODE, &s, &on, false),
             AddPanel::Added {
                 line: "Added new@example.com.".into()
             }
         );
-        s.add.as_mut().map(|a| {
+        if let Some(a) = s.add.as_mut() {
             a.state = "failed".into();
-            a.error = Some("The browser closed.".into())
-        });
+            a.error = Some("The browser closed.".into());
+        }
         assert_eq!(
             add_panel(CLAUDE_CODE, &s, &on, false),
             AddPanel::Failed {
                 message: "The browser closed.".into()
             }
         );
-        s.add.as_mut().map(|a| a.state = "cancelled".into());
+        if let Some(a) = s.add.as_mut() {
+            a.state = "cancelled".into();
+        }
         assert!(matches!(
             add_panel(CLAUDE_CODE, &s, &on, false),
             AddPanel::Idle { .. }

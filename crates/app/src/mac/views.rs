@@ -37,6 +37,8 @@ pub fn build(
             .or_else(|| crate::sheets::view::build_render(other, cx))
             .or_else(|| crate::search::view::build_render(other, cx))
             .or_else(|| crate::pages::view::build_render(other, cx))
-            .or_else(|| crate::tools::view::build_render(other, cx)),
+            .or_else(|| crate::tools::view::build_render(other, cx))
+            .or_else(|| crate::accounts::window::build_render(other, cx))
+            .or_else(|| crate::vault::view::build_render(other, cx)),
     }
 }

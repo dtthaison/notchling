@@ -29,6 +29,20 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
             )
             .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
         )
+        .child(
+            button(
+                "accounts",
+                "Accounts",
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
+        )
+        .child(
+            button("vault", "Vault", ButtonKind::Ghost, PartState::Rest, a)
+                .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
+        )
         .child(button(
             "parts",
             "?",

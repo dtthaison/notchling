@@ -12,4 +12,14 @@ pub mod menu;
 pub mod model;
 pub mod renders;
 pub mod store;
+#[cfg(target_os = "macos")]
+pub mod view;
+#[cfg(target_os = "macos")]
+pub mod view_cost;
+#[cfg(target_os = "macos")]
+pub mod view_rows;
+#[cfg(target_os = "macos")]
+pub mod view_tabs;
+#[cfg(target_os = "macos")]
+pub mod window;
 pub mod wire;

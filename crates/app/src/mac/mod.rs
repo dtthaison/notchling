@@ -9,6 +9,7 @@ pub mod pair_prompt;
 pub mod render;
 pub mod shell;
 pub mod tray;
+pub mod vault_prompts;
 pub mod views;
 pub mod window;
 

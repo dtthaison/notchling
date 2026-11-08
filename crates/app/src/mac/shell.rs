@@ -64,6 +64,22 @@ pub struct AppPairing(pub Arc<PairingFeed>);
 
 impl Global for AppPairing {}
 
+/// Milestone 6's switch feed (`accounts`, `vault`, `install`, and the vault's pending prompts),
+/// shared by the Accounts window, the vault sheet and the prompt windows. Not set in a render.
+pub struct AppSwitches(pub Arc<crate::switches::feed::SwitchFeed>);
+
+impl Global for AppSwitches {}
+
+/// The accounts store (Claude Code, lanes, the other providers, limits, cost). Not set in a render.
+pub struct AppAccounts(pub Arc<crate::accounts::store::Accounts>);
+
+impl Global for AppAccounts {}
+
+/// The Secret Vault's store (entries without values). Not set in a render.
+pub struct AppVault(pub Arc<crate::vault::store::Vault>);
+
+impl Global for AppVault {}
+
 /// The second opinions asked in Chat (the engine's store over the app's own data folder, running
 /// this binary's `delegate`); `None` over a fixture root, which never starts a tool.
 pub struct AppOpinions(pub Option<SecondOpinionStore>);
@@ -111,6 +127,17 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
         cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
+        let switches = Arc::new(crate::switches::feed::SwitchFeed::for_run(root.as_ref()));
+        cx.set_global(AppSwitches(switches.clone()));
+        cx.set_global(AppAccounts(Arc::new(
+            crate::accounts::store::Accounts::for_run(root.as_ref()),
+        )));
+        let vault = Arc::new(crate::vault::store::Vault::for_run(root.as_ref()));
+        cx.set_global(AppVault(vault.clone()));
+        if switches.is_live() {
+            // The daemon asks the person about a secret only while this follows `vault`.
+            super::vault_prompts::watch(cx, switches, vault);
+        }
         if let Some(root) = root.as_ref() {
             // A page's copy is only ever loaded from here.
             cx.set_global(AppPagesDir(root.data_dir.join("pages")));
@@ -172,10 +199,13 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
     0
 }
 
-/// What a menu entry does. Accounts and Settings open Chat until their own parts land.
+/// What a menu entry does. Settings opens Chat until its own part lands.
 fn handle(command: Command, cx: &mut App) {
     match command {
-        Command::OpenChat | Command::Accounts | Command::Settings => open_chat(cx),
+        Command::OpenChat | Command::Settings => open_chat(cx),
+        Command::Accounts => {
+            crate::accounts::window::open(cx, None);
+        }
         Command::SetAwake(mode) => {
             let shell = cx.global_mut::<Shell>();
             shell.state.awake = mode;

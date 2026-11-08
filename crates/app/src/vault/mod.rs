@@ -8,7 +8,15 @@
 
 pub mod approval;
 pub mod form;
+#[cfg(target_os = "macos")]
+pub mod form_view;
 pub mod list;
+#[cfg(target_os = "macos")]
+pub mod prompt_view;
 pub mod renders;
 pub mod store;
+#[cfg(target_os = "macos")]
+pub mod view;
+#[cfg(target_os = "macos")]
+pub mod view_list;
 pub mod wire;
