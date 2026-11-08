@@ -27,6 +27,7 @@ use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_ops::ProvidersOps;
 use crate::limits_ops::LimitsOps;
 use crate::switches::{SwitchOps, Switches};
+use crate::vault_ops::VaultOps;
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -297,7 +298,7 @@ impl Handler for Ops {
     }
 
     /// The held prompts are the app's: their ids are what answers them. So are the bridge's
-    /// pairing requests.
+    /// pairing requests. A group says for its own topics (the vault's approvals and forms).
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
             topics::PROMPTS | topics::BRIDGE => Tier::App,
@@ -565,6 +566,12 @@ pub fn run(
         switches.accounts.clone(),
         room.clone(),
     ));
+    // The vault: no Keychain read and no vault file until the app turns its switch on.
+    let vault = Arc::new(VaultOps::for_daemon(
+        &layout,
+        switches.vault.clone(),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -588,6 +595,7 @@ pub fn run(
                 .with_group(accounts.clone())
                 .with_group(providers.clone())
                 .with_group(limits.clone())
+                .with_group(vault.clone())
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -647,6 +655,7 @@ pub fn run(
     codex_ops.close();
     agy.close();
     providers.close();
+    vault.close();
     bridge.close();
     limits.close();
     handle.shutdown();

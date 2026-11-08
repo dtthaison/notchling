@@ -141,6 +141,12 @@ impl Layout {
         self.state_dir().join(AUDIT_NAME)
     }
 
+    /// The daemon's own vault list, `<data dir>/daemon/vault.json`: never the Swift app's
+    /// `<data dir>/vault.json` until the maintainer hands the vault over.
+    pub fn vault_index(&self) -> PathBuf {
+        self.data_dir.join("daemon").join("vault.json")
+    }
+
     /// The lock that keeps one daemon per real data folder, when it isn't the socket's own lock:
     /// with `--socket` elsewhere a second daemon could otherwise read the same folders. A fixture
     /// root (`NOTCHLING_DATA_ROOT`) is a test's own, so it takes only the socket's lock.

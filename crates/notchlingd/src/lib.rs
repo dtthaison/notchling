@@ -20,8 +20,10 @@
 //! sessions over. Later milestones add `secret`, `delegate` and `page`.
 //!
 //! Milestone 6 adds three more switches, all off at every start ([`switches`]: `accounts`, `vault`,
-//! `install`), served as op groups ([`op_group`]), and Claude Code's accounts and lanes behind
-//! `accounts` ([`accounts_ops`]).
+//! `install`), served as op groups ([`op_group`]): Claude Code's accounts and lanes
+//! ([`accounts_ops`]), the other providers ([`providers_ops`]) and the limit watchers
+//! ([`limits_ops`]) behind `accounts`, and the Secret Vault ([`vault_ops`]) behind `vault`, with
+//! its command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
 
 pub mod accounts_ops;
 mod accounts_signin;
@@ -54,6 +56,10 @@ pub mod providers_ops;
 pub mod service;
 pub mod signals;
 pub mod switches;
+pub mod vault_args;
+pub mod vault_cli;
+pub mod vault_ops;
+pub mod vault_wait;
 
 #[cfg(test)]
 mod accounts_ops_tests;
@@ -114,6 +120,9 @@ pub fn run(command: Command) -> i32 {
         },
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
+        Command::Secrets { args } => vault_cli::secrets(&args),
+        Command::Secret { args } => vault_cli::secret(&args),
+        Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
