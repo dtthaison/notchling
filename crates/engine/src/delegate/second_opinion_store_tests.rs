@@ -10,16 +10,22 @@ struct FakeHost {
     launched: Mutex<Vec<(Vec<String>, String)>>,
     waiting: Mutex<Vec<Done>>,
     terminated: Arc<AtomicUsize>,
+    /// Jobs stopped with `stop_within`, and the grace each was given (milliseconds).
+    stopped: Arc<Mutex<Vec<u128>>>,
     refuse: Mutex<Option<String>>,
     /// Calls `done` before `launch` returns.
     instant: Mutex<Option<String>>,
 }
 
-struct FakeJob(Arc<AtomicUsize>);
+struct FakeJob(Arc<AtomicUsize>, Arc<Mutex<Vec<u128>>>);
 
 impl Job for FakeJob {
     fn terminate(&self) {
         self.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn stop_within(&self, grace: Duration) {
+        self.1.lock().unwrap().push(grace.as_millis());
     }
 }
 
@@ -33,7 +39,10 @@ impl Host for FakeHost {
             Some(output) => done(output),
             None => self.waiting.lock().unwrap().push(done),
         }
-        Ok(Box::new(FakeJob(self.terminated.clone())))
+        Ok(Box::new(FakeJob(
+            self.terminated.clone(),
+            self.stopped.clone(),
+        )))
     }
 }
 
@@ -248,6 +257,34 @@ fn stop_all_stops_every_running_command() {
     rig.store.start(&request("b"));
     rig.store.stop_all();
     assert_eq!(rig.host.terminated.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn stop_all_within_stops_each_job_for_good_and_removes_the_prompt_files() {
+    let rig = rig();
+    let a = rig.store.start(&request("a"));
+    let b = rig.store.start(&request("b"));
+    let files: Vec<PathBuf> = [&a, &b]
+        .iter()
+        .map(|r| {
+            rig.dir
+                .join(format!("tmp/notchling-second-opinion-{}.txt", r.id))
+        })
+        .collect();
+    assert!(files.iter().all(|f| f.exists()), "the prompts are written");
+    rig.store.stop_all_within(Duration::from_millis(1500));
+    assert_eq!(*rig.host.stopped.lock().unwrap(), [1500, 1500]);
+    assert_eq!(
+        rig.host.terminated.load(Ordering::SeqCst),
+        0,
+        "the quit stop waits; it does not leave the kill to a thread that dies with the app"
+    );
+    assert!(files.iter().all(|f| !f.exists()), "the prompts are gone");
+    // A late end (the command's output arriving after all) finds nothing to remove or fail on.
+    rig.host.finish("");
+    // Nothing is running any more: a second stop has nothing to stop.
+    rig.store.stop_all_within(Duration::from_millis(1500));
+    assert_eq!(rig.host.stopped.lock().unwrap().len(), 2);
 }
 
 #[test]

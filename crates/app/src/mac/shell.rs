@@ -69,6 +69,10 @@ pub struct AppOpinions(pub Option<SecondOpinionStore>);
 
 impl Global for AppOpinions {}
 
+/// How long a review still running when the app quits gets to end after SIGTERM before it is
+/// killed. Short: the app is waiting on it to leave.
+const OPINION_STOP_GRACE: Duration = Duration::from_secs(2);
+
 /// How often the app reads the bridge while no panel is open.
 const BRIDGE_POLL: Duration = Duration::from_secs(5);
 
@@ -106,7 +110,19 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
         cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
-        cx.set_global(AppOpinions(store_for_run(root.as_ref(), exe.as_deref())));
+        let opinions = store_for_run(root.as_ref(), exe.as_deref());
+        if let Some(store) = opinions.clone() {
+            // Every way out of the app comes through here: ⌘Q, the Dock's Quit, the tray's Quit and
+            // a logout all end in `applicationWillTerminate`. GPUI runs this closure itself, not
+            // under the 100 ms it gives the returned future, so the wait finishes before the
+            // process can exit.
+            cx.on_app_quit(move |_| {
+                store.stop_all_within(OPINION_STOP_GRACE);
+                async {}
+            })
+            .detach();
+        }
+        cx.set_global(AppOpinions(opinions));
         if pairing.is_live() {
             // The daemon asks the person only while this follows `bridge`.
             super::pair_prompt::watch(cx, pairing, bridge.clone());
@@ -165,13 +181,8 @@ fn handle(command: Command, cx: &mut App) {
             shell.state.keep_display_on = !shell.state.keep_display_on;
             refresh_tray(shell);
         }
-        Command::Quit => {
-            // A review still running is stopped with the app, as the Swift store did.
-            if let Some(store) = cx.try_global::<AppOpinions>().and_then(|o| o.0.clone()) {
-                store.stop_all();
-            }
-            cx.quit()
-        }
+        // Reviews still running are stopped by the quit hook set in `run`, whichever way we leave.
+        Command::Quit => cx.quit(),
     }
 }
 

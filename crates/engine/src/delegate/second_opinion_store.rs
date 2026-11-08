@@ -17,6 +17,7 @@ use notchling_platform::files::{ensure_private_dir, write_private_no_follow};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// How many finished opinions the file keeps.
 pub const KEEP: usize = 100;
@@ -26,6 +27,13 @@ pub trait Job: Send {
     /// Asks it to stop (SIGTERM); the host kills it a little later if it is still there. Called
     /// with the store locked: it must not call back into the store.
     fn terminate(&self);
+
+    /// Stops it and does not return until it is gone: SIGTERM, then a kill after `grace` if it is
+    /// still there. For the app quitting, when nothing is left to kill it later. Where a job can't
+    /// wait this asks to stop, like [`Job::terminate`].
+    fn stop_within(&self, _grace: Duration) {
+        self.terminate();
+    }
 }
 
 /// Starts the delegate command for an opinion.
@@ -184,7 +192,33 @@ impl SecondOpinionStore {
         self.inner.save();
     }
 
-    /// Stops every running job (the app is quitting).
+    /// Stops every running job and returns once they are gone, or killed after `grace` (the app is
+    /// quitting, so nothing would be left to do it later). The jobs stop side by side, so this
+    /// takes about `grace` however many there are. Their prompt files go too, since the command
+    /// that would have removed each when it ended has no process left to report from.
+    pub fn stop_all_within(&self, grace: Duration) {
+        let (jobs, files): (Vec<Box<dyn Job>>, Vec<PathBuf>) = {
+            let mut state = self.inner.lock();
+            let mut jobs = Vec::new();
+            let mut files = Vec::new();
+            for running in state.jobs.values_mut() {
+                running.cancelled = true;
+                files.push(running.prompt_file.clone());
+                jobs.extend(running.job.take());
+            }
+            (jobs, files)
+        };
+        std::thread::scope(|scope| {
+            for job in jobs {
+                scope.spawn(move || job.stop_within(grace));
+            }
+        });
+        for file in files {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+
+    /// Asks every running job to stop (SIGTERM; the host kills a straggler a while later).
     pub fn stop_all(&self) {
         let mut state = self.inner.lock();
         for running in state.jobs.values_mut() {
