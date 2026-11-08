@@ -8,7 +8,7 @@ use crate::testutil::TempDir;
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode, Tier};
 use crate::AuditLog;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -27,8 +27,25 @@ impl Handler for TestHandler {
             "test.needsApproval" => Some(OpSpec::APPROVAL),
             // A handler bug: the connection's thread unwinds.
             "test.panic" => Some(OpSpec::AGENT),
+            "test.extras" => Some(OpSpec::AGENT),
             _ => None,
         }
+    }
+
+    fn call_with_extras(
+        &self,
+        caller: &Caller,
+        op: &str,
+        args: &Value,
+    ) -> (Result<Value, ApiError>, Map<String, Value>) {
+        let mut extras = Map::new();
+        if op == "test.extras" {
+            extras.insert("partial".into(), json!(true));
+            // Never over the envelope's own keys.
+            extras.insert("id".into(), json!(99));
+            extras.insert("ok".into(), json!("forged"));
+        }
+        (self.call(caller, op, args), extras)
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
@@ -184,6 +201,21 @@ fn hello_names_the_api_the_daemon_and_the_tier() {
     assert_eq!(c.hello().api, 1);
     assert_eq!(c.hello().daemon, "9.9.9");
     assert_eq!(c.tier(), Tier::Agent);
+}
+
+#[test]
+fn a_handlers_extras_go_beside_ok_without_replacing_the_envelope() {
+    let run = start();
+    let (mut s, mut r) = raw(&run.socket);
+    send(&mut s, HELLO);
+    reply(&mut r);
+    send(&mut s, r#"{"id":2,"op":"test.extras"}"#);
+    let v = reply(&mut r);
+    assert_eq!(v["id"], 2);
+    assert_eq!(v["ok"], "done");
+    assert_eq!(v["partial"], true, "{v}");
+    send(&mut s, r#"{"id":3,"op":"echo"}"#);
+    assert!(reply(&mut r).get("partial").is_none());
 }
 
 #[test]

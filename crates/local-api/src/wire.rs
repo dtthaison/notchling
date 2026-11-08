@@ -2,6 +2,8 @@
 //!
 //! - Request `{"id": <u64>, "op": "<name>", "args": {...}}`.
 //! - Reply `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.
+//!   A success may carry more fields beside `ok` (`sessions.list`: `"partial": true` when it
+//!   answered before the daemon's first read of the list); a client ignores ones it doesn't know.
 //! - Event, only after `events.subscribe`: `{"event": "<name>", "data": {...}}`.
 
 use serde::{Deserialize, Serialize};
