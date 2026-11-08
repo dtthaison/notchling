@@ -172,8 +172,13 @@ impl AccountsOps {
             keys: Keys {
                 runner: Arc::new(GatedSecurity {
                     flag: flag.clone(),
-                    inner: runner,
+                    inner: runner.clone(),
                 }),
+                user: user_name(),
+            },
+            // Only to undo a half-done switch; never to read or change a login otherwise.
+            undo_keys: Keys {
+                runner,
                 user: user_name(),
             },
             http: Arc::new(GatedHttp {

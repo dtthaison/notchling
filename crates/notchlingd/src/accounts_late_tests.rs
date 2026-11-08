@@ -171,3 +171,60 @@ fn a_sync_stuck_on_the_keychain_answers_the_list_as_last_read() {
     assert_eq!(w.room.named("accounts.done")[0]["result"]["active"], ID1);
     assert_eq!(w.room.named("accounts.changed").len(), 1);
 }
+
+/// The live item's write lands, then the app turns accounts off and `~/.claude.json` changes under
+/// the switch, so the config write fails and the Keychain must be put back with the switch off.
+struct OffAfterLiveWrite {
+    inner: Arc<MemoryKeychain>,
+    flag: Mutex<Option<Arc<crate::switches::SwitchFlag>>>,
+    config: std::path::PathBuf,
+}
+
+impl SecurityRunner for OffAfterLiveWrite {
+    fn run(&self, args: &[String], stdin: Option<&[u8]>) -> Result<SecurityOutput, KeychainError> {
+        let out = self.inner.run(args, stdin);
+        let line = String::from_utf8_lossy(stdin.unwrap_or_default()).into_owned();
+        let live_write = args.first().map(String::as_str) == Some("-i")
+            && line.contains(&format!("-s {:?}", LIVE_SERVICE));
+        if live_write {
+            if let Some(flag) = self.flag.lock().unwrap().take() {
+                flag.set(false);
+                std::fs::write(&self.config, "{broken").unwrap();
+            }
+        }
+        out
+    }
+}
+
+#[test]
+fn a_switch_whose_config_write_fails_puts_the_login_back_even_with_accounts_turned_off() {
+    let chain = Arc::new(MemoryKeychain::new());
+    let http = Arc::new(ScriptedHttp::new());
+    let dir = std::env::temp_dir().join(format!("nl-acc-undo-{}", std::process::id()));
+    let saboteur = Arc::new(OffAfterLiveWrite {
+        inner: chain.clone(),
+        flag: Mutex::new(None),
+        config: dir.join("home/.claude.json"),
+    });
+    let w = world("undo", true, saboteur.clone(), http.clone());
+    assert_eq!(w.d.0, dir);
+    signed_in_to_one(&w, &chain, &http);
+    w.ops
+        .call(&app(), ops::ACCOUNTS_LIST, &json!({"sync": true}))
+        .unwrap();
+    let before = chain.get(LIVE_SERVICE, "me");
+    *saboteur.flag.lock().unwrap() = Some(w.flag.clone());
+
+    let e = w
+        .ops
+        .call(&app(), ops::ACCOUNTS_SWITCH, &json!({"id": ID2}))
+        .unwrap_err();
+
+    assert!(!w.flag.is_on(), "{}", e.message);
+    assert_eq!(e.code, ErrorCode::Failed, "{}", e.message);
+    assert_eq!(
+        chain.get(LIVE_SERVICE, "me"),
+        before,
+        "Claude Code's login was put back, so it and ~/.claude.json name one account"
+    );
+}

@@ -69,8 +69,12 @@ pub(crate) fn world(
         keys: Keys {
             runner: Arc::new(GatedSecurity {
                 flag: flag.clone(),
-                inner: runner,
+                inner: runner.clone(),
             }),
+            user: "me".into(),
+        },
+        undo_keys: Keys {
+            runner,
             user: "me".into(),
         },
         http: Arc::new(GatedHttp {

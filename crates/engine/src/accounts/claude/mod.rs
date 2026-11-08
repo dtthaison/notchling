@@ -95,6 +95,10 @@ impl From<crate::lanes::LaneError> for AccountError {
 /// Everything the store reaches outside itself.
 pub struct ClaudeEnv {
     pub keys: Keys,
+    /// The same Keychain without the daemon's switch in front: used only to put Claude Code's
+    /// login back when a switch fails half way, so the item and `~/.claude.json` keep naming one
+    /// account even if the switch went off meanwhile.
+    pub undo_keys: Keys,
     pub http: Arc<dyn HttpClient>,
     pub now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// `~/.claude.json`.
@@ -411,22 +415,28 @@ impl ClaudeAccounts {
             .and_then(|t| set_top_level(t.expose(), "claudeAiOauth", &value).ok())
             .or_else(|| set_top_level("{}", "claudeAiOauth", &value).ok())
             .ok_or_else(|| err("Couldn't update Claude Code's login."))?;
-        self.env
-            .keys
-            .write(LIVE_SERVICE, &user, &new)
-            .map_err(|e| {
-                err(format!(
-                    "Couldn't update Claude Code's login in the Keychain: {e}"
-                ))
-            })?;
+        if let Err(e) = self.env.keys.write(LIVE_SERVICE, &user, &new) {
+            // A write can land and then fail its read-back (the switch went off between them).
+            self.undo_live(&user, old.as_ref());
+            return Err(err(format!(
+                "Couldn't update Claude Code's login in the Keychain: {e}"
+            )));
+        }
         if let Err(why) = config::set_account(&self.env.config_file, &account) {
-            // Put the old login back, so the Keychain and ~/.claude.json name one account.
-            if let Some(old) = old {
-                let _ = self.env.keys.write(LIVE_SERVICE, &user, old.expose());
-            }
+            self.undo_live(&user, old.as_ref());
             return Err(err(why));
         }
         Ok(())
+    }
+
+    /// Puts Claude Code's item back as it was before a switch that failed half way, so it and
+    /// `~/.claude.json` name one account; through [`ClaudeEnv::undo_keys`], which the switch going
+    /// off doesn't stop.
+    fn undo_live(&self, user: &str, old: Option<&Secret>) {
+        let _ = match old {
+            Some(old) => self.env.undo_keys.write(LIVE_SERVICE, user, old.expose()),
+            None => self.env.undo_keys.delete(LIVE_SERVICE, user).map(|_| ()),
+        };
     }
 
     // MARK: Keychain and profile

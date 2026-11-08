@@ -26,7 +26,7 @@ fn no_quit(rig: &Rig) -> bool {
 
 #[test]
 fn a_long_live_login_is_saved_in_parts_before_the_switch() {
-    let rig = Rig::new("long-live", FakeApps::new());
+    let rig = Rig::new("long-long-live", FakeApps::new());
     let a = big_login("1", "a@example.com");
     rig.keychain
         .set_as_other_tool(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(&a));
@@ -42,7 +42,10 @@ fn a_long_live_login_is_saved_in_parts_before_the_switch() {
 
 #[test]
 fn a_login_that_cannot_be_saved_is_never_replaced() {
-    let rig = Rig::new("unsaved", FakeApps::new().running("com.google.antigravity"));
+    let rig = Rig::new(
+        "long-unsaved",
+        FakeApps::new().running("com.google.antigravity"),
+    );
     let a = fake_login("1", "a@example.com", "ta");
     rig.set_live(&a);
     rig.save("2", &fake_login("2", "b@example.com", "tb"));
@@ -58,7 +61,7 @@ fn a_login_that_cannot_be_saved_is_never_replaced() {
 #[test]
 fn a_saved_login_too_long_for_antigravitys_item_is_refused_before_anything_quits() {
     let rig = Rig::new(
-        "too-long",
+        "long-too-long",
         FakeApps::new().running("com.google.antigravity"),
     );
     let a = fake_login("1", "a@example.com", "ta");
@@ -75,7 +78,7 @@ fn a_saved_login_too_long_for_antigravitys_item_is_refused_before_anything_quits
 
 #[test]
 fn an_add_that_could_not_put_a_long_login_back_is_refused() {
-    let rig = Rig::new("add-long", FakeApps::new());
+    let rig = Rig::new("long-add-long", FakeApps::new());
     let a = big_login("1", "a@example.com");
     rig.keychain
         .set_as_other_tool(LIVE_SERVICE, LIVE_ACCOUNT, &encode_keyring(&a));
@@ -89,7 +92,7 @@ fn an_add_that_could_not_put_a_long_login_back_is_refused() {
 
 #[test]
 fn an_add_abandoned_when_accounts_turn_off_writes_nothing_and_says_where_it_left_things() {
-    let rig = Rig::new("abandon", FakeApps::new());
+    let rig = Rig::new("long-abandon", FakeApps::new());
     rig.set_live(&fake_login("1", "a@example.com", "ta"));
     rig.store.begin_add().unwrap();
     let calls = rig.keychain.calls().len();

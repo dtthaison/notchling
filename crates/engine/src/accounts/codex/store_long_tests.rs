@@ -41,7 +41,7 @@ fn save_split(rig: &Rig, id: &str, login: &[u8]) {
 #[test]
 fn a_real_sized_live_login_is_saved_before_the_switch_and_comes_back_whole() {
     for size in [3_000, 4_500, 6_000] {
-        let rig = rig(&format!("big-{size}"));
+        let rig = rig(&format!("long-big-{size}"));
         let a = big_login_for("user-1", "ws-1", "rt-a", size);
         let b = big_login_for("user-2", "ws-2", "rt-b", size);
         assert!(a.len() > 4_000, "{} bytes", a.len());
@@ -67,7 +67,7 @@ fn a_real_sized_live_login_is_saved_before_the_switch_and_comes_back_whole() {
 
 #[test]
 fn a_live_login_that_cannot_be_saved_is_never_overwritten() {
-    let rig = rig("unsaved");
+    let rig = rig("long-unsaved");
     let a = big_login_for("user-1", "ws-1", "rt-a", 4_500);
     let b = big_login_for("user-2", "ws-2", "rt-b", 4_500);
     save_split(&rig, "user-2:ws-2", &b);
@@ -88,7 +88,7 @@ fn a_live_login_that_cannot_be_saved_is_never_overwritten() {
 
 #[test]
 fn a_live_login_naming_no_account_is_never_overwritten() {
-    let rig = rig("anon");
+    let rig = rig("long-anon");
     let b = big_login_for("user-2", "ws-2", "rt-b", 4_500);
     save_split(&rig, "user-2:ws-2", &b);
     let api_key_login = br#"{"OPENAI_API_KEY": "sk-FAKE-not-a-key", "tokens": null}"#;
@@ -107,7 +107,7 @@ fn a_live_login_naming_no_account_is_never_overwritten() {
 
 #[test]
 fn a_damaged_saved_copy_is_refused_and_nothing_changes() {
-    let rig = rig("damaged");
+    let rig = rig("long-damaged");
     let a = big_login_for("user-1", "ws-1", "rt-a", 4_500);
     let b = big_login_for("user-2", "ws-2", "rt-b", 4_500);
     save_split(&rig, "user-2:ws-2", &b);

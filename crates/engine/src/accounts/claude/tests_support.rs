@@ -70,6 +70,10 @@ impl World {
         let tmp = TempDir::new(tag);
         let chain = Arc::new(MemoryKeychain::new());
         let runner = wrap(chain.clone());
+        let undo_keys = Keys {
+            runner: runner.clone(),
+            user: "me".into(),
+        };
         let http = Arc::new(ScriptedHttp::new());
         let clock = Arc::new(AtomicI64::new(NOW));
         let now = clock.clone();
@@ -78,6 +82,7 @@ impl World {
                 runner,
                 user: "me".into(),
             },
+            undo_keys,
             http: http.clone(),
             now_ms: Arc::new(move || now.load(Ordering::SeqCst)),
             config_file: tmp.path("home/.claude.json"),
