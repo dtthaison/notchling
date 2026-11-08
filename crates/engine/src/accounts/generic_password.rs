@@ -121,6 +121,12 @@ impl FakeKeychain {
         self
     }
 
+    /// Puts an item the way another tool would, past the line-length rule (Antigravity writes its
+    /// own item through the Security framework, so it can be longer than `security -i` takes).
+    pub fn set_as_other_tool(&self, service: &str, account: &str, value: &str) {
+        lock(&self.items).insert((service.into(), account.into()), value.into());
+    }
+
     /// Writes fail from now on.
     pub fn fail_writes(&self) {
         *lock(&self.fail_writes) = true;
