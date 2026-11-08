@@ -3,7 +3,7 @@
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::jobs::{agent_from_job, agent_from_session, rank, read_jobs, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
-use super::successor::file_modified_ms;
+use crate::transcript::util::modified_secs;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -98,7 +98,7 @@ impl Monitor {
 
             for (short_id, job) in &jobs {
                 let live_session = session_by_job.get(short_id).copied();
-                let mut agent = agent_from_job(job, short_id, live_session, &file_modified_ms);
+                let mut agent = agent_from_job(job, short_id, live_session, &modified_secs);
                 agent.config_dir = lane_path.clone();
                 let this = rank(job);
                 if let Some(index) = result.iter().position(|a| a.id == agent.id) {

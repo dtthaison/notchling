@@ -40,7 +40,7 @@ pub struct Agent {
     pub target: AgentTarget,
     pub suggested_reply: Option<String>,
     /// The job's transcript, following it into a git worktree. To follow `/clear` too, pass it
-    /// through `successor::successor`.
+    /// through `transcript::locate::successor`.
     pub transcript_path: Option<String>,
     /// Where it runs: "Background", "claude -p", or the app hosting its terminal.
     pub host: String,
