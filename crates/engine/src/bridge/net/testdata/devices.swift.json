@@ -1,0 +1,17 @@
+[
+  {
+    "id" : "6D0F2A58-3B77-4C0E-9A41-5E8B1C7D2F90",
+    "lastSeen" : "2026-11-07T21:14:05Z",
+    "name" : "iPhone của Triết",
+    "pairedAt" : "2026-10-02T08:30:00Z",
+    "platform" : "ios",
+    "tokenHash" : "7d465b470b1a1015ae97b446fd018206b988612b134b3a9658cf1cf898df3337"
+  },
+  {
+    "id" : "9B3E7C14-2A60-4D85-8F1E-0C5D7A9B3E62",
+    "name" : "Pixel 9 \/ work",
+    "pairedAt" : "2026-11-01T12:00:00Z",
+    "platform" : "android",
+    "tokenHash" : "97bd566dddc475723b573e019fb35474fddafe405ce29db87c4339daa3c77b8c"
+  }
+]

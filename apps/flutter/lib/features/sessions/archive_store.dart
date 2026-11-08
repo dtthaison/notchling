@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/protocol/models.dart';
+import '../macs/session_ref.dart';
 
 /// Which sessions the user archived on this phone, and when. Stored on the phone, not on the Mac: archiving is a
 /// preference about this list (the Mac's own sessions are untouched), it works offline, and each phone keeps its own.
@@ -67,14 +68,27 @@ final NotifierProvider<ArchivedSessionsNotifier, Map<String, int>> archivedSessi
     NotifierProvider<ArchivedSessionsNotifier, Map<String, int>>(ArchivedSessionsNotifier.new);
 
 class ArchivedSessionsNotifier extends Notifier<Map<String, int>> {
+  Future<void>? _loading;
+
   @override
   Map<String, int> build() {
     final ArchiveStore store = ref.read(archiveStoreProvider);
-    Future<void>(() async {
+    _loading = Future<void>(() async {
       final Map<String, int> saved = await store.load();
       if (ref.mounted) state = <String, int>{...saved, ...state};
     });
     return <String, int>{};
+  }
+
+  /// Forgets what was archived on the computer whose storage scope is [scope], when that computer is removed.
+  /// Waits for the saved list to load first, so it can't come back over the change.
+  Future<void> removeScope(String scope) async {
+    await _loading;
+    if (!ref.mounted) return;
+    final Map<String, int> kept = <String, int>{for (final MapEntry<String, int> e in state.entries) if (!keyInScope(scope, e.key)) e.key: e.value};
+    if (kept.length == state.length) return;
+    state = kept;
+    await ref.read(archiveStoreProvider).save(kept);
   }
 
   void archive(String id) {
@@ -91,7 +105,11 @@ class ArchivedSessionsNotifier extends Notifier<Map<String, int>> {
 }
 
 /// The archived sessions still hidden: one that has moved since it was archived (new activity) comes back by itself.
-Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) => <String>{
+Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) => hiddenSessionIdsIn(archived, sessions, '');
+
+/// [hiddenSessionIds] for the sessions of the computer whose storage scope is [scope]: the archive keys carry the
+/// scope (decision 0012), so archiving `s1` on one computer leaves `s1` on another in the list. Returns bare ids.
+Set<String> hiddenSessionIdsIn(Map<String, int> archived, List<Session> sessions, String scope) => <String>{
       for (final Session s in sessions)
-        if (archived[s.id] != null && s.lastActivity.millisecondsSinceEpoch <= archived[s.id]!) s.id,
+        if (archived[scope.isEmpty ? s.id : '$scope/${s.id}'] case final int at when s.lastActivity.millisecondsSinceEpoch <= at) s.id,
     };

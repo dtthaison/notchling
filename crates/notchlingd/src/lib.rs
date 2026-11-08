@@ -15,6 +15,8 @@
 pub mod acting;
 pub mod acting_ops;
 pub mod attach;
+pub mod bridge_backend;
+pub mod bridge_ops;
 pub mod cli;
 pub mod clients;
 pub mod control_ops;
@@ -31,6 +33,8 @@ pub mod signals;
 mod acting_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
+#[cfg(test)]
+mod daemon_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]

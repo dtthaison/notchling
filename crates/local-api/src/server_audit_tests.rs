@@ -6,7 +6,7 @@ use crate::client::{Client, ConnectOptions};
 use crate::server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
 use crate::testutil::TempDir;
 use crate::tier::Allowlist;
-use crate::wire::{ApiError, ClientKind, ErrorCode};
+use crate::wire::{ApiError, ClientKind, ErrorCode, Tier};
 use crate::AuditLog;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -21,6 +21,18 @@ impl Handler for Acting {
             "session.reply" | "session.stop" => Some(OpSpec::APP),
             "slow" | "read" => Some(OpSpec::AGENT),
             _ => None,
+        }
+    }
+
+    fn topics(&self) -> &[&str] {
+        &["sessions", "bridge"]
+    }
+
+    fn topic_tier(&self, topic: &str) -> Tier {
+        if topic == "bridge" {
+            Tier::App
+        } else {
+            Tier::Agent
         }
     }
 
@@ -142,6 +154,33 @@ fn the_daemon_knows_when_the_app_is_attached() {
     let agent_run = start(Allowlist::empty());
     let _posing = connect(&agent_run, ClientKind::App);
     assert!(!agent_run.handle.app_attached());
+}
+
+#[test]
+fn the_daemon_knows_when_the_app_follows_a_topic() {
+    let me = std::env::current_exe().unwrap();
+    let run = start(Allowlist::new([me]));
+    assert!(!run.handle.app_following("bridge"));
+    // Attached is not following: the app said hello and nothing more.
+    let mut app = connect(&run, ClientKind::App);
+    assert!(run.handle.app_attached());
+    assert!(!run.handle.app_following("bridge"));
+    app.subscribe(&["sessions"]).unwrap();
+    assert!(!run.handle.app_following("bridge"));
+    app.subscribe(&["bridge"]).unwrap();
+    assert!(run.handle.app_following("bridge"));
+    assert!(!run.handle.app_following("prompts"));
+    drop(app);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while run.handle.app_following("bridge") && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!run.handle.app_following("bridge"), "gone with its client");
+    // A client the allowlist doesn't name is refused the app's topic, so it never counts.
+    let agent_run = start(Allowlist::empty());
+    let mut posing = connect(&agent_run, ClientKind::App);
+    assert!(posing.subscribe(&["bridge"]).is_err());
+    assert!(!agent_run.handle.app_following("bridge"));
 }
 
 #[test]

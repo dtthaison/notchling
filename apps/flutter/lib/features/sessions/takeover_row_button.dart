@@ -10,6 +10,7 @@ import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
 import '../chat/takeover_flow.dart';
 import '../connection/connection.dart';
+import '../macs/session_ref.dart';
 import 'sessions_notifier.dart';
 
 /// "Tiếp quản" on a view-only session's row: one tap (and the confirmation) from the list, no need to open the
@@ -25,14 +26,22 @@ Future<void> runTakeover(
   final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
   final TakeoverChoice choice = await confirmTakeover(context, session);
   if (choice == TakeoverChoice.cancel || !context.mounted) return;
-  final BridgeClient? client = ref.read(bridgeClientProvider);
+  // A row in a list of several computers carries a host-qualified id: the takeover goes to that computer.
+  final SessionRef? on = SessionRef.parse(session.id);
+  final BridgeClient? client = on == null
+      ? ref.read(bridgeClientProvider)
+      : ref.read(computerClientProvider(on.host));
   if (client == null) return;
   try {
     final String newId = await client.sessionTakeover(
-      session.id,
+      on?.id ?? session.id,
       stopOriginal: choice == TakeoverChoice.stopAndResume,
     );
-    ref.read(selectedSessionIdProvider.notifier).select(newId);
+    if (on == null) {
+      ref.read(selectedSessionIdProvider.notifier).select(newId);
+    } else {
+      ref.read(selectedSessionProvider.notifier).select(SessionRef(on.host, newId));
+    }
     ref.read(activeTabProvider.notifier).show(1);
   } on BridgeException catch (error) {
     messenger.showSnackBar(

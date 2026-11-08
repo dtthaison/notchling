@@ -583,6 +583,24 @@ abstract class AppL10n {
   /// **'Gỡ Mac'**
   String get macsRemove;
 
+  /// No description provided for @computerOffline.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chưa kết nối'**
+  String get computerOffline;
+
+  /// No description provided for @computerRevoked.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã thu hồi'**
+  String get computerRevoked;
+
+  /// No description provided for @computerNoSessions.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không có session'**
+  String get computerNoSessions;
+
   /// No description provided for @macsRemoveConfirm.
   ///
   /// In vi, this message translates to:

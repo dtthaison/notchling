@@ -42,10 +42,6 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(ref.read(notificationServiceProvider).init());
-    ref.read(notificationServiceProvider).taps.listen((String sessionId) {
-      ref.read(selectedSessionIdProvider.notifier).select(sessionId);
-      ref.read(activeTabProvider.notifier).show(1);
-    });
   }
 
   @override
@@ -92,6 +88,7 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     ref.watch(attentionWatcherProvider);
+    ref.watch(notificationTapsProvider);
     ref.watch(keepAliveControllerProvider);
     ref.listen<int>(connectedCountProvider, (int? previous, int next) {
       if (next > 0 && (previous ?? 0) == 0) {

@@ -12,6 +12,28 @@ serde_json = "1"
 # The terminal screen's combining characters (general category), as Swift's `properties.generalCategory`.
 unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
 notchling-platform = { path = "../platform" }
+# The bridge (E5a) answers in the generated `agentconsole.v1` types.
+notchling-protocol = { path = "../protocol" }
+# Stable message ids (SHA-256, as the Swift app's `stableUUID`) and photo chunks (base64).
+sha2 = "0.10"
+base64 = "0.22"
+# The phone bridge's transport (bridge::net): TLS with ring's provider (not aws-lc-rs), the Swift
+# app's PKCS#12 identity, and RS256 for Cloudflare Access tokens.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
+ring = "0.17.14"
+p12 = "0.6.3"
+# The OS's root certificates, for the one HTTPS GET the bridge makes (Cloudflare Access's keys).
+rustls-native-certs = "0.8.5"
+# Visualize (E15) finds mermaid blocks, local URLs and device names in transcripts; the Swift app used NSRegularExpression.
+regex = "1"
+# Chat pictures go to the phone as JPEG (E15). Swift used ImageIO; HEIC has no decoder here.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
+[dev-dependencies]
+# Test certificates only, and an independent WebSocket client to talk to the bridge.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+tungstenite = { version = "0.27", default-features = false, features = ["handshake"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

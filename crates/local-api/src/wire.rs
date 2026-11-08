@@ -2,6 +2,8 @@
 //!
 //! - Request `{"id": <u64>, "op": "<name>", "args": {...}}`.
 //! - Reply `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.
+//!   A success may carry more fields beside `ok` (`sessions.list`: `"partial": true` when it
+//!   answered before the daemon's first read of the list); a client ignores ones it doesn't know.
 //! - Event, only after `events.subscribe`: `{"event": "<name>", "data": {...}}`.
 
 use serde::{Deserialize, Serialize};
@@ -35,6 +37,21 @@ pub mod ops {
     pub const PROMPTS_LIST: &str = "prompts.list";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const HOOK_REQUEST: &str = "hook.request";
+
+    /// Milestone 4's phone bridge, app tier. The bridge is off at every start; `bridge.set
+    /// {"on": bool}` and `bridge.status` answer `{state, port, fingerprint, ...}`.
+    pub const BRIDGE_SET: &str = "bridge.set";
+    pub const BRIDGE_STATUS: &str = "bridge.status";
+    /// `{code, payload, expires_at, hosts}`: a one-time code and the QR's text.
+    pub const BRIDGE_PAIR_BEGIN: &str = "bridge.pair.begin";
+    /// `{"request": id, "allow": bool}`: the answer to a `bridge.pair.request` event.
+    pub const BRIDGE_PAIR_ANSWER: &str = "bridge.pair.answer";
+    /// `{devices: [{id, name, platform, paired_at, last_seen}]}`.
+    pub const BRIDGE_DEVICES: &str = "bridge.devices";
+    /// `{"device": id}` → `{revoked: bool}`.
+    pub const BRIDGE_REVOKE: &str = "bridge.revoke";
+    /// `{enabled, configured, connected, last_connection, listening, hostname}`.
+    pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
 }
 
 /// Event topics and the events they carry.
@@ -52,6 +69,13 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// `{"acting": bool}`, after `settings.set_acting`.
     pub const ACTING_CHANGED: &str = "settings.acting";
+    /// The phone bridge (app tier).
+    pub const BRIDGE: &str = "bridge";
+    /// `{"request", "name", "platform", "address"}`: a phone gave the right code and waits for the person at
+    /// the computer (`bridge.pair.answer`). Unanswered, it is refused.
+    pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
+    /// The status after a change (`bridge.status`'s answer).
+    pub const BRIDGE_CHANGED: &str = "bridge.changed";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.

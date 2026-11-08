@@ -1,0 +1,388 @@
+//! Reads one text frame from a client and answers it (Swift `BridgeRouter`). Nothing is served
+//! before `hello` or `pair`; a frame that isn't JSON closes an unauthenticated connection, and a
+//! locked-out address gets silence and the door. The ops themselves are in `router_ops`.
+
+use super::backend::{Audit, AuditEntry, BridgeBackend, Devices, PairingCodes, RateLimiter};
+use super::connection::{lock, Connection};
+use super::hub::Hub;
+use super::uploads::{ImageStore, Uploads};
+use super::wire::{self, BridgeFailure};
+use serde_json::{json, Map, Value};
+use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+/// A frame larger than this is refused (`protocol/README.md`: 256 KB).
+pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+/// The longest message or caption the phone may send.
+pub const MAX_TEXT_CHARACTERS: usize = 20_000;
+/// What `session.new` takes as `model`; `default` means none.
+pub const MODELS: [&str; 4] = ["default", "opus", "sonnet", "haiku"];
+
+/// Everything the router is built from.
+pub struct RouterParts {
+    pub backend: Arc<dyn BridgeBackend>,
+    pub devices: Arc<dyn Devices>,
+    pub codes: Arc<dyn PairingCodes>,
+    pub limiter: Arc<dyn RateLimiter>,
+    pub audit: Arc<dyn Audit>,
+    pub hub: Arc<Hub>,
+    /// `session.new` opens only folders inside it.
+    pub home: PathBuf,
+    /// Where phone photos are saved (`~/Library/Caches/AgentConsole/phone-images` on the Mac).
+    pub images_dir: PathBuf,
+    /// Milliseconds since the epoch.
+    pub now_ms: Arc<dyn Fn() -> f64 + Send + Sync>,
+}
+
+pub struct Router {
+    pub(crate) backend: Arc<dyn BridgeBackend>,
+    devices: Arc<dyn Devices>,
+    codes: Arc<dyn PairingCodes>,
+    limiter: Arc<dyn RateLimiter>,
+    audit: Arc<dyn Audit>,
+    pub(crate) hub: Arc<Hub>,
+    pub(crate) home: PathBuf,
+    pub(crate) images: ImageStore,
+    pub(crate) uploads: Uploads,
+    send_now_gate: Mutex<HashMap<String, f64>>,
+    now: Arc<dyn Fn() -> f64 + Send + Sync>,
+}
+
+/// One interrupt per session every three seconds: a second Esc would cancel the queued message.
+const SEND_NOW_INTERVAL_MS: f64 = 3000.0;
+
+impl Router {
+    pub fn new(parts: RouterParts) -> Router {
+        Router {
+            backend: parts.backend,
+            devices: parts.devices,
+            codes: parts.codes,
+            limiter: parts.limiter,
+            audit: parts.audit,
+            hub: parts.hub,
+            home: parts.home,
+            images: ImageStore::new(parts.images_dir),
+            uploads: Uploads::default(),
+            send_now_gate: Mutex::new(HashMap::new()),
+            now: parts.now_ms,
+        }
+    }
+
+    pub(crate) fn now_ms(&self) -> f64 {
+        (self.now)()
+    }
+
+    /// Photos being uploaded right now.
+    pub fn pending_uploads(&self) -> usize {
+        self.uploads.pending()
+    }
+
+    /// Frees uploads past their expiry; the transport runs it on the hub's tick.
+    pub fn sweep_uploads(&self) {
+        self.uploads.sweep(self.now_ms());
+    }
+
+    /// Answers one text frame. Blocks until the backend has (a `pair` waits for the person at the
+    /// computer), so the transport calls it off its reading thread; frames of one connection may be
+    /// handled at the same time.
+    pub fn handle(&self, connection: &Arc<Connection>, text: &str) {
+        let authenticated = connection.is_authenticated();
+        if !authenticated
+            && self
+                .limiter
+                .is_blocked(&connection.remote_address, self.now_ms())
+        {
+            connection.close();
+            return;
+        }
+        let parsed = (text.len() <= MAX_MESSAGE_BYTES)
+            .then(|| serde_json::from_str::<Value>(text).ok())
+            .flatten();
+        let Some((body, op)) = parsed.and_then(|v| match v {
+            Value::Object(map) => {
+                let op = map.get("op").and_then(Value::as_str).map(String::from)?;
+                Some((map, op))
+            }
+            _ => None,
+        }) else {
+            reply_error(
+                connection,
+                None,
+                &BridgeFailure::invalid("Tin nhắn không phải JSON hợp lệ."),
+            );
+            if !authenticated {
+                self.fail(connection);
+            }
+            return;
+        };
+        let id = body.get("id");
+
+        if !authenticated {
+            match op.as_str() {
+                "hello" => self.hello(&body, connection),
+                "pair" => self.pair(&body, connection),
+                _ => {
+                    reply_error(
+                        connection,
+                        id,
+                        &BridgeFailure::unauthorized("Cần đăng nhập (hello) trước."),
+                    );
+                    self.fail(connection);
+                }
+            }
+            return;
+        }
+
+        match self.dispatch(&op, &body, connection) {
+            Ok(data) => connection.send_text(wire::ok(id, data)),
+            Err(failure) => reply_error(connection, id, &failure),
+        }
+    }
+
+    /// The transport calls this when a connection ends: its upload and phone stream are dropped.
+    pub fn closed(&self, connection: &Arc<Connection>) {
+        self.uploads.drop_connection(connection.id);
+        let streaming = std::mem::take(&mut connection.subscription().phone_active);
+        if streaming {
+            self.backend.stop_phone(connection);
+        }
+        self.hub.remove(connection);
+    }
+
+    // MARK: Auth
+
+    fn fail(&self, connection: &Connection) {
+        self.limiter
+            .record_failure(&connection.remote_address, self.now_ms());
+        connection.close();
+    }
+
+    fn hello(&self, body: &Map<String, Value>, connection: &Arc<Connection>) {
+        let id = body.get("id");
+        let device = body
+            .get("token")
+            .and_then(Value::as_str)
+            .and_then(|token| self.devices.authenticate(token));
+        let Some(device) = device else {
+            reply_error(
+                connection,
+                id,
+                &BridgeFailure::unauthorized("Token không đúng hoặc đã bị thu hồi."),
+            );
+            self.fail(connection);
+            return;
+        };
+        self.limiter.record_success(&connection.remote_address);
+        self.devices.touch(&device.id);
+        let data =
+            json!({"device": {"id": device.id, "name": device.name}, "version": wire::VERSION});
+        connection.authenticate(device);
+        connection.send_text(wire::ok(id, data));
+    }
+
+    fn pair(&self, body: &Map<String, Value>, connection: &Arc<Connection>) {
+        let id = body.get("id");
+        let code_ok = body
+            .get("code")
+            .and_then(Value::as_str)
+            .is_some_and(|code| self.codes.consume(code, self.now_ms()));
+        if !code_ok {
+            reply_error(
+                connection,
+                id,
+                &BridgeFailure::unauthorized("Mã ghép đôi sai hoặc đã hết hạn."),
+            );
+            self.fail(connection);
+            return;
+        }
+        let info = body.get("device");
+        let field = |key: &str| {
+            info.and_then(|d| d.get(key))
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+        };
+        let name = field("name").unwrap_or_default();
+        let platform = field("platform").unwrap_or_else(|| "unknown".into());
+        if name.is_empty() {
+            reply_error(
+                connection,
+                id,
+                &BridgeFailure::invalid("Thiếu tên thiết bị."),
+            );
+            self.fail(connection);
+            return;
+        }
+        if !self
+            .backend
+            .request_approval(&name, &platform, &connection.remote_address)
+        {
+            reply_error(
+                connection,
+                id,
+                &BridgeFailure::unauthorized("Mac đã từ chối thiết bị này."),
+            );
+            connection.close();
+            return;
+        }
+        match self.devices.register(&name, &platform) {
+            Ok((device, token)) => {
+                self.limiter.record_success(&connection.remote_address);
+                let data = json!({"token": token, "deviceId": device.id, "version": wire::VERSION});
+                self.audit.append(AuditEntry {
+                    device: device.name.clone(),
+                    op: "pair".into(),
+                    address: connection.audit_address(),
+                    ..AuditEntry::default()
+                });
+                connection.authenticate(device);
+                connection.send_text(wire::ok(id, data));
+            }
+            Err(_) => {
+                reply_error(
+                    connection,
+                    id,
+                    &BridgeFailure::internal("Không lưu được thiết bị."),
+                );
+                connection.close();
+            }
+        }
+    }
+
+    // MARK: Ops
+
+    fn dispatch(
+        &self,
+        op: &str,
+        body: &Map<String, Value>,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let id = body.get("id");
+        match op {
+            "ping" => Ok(json!({"time": self.now_ms() as i64})),
+            "sessions.list" => {
+                let list: Vec<_> = self
+                    .backend
+                    .sessions()
+                    .iter()
+                    .map(|s| s.to_wire())
+                    .collect();
+                Ok(json!({"sessions": wire::object(&list)}))
+            }
+            "chat.get" => self.chat_get(body),
+            "viz.get" => self.viz_get(body),
+            "web.snapshot" => self.web_snapshot(body, id, connection),
+            "session.message" => self.session_message(body, connection),
+            "session.sendNow" => self.session_send_now(body, connection),
+            "session.image.begin" => self.image_begin(body, connection),
+            "session.image.chunk" => self.image_chunk(body, connection),
+            "session.image.end" => self.image_end(body, connection),
+            "commands.list" => self.commands_list(body),
+            "prompt.answer" => self.prompt_answer(body, connection),
+            "session.new" => self.session_new(body, connection),
+            "chat.image" => self.chat_image(body, id, connection),
+            "session.takeover" => self.session_takeover(body, connection),
+            "projects.recent" => Ok(json!({"projects": self.backend.recent_projects()})),
+            "subscribe" => self.subscribe(body, connection),
+            "unsubscribe" => {
+                self.unsubscribe(connection);
+                Ok(json!({"subscribed": false}))
+            }
+            _ => Err(BridgeFailure::invalid(format!("Không có lệnh \"{op}\"."))),
+        }
+    }
+
+    /// Records an executed action, never its text.
+    pub(crate) fn audit(
+        &self,
+        connection: &Connection,
+        op: &str,
+        session: Option<&str>,
+        length: Option<usize>,
+    ) {
+        self.audit.append(AuditEntry {
+            device: connection.device_name(),
+            op: op.into(),
+            session: session.map(String::from),
+            length,
+            address: connection.audit_address(),
+            stopped_pid: None,
+        });
+    }
+
+    pub(crate) fn audit_entry(&self, entry: AuditEntry) {
+        self.audit.append(entry);
+    }
+
+    /// False while an interrupt to this session went out less than three seconds ago.
+    pub(crate) fn allow_send_now(&self, session_id: &str) -> bool {
+        let now = self.now_ms();
+        let mut last = lock(&self.send_now_gate);
+        if last
+            .get(session_id)
+            .is_some_and(|at| now - at < SEND_NOW_INTERVAL_MS)
+        {
+            return false;
+        }
+        last.insert(session_id.to_string(), now);
+        true
+    }
+}
+
+pub(crate) fn reply_error(connection: &Connection, id: Option<&Value>, failure: &BridgeFailure) {
+    connection.send_text(wire::error(id, failure));
+}
+
+/// An existing folder inside `home`, with `..` and symlinks resolved first, so neither can lead
+/// out of it.
+pub fn validated_folder(path: &str, home: &Path) -> Result<PathBuf, BridgeFailure> {
+    if !path.starts_with('/') {
+        return Err(BridgeFailure::invalid("cwd phải là đường dẫn tuyệt đối."));
+    }
+    let resolved = resolve(Path::new(path));
+    let home = resolve(home);
+    if !resolved.starts_with(&home) {
+        return Err(BridgeFailure::invalid(
+            "Chỉ mở được thư mục trong thư mục home của Mac.",
+        ));
+    }
+    if !resolved.is_dir() {
+        return Err(BridgeFailure::not_found("Thư mục không tồn tại."));
+    }
+    Ok(resolved)
+}
+
+/// `..` removed by name, then the longest part that exists resolved through its symlinks, as
+/// Foundation's `standardizedFileURL.resolvingSymlinksInPath()` does.
+fn resolve(path: &Path) -> PathBuf {
+    let mut plain = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                plain.pop();
+            }
+            Component::CurDir => {}
+            other => plain.push(other.as_os_str()),
+        }
+    }
+    let mut existing = plain.clone();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(&existing) {
+            return rest
+                .iter()
+                .rev()
+                .fold(real, |acc: PathBuf, part| acc.join(part));
+        }
+        match (
+            existing.file_name().map(|n| n.to_os_string()),
+            existing.parent(),
+        ) {
+            (Some(name), Some(parent)) => {
+                rest.push(name);
+                existing = parent.to_path_buf();
+            }
+            _ => return plain,
+        }
+    }
+}

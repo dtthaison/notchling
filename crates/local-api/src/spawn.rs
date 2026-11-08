@@ -1,7 +1,9 @@
 //! Starting the daemon when it isn't there: the one place the app and the command line do it.
 //!
 //! [`ensure_daemon`] connects first; only when nobody listens does it start `<binary> daemon
-//! --socket <socket>` detached and wait up to 3 s for the socket. It refuses a binary outside an app
+//! --socket <socket>` detached and wait up to 3 s for the socket. A daemon that is alive when the
+//! wait ends is left running (the call says [`ClientError::Timeout`]; the caller connects later);
+//! one that exited is an error. It refuses a binary outside an app
 //! bundle (`*.app/Contents/…`) or a cargo target folder (`target/[<triple>/]debug|release`, or a
 //! moved one marked by `CACHEDIR.TAG`), and one not named `notchling`, so a test can never start
 //! some other program, and the socket is always passed explicitly, so a daemon started for a test
@@ -13,7 +15,7 @@ use crate::client::{connect_raw, ClientError};
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// How long [`ensure_daemon`] waits for a started daemon's socket.
@@ -150,12 +152,7 @@ pub fn ensure_daemon_with(
     let deadline = Instant::now() + options.wait;
     loop {
         if connect_raw(socket).is_ok() {
-            // Reap it whenever it ends, so it never lingers as a zombie of ours.
-            let _ = std::thread::Builder::new()
-                .name("notchling-daemon-reaper".into())
-                .spawn(move || {
-                    let _ = child.wait();
-                });
+            reap(child);
             return Ok(Started::Spawned);
         }
         if let Ok(Some(status)) = child.try_wait() {
@@ -164,12 +161,24 @@ pub fn ensure_daemon_with(
             ))));
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            // Not answering yet is not the same as never: a daemon on a loaded machine or a long
+            // list is only slow, and the caller (the app starts one once per run, then keeps
+            // trying to connect) meets it when it is up. Killing it here would leave nothing to
+            // meet. The wait ends; the daemon is not ours to end.
+            reap(child);
             return Err(ClientError::Timeout);
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Waits for the daemon to end on a thread of its own, so it never lingers as a zombie of ours.
+fn reap(mut child: Child) {
+    let _ = std::thread::Builder::new()
+        .name("notchling-daemon-reaper".into())
+        .spawn(move || {
+            let _ = child.wait();
+        });
 }
 
 /// Every Notchling setting variable starts with this.
@@ -345,6 +354,64 @@ mod tests {
             Path::new(command.get_program()),
             std::fs::canonicalize(&real).unwrap()
         );
+    }
+
+    /// Kills the process a test left running, whatever the test did.
+    #[cfg(unix)]
+    struct KillOnDrop(Option<libc::pid_t>);
+
+    #[cfg(unix)]
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0 {
+                // SAFETY: a process this test started (its own pid file named it).
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+    }
+
+    /// A daemon that is alive but not listening when the wait ends is only slow, so it is left to
+    /// finish: the app starts a daemon once per run and then keeps trying to connect, and a daemon
+    /// killed at the deadline is a daemon it never gets.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_still_starting_when_the_wait_ends_is_left_running() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("spawn-slow");
+        let d = dir.path();
+        // A cargo target folder (by its tag) holding a "notchling" that never binds a socket.
+        file(d, "cargo-out/CACHEDIR.TAG");
+        let binary = file(d, "cargo-out/debug/notchling");
+        let pid_file = d.join("pid");
+        let script = format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n",
+            pid_file.display()
+        );
+        std::fs::write(&binary, script).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let socket = d.join("notchlingd.sock");
+        let mut guard = KillOnDrop(None);
+
+        let options = SpawnOptions {
+            wait: Duration::from_millis(1500),
+            data_root: None,
+        };
+        let err = ensure_daemon_with(&binary, &socket, &options).unwrap_err();
+        assert!(matches!(err, ClientError::Timeout), "{err:?}");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !pid_file.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("the started program wrote its pid")
+            .trim()
+            .parse()
+            .unwrap();
+        guard.0 = Some(pid);
+        // SAFETY: signal 0 only asks whether the process exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        assert!(alive, "the daemon was killed when the wait ended");
     }
 
     #[test]

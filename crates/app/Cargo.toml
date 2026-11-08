@@ -11,6 +11,7 @@ notchling-engine = { path = "../engine" }
 notchling-kit = { path = "../kit" }
 notchling-local-api = { path = "../local-api" }
 notchling-platform = { path = "../platform" }
+qrcode = { version = "=0.14.1", default-features = false }
 serde_json = "1"
 
 # GPUI and AppKit are macOS only for now (LINT-GPUI-MACOS-ONLY); elsewhere `main` says so and exits 0.
@@ -25,3 +26,8 @@ raw-window-handle = "=0.6.2"
 # The render tests read the PNG back. The version GPUI's `image` already locks, so no second copy.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 png = "=0.17.16"
+
+# The phone panel's readers are tested on the engine bridge's real replies, over a test certificate.
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+p12 = "0.6.3"

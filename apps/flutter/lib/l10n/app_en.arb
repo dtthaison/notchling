@@ -151,6 +151,9 @@
   "macsActive": "In use",
   "macsUse": "Use this Mac",
   "macsRemove": "Remove Mac",
+  "computerOffline": "Not connected",
+  "computerRevoked": "Revoked",
+  "computerNoSessions": "No sessions",
   "macsRemoveConfirm": "Remove “{name}” from this phone?",
   "@macsRemoveConfirm": {
     "placeholders": {
