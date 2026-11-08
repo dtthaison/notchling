@@ -11,7 +11,10 @@
 use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::{ActingOps, Room};
 use crate::attach::{ClaudeAttacher, LiveLauncher};
+use crate::bridge_backend::APPROVAL_WAIT;
+use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::layout::Layout;
+use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
@@ -56,10 +59,12 @@ impl std::fmt::Display for DaemonError {
     }
 }
 
-/// The ops: M2's session list (agent tier), and with [`Ops::with_acting`] M3's ([`ActingOps`]).
+/// The ops: M2's session list (agent tier), with [`Ops::with_acting`] M3's ([`ActingOps`]), and
+/// with [`Ops::with_bridge`] M4's phone bridge ([`BridgeOps`], app tier).
 pub struct Ops {
     sessions: Arc<Mutex<Value>>,
     acting: Option<Arc<ActingOps>>,
+    bridge: Option<Arc<BridgeOps>>,
 }
 
 impl Ops {
@@ -67,6 +72,7 @@ impl Ops {
         Ops {
             sessions,
             acting: None,
+            bridge: None,
         }
     }
 
@@ -74,7 +80,13 @@ impl Ops {
         Ops {
             sessions,
             acting: Some(acting),
+            bridge: None,
         }
+    }
+
+    pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
+        self.bridge = Some(bridge);
+        self
     }
 }
 
@@ -82,11 +94,18 @@ impl Handler for Ops {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
-            op => self.acting.as_ref().and_then(|a| a.spec(op)),
+            op => self
+                .acting
+                .as_ref()
+                .and_then(|a| a.spec(op))
+                .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op))),
         }
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
+            return bridge.call(op, args);
+        }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self
                 .sessions
@@ -99,16 +118,23 @@ impl Handler for Ops {
     }
 
     fn topics(&self) -> &[&str] {
-        match self.acting {
-            Some(_) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
-            None => &[topics::SESSIONS],
+        match (&self.acting, &self.bridge) {
+            (Some(_), Some(_)) => &[
+                topics::SESSIONS,
+                topics::PROMPTS,
+                topics::SETTINGS,
+                topics::BRIDGE,
+            ],
+            (Some(_), None) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
+            (None, _) => &[topics::SESSIONS],
         }
     }
 
-    /// The held prompts are the app's: their ids are what answers them.
+    /// The held prompts are the app's: their ids are what answers them. So are the bridge's
+    /// pairing requests.
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
-            topics::PROMPTS => Tier::App,
+            topics::PROMPTS | topics::BRIDGE => Tier::App,
             _ => Tier::Agent,
         }
     }
@@ -208,6 +234,8 @@ pub struct DaemonOptions {
     /// Runs before every read of the list. A test blocks the first read here to stand in for a
     /// slow disk or a long list; nothing in the app sets it.
     pub before_scan: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The phone bridge's LAN and tunnel ports, used only once the app turns the bridge on.
+    pub bridge_ports: (u16, u16),
 }
 
 impl Default for DaemonOptions {
@@ -217,7 +245,30 @@ impl Default for DaemonOptions {
             rescan_every: RESCAN_EVERY,
             first_list_wait: FIRST_LIST_WAIT,
             before_scan: None,
+            bridge_ports: (bridge_ports::LAN, bridge_ports::TUNNEL),
         }
+    }
+}
+
+/// Where the bridge keeps its files: `AgentConsole` beside Notchling's data folder (the Swift
+/// app's, so paired phones carry over; `<root>/AgentConsole` under a fixture root), and photos in
+/// `AgentConsole/phone-images` beside the cache folder.
+fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
+    let beside = |dir: &std::path::Path| dir.parent().unwrap_or(dir).join("AgentConsole");
+    let data_dir = beside(&layout.data_dir);
+    let images_dir = match (layout.fixture, notchling_platform::paths::cache_dir()) {
+        (false, Some(cache)) => beside(&cache).join("phone-images"),
+        _ => data_dir.join("phone-images"),
+    };
+    BridgeSetup {
+        data_dir,
+        home: PathBuf::from(home_of(&layout.roots())),
+        images_dir,
+        projects_dir: layout.claude_dir.join("projects"),
+        lan_port: ports.0,
+        tunnel_port: ports.1,
+        loopback_only: false,
+        approval_wait: APPROVAL_WAIT,
     }
 }
 
@@ -274,6 +325,14 @@ pub fn run(
             Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
         ),
     );
+    // Off at every start, like acting: no port is bound and nothing is written under
+    // `AgentConsole` until the app's `bridge.set` in this run.
+    let bridge = Arc::new(BridgeOps::new(
+        bridge_setup(&layout, options.bridge_ports),
+        sessions.clone(),
+        acting_ops.clone(),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -282,7 +341,9 @@ pub fn run(
             version: env!("CARGO_PKG_VERSION").to_string(),
             limits: Limits::default(),
         },
-        Arc::new(Ops::with_acting(sessions.clone(), acting_ops.clone())),
+        Arc::new(
+            Ops::with_acting(sessions.clone(), acting_ops.clone()).with_bridge(bridge.clone()),
+        ),
     )
     .map_err(|e| match e.kind() {
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),
@@ -338,8 +399,9 @@ pub fn run(
             watched = now;
         }
     }
-    // Held hooks pass now rather than at their deadline.
+    // Held hooks pass now rather than at their deadline; the bridge's ports close.
     acting_ops.close();
+    bridge.close();
     handle.shutdown();
     match thread.join() {
         Ok(result) => result.map_err(DaemonError::Io),
