@@ -91,7 +91,7 @@ Since Phase 4. Every crate but `crates/protocol` is a stub that builds, has one 
 | Area | Folders and files | Tests | Zone | Parts |
 | --- | --- | --- | --- | --- |
 | Workspace | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` (Rust 1.99.1), `deny.toml` (the license allowlist) | the `rust-test`, `rust-clippy` and `rust-deny` checks | protected | none |
-| Engine | `crates/engine/` | unit test in `src/lib.rs` | mixed: `src/transcript/`, `src/search/` auto (not written yet) | E1 to E3, E5 to E9, E11 to E15 |
+| Engine | `crates/engine/` | unit test in `src/lib.rs`; E1 ports in `tests/transcript_*.rs` (read the Swift fixtures by path) | mixed: `src/transcript/`, `src/search/` auto (not written yet) | E1 to E3, E5 to E9, E11 to E15 |
 | Engine service | `crates/notchlingd/` (prints its version) | unit test in `src/main.rs` | protected | E4, E16 |
 | Terminal host | `crates/ptyhost/` (prints its version) | unit test in `src/main.rs` | protected | E3 |
 | Local API | `crates/local-api/` | unit test in `src/lib.rs` | protected | E17 |
