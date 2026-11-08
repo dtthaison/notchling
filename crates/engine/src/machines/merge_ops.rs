@@ -321,9 +321,16 @@ fn not_a_branch(branch: &str) -> String {
     )
 }
 
+#[cfg(unix)]
 fn is_executable(path: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+/// No execute bit off Unix: a file is as close as it gets.
+#[cfg(not(unix))]
+fn is_executable(path: &str) -> bool {
+    std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
 }

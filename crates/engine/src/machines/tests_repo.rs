@@ -101,6 +101,7 @@ fn machine_names_for_titles_and_paths() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_alias_guard_matches_indented_and_padded_host_lines_only() {
     let pattern = alias_pattern(ALIAS);

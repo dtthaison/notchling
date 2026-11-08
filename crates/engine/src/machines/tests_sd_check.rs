@@ -374,6 +374,7 @@ fn a_python_or_sd_path_from_a_machine_with_shell_characters_never_runs() {
 
 // MARK: Running
 
+#[cfg(unix)]
 fn uid() -> String {
     let out = std::process::Command::new("/usr/bin/id")
         .arg("-u")
@@ -383,6 +384,7 @@ fn uid() -> String {
 }
 
 /// Runs the macOS toggle scripts with `/bin/sh` and a fake `launchctl` that logs its arguments.
+#[cfg(unix)]
 fn run_toggle(on: bool, loaded: bool) -> Vec<String> {
     let dir = TempDir::new("toggle");
     let bin = dir.path().join("bin");
@@ -414,6 +416,7 @@ fn run_toggle(on: bool, loaded: bool) -> Vec<String> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn mac_toggle_on_enables_then_bootstraps_only_when_not_loaded() {
     let uid = uid();
@@ -435,6 +438,7 @@ fn mac_toggle_on_enables_then_bootstraps_only_when_not_loaded() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn mac_toggle_off_boots_out_only_when_loaded_then_disables() {
     let uid = uid();

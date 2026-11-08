@@ -181,6 +181,7 @@ fn the_login_checks_keep_no_output_and_write_nothing() {
 
 /// Run in a real shell with stubs for gh, ssh and security: only token lines come back, never what
 /// they printed.
+#[cfg(unix)]
 #[test]
 fn the_login_checks_run_to_token_lines_and_never_print_the_tools_output() {
     let dir = TempDir::new("login");

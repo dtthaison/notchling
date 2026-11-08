@@ -85,9 +85,9 @@ mod tests_merge;
 mod tests_merge_b;
 #[cfg(test)]
 mod tests_merge_c;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests_merge_git;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests_merge_git_b;
 #[cfg(test)]
 mod tests_morning;
@@ -103,9 +103,9 @@ mod tests_repo_push;
 mod tests_repo_replace;
 #[cfg(test)]
 mod tests_repo_replace_b;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests_repo_shell;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests_runner;
 #[cfg(test)]
 mod tests_safety;
