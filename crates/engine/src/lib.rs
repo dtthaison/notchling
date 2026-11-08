@@ -4,10 +4,12 @@
 //! `control` (E11), which plans what the app does to a session and launches it through a trait,
 //! `terminal` (E3a) and `reply` (E3b), which plans what is typed into a session.
 
+pub mod accounts;
 pub mod bridge;
 pub mod control;
 pub mod delegate;
 pub mod pages;
+pub mod providers;
 pub mod reply;
 pub mod search;
 pub mod sessions;
