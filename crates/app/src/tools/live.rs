@@ -32,8 +32,22 @@ pub struct ToolLive {
     pub agy_changes: BTreeMap<String, u64>,
     /// The last failure of a session's turn, cleared when its next turn starts.
     pub errors: BTreeMap<String, String>,
+    /// Draft rows (`codex-new:<uuid>`) whose session Codex named after the daemon had replied
+    /// `starting`: the draft, and the real row it became.
+    pub named: BTreeMap<String, String>,
+    /// Draft rows whose session never started, and why.
+    pub unstarted: BTreeMap<String, String>,
     /// Counts every event taken, so a poll can tell something moved.
     pub generation: u64,
+}
+
+/// What became of a draft row whose session was still starting when the daemon replied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Follow {
+    Waiting,
+    /// Codex named the session: this is its row.
+    Named(String),
+    NotStarted(String),
 }
 
 fn text<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -46,6 +60,23 @@ impl ToolLive {
         let data = &event.data;
         match event.event.as_str() {
             topics::CODEX_TURN => {
+                // A new session the daemon could not name within its reply: the draft row it
+                // was sent from, and what became of it.
+                if let Some(draft) = text(data, "draft") {
+                    match (text(data, "state"), text(data, "id")) {
+                        (Some("named"), Some(id)) => {
+                            self.named.insert(draft.to_owned(), id.to_owned());
+                        }
+                        (Some("not_started"), _) => {
+                            let why = text(data, "error").filter(|e| !e.is_empty());
+                            self.unstarted.insert(
+                                draft.to_owned(),
+                                why.unwrap_or("Codex didn't start the session.").to_owned(),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
                 let Some(id) = text(data, "id") else {
                     self.generation = self.generation.wrapping_add(1);
                     return true;
@@ -123,6 +154,17 @@ impl ToolLive {
             self.errors.insert(id.to_owned(), error.to_owned());
         }
         *self.agy_changes.entry(id.to_owned()).or_default() += 1;
+    }
+
+    /// What became of a draft whose first message the daemon answered `starting`.
+    pub fn follow(&self, draft: &str) -> Follow {
+        if let Some(row) = self.named.get(draft) {
+            Follow::Named(row.clone())
+        } else if let Some(why) = self.unstarted.get(draft) {
+            Follow::NotStarted(why.clone())
+        } else {
+            Follow::Waiting
+        }
     }
 
     /// Whether a row's turn runs, by the runners' word.
@@ -253,6 +295,41 @@ mod tests {
         assert_eq!(live.generation, before.generation + 1);
         assert_eq!(live.errors, before.errors);
         assert!(!live.apply(&event("sessions.changed", json!([]))));
+    }
+
+    #[test]
+    fn a_draft_is_followed_to_the_session_the_daemon_names_late() {
+        let mut live = ToolLive::default();
+        live.apply(&event(
+            "codex.turn",
+            json!({"id": "codex:s9", "session": "s9", "state": "named", "draft": "codex-new:u1"}),
+        ));
+        assert_eq!(live.named["codex-new:u1"], "codex:s9");
+        assert!(
+            !live.is_working("codex:s9"),
+            "naming is not the turn starting; the started event is"
+        );
+        live.apply(&event(
+            "codex.turn",
+            json!({"id": null, "state": "not_started", "draft": "codex-new:u2", "error": "no codex"}),
+        ));
+        assert_eq!(live.unstarted["codex-new:u2"], "no codex");
+        assert_eq!(live.named.len(), 1);
+        // A failure with no error text still says something.
+        live.apply(&event(
+            "codex.turn",
+            json!({"id": null, "state": "not_started", "draft": "codex-new:u3"}),
+        ));
+        assert!(!live.unstarted["codex-new:u3"].is_empty());
+        assert_eq!(
+            live.follow("codex-new:u1"),
+            Follow::Named("codex:s9".into())
+        );
+        assert_eq!(
+            live.follow("codex-new:u2"),
+            Follow::NotStarted("no codex".into())
+        );
+        assert_eq!(live.follow("codex-new:other"), Follow::Waiting);
     }
 
     #[test]

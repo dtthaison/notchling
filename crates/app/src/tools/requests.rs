@@ -75,11 +75,15 @@ pub fn codex_send(id: &str, text: &str, pick: &Pick) -> Request {
     }
 }
 
-/// `codex.send` that starts a new session in `folder`.
-pub fn codex_send_draft(folder: &str, text: &str, pick: &Pick) -> Request {
+/// `codex.send` that starts a new session in `folder` from the draft row `draft`: the daemon
+/// echoes the draft in the event that names the session when that takes over its 4.5 s.
+pub fn codex_send_draft(draft: &str, folder: &str, text: &str, pick: &Pick) -> Request {
     Request {
         op: ops::CODEX_SEND,
-        args: with_pick(json!({ "draft_folder": folder, "text": text }), pick),
+        args: with_pick(
+            json!({ "draft_folder": folder, "text": text, "draft": draft }),
+            pick,
+        ),
     }
 }
 
@@ -215,10 +219,13 @@ pub fn sent_row(reply: &Value) -> Option<String> {
 pub enum Sent {
     Started,
     Queued(usize),
+    /// A new session Codex hasn't named yet: the real row comes in an event naming the draft.
+    Starting,
 }
 
 pub fn sent_state(reply: &Value) -> Sent {
     match reply.get("state").and_then(Value::as_str) {
+        Some("starting") => Sent::Starting,
         Some("queued") => Sent::Queued(
             reply
                 .get("waiting")
@@ -256,8 +263,9 @@ mod tests {
             effort: Some("high".into()),
         };
         assert_eq!(
-            codex_send_draft("/w/api", "start", &picked).args,
-            json!({"draft_folder": "/w/api", "text": "start", "model": "gpt-6.1-sol", "effort": "high"})
+            codex_send_draft("codex-new:u1", "/w/api", "start", &picked).args,
+            json!({"draft_folder": "/w/api", "text": "start", "draft": "codex-new:u1",
+                   "model": "gpt-6.1-sol", "effort": "high"})
         );
         let model_only = Pick {
             model: Some("m".into()),
@@ -267,6 +275,11 @@ mod tests {
             codex_send("codex:s1", "x", &model_only).args,
             json!({"id": "codex:s1", "text": "x", "model": "m"})
         );
+        assert_eq!(
+            sent_state(&json!({"state": "starting", "draft": "codex-new:u1"})),
+            Sent::Starting
+        );
+        assert_eq!(sent_row(&json!({"state": "starting"})), None);
         assert_eq!(codex_stop("codex:s1").op, "codex.stop");
         assert_eq!(codex_delete("codex:s1").args, json!({"id": "codex:s1"}));
     }
