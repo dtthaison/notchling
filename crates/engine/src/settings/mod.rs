@@ -11,6 +11,7 @@
 //! - [`migrate`]: the Swift app's exported UserDefaults in, new settings out. The app exports the
 //!   `local.notchling` domain (and `local.awake.menubar` when upgrading from Awake) as JSON; reading
 //!   the real domain is the app's job.
+//! - [`import`]: [`migrate`] into a [`Settings`] and save; values the new app already has win.
 //! - [`data_dir`] / [`DirEnv`]: the data folder as a pure function of the environment.
 //!
 //! # The keys
@@ -67,6 +68,6 @@ pub mod migrate;
 pub mod store;
 
 pub use dirs::{data_dir, settings_file, DirEnv, Os};
-pub use keys::{spec, Fallback, Kind, KeySpec, KEYS};
-pub use migrate::{migrate, DefaultsExport, Migrated, Report};
+pub use keys::{spec, Fallback, KeySpec, Kind, KEYS};
+pub use migrate::{import, migrate, DefaultsExport, Migrated, Report};
 pub use store::{Settings, SettingsError};

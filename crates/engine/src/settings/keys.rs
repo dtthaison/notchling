@@ -62,6 +62,27 @@ impl KeySpec {
     }
 }
 
+impl KeySpec {
+    /// True when `value` is exactly what this key stores: the right JSON type and, for an enum, one of
+    /// the allowed strings.
+    pub fn accepts(&self, value: &Value) -> bool {
+        match self.kind {
+            Kind::Bool => value.is_boolean(),
+            Kind::Int => value.is_i64() || value.is_u64(),
+            Kind::Double => value.is_number(),
+            Kind::String => value
+                .as_str()
+                .is_some_and(|s| self.allowed.is_empty() || self.allowed.contains(&s)),
+            Kind::StringList => value
+                .as_array()
+                .is_some_and(|a| a.iter().all(Value::is_string)),
+            Kind::Dict => value.is_object(),
+            Kind::Json => !value.is_null(),
+            Kind::Any => true,
+        }
+    }
+}
+
 const fn key(
     name: &'static str,
     kind: Kind,
@@ -69,7 +90,14 @@ const fn key(
     from_awake: bool,
     doc: &'static str,
 ) -> KeySpec {
-    KeySpec { name, kind, default, allowed: &[], from_awake, doc }
+    KeySpec {
+        name,
+        kind,
+        default,
+        allowed: &[],
+        from_awake,
+        doc,
+    }
 }
 
 const fn choice(
@@ -79,7 +107,14 @@ const fn choice(
     from_awake: bool,
     doc: &'static str,
 ) -> KeySpec {
-    KeySpec { name, kind: Kind::String, default: Fallback::Str(default), allowed, from_awake, doc }
+    KeySpec {
+        name,
+        kind: Kind::String,
+        default: Fallback::Str(default),
+        allowed,
+        from_awake,
+        doc,
+    }
 }
 
 use Fallback as D;

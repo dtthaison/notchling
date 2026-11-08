@@ -109,14 +109,23 @@ mod tests {
             Some("/h/.claude/projects/p/1f2e-uuid.jsonl"),
         );
         assert_eq!(job.session_id().as_deref(), Some("1f2e-uuid"));
-        assert_eq!(sample(AgentTarget::Job("ab12".into()), None).session_id(), None);
+        assert_eq!(
+            sample(AgentTarget::Job("ab12".into()), None).session_id(),
+            None
+        );
         let resume = sample(
-            AgentTarget::Resume { session_id: "s1".into(), cwd: "/tmp".into() },
+            AgentTarget::Resume {
+                session_id: "s1".into(),
+                cwd: "/tmp".into(),
+            },
             None,
         );
         assert_eq!(resume.session_id().as_deref(), Some("s1"));
         let empty = sample(
-            AgentTarget::Resume { session_id: String::new(), cwd: "/tmp".into() },
+            AgentTarget::Resume {
+                session_id: String::new(),
+                cwd: "/tmp".into(),
+            },
             None,
         );
         assert_eq!(empty.session_id(), None);

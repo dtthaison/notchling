@@ -20,15 +20,19 @@ pub struct Rank {
 pub fn rank(job: &Value) -> Rank {
     Rank {
         live: str_field(job, "state") != Some("stopped"),
-        updated_ms: str_field(job, "updatedAt").and_then(parse_iso_ms).unwrap_or(i64::MIN),
+        updated_ms: str_field(job, "updatedAt")
+            .and_then(parse_iso_ms)
+            .unwrap_or(i64::MIN),
     }
 }
 
 /// The folders of one job's copies (`None` is the main folder), the current copy first.
 pub fn newest_first(copies: &[(Option<String>, Value)]) -> Vec<Option<String>> {
-    let mut ranked: Vec<(Option<String>, Rank)> =
-        copies.iter().map(|(dir, job)| (dir.clone(), rank(job))).collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1)); // stable: ties keep the folder order
+    let mut ranked: Vec<(Option<String>, Rank)> = copies
+        .iter()
+        .map(|(dir, job)| (dir.clone(), rank(job)))
+        .collect();
+    ranked.sort_by_key(|a| std::cmp::Reverse(a.1)); // stable: ties keep the folder order
     ranked.into_iter().map(|(dir, _)| dir).collect()
 }
 
@@ -89,8 +93,13 @@ pub fn agent_from_job(
     }
     .map(String::from);
     let cwd = str_field(job, "cwd").unwrap_or("").to_string();
-    let mut since_ms = str_field(job, "updatedAt").and_then(parse_iso_ms).unwrap_or(0);
-    if let Some(ms) = live.and_then(|l| l.get("statusUpdatedAt")).and_then(Value::as_f64) {
+    let mut since_ms = str_field(job, "updatedAt")
+        .and_then(parse_iso_ms)
+        .unwrap_or(0);
+    if let Some(ms) = live
+        .and_then(|l| l.get("statusUpdatedAt"))
+        .and_then(Value::as_f64)
+    {
         since_ms = since_ms.max(ms as i64);
     }
     let session_id = str_field(job, "sessionId");
@@ -123,10 +132,7 @@ pub fn agent_from_job(
 
 /// The row for a live terminal session, `None` without a session id and pid. `host_app` names the
 /// app hosting a terminal's process; `sdk-cli` sessions are `claude -p`.
-pub fn agent_from_session(
-    s: &Value,
-    host_app: &dyn Fn(u32) -> Option<String>,
-) -> Option<Agent> {
+pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -> Option<Agent> {
     let id = str_field(s, "sessionId")?;
     let pid = pid_of(s)?;
     let status = str_field(s, "status").unwrap_or("idle");
@@ -168,9 +174,13 @@ pub fn agent_from_session(
 /// Every `jobs/<id>/state.json` under a config folder, by short id. Unreadable files are skipped.
 pub fn read_jobs(base: &Path) -> BTreeMap<String, Value> {
     let mut jobs = BTreeMap::new();
-    let Ok(entries) = std::fs::read_dir(base.join("jobs")) else { return jobs };
+    let Ok(entries) = std::fs::read_dir(base.join("jobs")) else {
+        return jobs;
+    };
     for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
         if let Some(state) = read_json(&entry.path().join("state.json")) {
             jobs.insert(name, state);
         }
@@ -180,7 +190,9 @@ pub fn read_jobs(base: &Path) -> BTreeMap<String, Value> {
 
 /// The `sessions/<pid>.json` files whose process is still alive, in file-name order.
 pub fn read_sessions(base: &Path, alive: &dyn Fn(u32) -> bool) -> Vec<Value> {
-    let Ok(entries) = std::fs::read_dir(base.join("sessions")) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(base.join("sessions")) else {
+        return Vec::new();
+    };
     let mut files: Vec<_> = entries
         .flatten()
         .map(|e| e.path())
@@ -230,7 +242,9 @@ fn str_field<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 
 fn pid_of(s: &Value) -> Option<u32> {
     let n = s.get("pid")?;
-    n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)).and_then(|p| u32::try_from(p).ok())
+    n.as_u64()
+        .or_else(|| n.as_f64().map(|f| f as u64))
+        .and_then(|p| u32::try_from(p).ok())
 }
 
 pub(crate) fn read_json(path: &Path) -> Option<Value> {
@@ -242,7 +256,11 @@ pub(crate) fn read_json(path: &Path) -> Option<Value> {
 pub(crate) fn last_component(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
-        return if path.is_empty() { String::new() } else { "/".to_string() };
+        return if path.is_empty() {
+            String::new()
+        } else {
+            "/".to_string()
+        };
     }
     trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
@@ -253,7 +271,11 @@ fn capitalized(text: &str) -> String {
     let mut start = true;
     for c in text.chars() {
         if c.is_alphanumeric() {
-            out.extend(if start { c.to_uppercase().collect::<Vec<_>>() } else { c.to_lowercase().collect() });
+            out.extend(if start {
+                c.to_uppercase().collect::<Vec<_>>()
+            } else {
+                c.to_lowercase().collect()
+            });
             start = false;
         } else {
             out.push(c);

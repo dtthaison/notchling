@@ -19,7 +19,10 @@ impl Probes<'static> {
     /// The default without platform calls: liveness from Linux's `/proc` (everywhere else every pid is
     /// assumed alive, so a stale file shows until the app adds a real probe) and no host app.
     pub fn from_proc() -> Self {
-        Probes { is_alive: &proc_alive, host_app: &no_host }
+        Probes {
+            is_alive: &proc_alive,
+            host_app: &no_host,
+        }
     }
 }
 
@@ -111,7 +114,9 @@ impl Monitor {
                 if parked.is_some_and(|id| jobs.contains_key(id)) {
                     continue;
                 }
-                let Some(mut agent) = agent_from_session(s, probes.host_app) else { continue };
+                let Some(mut agent) = agent_from_session(s, probes.host_app) else {
+                    continue;
+                };
                 agent.config_dir = lane_path.clone();
                 self.exited.remove(&agent.id);
                 if let Some(path) = &lane_path {
@@ -129,7 +134,8 @@ impl Monitor {
             }
         }
 
-        let job_ids: std::collections::HashSet<&str> = result.iter().map(|a| a.id.as_str()).collect();
+        let job_ids: std::collections::HashSet<&str> =
+            result.iter().map(|a| a.id.as_str()).collect();
         for (id, old) in &self.last_live {
             if live.contains_key(id) || job_ids.contains(id.as_str()) {
                 continue;
@@ -140,7 +146,10 @@ impl Monitor {
                     group: AgentGroup::Completed,
                     label: "Exited".to_string(),
                     since_ms: now_ms,
-                    target: AgentTarget::Resume { session_id: id.clone(), cwd: old.cwd.clone() },
+                    target: AgentTarget::Resume {
+                        session_id: id.clone(),
+                        cwd: old.cwd.clone(),
+                    },
                     suggested_reply: None,
                     transcript_path: None,
                     host: String::new(),
@@ -158,7 +167,12 @@ impl Monitor {
 
         let cutoff = now_ms - self.completed_window_ms;
         result.retain(|a| a.group != AgentGroup::Completed || a.since_ms > cutoff);
-        result.sort_by(|a, b| a.group.cmp(&b.group).then(b.since_ms.cmp(&a.since_ms)).then(a.id.cmp(&b.id)));
+        result.sort_by(|a, b| {
+            a.group
+                .cmp(&b.group)
+                .then(b.since_ms.cmp(&a.since_ms))
+                .then(a.id.cmp(&b.id))
+        });
         result
     }
 

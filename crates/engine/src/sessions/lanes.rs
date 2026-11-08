@@ -30,7 +30,10 @@ pub struct Roots {
 impl Roots {
     /// The usual layout: `<home>/.claude` and `<data_dir>/lanes.json`.
     pub fn new(home: &Path, data_dir: &Path) -> Self {
-        Roots { main_dir: home.join(".claude"), lanes_file: data_dir.join("lanes.json") }
+        Roots {
+            main_dir: home.join(".claude"),
+            lanes_file: data_dir.join("lanes.json"),
+        }
     }
 }
 
@@ -52,9 +55,15 @@ pub fn read_lanes(file: &Path) -> Vec<Lane> {
 /// Every folder sessions can live in: the main one, then each lane's. Each has its own `sessions` and
 /// `jobs`; `projects` (transcripts) is shared with the main folder.
 pub fn config_dirs(roots: &Roots) -> Vec<ConfigDir> {
-    let mut dirs = vec![ConfigDir { dir: roots.main_dir.clone(), lane: None }];
+    let mut dirs = vec![ConfigDir {
+        dir: roots.main_dir.clone(),
+        lane: None,
+    }];
     for lane in read_lanes(&roots.lanes_file) {
-        dirs.push(ConfigDir { dir: PathBuf::from(&lane.path), lane: Some(lane) });
+        dirs.push(ConfigDir {
+            dir: PathBuf::from(&lane.path),
+            lane: Some(lane),
+        });
     }
     dirs
 }
@@ -62,7 +71,9 @@ pub fn config_dirs(roots: &Roots) -> Vec<ConfigDir> {
 /// The lane whose path is `path` (compared after removing `.` parts and trailing slashes).
 pub fn lane_at_path(roots: &Roots, path: &str) -> Option<Lane> {
     let wanted = standardize(path);
-    read_lanes(&roots.lanes_file).into_iter().find(|l| standardize(&l.path) == wanted)
+    read_lanes(&roots.lanes_file)
+        .into_iter()
+        .find(|l| standardize(&l.path) == wanted)
 }
 
 fn standardize(path: &str) -> String {
@@ -101,8 +112,14 @@ mod tests {
         assert_eq!(dirs[0].dir, tmp.path("home/.claude"));
         assert!(dirs[0].lane.is_none());
         assert_eq!(dirs[1].dir, PathBuf::from("/lanes/b"));
-        assert_eq!(dirs[1].lane.as_ref().map(|l| l.account_id.as_str()), Some("acc-1"));
-        assert_eq!(dirs[1].lane.as_ref().and_then(|l| l.folder.as_deref()), Some("/work"));
+        assert_eq!(
+            dirs[1].lane.as_ref().map(|l| l.account_id.as_str()),
+            Some("acc-1")
+        );
+        assert_eq!(
+            dirs[1].lane.as_ref().and_then(|l| l.folder.as_deref()),
+            Some("/work")
+        );
         assert_eq!(dirs[2].lane.as_ref().and_then(|l| l.folder.clone()), None);
     }
 

@@ -53,7 +53,10 @@ fn assignment_end(c: &[char], at: usize) -> Option<usize> {
     if !(first.is_ascii_uppercase() || first == '_') {
         return None;
     }
-    while c.get(i).is_some_and(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || *ch == '_') {
+    while c
+        .get(i)
+        .is_some_and(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || *ch == '_')
+    {
         i += 1;
     }
     if c.get(i) != Some(&'=') {
@@ -104,7 +107,11 @@ pub fn output_path(command: &str, cwd: &str, home: &str) -> Option<String> {
     if let Some(rest) = path.strip_prefix("~/") {
         path = format!("{}/{rest}", home.trim_end_matches('/'));
     }
-    Some(if path.starts_with('/') { path } else { format!("{}/{path}", cwd.trim_end_matches('/')) })
+    Some(if path.starts_with('/') {
+        path
+    } else {
+        format!("{}/{path}", cwd.trim_end_matches('/'))
+    })
 }
 
 fn is_delim(ch: char) -> bool {
@@ -138,7 +145,10 @@ fn redirect_at(c: &[char], at: usize) -> Option<(String, usize)> {
         }
     }
     let start = i;
-    while c.get(i).is_some_and(|ch| !ch.is_whitespace() && !matches!(ch, ';' | '&' | '|' | '<' | '>')) {
+    while c
+        .get(i)
+        .is_some_and(|ch| !ch.is_whitespace() && !matches!(ch, ';' | '&' | '|' | '<' | '>'))
+    {
         i += 1;
     }
     (i > start).then(|| (c[start..i].iter().collect(), i))
@@ -175,8 +185,14 @@ mod tests {
         let sd = "cd /p && env HOME=/h PATH=/a:/b /venv/python3 /x/sd.py autopilot > /repo/.git/run.log 2>&1";
         let at = |c: &str| output_path(c, "/p", "/home/me");
         assert_eq!(at(sd).as_deref(), Some("/repo/.git/run.log"));
-        assert_eq!(at("make test >> build.log").as_deref(), Some("/p/build.log"));
-        assert_eq!(at("run > 'my out.log' 2>&1").as_deref(), Some("/p/my out.log"));
+        assert_eq!(
+            at("make test >> build.log").as_deref(),
+            Some("/p/build.log")
+        );
+        assert_eq!(
+            at("run > 'my out.log' 2>&1").as_deref(),
+            Some("/p/my out.log")
+        );
         assert_eq!(at("run 2>&1"), None);
         assert_eq!(at("run > /dev/null"), None);
         assert_eq!(at("npm test"), None);
@@ -188,7 +204,10 @@ mod tests {
         assert_eq!(at("run 1> out.log").as_deref(), Some("/p/out.log"));
         assert_eq!(at("run > ~/out.log").as_deref(), Some("/home/me/out.log"));
         assert_eq!(at("run > \"a b.log\"").as_deref(), Some("/p/a b.log"));
-        assert_eq!(at("a > first.log; b > second.log").as_deref(), Some("/p/second.log"));
+        assert_eq!(
+            at("a > first.log; b > second.log").as_deref(),
+            Some("/p/second.log")
+        );
         assert_eq!(at(">out.log run").as_deref(), Some("/p/out.log"));
         assert_eq!(at("run >&2"), None);
         assert_eq!(at("run 2> err.log"), None);
@@ -197,7 +216,10 @@ mod tests {
     // CommandJobTests.testReadable
     #[test]
     fn readable_shortens_the_env_prefix() {
-        assert_eq!(readable("cd /p && env HOME=/h PATH=/a:/b python3 sd.py"), "cd /p && env … python3 sd.py");
+        assert_eq!(
+            readable("cd /p && env HOME=/h PATH=/a:/b python3 sd.py"),
+            "cd /p && env … python3 sd.py"
+        );
         assert_eq!(readable("env A='x y' B=\"z w\" run"), "env … run");
         assert_eq!(readable("make test"), "make test");
         assert_eq!(readable("env run"), "env run");
@@ -209,7 +231,10 @@ mod tests {
         let tmp = TempDir::new("tail");
         let text: String = (1..=300).map(|n| format!("line {n}\n")).collect();
         let p = tmp.write("x.log", &text);
-        assert_eq!(tail(&p.display().to_string(), 3).as_deref(), Some("line 298\nline 299\nline 300"));
+        assert_eq!(
+            tail(&p.display().to_string(), 3).as_deref(),
+            Some("line 298\nline 299\nline 300")
+        );
         assert_eq!(tail("/nonexistent/file.log", 3), None);
     }
 

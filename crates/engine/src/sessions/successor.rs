@@ -12,7 +12,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Claude Code's folder name for a working directory: every character other than an ASCII letter or
 /// digit becomes `-` (`/Users/me/.claude` becomes `-Users-me--claude`).
 pub fn project_folder(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// A background job's transcript. A session that enters a git worktree goes on in that worktree's
@@ -77,7 +79,7 @@ pub fn search_successor(path: &str, name: &str) -> Option<String> {
     let mut current = path.to_string();
     let mut found: Option<String> = None;
     for _ in 0..4 {
-        let since = modified_time(&current)? .checked_sub(Duration::from_secs(10))?;
+        let since = modified_time(&current)?.checked_sub(Duration::from_secs(10))?;
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .ok()?
             .filter_map(|e| e.ok())
@@ -113,7 +115,9 @@ fn created_time(path: &str) -> Option<SystemTime> {
 }
 
 fn started_by_clear(path: &str, marker: &str) -> bool {
-    let Ok(file) = std::fs::File::open(Path::new(path)) else { return false };
+    let Ok(file) = std::fs::File::open(Path::new(path)) else {
+        return false;
+    };
     let mut head = Vec::new();
     if file.take(16_384).read_to_end(&mut head).is_err() {
         return false;
@@ -163,31 +167,57 @@ mod tests {
 
     #[test]
     fn follows_the_session_into_its_worktree() {
-        let found = job_transcript(Some(START), Some("abc"), Some(TREE), &|p| (p == MOVED).then_some(1));
+        let found = job_transcript(Some(START), Some("abc"), Some(TREE), &|p| {
+            (p == MOVED).then_some(1)
+        });
         assert_eq!(found.as_deref(), Some(MOVED));
     }
 
     #[test]
     fn the_newer_file_wins_when_both_exist() {
         let newer_moved = |p: &str| Some(if p == START { 100 } else { 200 });
-        assert_eq!(job_transcript(Some(START), Some("abc"), Some(TREE), &newer_moved).as_deref(), Some(MOVED));
+        assert_eq!(
+            job_transcript(Some(START), Some("abc"), Some(TREE), &newer_moved).as_deref(),
+            Some(MOVED)
+        );
         let newer_start = |p: &str| Some(if p == START { 300 } else { 200 });
-        assert_eq!(job_transcript(Some(START), Some("abc"), Some(TREE), &newer_start).as_deref(), Some(START));
+        assert_eq!(
+            job_transcript(Some(START), Some("abc"), Some(TREE), &newer_start).as_deref(),
+            Some(START)
+        );
     }
 
     #[test]
     fn without_a_worktree_it_is_the_recorded_path() {
-        assert_eq!(job_transcript(Some(START), Some("abc"), None, &|_| None).as_deref(), Some(START));
-        assert_eq!(job_transcript(None, Some("abc"), Some("/w"), &|_| Some(1)), None);
-        assert_eq!(job_transcript(Some(START), Some(""), Some(TREE), &|_| Some(1)).as_deref(), Some(START));
+        assert_eq!(
+            job_transcript(Some(START), Some("abc"), None, &|_| None).as_deref(),
+            Some(START)
+        );
+        assert_eq!(
+            job_transcript(None, Some("abc"), Some("/w"), &|_| Some(1)),
+            None
+        );
+        assert_eq!(
+            job_transcript(Some(START), Some(""), Some(TREE), &|_| Some(1)).as_deref(),
+            Some(START)
+        );
     }
 
     // ProjectFolderTests: checked against real folder names in ~/.claude/projects.
     #[test]
     fn folder_names() {
-        assert_eq!(project_folder("/Users/sondoan/go/src/pp/notchling"), "-Users-sondoan-go-src-pp-notchling");
-        assert_eq!(project_folder("/Users/sondoan/.claude/jobs/45ee33db/tmp"), "-Users-sondoan--claude-jobs-45ee33db-tmp");
-        assert_eq!(project_folder("/private/tmp/claude-501/x_y"), "-private-tmp-claude-501-x-y");
+        assert_eq!(
+            project_folder("/Users/sondoan/go/src/pp/notchling"),
+            "-Users-sondoan-go-src-pp-notchling"
+        );
+        assert_eq!(
+            project_folder("/Users/sondoan/.claude/jobs/45ee33db/tmp"),
+            "-Users-sondoan--claude-jobs-45ee33db-tmp"
+        );
+        assert_eq!(
+            project_folder("/private/tmp/claude-501/x_y"),
+            "-private-tmp-claude-501-x-y"
+        );
         assert_eq!(project_folder("/tmp/caf\u{e9}"), "-tmp-caf-");
     }
 
@@ -212,7 +242,10 @@ mod tests {
         tick();
         tmp.write("new.jsonl", &cleared("worker"));
         let old = path(&tmp, "old.jsonl");
-        assert_eq!(search_successor(&old, "worker"), Some(path(&tmp, "new.jsonl")));
+        assert_eq!(
+            search_successor(&old, "worker"),
+            Some(path(&tmp, "new.jsonl"))
+        );
         assert_eq!(search_successor(&old, "someone-else"), None);
         assert_eq!(search_successor(&old, ""), None);
     }
@@ -225,7 +258,10 @@ mod tests {
         tmp.write("b.jsonl", &cleared("worker"));
         tick();
         tmp.write("c.jsonl", &cleared("worker"));
-        assert_eq!(search_successor(&path(&tmp, "a.jsonl"), "worker"), Some(path(&tmp, "c.jsonl")));
+        assert_eq!(
+            search_successor(&path(&tmp, "a.jsonl"), "worker"),
+            Some(path(&tmp, "c.jsonl"))
+        );
     }
 
     #[test]
@@ -237,7 +273,11 @@ mod tests {
         assert_eq!(cache.find(&old, "worker"), None);
         tick();
         tmp.write("new.jsonl", &cleared("worker"));
-        assert_eq!(cache.find(&old, "worker"), Some(path(&tmp, "new.jsonl")), "creating a file must invalidate the cache");
+        assert_eq!(
+            cache.find(&old, "worker"),
+            Some(path(&tmp, "new.jsonl")),
+            "creating a file must invalidate the cache"
+        );
     }
 
     #[test]
@@ -246,13 +286,23 @@ mod tests {
         let tmp = TempDir::new("succ3");
         tmp.write("old.jsonl", "{}\n");
         let old = path(&tmp, "old.jsonl");
-        let before = std::fs::metadata(tmp.root()).and_then(|m| m.modified()).ok();
+        let before = std::fs::metadata(tmp.root())
+            .and_then(|m| m.modified())
+            .ok();
         tick();
-        let mut file = std::fs::OpenOptions::new().append(true).open(&old).expect("open");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&old)
+            .expect("open");
         file.write_all(b"{\"more\":1}\n").expect("append");
         drop(file);
-        let after = std::fs::metadata(tmp.root()).and_then(|m| m.modified()).ok();
-        assert_eq!(before, after, "the cache relies on appends leaving the folder date alone");
+        let after = std::fs::metadata(tmp.root())
+            .and_then(|m| m.modified())
+            .ok();
+        assert_eq!(
+            before, after,
+            "the cache relies on appends leaving the folder date alone"
+        );
     }
 
     #[test]
@@ -275,6 +325,9 @@ mod tests {
         tmp.write("old.jsonl", "{}\n");
         tick();
         tmp.write("new.jsonl", &cleared("say \\\"hi\\\""));
-        assert_eq!(search_successor(&path(&tmp, "old.jsonl"), "say \"hi\""), Some(path(&tmp, "new.jsonl")));
+        assert_eq!(
+            search_successor(&path(&tmp, "old.jsonl"), "say \"hi\""),
+            Some(path(&tmp, "new.jsonl"))
+        );
     }
 }

@@ -68,17 +68,26 @@ mod tests {
     #[test]
     fn parses_zulu_with_fraction() {
         assert_eq!(parse_iso_ms("1970-01-01T00:00:00.000Z"), Some(0));
-        assert_eq!(parse_iso_ms("2026-11-02T08:21:06.159Z"), Some(1_793_607_666_159));
+        assert_eq!(
+            parse_iso_ms("2026-11-02T08:21:06.159Z"),
+            Some(1_793_607_666_159)
+        );
     }
 
     #[test]
     fn fraction_is_optional_and_offsets_apply() {
-        assert_eq!(parse_iso_ms("2026-11-02T08:21:06Z"), Some(1_793_607_666_000));
+        assert_eq!(
+            parse_iso_ms("2026-11-02T08:21:06Z"),
+            Some(1_793_607_666_000)
+        );
         assert_eq!(
             parse_iso_ms("2026-11-02T15:21:06.159+07:00"),
             parse_iso_ms("2026-11-02T08:21:06.159Z")
         );
-        assert_eq!(parse_iso_ms("2026-11-02T08:21:06.5Z"), Some(1_793_607_666_500));
+        assert_eq!(
+            parse_iso_ms("2026-11-02T08:21:06.5Z"),
+            Some(1_793_607_666_500)
+        );
     }
 
     #[test]
