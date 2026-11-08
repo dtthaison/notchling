@@ -460,3 +460,29 @@ fn a_daemon_that_accepts_and_never_answers_lets_the_hook_pass_by_its_deadline() 
     assert!(took < Duration::from_secs(2), "{took:?}");
     let _ = mute.join();
 }
+
+#[test]
+fn an_event_over_the_line_cap_passes_at_once() {
+    // A Write of a big file: the event is over the local API's 1 MiB line, so it can't be sent,
+    // and the hook passes (Claude Code asks in its own terminal) rather than hang or fail.
+    let d = daemon(true, true);
+    claim_session(&d);
+    let mut app = connect(&d.socket, ClientKind::App);
+    app.subscribe(&[topics::PROMPTS]).unwrap();
+    let mut big = fixture("permission-request.json");
+    big["tool_name"] = json!("Write");
+    big["tool_input"] = json!({"file_path": "/tmp/demo/big.txt",
+        "content": "x".repeat(notchling_local_api::MAX_LINE + 1)});
+    let started = Instant::now();
+    let out = decide(
+        big.to_string().as_bytes(),
+        &options(&d.socket, &d.dir.0, 10_000),
+    );
+    assert_eq!(out, None);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(d.ops.prompts().list().is_empty());
+}

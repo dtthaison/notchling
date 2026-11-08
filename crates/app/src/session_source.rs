@@ -322,10 +322,7 @@ type Connected = (Client, Vec<Agent>, Option<Vec<Value>>);
 /// falls between the two. Events that came in meanwhile are not older than the list, so the last
 /// of them wins. The prompts are followed and listed the same way when the daemon lets this client
 /// (the app tier); a refusal leaves them `None`.
-fn connect(
-    config: &SourceConfig,
-    tried_start: &mut bool,
-) -> Result<Connected, ClientError> {
+fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
         check_server: config.check_server,
         ..ConnectOptions::default()
