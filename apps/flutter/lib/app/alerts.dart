@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/pairing/mac_store.dart';
 import '../core/protocol/models.dart';
 import '../features/macs/macs_notifier.dart';
+import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
 import 'providers.dart';
 
@@ -50,6 +51,17 @@ class AlertPrefs {
   final Set<String> muted;
   final bool loaded;
 
+  /// What is muted is kept by [storageKey], like the chat cache and the archive: a bare id belongs to the computer
+  /// that kept the empty scope (the one a phone had before it followed several), `<scope>/<id>` to any other. So
+  /// muting `s1` on one computer leaves `s1` on another heard.
+  /// Whether [sessionId] on the computer whose storage scope is [scope] is muted.
+  bool isMuted(String scope, String sessionId) => muted.contains(storageKey(scope, sessionId));
+
+  /// The ids (as that computer gave them) muted on the computer whose storage scope is [scope].
+  Set<String> mutedIn(String scope) => scope.isEmpty
+      ? <String>{for (final String key in muted) if (SessionRef.parse(key) == null) key}
+      : <String>{for (final String key in muted) if (key.startsWith('$scope/')) key.substring(scope.length + 1)};
+
   AlertPrefs copyWith({bool? keepAlive, Set<String>? muted, bool? loaded}) =>
       AlertPrefs(keepAlive: keepAlive ?? this.keepAlive, muted: muted ?? this.muted, loaded: loaded ?? this.loaded);
 }
@@ -84,9 +96,12 @@ class AlertPrefsNotifier extends Notifier<AlertPrefs> {
     await _store.write(_keepAliveKey, on ? 'on' : 'off');
   }
 
-  Future<void> setMuted(String sessionId, {required bool muted}) async {
+  /// Mutes or unmutes [sessionId] on the computer whose storage scope is [scope] (the empty scope by default,
+  /// which is a phone that follows one computer).
+  Future<void> setMuted(String sessionId, {required bool muted, String scope = ''}) async {
     final Set<String> next = <String>{...state.muted};
-    muted ? next.add(sessionId) : next.remove(sessionId);
+    final String key = storageKey(scope, sessionId);
+    muted ? next.add(key) : next.remove(key);
     state = state.copyWith(muted: next);
     await _store.write(_mutedKey, jsonEncode(next.toList()));
   }

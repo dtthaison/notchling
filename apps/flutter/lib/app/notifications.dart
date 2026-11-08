@@ -154,7 +154,7 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
   ref.listen<SessionsState>(sessionsProvider, (SessionsState? previous, SessionsState next) {
     if (next.phase != LoadPhase.ready) return;
     final bool hadList = previous != null && previous.phase == LoadPhase.ready;
-    final Set<String> muted = ref.read(alertPrefsProvider).muted;
+    final Set<String> muted = ref.read(alertPrefsProvider).mutedIn(ref.read(macsProvider).activeScope);
     // Track every change, even when nothing is shown, so a later alert does not repeat an old one.
     final Map<String, AlertKind> stateAlerts = hadList ? alertsBetween(previous.sessions, next.sessions, announced) : <String, AlertKind>{};
     final List<MessageAlert> replies = tracker.update(next.sessions, now: DateTime.now(), muted: muted);

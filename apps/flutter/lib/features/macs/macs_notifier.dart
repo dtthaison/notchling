@@ -29,6 +29,9 @@ class MacsState {
   /// the computer's id for every other one, so two computers never share an entry.
   String scopeOf(String id) => scopes[id] ?? id;
 
+  /// The storage scope of the computer in use (empty when none is).
+  String get activeScope => activeId == null ? '' : scopeOf(activeId!);
+
   /// Like [activeKey], for any paired computer.
   String? keyOf(String id) {
     final MacProfile? mac = byId(id);

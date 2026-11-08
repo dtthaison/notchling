@@ -398,8 +398,10 @@ class _ChatHeader extends ConsumerWidget {
       sessionsProvider.select((SessionsState s) => s.byId(sessionId)),
     );
     if (session == null) return const SizedBox.shrink();
+    // Muted per computer: the same id on another computer is another session.
+    final String scope = ref.watch(macsProvider.select((MacsState s) => s.activeScope));
     final bool muted = ref.watch(
-      alertPrefsProvider.select((AlertPrefs p) => p.muted.contains(session.id)),
+      alertPrefsProvider.select((AlertPrefs p) => p.isMuted(scope, session.id)),
     );
     return ChatHeaderView(
       session: session,
@@ -412,7 +414,7 @@ class _ChatHeader extends ConsumerWidget {
       onToggleMute: () => unawaited(
         ref
             .read(alertPrefsProvider.notifier)
-            .setMuted(session.id, muted: !muted),
+            .setMuted(session.id, muted: !muted, scope: scope),
       ),
     );
   }
