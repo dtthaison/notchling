@@ -13,7 +13,9 @@ use notchling_engine::transcript::{codex, conversation};
 use notchling_platform::paths;
 
 use super::codex_list;
-use crate::notch::source::{DataRoot as NotchRoot, Source, ANTIGRAVITY_DIR, DATA_ROOT_ENV};
+use crate::notch::source::{
+    DataRoot as NotchRoot, Source, ANTIGRAVITY_DIR, APP_DIR, DATA_ROOT_ENV,
+};
 use crate::tools::foreign::AgyList;
 use crate::tools::requests::RowTool;
 use crate::transcripts::Locator;
@@ -121,11 +123,20 @@ impl DataRoot {
         }
     }
 
-    /// The Antigravity list, read through a copy in our own folder.
+    /// The app's own folder under the data folder, for what only the app keeps: the second
+    /// opinions and its copy of Antigravity's database. Beside `daemon/` (the daemon's) and apart
+    /// from the Swift app's files in the data folder itself, which a Swift app running next to
+    /// this one keeps writing.
+    pub fn app_dir(&self) -> PathBuf {
+        self.data_dir.join(APP_DIR)
+    }
+
+    /// The Antigravity list, read through a copy in our own folder: the one the notch reads too,
+    /// so the two make one read between them.
     pub fn new_agy_list(&self) -> AgyList {
-        AgyList::new(
+        AgyList::shared(
             self.antigravity_dir.clone(),
-            self.data_dir.join("antigravity"),
+            self.app_dir().join("antigravity"),
         )
     }
 
@@ -341,6 +352,22 @@ mod tests {
         let folders = root.watch_folders();
         assert!(folders.contains(&PathBuf::from("/f/claude/projects")));
         assert!(folders.contains(&PathBuf::from("/f/codex/sessions")));
+    }
+
+    #[test]
+    fn antigravity_is_copied_into_the_apps_own_folder_and_read_once_for_chat_and_the_notch() {
+        let root = DataRoot::fixture(Path::new("/f"));
+        let list = root.new_agy_list();
+        // Not data/antigravity, which the Swift app copies over, and not daemon/, the daemon's.
+        assert_eq!(list.copy_dir, PathBuf::from("/f/notchling/app/antigravity"));
+        assert_eq!(
+            list.copy_dir,
+            NotchRoot::fixture(Path::new("/f")).antigravity_copy_dir()
+        );
+        // The notch's source and Chat's loader hold the one list.
+        let notch = root.notch_source();
+        assert!(notch.agy_list().is_same_list(&list));
+        assert!(Loader::new(root).agy_list().is_same_list(&list));
     }
 
     #[test]

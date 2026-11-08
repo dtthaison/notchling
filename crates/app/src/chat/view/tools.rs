@@ -15,10 +15,13 @@ use serde_json::Value;
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::chat::data::Tool;
+use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
-use crate::tools::agy_permission::AgyPermission;
+use crate::tools::agy_permission::{held_prompt, HeldPrompt};
 use crate::tools::codex_picker::CodexPicker;
+use crate::tools::fetch_gate::{Ask, FetchGate};
 use crate::tools::live::ToolLive;
+use crate::tools::open_gate::OpenGate;
 use crate::tools::requests::{
     agy_cancel, agy_conversation, agy_open, agy_permission, agy_send, agy_send_draft,
     agy_set_option, agy_state, codex_send, codex_send_draft, codex_stop, is_draft,
@@ -51,9 +54,12 @@ pub struct ChatTools {
     pub agy: Option<AgyConversation>,
     /// Which row and change count the last fetch was for.
     pub agy_fetched: Option<(String, u64)>,
+    /// The reads of Antigravity conversations: one in flight per row, none out of order.
+    pub fetches: FetchGate,
     pub agy_config: Vec<ConfigOption>,
-    /// Antigravity rows this Chat asked the daemon to open, once each.
-    pub opened: HashSet<String>,
+    /// Which Antigravity rows this Chat asked the daemon to open, and when to ask again (the
+    /// daemon closes a session after ten idle minutes).
+    pub opens: OpenGate,
     /// Messages the daemon queued behind a Codex turn, shown until that turn ends.
     pub queued: HashMap<String, Vec<String>>,
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
@@ -72,8 +78,9 @@ impl ChatTools {
             picks: HashMap::new(),
             agy: None,
             agy_fetched: None,
+            fetches: FetchGate::default(),
             agy_config: Vec::new(),
-            opened: HashSet::new(),
+            opens: OpenGate::default(),
             queued: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
@@ -265,19 +272,12 @@ impl ChatView {
         );
     }
 
-    /// An option of the Antigravity permission card.
-    pub(super) fn answer_agy(
-        &mut self,
-        prompt_id: String,
-        rpc_id: String,
-        option: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(id) = self.selected.clone() else {
-            return;
-        };
+    /// An option of the Antigravity permission card: the answer goes for the session the prompt
+    /// belongs to, which is what the daemon named, not whichever row is selected now.
+    pub(super) fn answer_agy(&mut self, held: &HeldPrompt, option: String, cx: &mut Context<Self>) {
+        let prompt_id = held.prompt_id.clone();
         self.spawn_send(
-            agy_permission(&id, &rpc_id, Some(&option)),
+            agy_permission(&held.session_id, &held.permission.rpc_id, Some(&option)),
             move |view, result, _| match result {
                 Ok(_) => {
                     view.tools.answered.insert(prompt_id);
@@ -289,19 +289,10 @@ impl ChatView {
     }
 
     /// The Antigravity permission waiting on the selected row, from the daemon's held prompts.
-    pub(super) fn agy_prompt(&self) -> Option<(String, AgyPermission)> {
+    pub(super) fn agy_prompt(&self) -> Option<HeldPrompt> {
         let id = self.selected.as_deref()?;
         let prompts = self.source.view().prompts?;
-        prompts.iter().find_map(|p| {
-            if p.get("sessionId").and_then(Value::as_str) != Some(id) {
-                return None;
-            }
-            let prompt_id = p.get("id")?.as_str()?.to_owned();
-            if self.tools.answered.contains(&prompt_id) {
-                return None;
-            }
-            AgyPermission::from_prompt(p).map(|agy| (prompt_id, agy))
-        })
+        held_prompt(&prompts, id, &self.tools.answered)
     }
 
     /// Opens or closes the picker the selected row has: Codex's models, Antigravity's options.
@@ -353,30 +344,42 @@ impl ChatView {
         if session.tool != Tool::Antigravity || is_draft(&id) {
             return;
         }
-        if !self.tools.live.is_open(&id)
-            && !self.tools.opened.contains(&id)
-            && self.acting(cx) == Acting::On
+        let changes = self.tools.live.agy_changes.get(&id).copied().unwrap_or(0);
+        let acting = self.acting(cx) == Acting::On;
+        let asked = u64::try_from(now_ms()).unwrap_or(0);
+        if self
+            .tools
+            .opens
+            .should_open(&id, self.tools.live.is_open(&id), acting, changes, asked)
         {
-            self.tools.opened.insert(id.clone());
+            let opened = id.clone();
             self.spawn_send(
                 agy_open(&id),
-                |view, result, _| {
+                move |view, result, _| {
                     if let Err(message) = result {
+                        view.tools.opens.failed(&opened);
                         view.tools.error = Some(message);
                     }
                 },
                 cx,
             );
         }
-        let changes = self.tools.live.agy_changes.get(&id).copied().unwrap_or(0);
         if self.tools.agy_fetched.as_ref() != Some(&(id.clone(), changes)) {
             self.tools.agy_fetched = Some((id.clone(), changes));
             self.fetch_agy(id, cx);
         }
     }
 
-    /// Reads the row's conversation and options from the daemon, off the UI thread.
+    /// Reads the row's conversation and options from the daemon, off the UI thread: one read at a
+    /// time per row, and a change that comes meanwhile is covered by the read that follows
+    /// (`FetchGate`).
     fn fetch_agy(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Ask::Start(number) = self.tools.fetches.request(&id) {
+            self.read_agy(id, number, cx);
+        }
+    }
+
+    fn read_agy(&mut self, id: String, number: u64, cx: &mut Context<Self>) {
         let actions = self.acts(cx).actions;
         let asked = id.clone();
         cx.spawn(async move |this, cx| {
@@ -389,16 +392,19 @@ impl ChatView {
                 })
                 .await;
             this.update(cx, |view, cx| {
-                if view.selected.as_deref() != Some(asked.as_str()) {
-                    return;
+                let done = view.tools.fetches.finished(&asked, number);
+                if done.apply && view.selected.as_deref() == Some(asked.as_str()) {
+                    if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
+                        view.conversation = c.conversation.clone();
+                        view.loading = false;
+                        view.tools.agy = Some(c);
+                    }
+                    if let Some(state) = state {
+                        view.tools.agy_config = parse_config(&state);
+                    }
                 }
-                if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
-                    view.conversation = c.conversation.clone();
-                    view.loading = false;
-                    view.tools.agy = Some(c);
-                }
-                if let Some(state) = state {
-                    view.tools.agy_config = parse_config(&state);
+                if let Some(next) = done.next {
+                    view.read_agy(asked.clone(), next, cx);
                 }
                 cx.notify();
             })

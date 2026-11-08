@@ -464,6 +464,24 @@ fn highlights_are_byte_ranges_on_char_boundaries() {
 }
 
 #[test]
+// The list of one range is the answer being checked.
+#[allow(clippy::single_range_in_vec_init)]
+fn highlights_are_disjoint_when_words_overlap() {
+    // "b" sits inside "bridge", and "c" twice inside "cache": the ranges merge, so a drawing layer
+    // that assumes disjoint runs never sees one inside another.
+    let text = "the bridge\u{2019}s state";
+    let ranges = highlights(text, &w(&["bridge", "b"]));
+    assert_eq!(ranges, [4..10]);
+    let text = "cache\u{2014}stale";
+    let ranges = highlights(text, &w(&["cache", "c"]));
+    assert_eq!(ranges, [0..5]);
+    // Adjacent ranges join as well.
+    assert_eq!(highlights("abc", &w(&["ab", "c"])), [0..3]);
+    // Disjoint ones stay apart, in order.
+    assert_eq!(highlights("a b a", &w(&["a"])), [0..1, 4..5]);
+}
+
+#[test]
 fn highlights_skip_text_whose_lowercase_changes_length() {
     assert!(highlights("İ token", &w(&["token"])).is_empty());
 }

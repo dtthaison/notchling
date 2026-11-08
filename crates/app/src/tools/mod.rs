@@ -15,11 +15,14 @@
 //! message otherwise. The reads (`agy.conversation`) go through `Actions::read`, which needs no
 //! acting.
 
+pub mod agy_list;
 pub mod agy_options;
 pub mod agy_permission;
 pub mod codex_picker;
+pub mod fetch_gate;
 pub mod foreign;
 pub mod live;
+pub mod open_gate;
 pub mod renders;
 pub mod requests;
 pub mod second_opinion;

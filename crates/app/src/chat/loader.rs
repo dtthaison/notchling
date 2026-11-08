@@ -43,6 +43,12 @@ impl Loader {
         }
     }
 
+    /// The Antigravity list this loader reads (a test checks it is the notch's too).
+    #[cfg(test)]
+    pub fn agy_list(&self) -> &AgyList {
+        &self.agy
+    }
+
     /// The sessions, and the conversation and subagents of `selected` (else the first session).
     /// `now_ms` is the clock.
     pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
