@@ -119,6 +119,7 @@ fn with_no_socket_it_falls_back_says_so_and_starts_the_daemon_only_once() {
         start: Some(failing_starter(&calls)),
         backoff: quick(),
         version: "test".into(),
+        check_server: true,
     });
     let view = wait_for(&source, "the fallback", View::daemon_down);
     assert!(view.agents.is_none(), "files are read instead");
@@ -136,6 +137,7 @@ fn without_a_starter_nothing_is_started_and_the_source_still_retries() {
         start: None,
         backoff: quick(),
         version: "test".into(),
+        check_server: true,
     });
     wait_for(&source, "the fallback", View::daemon_down);
     assert!(!scratch.path().join(SOCKET_NAME).exists());
@@ -155,6 +157,7 @@ fn the_ui_side_never_waits_on_the_socket() {
         start: Some(slow),
         backoff: quick(),
         version: "test".into(),
+        check_server: true,
     });
     let view = source.view();
     assert!(began.elapsed() < Duration::from_millis(300));
@@ -217,13 +220,35 @@ mod over_a_socket {
         thread.join().expect("server thread").expect("server ended");
     }
 
+    /// The server here is this test binary, not a `notchling`, so the server check is off.
     fn config(socket: &Path, start: Option<Starter>) -> SourceConfig {
         SourceConfig {
             socket: socket.to_path_buf(),
             start,
             backoff: quick(),
             version: "test".into(),
+            check_server: false,
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_socket_served_by_something_else_is_not_talked_to_and_says_so() {
+        let scratch = Scratch::new("ss-untrusted");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let running = serve(&socket, &list_of(&["from-a-stranger"]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source = SessionSource::start(SourceConfig {
+            check_server: true,
+            ..config(&socket, Some(failing_starter(&calls)))
+        });
+        let view = wait_for(&source, "the untrusted note", |v| v.link == Link::Untrusted);
+        assert!(view.agents.is_none(), "files are read instead");
+        assert_eq!(view.note(), Some(DAEMON_UNTRUSTED_NOTE));
+        // Nothing was started over it, and it heard no hello.
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(running.0.status().clients, Default::default());
+        stop(running);
     }
 
     #[test]

@@ -73,6 +73,7 @@
      - `install --dir` writes 0644 into the temp folder and prints the load command.
 3. **App on the daemon** (`crates/app`): Chat's sidebar and the notch take their rows from `sessions.list` and `sessions.changed` through the local-api client.
    - If the daemon can't be reached and can't be started, they fall back to reading the files directly, as M1 does, and the sidebar footer says "Daemon not running".
+   - Clients check the server before `hello`: the same uid, and on macOS a server file (from its audit token) that `spawn_allowed` accepts. Anything else is `ClientError::UntrustedServer`; the app reads the files and says "Daemon not trusted". Tests that serve from their own binary turn the check off (`ConnectOptions::check_server`); it is on by default.
    - Renders keep using fixtures with no daemon.
    - Tests: the client-backed source against an in-process server, and the fallback.
 4. **Docs**: ARCHITECTURE.md, the feature map, AGENTS.md (the `notchling` binary and how to run the daemon in dev), and `docs/dev-profile.md` (running the daemon against the dev profile).

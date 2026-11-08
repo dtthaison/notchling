@@ -27,7 +27,7 @@ use super::model::{
 };
 use super::renders;
 use super::source::Source;
-use crate::session_source::{SessionSource, DAEMON_DOWN_NOTE};
+use crate::session_source::SessionSource;
 
 /// The notch's root view: a transparent canvas with the shape at its top centre.
 pub struct NotchView {
@@ -167,8 +167,9 @@ impl NotchView {
             // Beside the camera, only while the list is open: the collapsed shape is too small.
             .child(
                 div().children(
-                    (m.daemon_down && m.state == NotchState::List)
-                        .then(|| text(DAEMON_DOWN_NOTE, TypeRole::Meta, Ink::TextFaint)),
+                    m.daemon_note
+                        .filter(|_| m.state == NotchState::List)
+                        .map(|note| text(note, TypeRole::Meta, Ink::TextFaint)),
                 ),
             )
             .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))

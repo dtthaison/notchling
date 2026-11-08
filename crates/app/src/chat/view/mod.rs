@@ -50,8 +50,8 @@ pub struct ChatView {
     source: Arc<SessionSource>,
     /// The source's generation at the last tick, so a change of rows or link reloads.
     seen_generation: u64,
-    /// The sidebar footer says "Daemon not running".
-    daemon_down: bool,
+    /// What the sidebar footer says about the daemon ("Daemon not running", "Daemon not trusted").
+    daemon_note: Option<&'static str>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
     _appearance_changes: Subscription,
@@ -96,7 +96,7 @@ impl ChatView {
             scroll_to_end: false,
             gate: ReloadGate::default(),
             seen_generation: source.generation(),
-            daemon_down: source.view().daemon_down(),
+            daemon_note: source.view().note(),
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
@@ -193,9 +193,9 @@ impl ChatView {
         if generation != self.seen_generation {
             self.seen_generation = generation;
             self.gate.changed();
-            let down = self.source.view().daemon_down();
-            if down != self.daemon_down {
-                self.daemon_down = down;
+            let note = self.source.view().note();
+            if note != self.daemon_note {
+                self.daemon_note = note;
                 cx.notify();
             }
         }

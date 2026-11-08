@@ -25,7 +25,7 @@ use super::model::NotchModel;
 use super::source::{now_ms, Source};
 use super::view::NotchView;
 use crate::mac::capture::ns_window;
-use crate::session_source::{Link, SessionSource};
+use crate::session_source::SessionSource;
 
 const TICK: Duration = Duration::from_millis(50);
 const POLL: Duration = Duration::from_secs(2);
@@ -166,9 +166,12 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, down) = match answer {
-            Some(answer) => (answer.agents, answer.link == Link::Down),
-            None => (None, false),
+        let (claude, note) = match answer {
+            Some(answer) => {
+                let note = answer.note();
+                (answer.agents, note)
+            }
+            None => (None, None),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
@@ -180,7 +183,7 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 .await;
             let applied = this.update(cx, |view, cx| {
                 view.source = Some(source);
-                view.model.daemon_down = down;
+                view.model.daemon_note = note;
                 let now = now_ms();
                 view.model.now_ms = now;
                 if let Some(info) = MainThreadMarker::new().and_then(screen_info) {

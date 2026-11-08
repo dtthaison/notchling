@@ -1,7 +1,7 @@
 //! The server over a real socket in a temp folder; the peer is this test process.
 #![cfg(unix)]
 
-use crate::client::{Client, ClientError};
+use crate::client::{Client, ClientError, ConnectOptions};
 use crate::framing::{LineReader, MAX_LINE};
 use crate::server::{Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle};
 use crate::testutil::TempDir;
@@ -109,7 +109,34 @@ fn start() -> Running {
 }
 
 fn client(socket: &Path) -> Client {
-    Client::connect(socket, ClientKind::Cli, "0.1.0").unwrap()
+    connect_as(socket, ClientKind::Cli)
+}
+
+/// The server here is this test binary, not a `notchling`, so the client's server check is off.
+fn relaxed() -> ConnectOptions {
+    ConnectOptions {
+        check_server: false,
+        ..ConnectOptions::default()
+    }
+}
+
+fn connect_as(socket: &Path, kind: ClientKind) -> Client {
+    Client::connect_with(socket, kind, "0.1.0", &relaxed()).unwrap()
+}
+
+#[test]
+fn a_client_refuses_a_server_that_is_not_a_notchling_daemon() {
+    // Strict by default: the test binary serving here is no `notchling`.
+    let run = start();
+    match Client::connect(&run.socket, ClientKind::App, "0.1.0") {
+        Err(ClientError::UntrustedServer(why)) => assert!(why.contains("not a notchling"), "{why}"),
+        Err(e) => panic!("{e}"),
+        Ok(c) => panic!("said hello to {:?}", c.hello()),
+    }
+    // It said nothing: the server never heard a hello.
+    assert_eq!(run.handle.status().clients, Default::default());
+    // Relaxed, as tests do, the same server is fine.
+    assert!(Client::connect_with(&run.socket, ClientKind::App, "0.1.0", &relaxed()).is_ok());
 }
 
 /// A raw connection and its lines.
@@ -213,7 +240,7 @@ fn the_tier_comes_from_the_allowlist_not_the_hello() {
     let listed = start_with(Allowlist::new([me()]), fast());
     assert_eq!(client(&listed.socket).tier(), Tier::App);
     let unlisted = start();
-    let c = Client::connect(&unlisted.socket, ClientKind::App, "0.1.0").unwrap();
+    let c = connect_as(&unlisted.socket, ClientKind::App);
     assert_eq!(c.tier(), Tier::Agent);
 }
 
@@ -262,7 +289,7 @@ fn approval_is_needed_while_no_app_is_attached() {
 #[test]
 fn with_an_app_attached_the_approval_op_reaches_the_handler() {
     let run = start_with(Allowlist::new([me()]), fast());
-    let _app = Client::connect(&run.socket, ClientKind::App, "0.1.0").unwrap();
+    let _app = connect_as(&run.socket, ClientKind::App);
     let mut c = client(&run.socket);
     assert_eq!(
         c.call("test.needsApproval", json!({})).unwrap(),
@@ -275,7 +302,7 @@ fn with_an_app_attached_the_approval_op_reaches_the_handler() {
 fn an_app_connection_whose_handler_panics_is_forgotten() {
     // Left on the hub, it would keep `app_attached` true and approval would fail open.
     let run = start_with(Allowlist::new([me()]), fast());
-    let mut app = Client::connect(&run.socket, ClientKind::App, "0.1.0").unwrap();
+    let mut app = connect_as(&run.socket, ClientKind::App);
     assert_eq!(app.tier(), Tier::App);
     assert!(app.call("test.panic", json!({})).is_err());
     drop(app);
@@ -290,7 +317,7 @@ fn an_app_connection_whose_handler_panics_is_forgotten() {
 #[test]
 fn status_counts_clients_by_kind() {
     let run = start();
-    let _hook = Client::connect(&run.socket, ClientKind::Hook, "0.1.0").unwrap();
+    let _hook = connect_as(&run.socket, ClientKind::Hook);
     let mut c = client(&run.socket);
     let status = c.status().unwrap();
     assert_eq!(status.version, "9.9.9");
