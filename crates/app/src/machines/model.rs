@@ -166,6 +166,8 @@ pub struct MachinesModel {
     pub rename_note: Option<String>,
     /// A Rename is moving the legacy secrets in the background.
     pub(super) renaming: bool,
+    /// A round of checks a poll started is running.
+    pub(super) checking: bool,
     pub registry_problem: Option<String>,
     /// Renew… and the like: a line at the bottom.
     pub notice: Option<String>,
@@ -200,6 +202,7 @@ impl MachinesModel {
             migration_note: None,
             rename_note: None,
             renaming: false,
+            checking: false,
             registry_problem: None,
             notice: None,
             outcomes: BTreeMap::new(),

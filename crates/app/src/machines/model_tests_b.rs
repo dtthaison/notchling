@@ -197,3 +197,21 @@ fn renew_opens_the_secrets_page_or_says_why_not() {
     assert_eq!(w.model.notice.as_deref(), Some("no page"));
     assert_eq!(*lock(&w.vault.renewed), ["claude-worker", "bare"]);
 }
+
+#[test]
+fn each_poll_while_open_checks_the_machines_again_one_round_at_a_time() {
+    let mut w = scripted_world(vec![mac("m1")]);
+    assert!(w.model.check_after_poll(), "a poll ended: check again");
+    assert!(
+        !w.model.check_after_poll(),
+        "not while the round it started still runs"
+    );
+    w.model.checked();
+    assert!(w.model.check_after_poll());
+    w.model.checked();
+    let mut empty = scripted_world(Vec::new());
+    assert!(
+        !empty.model.check_after_poll(),
+        "no machine, nothing to check"
+    );
+}

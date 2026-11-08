@@ -170,7 +170,24 @@ impl MachinesView {
         Self::background(
             cx,
             move || poller.refresh(false),
-            |view, _, cx| view.reload(cx),
+            |view, _, cx| {
+                view.reload(cx);
+                view.check_after_poll(cx);
+            },
+        );
+    }
+
+    /// After each poll while the window is open: every machine's checks again, off the UI
+    /// thread. The engine runs the slow probes only when they are due, and no Fix.
+    fn check_after_poll(&mut self, cx: &mut Context<Self>) {
+        if self.fixed || !self.model.check_after_poll() {
+            return;
+        }
+        let engine = self.model.parts.engine.clone();
+        Self::background(
+            cx,
+            move || engine.refresh(None, false),
+            |view, _, _| view.model.checked(),
         );
     }
 

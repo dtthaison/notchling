@@ -186,6 +186,24 @@ impl MachinesModel {
         }
     }
 
+    // MARK: Checks while the window is open
+
+    /// A poll ended: whether to check the machines again (checks only, the slow probes as their
+    /// cadence allows), as Swift's window does on each poller change while it is visible. One
+    /// round at a time; [`MachinesModel::checked`] ends it.
+    pub fn check_after_poll(&mut self) -> bool {
+        if self.machines.is_empty() || self.checking {
+            return false;
+        }
+        self.checking = true;
+        true
+    }
+
+    /// The round of checks a poll started ended.
+    pub fn checked(&mut self) {
+        self.checking = false;
+    }
+
     /// Every tick: a Set up all that reached an admin step gets its sheet. Whether one was shown.
     pub fn tick(&mut self) -> bool {
         let Some(pending) = self.asks.take() else {
