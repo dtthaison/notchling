@@ -91,15 +91,48 @@ impl DefaultsSource for NoDefaults {
 /// `<data>` is its base64 text and `<date>` its ISO text, which is how the engine's migration
 /// expects an export (it decodes the data keys that hold JSON).
 pub fn parse_plist(text: &str) -> Result<Map<String, Value>, String> {
+    match parse_domain(text)? {
+        (map, bad) if bad.is_empty() => Ok(map),
+        (_, bad) => Err(format!("a value it can't read under {}", bad.join(", "))),
+    }
+}
+
+/// A domain's settings, as [`parse_plist`], except that a setting whose value can't be read (an
+/// integer past 64 bits, a type JSON has no word for) is left out and named rather than failing
+/// the whole domain. A broken structure still fails.
+pub fn parse_domain(text: &str) -> Result<(Map<String, Value>, Vec<String>), String> {
     let root = xml::parse(text)?;
     if root.name != "plist" {
         return Err("not a property list".into());
     }
     let top = root.children.first().ok_or("an empty property list")?;
-    match value(top)? {
-        Value::Object(map) => Ok(map),
-        _ => Err("the property list isn't a dictionary".into()),
+    if top.name != "dict" {
+        return Err("the property list isn't a dictionary".into());
     }
+    let mut map = Map::new();
+    let mut bad = Vec::new();
+    for (key, item) in entries(top)? {
+        match value(item) {
+            Ok(v) => {
+                map.insert(key.text.clone(), v);
+            }
+            Err(_) => bad.push(key.text.clone()),
+        }
+    }
+    bad.sort();
+    Ok((map, bad))
+}
+
+/// A `<dict>`'s key and value nodes, in order.
+fn entries(dict: &Node) -> Result<Vec<(&Node, &Node)>, String> {
+    dict.children
+        .chunks(2)
+        .map(|pair| match pair {
+            [key, item] if key.name == "key" => Ok((key, item)),
+            [_, _] => Err("a dictionary entry with no key".to_owned()),
+            _ => Err("a dictionary key with no value".to_owned()),
+        })
+        .collect()
 }
 
 fn value(node: &Node) -> Result<Value, String> {
@@ -123,14 +156,7 @@ fn value(node: &Node) -> Result<Value, String> {
         "array" => Value::Array(node.children.iter().map(value).collect::<Result<_, _>>()?),
         "dict" => {
             let mut map = Map::new();
-            let mut pairs = node.children.chunks(2);
-            for pair in &mut pairs {
-                let [key, item] = pair else {
-                    return Err("a dictionary key with no value".into());
-                };
-                if key.name != "key" {
-                    return Err("a dictionary entry with no key".into());
-                }
+            for (key, item) in entries(node)? {
                 map.insert(key.text.clone(), value(item)?);
             }
             Value::Object(map)
@@ -139,17 +165,28 @@ fn value(node: &Node) -> Result<Value, String> {
     })
 }
 
-/// Both domains, read.
-pub fn read_export(source: &dyn DefaultsSource) -> Result<DefaultsExport, String> {
+/// Both domains, read, with the settings whose values couldn't be (see [`parse_domain`]).
+pub fn read_export(source: &dyn DefaultsSource) -> Result<(DefaultsExport, Vec<String>), String> {
+    let mut unreadable = Vec::new();
     let current = match source.export(DOMAIN)? {
-        Some(text) => parse_plist(&text)?,
+        Some(text) => {
+            let (map, bad) = parse_domain(&text)?;
+            unreadable.extend(bad);
+            map
+        }
         None => Map::new(),
     };
     let awake = match source.export(AWAKE_DOMAIN)? {
-        Some(text) => Some(parse_plist(&text)?),
+        Some(text) => {
+            let (map, bad) = parse_domain(&text)?;
+            unreadable.extend(bad);
+            Some(map)
+        }
         None => None,
     };
-    Ok(DefaultsExport { current, awake })
+    unreadable.sort();
+    unreadable.dedup();
+    Ok((DefaultsExport { current, awake }, unreadable))
 }
 
 /// What an import found and did.
@@ -163,15 +200,24 @@ pub struct Imported {
     pub ignored: usize,
     /// Settings whose value was the wrong type; dropped.
     pub invalid: Vec<String>,
+    /// Settings whose value couldn't be read at all; skipped, and named in the line.
+    pub unreadable: Vec<String>,
 }
 
 impl Imported {
     /// The line the first-run view shows.
     pub fn line(&self) -> String {
-        match (self.added.len(), self.kept.len()) {
+        let line: String = match (self.added.len(), self.kept.len()) {
             (0, 0) => "The Swift app has no settings to bring over.".into(),
             (0, _) => "Nothing new: every setting is already here.".into(),
             (n, _) => format!("Brought over {n} setting{}.", if n == 1 { "" } else { "s" }),
+        };
+        match self.unreadable.len() {
+            0 => line,
+            n => format!(
+                "{line} Skipped {n} it couldn't read: {}.",
+                self.unreadable.join(", ")
+            ),
         }
     }
 }
@@ -180,7 +226,7 @@ impl Imported {
 /// `file` win, so running it again, or after a setting was changed here, loses nothing. Only
 /// `file` is written; an unreadable `file` is left as it is.
 pub fn import_into(source: &dyn DefaultsSource, file: &Path) -> Result<Imported, String> {
-    let export = read_export(source)?;
+    let (export, unreadable) = read_export(source)?;
     let mut settings = Settings::open(file).map_err(|e| e.to_string())?;
     let before: Map<String, Value> = settings.values().clone();
     let preview = notchling_engine::settings::migrate(&export);
@@ -188,6 +234,7 @@ pub fn import_into(source: &dyn DefaultsSource, file: &Path) -> Result<Imported,
     let mut done = Imported {
         ignored: report.ignored.len(),
         invalid: report.invalid,
+        unreadable,
         ..Imported::default()
     };
     for name in preview.values.keys() {
@@ -249,7 +296,8 @@ mod tests {
 
     #[test]
     fn the_fixture_domain_is_read_with_its_awake_domain() {
-        let export = read_export(&fixtures()).unwrap();
+        let (export, unreadable) = read_export(&fixtures()).unwrap();
+        assert!(unreadable.is_empty());
         assert_eq!(export.current["mode"], json!("whileWorking"));
         assert_eq!(export.current["hideNotch"], json!(1));
         assert_eq!(
@@ -299,6 +347,40 @@ mod tests {
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(after, serde_json::from_str::<Value>(&before).unwrap());
         assert_eq!(after["values"]["mode"], json!("off"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A domain with values this reader can't turn into JSON, beside good ones.
+    struct Odd;
+
+    impl DefaultsSource for Odd {
+        fn export(&self, domain: &str) -> Result<Option<String>, String> {
+            Ok((domain == DOMAIN).then(|| {
+                "<plist><dict>\
+                 <key>mode</key><string>whileWorking</string>\
+                 <key>limitSwitchAt</key><integer>18446744073709551615</integer>\
+                 <key>showPet</key><false/>\
+                 <key>chatPageWidth</key><uid>3</uid>\
+                 </dict></plist>"
+                    .to_owned()
+            }))
+        }
+    }
+
+    #[test]
+    fn a_value_that_cant_be_read_is_skipped_and_named_not_the_whole_import() {
+        let dir = temp("odd");
+        let file = dir.join("settings.json");
+        let done = import_into(&Odd, &file).unwrap();
+        assert_eq!(done.added, ["mode", "showPet"]);
+        assert_eq!(done.unreadable, ["chatPageWidth", "limitSwitchAt"]);
+        assert_eq!(
+            done.line(),
+            "Brought over 2 settings. Skipped 2 it couldn't read: chatPageWidth, limitSwitchAt."
+        );
+        let store = Settings::open(&file).unwrap();
+        assert_eq!(store.get_str("mode").as_deref(), Some("whileWorking"));
+        assert_eq!(store.raw("limitSwitchAt"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
