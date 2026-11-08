@@ -9,6 +9,7 @@ impl VaultOps {
     /// Asks the app and waits. With no app following the vault, a no at once.
     pub(super) fn approve(
         &self,
+        caller: &Caller,
         asking: &[VaultEntry],
         command: &str,
         folder: &str,
@@ -25,7 +26,9 @@ impl VaultOps {
         let id = ticket.id.clone();
         let names: Vec<&str> = asking.iter().map(|e| e.name.as_str()).collect();
         let entries: Vec<Value> = asking.iter().map(entry_json).collect();
-        let event = json!({"id": id, "names": names, "entries": entries, "command": command, "folder": folder});
+        let verified = crate::vault_caller::verified(self.processes.as_ref(), caller, folder);
+        let event = json!({"id": id, "names": names, "entries": entries, "command": command,
+                           "folder": folder, "verified": verified});
         self.approvals.describe(&id, &event);
         self.room
             .publish(topics::VAULT, topics::VAULT_APPROVAL_PENDING, &event);

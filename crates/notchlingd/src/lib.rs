@@ -65,6 +65,7 @@ pub mod service;
 pub mod signals;
 pub mod switches;
 pub mod vault_args;
+pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
 pub mod vault_wait;

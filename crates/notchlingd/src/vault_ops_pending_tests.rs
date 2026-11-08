@@ -3,7 +3,54 @@
 
 use super::tests::{agent, app, err, pending_use, seed, setup};
 use super::*;
+use crate::vault_caller::Processes;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+
+/// Every process works in `/w/app` and runs under `zsh`, under `claude`, under launchd.
+pub(super) struct FakeProcesses;
+
+impl Processes for FakeProcesses {
+    fn parent(&self, pid: u32) -> Option<u32> {
+        Some(match pid {
+            41 => 42,
+            42 => 1,
+            _ => 41,
+        })
+    }
+    fn name(&self, pid: u32) -> Option<String> {
+        Some(if pid == 41 { "zsh" } else { "claude" }.to_string())
+    }
+    fn cwd(&self, _pid: u32) -> Option<PathBuf> {
+        Some(PathBuf::from("/w/app"))
+    }
+    fn resolve(&self, _path: &Path) -> Option<PathBuf> {
+        None
+    }
+}
+
+#[test]
+fn the_approval_says_what_the_daemon_checked_about_the_caller() {
+    let s = setup("verified", true);
+    seed(&s, true);
+    let (user, event) = pending_use(&s);
+    // What the caller claims stays as it was; beside it, what the kernel says.
+    assert_eq!(event["folder"], "/w/app");
+    assert_eq!(
+        event["verified"],
+        json!({"exe": "/fake/peer/notchling", "pid": std::process::id(), "cwd": "/w/app",
+               "parents": ["zsh", "claude"], "folder_matches": true})
+    );
+    let id = event["id"].clone();
+    s.ops
+        .call(
+            &app(),
+            ops::VAULT_APPROVAL_ANSWER,
+            &json!({"id": id, "decision": "deny"}),
+        )
+        .unwrap();
+    assert!(user.join().unwrap().is_err());
+}
 
 #[test]
 fn a_reconnecting_app_sees_what_waits_for_it() {

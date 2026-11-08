@@ -21,7 +21,8 @@
 //! secretVar, ask?, updated}`. No reply but `vault.use`'s carries a value, and no event ever does.
 //!
 //! **Approval.** `vault.use` of an entry marked ask-first publishes `vault.approval.pending {id,
-//! names, entries, command, folder}` on the `vault` topic, which only the app tier may follow, and
+//! names, entries, command, folder, verified}` on the `vault` topic (`command` and `folder` as the
+//! caller claims them, `verified` what the kernel says about it: see [`crate::vault_caller`]), which only the app tier may follow, and
 //! waits up to [`APPROVAL_WAIT`] for `vault.approval.answer`. The id is 128 random bits. The
 //! answer must come from an app-tier client that said hello as the app; an agent-tier client is
 //! refused by the server before this module sees the call. With no app following `vault` the use
@@ -48,6 +49,7 @@ use crate::layout::Layout;
 use crate::op_group::OpGroup;
 pub use crate::switches::{SwitchFlag, VAULT_OFF};
 use crate::vault_args::{entry_from, entry_json, text, value_from, Decision};
+use crate::vault_caller::{Processes, SystemProcesses};
 use crate::vault_wait::{OffHook, Refused, Waiters};
 use notchling_engine::vault::list::{self, label};
 use notchling_engine::vault::{
@@ -115,6 +117,8 @@ pub struct VaultOps {
     approvals: Arc<Waiters<Decision>>,
     requests: Arc<Waiters<Option<VaultEntry>>>,
     timing: VaultTiming,
+    /// What the kernel says about a caller, for the approval prompt.
+    processes: Arc<dyn Processes>,
 }
 
 fn failed(message: impl Into<String>) -> ApiError {
@@ -135,6 +139,7 @@ impl VaultOps {
             approvals: Arc::new(Waiters::new("vault-approval-", MAX_APPROVALS)),
             requests: Arc::new(Waiters::new("vault-request-", MAX_REQUESTS)),
             timing: VaultTiming::default(),
+            processes: Arc::new(SystemProcesses),
         };
         // Off forgets at once, not at the next call: a value must not sit in memory, nor an agent
         // wait for an approval, after the user turned the vault off.
@@ -181,6 +186,12 @@ impl VaultOps {
 
     pub fn with_timing(mut self, timing: VaultTiming) -> VaultOps {
         self.timing = timing;
+        self
+    }
+
+    /// Asks `processes` about callers instead of the kernel (tests).
+    pub fn with_processes(mut self, processes: Arc<dyn Processes>) -> VaultOps {
+        self.processes = processes;
         self
     }
 
@@ -277,7 +288,7 @@ impl VaultOps {
     }
 
     fn use_secrets(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        let result = self.use_inner(args);
+        let result = self.use_inner(caller, args);
         let outcome = match &result {
             Ok((_, names)) => format!("ok:{}", names.join(",")),
             Err((e, names)) if e.code == ErrorCode::NeedsApproval => {
@@ -291,7 +302,11 @@ impl VaultOps {
 
     /// The reply and the names used (for the audit log; only names that exist).
     #[allow(clippy::type_complexity)]
-    fn use_inner(&self, args: &Value) -> Result<(Value, Vec<String>), (ApiError, Vec<String>)> {
+    fn use_inner(
+        &self,
+        caller: &Caller,
+        args: &Value,
+    ) -> Result<(Value, Vec<String>), (ApiError, Vec<String>)> {
         let none = |e: ApiError| (e, Vec::new());
         let bad = || ApiError::bad_request("vault.use takes {names: [name, …], folder, command}");
         let names: Vec<String> = match args.get("names").and_then(Value::as_array) {
@@ -340,7 +355,9 @@ impl VaultOps {
         let fail = |e: ApiError| (e, used.clone());
         let asking: Vec<VaultEntry> = picked.iter().filter(|e| e.asks()).cloned().collect();
         if !asking.is_empty() {
-            let decision = self.approve(&asking, &command, &folder).map_err(fail)?;
+            let decision = self
+                .approve(caller, &asking, &command, &folder)
+                .map_err(fail)?;
             // The switch may have gone off while the user looked.
             if !self.switch.is_on() {
                 return Err(fail(self.switch.refusal()));

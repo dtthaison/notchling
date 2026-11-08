@@ -104,7 +104,8 @@ pub(super) fn setup(tag: &str, on: bool) -> Setup {
     };
     let ops = VaultOps::new(switch.clone(), store, room.clone())
         .with_audit(AuditLog::new(dir.join("audit.jsonl")))
-        .with_timing(timing);
+        .with_timing(timing)
+        .with_processes(Arc::new(super::pending_tests::FakeProcesses));
     Setup {
         ops: Arc::new(ops),
         room,

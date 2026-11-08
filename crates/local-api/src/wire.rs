@@ -199,7 +199,9 @@ pub mod topics {
 
     /// The Secret Vault (app tier). Never carries a value.
     pub const VAULT: &str = "vault";
-    /// `{id, names, entries, command, folder}`: an agent waits to use secrets marked ask-first.
+    /// `{id, names, entries, command, folder, verified: {exe, pid, cwd, parents,
+    /// folder_matches}}`: an agent waits to use secrets marked ask-first. `command` and `folder`
+    /// are what it claims; `verified` is what the daemon checked with the kernel.
     pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
     /// `{id, decision}`: answered, timed out, or the app left.
     pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";
