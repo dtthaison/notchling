@@ -8,7 +8,8 @@
 //! list. `security -i` reads lines into a 4 KB buffer, so a longer command can't go that way. The
 //! Swift app then put the hex on the command line, where `ps` shows it; this port refuses such a
 //! value instead ([`KeychainError::TooLong`], the same rule as Claude Code's logins in
-//! [`super::keychain`]): a login never goes on a command line.
+//! [`super::keychain`]): a login never goes on a command line. The stores' own saved copies go
+//! through [`super::chunked`], which splits a long value over several items.
 //!
 //! Everything sits behind [`Keychain`] so no test touches a real item. The process itself is
 //! launched by [`super::keychain::SystemSecurity`], which Claude Code's logins use too (see the

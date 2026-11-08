@@ -161,3 +161,13 @@ fn every_line_written_stays_under_the_cap() {
         Err(KeychainError::TooLong)
     );
 }
+
+#[test]
+fn the_own_services_are_the_stores_saved_copies() {
+    assert!(is_own(crate::accounts::codex::store::SERVICE));
+    assert!(is_own(crate::accounts::antigravity::store::SERVICE));
+    assert!(is_own(crate::accounts::claude::SAVED_SERVICE));
+    assert!(!is_own(crate::accounts::claude::LIVE_SERVICE));
+    assert!(!is_own(crate::accounts::antigravity::store::LIVE_SERVICE));
+    assert!(!is_own(crate::vault::store::SERVICE));
+}
