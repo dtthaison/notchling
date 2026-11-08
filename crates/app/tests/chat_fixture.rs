@@ -114,6 +114,39 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
 }
 
 #[test]
+fn a_reads_numbered_output_lines_up_in_the_view_model() {
+    let root = DataRoot::fixture(&fixture_root());
+    let sessions = root.sessions(NOW_MS);
+    let fix = sessions
+        .iter()
+        .find(|s| s.agent.name == "fix the bug")
+        .expect("fix the bug");
+    let rows = rows(&root.conversation(fix));
+    let read = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Tools(t) => Some(t),
+            _ => None,
+        })
+        .flatten()
+        .find(|t| t.title.starts_with("Read "))
+        .expect("the Read call");
+    // Claude Code's `cat -n` output is `     1<tab>code`; the engine trims the first line's
+    // leading spaces, so the first number must not drag its code left of the others.
+    let out = read.output.as_ref().expect("its output");
+    assert!(!out.text.contains('\t'), "{:?}", out.text);
+    let lines: Vec<&str> = out.text.lines().collect();
+    assert_eq!(lines[0], "1  import Foundation");
+    assert_eq!(lines[1], "2");
+    assert_eq!(lines[2], "3  enum SessionSearch {");
+    assert_eq!(
+        lines[3],
+        "4      static func rank(_ hits: [Hit]) -> [Hit] {"
+    );
+    assert_eq!(lines[6], "7  }");
+}
+
+#[test]
 fn header_and_inspector_read_the_facts() {
     let root = DataRoot::fixture(&fixture_root());
     let sessions = root.sessions(NOW_MS);
