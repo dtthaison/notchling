@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{App, Application, Global, WindowId};
 use objc2::MainThreadMarker;
@@ -15,6 +16,7 @@ use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
+use crate::phone::bridge::{now_ms, Bridge};
 use crate::session_source::SessionSource;
 
 /// The app's state while it runs.
@@ -36,6 +38,15 @@ impl Global for Shell {}
 pub struct AppActions(pub Arc<Actions>);
 
 impl Global for AppActions {}
+
+/// The phone bridge as the daemon last described it, shared by Chat's Phone panel and the poll that
+/// keeps it fresh and re-asserts the user's choice (`bridgeOn`). Not set in a render.
+pub struct AppBridge(pub Arc<Bridge>);
+
+impl Global for AppBridge {}
+
+/// How often the app reads the bridge while no panel is open.
+const BRIDGE_POLL: Duration = Duration::from_secs(5);
 
 /// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
 /// root instead of the real folders; Chat and the notch read the same one.
@@ -66,6 +77,19 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         let for_notch = sessions.clone();
         let actions = Arc::new(Actions::for_run(root.as_ref()));
         cx.set_global(AppActions(actions.clone()));
+        let bridge = Arc::new(Bridge::for_run(root.as_ref()));
+        cx.set_global(AppBridge(bridge.clone()));
+        if bridge.is_live() {
+            // Off at every daemon start: this brings the daemon back to what the user chose.
+            cx.spawn(async move |cx| loop {
+                let asked = bridge.clone();
+                cx.background_executor()
+                    .spawn(async move { asked.refresh(now_ms()) })
+                    .await;
+                cx.background_executor().timer(BRIDGE_POLL).await;
+            })
+            .detach();
+        }
         cx.set_global(Shell {
             state,
             tray,
