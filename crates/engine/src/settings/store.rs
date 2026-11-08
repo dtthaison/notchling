@@ -67,12 +67,18 @@ impl Settings {
         self.values.get(key)
     }
 
-    /// The stored value, else the key's default.
+    /// The stored value, else the key's default; `limitSwitchAt` is held to 80 to 99 as Swift reads it.
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.values
+        let spec = spec(key);
+        let value = self
+            .values
             .get(key)
             .cloned()
-            .or_else(|| spec(key).and_then(KeySpec::default_value))
+            .or_else(|| spec.and_then(KeySpec::default_value))?;
+        Some(match spec {
+            Some(spec) => spec.normalize(value),
+            None => value,
+        })
     }
 
     pub fn get_bool(&self, key: &str) -> Option<bool> {
@@ -316,6 +322,28 @@ mod tests {
         );
         assert_eq!(s.raw("showPet"), None);
         assert!(!tmp.path("data/settings.json").exists());
+    }
+
+    #[test]
+    fn limit_switch_at_reads_inside_80_to_99() {
+        // LimitWatcher.switchAt: min(max(v, 80), 99) on read; the stored value is left as written.
+        let tmp = TempDir::new("set-clamp");
+        let mut s = open(&tmp);
+        for (stored, read) in [(50, 80), (80, 80), (90, 90), (99, 99), (100, 99), (-5, 80)] {
+            s.set("limitSwitchAt", json!(stored)).expect("set");
+            assert_eq!(s.get_i64("limitSwitchAt"), Some(read), "stored {stored}");
+            assert_eq!(s.get("limitSwitchAt"), Some(json!(read)));
+        }
+        s.set("limitSwitchAt", json!(u64::MAX)).expect("set");
+        assert_eq!(s.get_i64("limitSwitchAt"), Some(99));
+        s.set("limitSwitchAt", json!(10)).expect("set");
+        assert_eq!(s.raw("limitSwitchAt"), Some(&json!(10)));
+        // A value another version or the migration wrote reads clamped too.
+        tmp.write(
+            "data/settings.json",
+            r#"{"version":1,"values":{"limitSwitchAt":3}}"#,
+        );
+        assert_eq!(open(&tmp).get_i64("limitSwitchAt"), Some(80));
     }
 
     #[test]

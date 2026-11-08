@@ -45,6 +45,8 @@ pub struct KeySpec {
     /// True when `AppDelegate.migrateFromAwake` copies it from the old `local.awake.menubar` domain.
     pub from_awake: bool,
     pub doc: &'static str,
+    /// For an integer key, the inclusive range a read stays inside (the stored value is kept as written).
+    pub range: Option<(i64, i64)>,
 }
 
 impl KeySpec {
@@ -63,6 +65,21 @@ impl KeySpec {
 }
 
 impl KeySpec {
+    /// `value` as a read returns it: an integer key with a range is clamped into it, the way Swift's
+    /// `LimitWatcher.switchAt` reads `limitSwitchAt`. Anything else comes back as it is.
+    pub fn normalize(&self, value: Value) -> Value {
+        let Some((low, high)) = self.range else {
+            return value;
+        };
+        if let Some(n) = value.as_i64() {
+            json!(n.clamp(low, high))
+        } else if value.is_u64() {
+            json!(high)
+        } else {
+            value
+        }
+    }
+
     /// True when `value` is exactly what this key stores: the right JSON type and, for an enum, one of
     /// the allowed strings.
     pub fn accepts(&self, value: &Value) -> bool {
@@ -97,6 +114,15 @@ const fn key(
         allowed: &[],
         from_awake,
         doc,
+        range: None,
+    }
+}
+
+impl KeySpec {
+    /// Reads of this integer key stay in `low..=high`.
+    const fn ranged(mut self, low: i64, high: i64) -> KeySpec {
+        self.range = Some((low, high));
+        self
     }
 }
 
@@ -114,6 +140,7 @@ const fn choice(
         allowed,
         from_awake,
         doc,
+        range: None,
     }
 }
 
@@ -144,7 +171,7 @@ pub const KEYS: &[KeySpec] = &[
     key("claudeDesktopAccounts", K::StringList, D::Empty, true, "Claude Desktop accounts signed in once (account UUIDs)"),
     key("codexAccounts", K::Json, D::None, true, "Saved Codex accounts (JSON)"),
     choice("limitMode", "notifyAndSwitch", &["off", "notify", "notifyAndSwitch"], true, "Claude Code limit watching"),
-    key("limitSwitchAt", K::Int, D::Int(95), true, "Percent at which a limit switch happens"),
+    key("limitSwitchAt", K::Int, D::Int(95), true, "Percent at which a limit switch happens (reads stay in 80 to 99)").ranged(80, 99),
     choice("codexLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Codex limit watching"),
     choice("antigravityLimitMode", "notify", &["off", "notify"], true, "Antigravity limit watching (never switches)"),
     key("codexNetwork", K::Bool, D::Bool(true), true, "Open the network in Codex turns (Allow Network in Codex Turns)"),

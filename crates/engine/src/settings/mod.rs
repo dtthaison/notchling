@@ -42,7 +42,7 @@
 //! | `claudeDesktopAccounts` | list of strings | `[]` | yes | Claude Desktop accounts seen |
 //! | `codexAccounts` | JSON | unset | yes | Saved Codex accounts |
 //! | `limitMode` | `off`/`notify`/`notifyAndSwitch` | `notifyAndSwitch` | yes | Claude limit watching |
-//! | `limitSwitchAt` | int | 95 | yes | Percent that triggers a switch |
+//! | `limitSwitchAt` | int | 95 | yes | Percent that triggers a switch (reads are held to 80 to 99) |
 //! | `codexLimitMode` | `off`/`notify`/`notifyAndSwitch` | `notify` | yes | Codex limit watching |
 //! | `antigravityLimitMode` | `off`/`notify` | `notify` | yes | Antigravity limit watching |
 //! | `codexNetwork` | bool | true | yes | Network open in Codex turns |
