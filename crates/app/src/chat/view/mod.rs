@@ -57,6 +57,7 @@ impl ChatView {
             WatchConfig {
                 poll: Duration::from_secs(1),
                 debounce: Duration::from_millis(500),
+                ..WatchConfig::default()
             },
         )
         .ok();
