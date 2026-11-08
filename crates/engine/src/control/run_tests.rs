@@ -38,6 +38,7 @@ fn stop_then_start() -> Plan {
                 timeout_secs: 60,
                 expect: Expect::ExitZero,
                 required: true,
+                keep_going: false,
                 pause_after_ms: 1500,
             }),
             Step::Run(RunStep {
@@ -45,6 +46,7 @@ fn stop_then_start() -> Plan {
                 timeout_secs: 60,
                 expect: Expect::JobId,
                 required: true,
+                keep_going: false,
                 pause_after_ms: 0,
             }),
         ],
@@ -125,32 +127,59 @@ fn a_timeout_names_the_command_and_the_limit() {
     );
 }
 
-#[test]
-fn best_effort_steps_do_not_stop_the_plan() {
-    let rm = |required| {
+/// A Remove-shaped plan: the current copy counts, the stale ones are best effort, and none waits on
+/// another (Swift's loop in `AppDelegate.remove`).
+fn rm_plan(current_keeps_going: bool) -> Plan {
+    let rm = |required, keep_going| {
         Step::Run(RunStep {
             command: Command::new(&["claude", "rm", "ab12"]),
             timeout_secs: 120,
             expect: Expect::ExitZero,
             required,
+            keep_going,
             pause_after_ms: 0,
         })
     };
-    let plan = Plan {
-        steps: vec![rm(true), rm(false), rm(false)],
+    Plan {
+        steps: vec![
+            rm(true, current_keeps_going),
+            rm(false, false),
+            rm(false, false),
+        ],
         outcome: Outcome::Done,
-    };
+    }
+}
+
+#[test]
+fn best_effort_steps_do_not_stop_the_plan() {
     let fake = FakeLauncher::new();
     fake.push_output(Ok(LaunchOutput::ok("")));
     fake.push_output(Ok(LaunchOutput::failed(1, "already gone")));
-    let report = execute(&plan, &fake, &|_| {}).expect("ran");
+    let report = execute(&rm_plan(true), &fake, &|_| {}).expect("ran");
     assert_eq!(report.ignored_failures, ["already gone"]);
     assert_eq!(fake.commands().len(), 3);
-    // The required one failing ends it.
+}
+
+/// The old test pinned the opposite: a failing current copy ended the plan, so the stale copies stayed.
+#[test]
+fn a_failing_current_copy_is_the_error_after_every_copy_was_tried() {
+    let failing = FakeLauncher::new();
+    failing.push_output(Ok(LaunchOutput::failed(1, "denied")));
+    failing.push_output(Ok(LaunchOutput::failed(1, "second failure")));
+    assert_eq!(
+        execute(&rm_plan(true), &failing, &|_| {}),
+        Err(ControlError::Failed("denied".into())),
+        "the first failure is the plan's, later ones don't replace it"
+    );
+    assert_eq!(failing.commands().len(), 3, "the stale copies were removed");
+}
+
+#[test]
+fn a_required_step_without_keep_going_still_ends_the_plan() {
     let failing = FakeLauncher::new();
     failing.push_output(Ok(LaunchOutput::failed(1, "denied")));
     assert_eq!(
-        execute(&plan, &failing, &|_| {}),
+        execute(&rm_plan(false), &failing, &|_| {}),
         Err(ControlError::Failed("denied".into()))
     );
     assert_eq!(failing.commands().len(), 1);

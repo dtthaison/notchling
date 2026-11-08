@@ -40,6 +40,7 @@ fn run(command: Command, timeout_secs: u64, expect: Expect) -> RunStep {
         timeout_secs,
         expect,
         required: true,
+        keep_going: false,
         pause_after_ms: 0,
     }
 }
@@ -118,7 +119,8 @@ pub fn plan_stop(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
 
 /// `claude rm <id>` in every folder holding a copy of the job. A session moved to another account
 /// left a stopped copy behind; remove that too, or it shows up again. Only the current copy's
-/// result counts: the others are best effort.
+/// result counts: the others are best effort, and none of them waits on another (a current copy
+/// that fails still lets the stale ones go, as Swift's loop does).
 pub fn plan_remove(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
     let id = job_id(agent)?;
     let mut dirs = job_dirs(roots, id);
@@ -131,6 +133,7 @@ pub fn plan_remove(agent: &Agent, roots: &Roots) -> Result<Plan, PlanError> {
         .map(|(index, dir)| {
             Step::Run(RunStep {
                 required: index == 0,
+                keep_going: index == 0,
                 ..run(
                     Command::new(&["claude", "rm", id]).for_config_dir(dir.as_deref()),
                     REMOVE_TIMEOUT_SECS,
