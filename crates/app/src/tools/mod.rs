@@ -18,6 +18,7 @@
 pub mod agy_options;
 pub mod agy_permission;
 pub mod codex_picker;
+pub mod fetch_gate;
 pub mod foreign;
 pub mod live;
 pub mod open_gate;

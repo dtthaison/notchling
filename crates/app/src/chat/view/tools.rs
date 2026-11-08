@@ -19,6 +19,7 @@ use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::AgyPermission;
 use crate::tools::codex_picker::CodexPicker;
+use crate::tools::fetch_gate::{Ask, FetchGate};
 use crate::tools::live::ToolLive;
 use crate::tools::open_gate::OpenGate;
 use crate::tools::requests::{
@@ -53,6 +54,8 @@ pub struct ChatTools {
     pub agy: Option<AgyConversation>,
     /// Which row and change count the last fetch was for.
     pub agy_fetched: Option<(String, u64)>,
+    /// The reads of Antigravity conversations: one in flight per row, none out of order.
+    pub fetches: FetchGate,
     pub agy_config: Vec<ConfigOption>,
     /// Which Antigravity rows this Chat asked the daemon to open, and when to ask again (the
     /// daemon closes a session after ten idle minutes).
@@ -75,6 +78,7 @@ impl ChatTools {
             picks: HashMap::new(),
             agy: None,
             agy_fetched: None,
+            fetches: FetchGate::default(),
             agy_config: Vec::new(),
             opens: OpenGate::default(),
             queued: HashMap::new(),
@@ -382,8 +386,16 @@ impl ChatView {
         }
     }
 
-    /// Reads the row's conversation and options from the daemon, off the UI thread.
+    /// Reads the row's conversation and options from the daemon, off the UI thread: one read at a
+    /// time per row, and a change that comes meanwhile is covered by the read that follows
+    /// (`FetchGate`).
     fn fetch_agy(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Ask::Start(number) = self.tools.fetches.request(&id) {
+            self.read_agy(id, number, cx);
+        }
+    }
+
+    fn read_agy(&mut self, id: String, number: u64, cx: &mut Context<Self>) {
         let actions = self.acts(cx).actions;
         let asked = id.clone();
         cx.spawn(async move |this, cx| {
@@ -396,16 +408,19 @@ impl ChatView {
                 })
                 .await;
             this.update(cx, |view, cx| {
-                if view.selected.as_deref() != Some(asked.as_str()) {
-                    return;
+                let done = view.tools.fetches.finished(&asked, number);
+                if done.apply && view.selected.as_deref() == Some(asked.as_str()) {
+                    if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
+                        view.conversation = c.conversation.clone();
+                        view.loading = false;
+                        view.tools.agy = Some(c);
+                    }
+                    if let Some(state) = state {
+                        view.tools.agy_config = parse_config(&state);
+                    }
                 }
-                if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
-                    view.conversation = c.conversation.clone();
-                    view.loading = false;
-                    view.tools.agy = Some(c);
-                }
-                if let Some(state) = state {
-                    view.tools.agy_config = parse_config(&state);
+                if let Some(next) = done.next {
+                    view.read_agy(asked.clone(), next, cx);
                 }
                 cx.notify();
             })
