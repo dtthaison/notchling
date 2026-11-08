@@ -23,6 +23,12 @@ From the design: [Architecture](https://github.com/dtthaison/notchling/blob/d285
 
 Accepted. The maintainer decided to stay MIT and allow only MIT, Apache and BSD licenses *(decided)*.
 
+## Note, 2026-11-08: named exceptions for GPUI's tree
+
+GPUI 0.2.2 (part U0) brings crates outside the list into the dependency tree. Linked into the macOS app: `option-ext` (MPL-2.0, through `dirs` and `zed-font-kit`, which finds the user's fonts). Build time only, never linked: `cbindgen` (MPL-2.0, GPUI's build script writes its Metal shader header) and `hexf-parse` (CC0-1.0, through `naga` in the same script). Compiled by no build of ours but still in `cargo-deny`'s graph, because it filters each dependency edge by target on its own while GPUI is a macOS-only dependency here: `dwrote` (MPL-2.0, Windows font-kit) and `tiny-keccak` (CC0-1.0, Linux x11 input methods).
+
+The maintainer chose named exceptions in `deny.toml` for exactly these crates on 2026-11-08, rather than widening the allow list. Why that is acceptable: MPL-2.0 is file-level copyleft that reaches only its own files, which we use unmodified with their source on crates.io, so Notchling stays MIT and no obligation falls on anyone building it; CC0-1.0 is a public-domain dedication. `deny.toml` now also checks only the triples we build (`[graph] targets`), and an unmaintained crate deep in GPUI's tree no longer fails the check (`[advisories] unmaintained = "workspace"`: only our own direct dependencies do); vulnerability advisories stay errors. A new exception takes the maintainer, as before.
+
 ## Date
 
 2026-11-07

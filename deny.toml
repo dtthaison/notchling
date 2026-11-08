@@ -3,9 +3,21 @@
 
 [graph]
 all-features = true
+# Only the triples we build (the rust workflow's macOS, Ubuntu and Windows runners). GPUI's tree also
+# names Windows-only, Linux-x11-only and `cfg(fuzzing)` crates (dwrote, tiny-keccak, libfuzzer-sys)
+# that no build of ours compiles, since GPUI itself is a macOS-only dependency for now.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
 
 [advisories]
 ignore = []
+# Vulnerabilities stay errors. An unmaintained crate deep in GPUI's tree (zbus, rustybuzz, ttf-parser,
+# async-std…) is Zed's to replace, not ours: only a direct dependency of our crates fails on it.
+unmaintained = "workspace"
 
 [licenses]
 allow = [
@@ -19,6 +31,22 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.8
+# Named exceptions, the maintainer's choice on 2026-11-08 (docs/decisions/0008): GPUI 0.2.2's tree
+# brings these. MPL-2.0 is file-level copyleft that reaches only its own files, which we use
+# unmodified from crates.io; CC0-1.0 is a public-domain dedication. One crate each, by name.
+exceptions = [
+    # dirs ← zed-font-kit ← gpui: finds the user's font folders. Linked into the macOS app.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+    # gpui's build script writes the C header for its Metal shaders. A build tool, never linked.
+    { crate = "cbindgen", allow = ["MPL-2.0"] },
+    # naga, in gpui's build script, compiles the shaders. Build time only, never linked.
+    { crate = "hexf-parse", allow = ["CC0-1.0"] },
+    # The two below are compiled by no build of ours: zed-font-kit wants dwrote only on Windows and
+    # zed-xim wants tiny-keccak (through ahash) only on Linux x11, while gpui itself is macOS-only
+    # here. cargo-deny filters each edge by target on its own, so the pair survives `targets` above.
+    { crate = "dwrote", allow = ["MPL-2.0"] },
+    { crate = "tiny-keccak", allow = ["CC0-1.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
