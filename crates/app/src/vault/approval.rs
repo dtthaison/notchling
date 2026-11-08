@@ -20,6 +20,7 @@ pub const ONCE: &str = "Allow Once";
 pub const FOLDER: &str = "Folder";
 pub const COMMAND: &str = "Command it says it will run";
 pub const FOLDER_WARNING: &str = "The folder it names isn't where it's running";
+pub const FOLDER_UNCHECKED: &str = "The folder couldn't be checked";
 
 /// The prompt window's size in points.
 pub const PROMPT_SIZE: (f32, f32) = (500.0, 470.0);
@@ -54,6 +55,8 @@ pub struct Prompt {
     pub always_tip: String,
     /// The red line above the buttons when the folder it names isn't where it runs.
     pub warning: Option<&'static str>,
+    /// Under the folder when the daemon couldn't check it against where the caller runs.
+    pub unchecked: Option<&'static str>,
 }
 
 impl Prompt {
@@ -68,7 +71,8 @@ impl Prompt {
         let real = verified
             .and_then(|v| v.cwd.clone())
             .filter(|c| !c.is_empty());
-        let mismatch = verified.is_some_and(|v| !v.folder_matches);
+        let matches = verified.and_then(|v| v.folder_matches);
+        let mismatch = matches == Some(false);
         Prompt {
             id: a.id.clone(),
             title: format!("Allow an agent to use {names}?"),
@@ -83,6 +87,7 @@ impl Prompt {
             explanation: EXPLANATION,
             always_tip: format!("Stop asking for {names}; you can turn it back on in the vault"),
             warning: mismatch.then_some(FOLDER_WARNING),
+            unchecked: matches.is_none().then_some(FOLDER_UNCHECKED),
         }
     }
 

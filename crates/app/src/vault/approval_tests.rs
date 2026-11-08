@@ -60,9 +60,22 @@ fn the_daemons_verified_caller_is_shown_and_a_wrong_folder_warns() {
     .unwrap();
     let p = Prompt::new(&ok);
     assert_eq!(
-        (p.warning, p.claimed_folder, p.requested_by),
+        (p.warning, p.claimed_folder.clone(), p.requested_by.clone()),
         (None, None, None)
     );
+    // The daemon couldn't read where it runs: no warning, but the prompt says it wasn't checked.
+    let unknown = Approval::from_event(&json!({"id": "ap-4", "names": ["github"],
+        "folder": "/w", "verified": {"cwd": null, "parents": ["zsh"], "folder_matches": null}}))
+    .unwrap();
+    let p = Prompt::new(&unknown);
+    assert_eq!(p.warning, None);
+    assert_eq!(p.unchecked, Some(FOLDER_UNCHECKED));
+    assert_eq!(p.folder, "/w");
+    // No verified object at all (an older daemon): nothing was checked either.
+    let old =
+        Approval::from_event(&json!({"id": "ap-5", "names": ["github"], "folder": "/w"})).unwrap();
+    assert_eq!(Prompt::new(&old).unchecked, Some(FOLDER_UNCHECKED));
+    assert_eq!(Prompt::new(&ok).unchecked, None);
     // An odd verified object is read as far as it goes.
     let odd = Approval::from_event(&json!({"id": "ap-3", "verified": "yes"})).unwrap();
     assert_eq!(odd.verified, None);

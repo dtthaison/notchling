@@ -119,8 +119,9 @@ pub struct Verified {
     pub cwd: Option<String>,
     /// Process names, nearest first.
     pub parents: Vec<String>,
-    /// Whether the folder the request names is where it runs.
-    pub folder_matches: bool,
+    /// Whether the folder the request names is where it runs; `None` when the daemon couldn't
+    /// tell (it couldn't read the caller's folder).
+    pub folder_matches: Option<bool>,
 }
 
 impl Verified {
@@ -140,11 +141,8 @@ impl Verified {
                         .collect()
                 })
                 .unwrap_or_default(),
-            // Missing is not a match: nothing was checked.
-            folder_matches: v
-                .get("folder_matches")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            // Missing or null: nothing was checked, which is neither a match nor a mismatch.
+            folder_matches: v.get("folder_matches").and_then(Value::as_bool),
         })
     }
 }

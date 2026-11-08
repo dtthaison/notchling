@@ -231,6 +231,11 @@ impl Render for VaultApprovalView {
                     .claimed_folder
                     .as_deref()
                     .map(|c| mono(c, Ink::TextMuted, a)),
+            )
+            .children(
+                prompt
+                    .unchecked
+                    .map(|u| label(u, TypeRole::Meta, Ink::TextMuted, a)),
             );
         div()
             .id(SharedString::from(prompt.element("vault-approval")))
