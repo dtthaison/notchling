@@ -8,7 +8,9 @@
 //! [`panel`] (what is drawn, each control with the reason it is disabled). [`renders`] is
 //! `--render phone-panel`. The GPUI view is `view`, macOS only (`LINT-GPUI-MACOS-ONLY`).
 
+pub mod approval;
 pub mod bridge;
+pub mod pairing;
 pub mod panel;
 pub mod qr;
 pub mod renders;
