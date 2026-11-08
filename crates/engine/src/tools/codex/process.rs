@@ -42,6 +42,11 @@ pub trait ToolProcess: Send + Sync {
     fn terminate(&self) {
         self.interrupt();
     }
+    /// Ends it for good (SIGKILL), for a turn that ignored [`ToolProcess::terminate`] too; by
+    /// default the same as a terminate.
+    fn kill(&self) {
+        self.terminate();
+    }
 }
 
 /// Why a tool did not start.
@@ -241,6 +246,13 @@ impl ToolProcess for RealProcess {
     fn terminate(&self) {
         #[cfg(unix)]
         self.signal(libc::SIGTERM);
+        #[cfg(not(unix))]
+        self.signal(0);
+    }
+
+    fn kill(&self) {
+        #[cfg(unix)]
+        self.signal(libc::SIGKILL);
         #[cfg(not(unix))]
         self.signal(0);
     }

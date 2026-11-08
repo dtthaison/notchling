@@ -16,6 +16,9 @@ pub struct FakeRun {
     pub held: bool,
     /// How an interrupt ends it.
     pub on_interrupt: ExitInfo,
+    /// Ignores an interrupt and a terminate (like a process that traps SIGINT and SIGTERM); only
+    /// a kill (or a release) ends it.
+    pub stubborn: bool,
 }
 
 impl FakeRun {
@@ -35,6 +38,15 @@ impl FakeRun {
                 code: None,
                 signaled: true,
             },
+            stubborn: false,
+        }
+    }
+
+    /// Prints `lines`, then stays running through an interrupt and a terminate.
+    pub fn stubborn(lines: &[&str]) -> FakeRun {
+        FakeRun {
+            stubborn: true,
+            ..FakeRun::held(lines)
         }
     }
 
@@ -67,6 +79,7 @@ struct State {
     ended: Option<ExitInfo>,
     released: bool,
     interrupts: usize,
+    kills: usize,
 }
 
 pub struct FakeProcess {
@@ -98,9 +111,14 @@ impl FakeProcess {
         self.changed.notify_all();
     }
 
-    /// How many times it was interrupted.
+    /// How many times it was interrupted (a terminate counts as one).
     pub fn interrupts(&self) -> usize {
         self.lock().interrupts
+    }
+
+    /// How many times it was killed.
+    pub fn kills(&self) -> usize {
+        self.lock().kills
     }
 }
 
@@ -125,6 +143,15 @@ impl ToolProcess for FakeProcess {
     fn interrupt(&self) {
         let mut state = self.lock();
         state.interrupts += 1;
+        if state.ended.is_none() && !self.run.stubborn {
+            state.ended = Some(self.run.on_interrupt);
+        }
+        self.changed.notify_all();
+    }
+
+    fn kill(&self) {
+        let mut state = self.lock();
+        state.kills += 1;
         if state.ended.is_none() {
             state.ended = Some(self.run.on_interrupt);
         }
