@@ -14,10 +14,17 @@
 //! | `prompts.list` | app | `{}` | `[prompt...]` |
 //! | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
 //! | `session.question` | agent | `{id}` | `{"promptId", "items"}`, or `unimplemented` for one only on screen (`ReplySender.readQuestion` isn't ported) |
-//! | `hook.request` | agent, `client: "hook"` only | `{event, pid?, waitMs?}` | a decision (`prompts`) |
+//! | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
 //!
-//! An `id` is a row id from `sessions.list`, or for `answer` and `permission` a prompt id from
-//! `prompt.pending`. A typing failure (a dialog open, the question gone) is code `failed`.
+//! An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from
+//! `prompt.pending` only (`session.permission` always; `session.answer` when the id is a prompt's,
+//! else it types into the row's dialog), never found from a row: a prompt is the one the app showed.
+//! A typing failure (a dialog open, the question gone) is code `failed`.
+//!
+//! The hook is who its process is. Its pid comes from the socket's peer credentials
+//! ([`Caller::pid`]), never from its arguments, and that process must descend from the Claude Code
+//! process whose `sessions/<pid>.json` (in the main config folder or a lane's) holds the event's
+//! `session_id`. Anything else is `forbidden`, and `notchling hook` passes on it.
 
 use crate::acting::{Acting, ACTING_OFF};
 use crate::hook_output::is_prompt_event;
@@ -29,7 +36,7 @@ use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
 use notchling_engine::sessions::jobs::config_dir_for_job;
-use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_engine::sessions::{config_dirs, Agent, AgentGroup, AgentTarget, Roots};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::sync::mpsc::RecvTimeoutError;
@@ -38,6 +45,14 @@ use std::time::{Duration, Instant};
 
 /// The longest a hook is held (the Swift hook's `waitSeconds`), under Claude Code's 300 s timeout.
 pub const HOOK_WAIT: Duration = Duration::from_secs(290);
+
+/// How far up from the hook's process its Claude Code is looked for (Claude Code runs a hook
+/// through a shell or two).
+pub const LINEAGE_DEPTH: usize = 16;
+
+/// A process's parent: the kernel's (`proc_pidinfo` on macOS, `/proc/<pid>/stat` on Linux),
+/// swapped in tests.
+pub type Parents = Box<dyn Fn(u32) -> Option<u32> + Send + Sync>;
 
 /// The ops that act on a session, refused while acting is off.
 pub const ACTING_OPS: [&str; 11] = [
@@ -138,6 +153,8 @@ pub struct ActingOps {
     typing: Mutex<()>,
     /// How often a held hook looks at the app and its own process.
     tick: Duration,
+    /// Walks a hook's process up to its Claude Code.
+    parent_of: Parents,
 }
 
 impl ActingOps {
@@ -159,7 +176,40 @@ impl ActingOps {
             pause: Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
             typing: Mutex::new(()),
             tick: Duration::from_millis(250),
+            parent_of: Box::new(crate::hook::parent_pid),
         }
+    }
+
+    /// Finds a process's parent with `parents` (tests).
+    pub fn with_parents(mut self, parents: Parents) -> ActingOps {
+        self.parent_of = parents;
+        self
+    }
+
+    /// Whether `pid` descends from the Claude Code process whose `sessions/<pid>.json`, in any
+    /// config folder, holds `session_id`.
+    fn started_by_session(&self, pid: u32, session_id: &str) -> bool {
+        if session_id.is_empty() {
+            return false;
+        }
+        let folders: Vec<std::path::PathBuf> = config_dirs(&self.roots)
+            .into_iter()
+            .map(|c| c.dir.join("sessions"))
+            .collect();
+        let mut next = (self.parent_of)(pid);
+        for _ in 0..LINEAGE_DEPTH {
+            let Some(p) = next.filter(|p| *p > 1) else {
+                return false;
+            };
+            if folders
+                .iter()
+                .any(|f| session_file_holds(&f.join(format!("{p}.json")), session_id))
+            {
+                return true;
+            }
+            next = (self.parent_of)(p);
+        }
+        false
     }
 
     /// Session control runs through `launcher`, and waits with `pause`.
@@ -303,11 +353,15 @@ impl ActingOps {
         Ok(json!({"taken": outcome.taken}))
     }
 
-    /// The held prompt `args.id` names: a prompt id, or a session row whose Claude Code session
-    /// has one of `kind` held.
-    fn held(&self, args: &Value, kind: Kind) -> Result<Option<Prompt>, ApiError> {
-        let id = text_arg(args, "id")?;
-        if let Some(prompt) = self.prompts.get(id) {
+    /// The held prompt `args.id` names by its own id. Never found from a session row: an answer
+    /// goes to the prompt the app showed, not to whichever one a session has now.
+    fn held(&self, args: &Value) -> Result<Option<Prompt>, ApiError> {
+        Ok(self.prompts.get(text_arg(args, "id")?))
+    }
+
+    /// For reading only (`session.question`): a prompt id, or the row's oldest held question.
+    fn held_for_reading(&self, args: &Value) -> Result<Option<Prompt>, ApiError> {
+        if let Some(prompt) = self.held(args)? {
             return Ok(Some(prompt));
         }
         let Ok(agent) = self.agent(args) else {
@@ -315,14 +369,14 @@ impl ActingOps {
         };
         Ok(agent
             .session_id()
-            .and_then(|s| self.prompts.for_session(&s, kind)))
+            .and_then(|s| self.prompts.for_session(&s, Kind::Question)))
     }
 
     fn permission(&self, args: &Value) -> Result<Value, ApiError> {
         let decision = text_arg(args, "decision")?;
         let prompt = self
-            .held(args, Kind::Permission)?
-            .ok_or_else(|| bad("no permission is waiting for this session"))?;
+            .held(args)?
+            .ok_or_else(|| bad("no prompt with that id is waiting (answer by the prompt's id)"))?;
         let response = match (decision, prompt.kind) {
             ("deny", _) => match args.get("message").and_then(Value::as_str) {
                 Some(message) => json!({"action": "deny", "message": message}),
@@ -343,7 +397,7 @@ impl ActingOps {
         let answers = args
             .get("answers")
             .ok_or_else(|| bad("answers is needed"))?;
-        if let Some(prompt) = self.held(args, Kind::Question)? {
+        if let Some(prompt) = self.held(args)? {
             let question = prompt
                 .question
                 .clone()
@@ -379,7 +433,7 @@ impl ActingOps {
     }
 
     fn question(&self, args: &Value) -> Result<Value, ApiError> {
-        if let Some(prompt) = self.held(args, Kind::Question)? {
+        if let Some(prompt) = self.held_for_reading(args)? {
             if let Some(q) = &prompt.question {
                 let mut out = question_json(q);
                 out["promptId"] = json!(prompt.id);
@@ -397,7 +451,7 @@ impl ActingOps {
 
     /// Holds a hook's prompt until the app decides, the hook's deadline, the app leaving or the
     /// hook's process going; every way but a decision is a pass. Only a client that said hello as
-    /// the hook gets here, so no other client can collect a decision.
+    /// the hook, from a process the event's Claude Code session started, gets here.
     fn hook_request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         if caller.client != ClientKind::Hook {
             return Err(forbidden(
@@ -414,6 +468,16 @@ impl ActingOps {
         if !is_prompt_event(event) {
             return Ok(pass("not a question or permission"));
         }
+        // Who the hook is comes from the kernel, and it must be this session's.
+        let session = event.get("session_id").and_then(Value::as_str).unwrap_or("");
+        let Some(pid) = caller
+            .pid
+            .filter(|pid| self.started_by_session(*pid, session))
+        else {
+            return Err(forbidden(
+                "hook.request comes only from a hook the event's Claude Code session started",
+            ));
+        };
         if !self.room.can_answer() {
             return Ok(pass("no app is attached"));
         }
@@ -422,11 +486,7 @@ impl ActingOps {
             .and_then(Value::as_u64)
             .map(Duration::from_millis)
             .map_or(HOOK_WAIT, |w| w.min(HOOK_WAIT));
-        let pid = args
-            .get("pid")
-            .and_then(Value::as_u64)
-            .and_then(|p| u32::try_from(p).ok());
-        let Some((prompt, rx)) = self.prompts.open(event.clone(), pid, now_ms()) else {
+        let Some((prompt, rx)) = self.prompts.open(event.clone(), Some(pid), now_ms()) else {
             return Ok(pass("the daemon is stopping"));
         };
         self.room
@@ -442,7 +502,7 @@ impl ActingOps {
                 "timeout"
             } else if !self.room.can_answer() {
                 "no_app"
-            } else if pid.is_some_and(|p| !alive(p)) {
+            } else if !alive(pid) {
                 "hook_gone"
             } else {
                 continue;
@@ -510,6 +570,14 @@ fn question_arg(args: &Value) -> Result<PendingQuestion, ApiError> {
         tool_use_id: "screen".into(),
         items,
     })
+}
+
+/// Whether the Claude Code session file at `path` names `session_id`.
+fn session_file_holds(path: &std::path::Path, session_id: &str) -> bool {
+    std::fs::read(path)
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
+        .is_some_and(|s| s.get("sessionId").and_then(Value::as_str) == Some(session_id))
 }
 
 fn now_ms() -> i64 {

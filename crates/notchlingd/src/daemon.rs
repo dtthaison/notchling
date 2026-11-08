@@ -20,7 +20,7 @@ use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
     ops, topics, Allowlist, ApiError, AuditEntry, AuditLog, Caller, Handler, Limits, OpSpec,
-    Server, ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
+    Server, ServerConfig, ServerHandle, Tier, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
@@ -98,6 +98,14 @@ impl Handler for Ops {
         match self.acting {
             Some(_) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
             None => &[topics::SESSIONS],
+        }
+    }
+
+    /// The held prompts are the app's: their ids are what answers them.
+    fn topic_tier(&self, topic: &str) -> Tier {
+        match topic {
+            topics::PROMPTS => Tier::App,
+            _ => Tier::Agent,
         }
     }
 
@@ -350,7 +358,7 @@ fn wait_batch(rx: &Receiver<Batch>, wait: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notchling_local_api::{ClientKind, Tier};
+    use notchling_local_api::ClientKind;
     use serde_json::json;
 
     fn caller() -> Caller {
@@ -358,6 +366,7 @@ mod tests {
             tier: Tier::Agent,
             client: ClientKind::Cli,
             peer: None,
+            pid: None,
         }
     }
 

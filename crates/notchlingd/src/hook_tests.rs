@@ -107,6 +107,22 @@ fn daemon(acting: bool, app_tier: bool) -> Daemon {
     }
 }
 
+/// Makes this test process look like a hook Claude Code started: its parent is the Claude Code
+/// process whose `sessions/<pid>.json` holds the fixtures' session.
+fn claim_session(d: &Daemon) {
+    let sessions = d.dir.0.join("claude/sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    // SAFETY: getppid takes nothing and can't fail.
+    let parent = unsafe { libc::getppid() };
+    let session = json!({"pid": parent, "sessionId": crate::acting_ops_tests::SESSION,
+        "cwd": "/tmp/demo", "entrypoint": "cli"});
+    std::fs::write(
+        sessions.join(format!("{parent}.json")),
+        session.to_string(),
+    )
+    .unwrap();
+}
+
 fn connect(socket: &Path, kind: ClientKind) -> Client {
     let options = ConnectOptions {
         check_server: false,
@@ -119,7 +135,6 @@ fn options(socket: &Path, claude_dir: &Path, wait_ms: u64) -> HookOptions {
     HookOptions {
         socket: socket.to_path_buf(),
         claude_dir: claude_dir.to_path_buf(),
-        pid: std::process::id(),
         ancestors: vec![4242],
         wait: Duration::from_millis(wait_ms),
         slack: Duration::from_millis(500),
@@ -202,6 +217,7 @@ fn passes_on_a_socket_error() {
 #[test]
 fn passes_for_a_claude_p_session_without_asking() {
     let d = daemon(true, true);
+    claim_session(&d);
     let app = answering_app(
         &d.socket,
         ops::SESSION_PERMISSION,
@@ -232,6 +248,7 @@ fn passes_for_a_claude_p_session_without_asking() {
 #[test]
 fn passes_at_its_deadline() {
     let d = daemon(true, true);
+    claim_session(&d);
     let mut app = connect(&d.socket, ClientKind::App);
     app.subscribe(&[topics::PROMPTS]).unwrap();
     let started = Instant::now();
@@ -292,6 +309,7 @@ fn daemon_status_carries_the_switch_for_the_app() {
 #[test]
 fn prints_the_apps_decision_as_the_swift_hook_does() {
     let d = daemon(true, true);
+    claim_session(&d);
     let app = answering_app(
         &d.socket,
         ops::SESSION_PERMISSION,
@@ -352,8 +370,8 @@ fn the_agent_tier_reaches_no_acting_op_and_no_decision() {
             other => panic!("{op}: {other:?}"),
         }
     }
-    // Saying it's the app changes nothing; saying it's the hook gets a held prompt at most, never
-    // someone else's decision, and here no app can answer so it passes.
+    // Saying it's the app changes nothing; saying it's the hook, from a process no Claude Code
+    // session started, is refused: the hook's identity is its process, not its word.
     let mut posing = connect(&d.socket, ClientKind::App);
     assert!(posing
         .call(ops::SESSION_REPLY, json!({"id": "job-a", "text": "x"}))
@@ -366,15 +384,83 @@ fn the_agent_tier_reaches_no_acting_op_and_no_decision() {
         other => panic!("{other:?}"),
     }
     let mut hook = connect(&d.socket, ClientKind::Hook);
-    let reply = hook
-        .call(
-            ops::HOOK_REQUEST,
-            json!({"event": fixture("permission-request.json")}),
-        )
-        .unwrap();
-    assert_eq!(reply["action"], "pass");
+    match hook.call(
+        ops::HOOK_REQUEST,
+        json!({"event": fixture("permission-request.json"), "pid": 4242}),
+    ) {
+        Err(notchling_local_api::ClientError::Api(e)) => {
+            assert_eq!(e.code, ErrorCode::Forbidden, "{}", e.message)
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(d.ops.prompts().list().is_empty());
+    // And the agent tier can't follow the prompts to learn their ids.
+    match agent.subscribe(&[topics::PROMPTS]) {
+        Err(notchling_local_api::ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Forbidden),
+        other => panic!("{other:?}"),
+    }
+    agent.subscribe(&[topics::SESSIONS]).unwrap();
     assert_eq!(
         agent.call(ops::SETTINGS_GET_ACTING, json!({})).unwrap(),
         json!({"acting": true})
     );
+}
+
+#[test]
+fn a_hook_from_another_session_is_refused_and_passes() {
+    let d = daemon(true, true);
+    let mut app = connect(&d.socket, ClientKind::App);
+    app.subscribe(&[topics::PROMPTS]).unwrap();
+    // The parent's session file names another session: this process is no hook of this one.
+    claim_session(&d);
+    let mut other = fixture("permission-request.json");
+    other["session_id"] = json!("00000000-0000-0000-0000-000000000000");
+    let out = decide(
+        other.to_string().as_bytes(),
+        &options(&d.socket, &d.dir.0, 10_000),
+    );
+    assert_eq!(out, None, "refused, so the hook passes");
+    assert!(d.ops.prompts().list().is_empty());
+    assert!(matches!(app.next_event(Duration::from_millis(200)), Ok(None)));
+    // The one it belongs to is held, under the caller's own pid whatever it says.
+    let mut hook = connect(&d.socket, ClientKind::Hook);
+    let waiter = std::thread::spawn(move || {
+        hook.call(
+            ops::HOOK_REQUEST,
+            json!({"event": fixture("permission-request.json"), "pid": 1, "waitMs": 400}),
+        )
+        .unwrap()
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while d.ops.prompts().list().is_empty() {
+        assert!(Instant::now() < deadline, "never held");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        d.ops.prompts().list()[0].hook_pid,
+        Some(std::process::id())
+    );
+    assert_eq!(waiter.join().unwrap()["reason"], "timeout");
+}
+
+#[test]
+fn a_daemon_that_accepts_and_never_answers_lets_the_hook_pass_by_its_deadline() {
+    let dir = scratch("mute");
+    let socket = dir.0.join("mute.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    // Accepts, reads nothing, says nothing, and keeps the connection open.
+    let mute = std::thread::spawn(move || {
+        let held = listener.accept();
+        std::thread::sleep(Duration::from_secs(4));
+        drop(held);
+    });
+    let mut opts = options(&socket, &dir.0, 300);
+    opts.connect_timeout = Duration::from_millis(300);
+    opts.slack = Duration::from_millis(300);
+    let started = Instant::now();
+    let out = decide(&input("permission-request.json"), &opts);
+    assert_eq!(out, None);
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(2), "{took:?}");
+    let _ = mute.join();
 }

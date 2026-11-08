@@ -134,7 +134,8 @@ pub(crate) struct Setup {
 
 fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
     let roots = Roots {
-        main_dir: PathBuf::from("/nonexistent/claude"),
+        // Read-only: its `sessions/4242.json` is the Claude Code process behind [`hook`].
+        main_dir: fixture_claude(),
         lanes_file: PathBuf::from("/nonexistent/lanes.json"),
     };
     setup_in(on, screen, list, roots, None)
@@ -155,13 +156,19 @@ pub(crate) fn setup_in(
         ..FakeAttacher::default()
     };
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
+    // This process's parent is the fixture's Claude Code (pid 4242), so it may be the hook.
+    let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
         Arc::new(Mutex::new(list)),
         roots,
         room.clone(),
         Box::new(attacher),
-    );
+    )
+    .with_parents(Box::new(move |pid| match pid {
+        p if p == me || p == GONE => Some(4242),
+        _ => None,
+    }));
     if let Some(launcher) = launcher {
         ops = ops.with_launcher(launcher, Box::new(|_| {}));
     }
@@ -178,7 +185,15 @@ pub(crate) fn caller(client: ClientKind) -> Caller {
         tier: Tier::App,
         client,
         peer: None,
+        pid: Some(std::process::id()),
     }
+}
+
+/// A pid no process has: a hook Claude Code gave up on.
+const GONE: u32 = 99_999_999;
+
+fn fixture_claude() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hook/cli/claude")
 }
 
 pub(crate) fn app() -> Caller {
@@ -447,7 +462,7 @@ fn the_apps_permission_decision_reaches_the_hook() {
 }
 
 #[test]
-fn a_session_row_finds_its_held_prompt_and_a_question_takes_answers() {
+fn a_held_question_is_read_by_row_and_answered_by_prompt_id_only() {
     let s = Arc::new(setup(true, PROMPT, sessions()));
     let (thread, id) = held(&s, fixture("ask-user-question.json"), 10_000);
     let read = s
@@ -464,18 +479,29 @@ fn a_session_row_finds_its_held_prompt_and_a_question_takes_answers() {
         code(s.ops.call(
             &app(),
             ops::SESSION_PERMISSION,
-            &json!({"id": "job-a", "decision": "allow"})
+            &json!({"id": id, "decision": "allow"})
         ))
         .0,
         ErrorCode::BadRequest,
         "a question isn't allowed, it's answered"
     );
+    // A row id never reaches a held prompt: only its id does (no question given, nothing typed).
+    assert_eq!(
+        code(s.ops.call(
+            &app(),
+            ops::SESSION_ANSWER,
+            &json!({"id": "job-a", "answers": [[1, 3], [2]]}),
+        ))
+        .0,
+        ErrorCode::BadRequest
+    );
+    assert_eq!(s.ops.prompts().list().len(), 1, "still held");
     let out = s
         .ops
         .call(
             &app(),
             ops::SESSION_ANSWER,
-            &json!({"id": "job-a", "answers": [[1, 3], [2]]}),
+            &json!({"id": id, "answers": [[1, 3], [2]]}),
         )
         .unwrap();
     assert_eq!(out, json!({"answered": "hook", "promptId": id}));
@@ -531,9 +557,36 @@ fn turning_acting_off_passes_every_held_hook_at_once() {
 fn a_hook_claude_code_gave_up_on_is_let_go() {
     let s = Arc::new(setup(true, PROMPT, sessions()));
     let ops = s.clone();
-    let args = json!({"event": fixture("permission-request.json"), "pid": 99_999_999u64, "waitMs": 10_000});
-    let out = ops.ops.call(&hook(), ops::HOOK_REQUEST, &args).unwrap();
+    let args = json!({"event": fixture("permission-request.json"), "waitMs": 10_000});
+    let gone = Caller {
+        pid: Some(GONE),
+        ..hook()
+    };
+    let out = ops.ops.call(&gone, ops::HOOK_REQUEST, &args).unwrap();
     assert_eq!(out["reason"], "hook_gone");
+}
+
+#[test]
+fn a_hook_is_its_process_never_its_word() {
+    let s = setup(true, PROMPT, sessions());
+    let ask = json!({"event": fixture("permission-request.json"), "pid": 4243, "waitMs": 50});
+    // No peer pid, or one no Claude Code session started (whatever `pid` says): refused.
+    for pid in [None, Some(1), Some(31_337)] {
+        let posing = Caller { pid, ..hook() };
+        let (c, m) = code(s.ops.call(&posing, ops::HOOK_REQUEST, &ask));
+        assert_eq!(c, ErrorCode::Forbidden, "{pid:?}: {m}");
+    }
+    // The right process, but the event names a session its Claude Code isn't.
+    let mut other = fixture("permission-request.json");
+    other["session_id"] = json!("someone-else");
+    let (c, _) = code(s.ops.call(&hook(), ops::HOOK_REQUEST, &json!({"event": other})));
+    assert_eq!(c, ErrorCode::Forbidden);
+    assert!(s.room.named("prompt.pending").is_empty());
+    // The real one is held under its own pid.
+    let out = s.ops.call(&hook(), ops::HOOK_REQUEST, &ask).unwrap();
+    assert_eq!(out["reason"], "timeout");
+    let pending = s.room.named("prompt.pending");
+    assert_eq!(pending.len(), 1);
 }
 
 #[test]
