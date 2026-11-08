@@ -424,7 +424,7 @@ impl MachinesView {
                 a,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.model.renew(&name);
+                this.renew(&name, cx);
                 cx.notify();
             }));
             column = column.child(

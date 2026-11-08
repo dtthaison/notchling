@@ -432,7 +432,14 @@ fn renamed_legacy_secrets_show_a_banner_until_rename_moves_them() {
         w.model.rename_banner().as_deref(),
         Some("Rename sd-worker-m1 and sd-claude to the new names")
     );
-    w.model.rename_secrets();
+    let work = w.model.rename_work().expect("two to move");
+    assert!(
+        lock(&w.vault.renames).is_empty(),
+        "nothing moves on the UI thread"
+    );
+    assert!(w.model.rename_work().is_none(), "one rename at a time");
+    let failed = work.run();
+    w.model.renamed(failed);
     assert_eq!(
         *lock(&w.vault.renames),
         [
@@ -567,9 +574,15 @@ fn renew_opens_the_secrets_page_or_says_why_not() {
     lock(&w.vault.entries).push(entry);
     lock(&w.vault.entries).push(VaultEntry::new("bare", Kind::Token));
     w.model.reload();
-    w.model.renew("claude-worker");
+    let work = w.model.renew_work("claude-worker");
+    assert!(
+        lock(&w.vault.renewed).is_empty(),
+        "nothing opens on the UI thread"
+    );
+    w.model.renewed(work.run());
     assert_eq!(w.model.notice, None);
-    w.model.renew("bare");
+    let work = w.model.renew_work("bare");
+    w.model.renewed(work.run());
     assert_eq!(w.model.notice.as_deref(), Some("no page"));
     assert_eq!(*lock(&w.vault.renewed), ["claude-worker", "bare"]);
 }

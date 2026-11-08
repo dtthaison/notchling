@@ -151,7 +151,7 @@ impl MachinesView {
                 a,
             )
             .on_click(cx.listener(|this, _, _, cx| {
-                this.model.rename_secrets();
+                this.rename_secrets(cx);
                 cx.notify();
             }));
             column = column.child(Self::banner(

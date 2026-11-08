@@ -173,6 +173,34 @@ impl MachinesView {
         );
     }
 
+    /// Rename: the legacy secrets move through the vault off the UI thread.
+    pub(super) fn rename_secrets(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let Some(work) = self.model.rename_work() else {
+            return;
+        };
+        Self::background(
+            cx,
+            move || work.run(),
+            |view, failed, _| view.model.renamed(failed),
+        );
+    }
+
+    /// Renew…: the page opens off the UI thread.
+    pub(super) fn renew(&mut self, name: &str, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let work = self.model.renew_work(name);
+        Self::background(
+            cx,
+            move || work.run(),
+            |view, result, _| view.model.renewed(result),
+        );
+    }
+
     /// A confirmed plan runs; its outcome lands on the card.
     fn run(&mut self, run: Run, cx: &mut Context<Self>) {
         if self.fixed {
