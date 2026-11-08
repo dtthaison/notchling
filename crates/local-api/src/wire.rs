@@ -83,6 +83,21 @@ pub mod ops {
     pub const PAGES_LIST: &str = "pages.list";
     /// `{query}` → `{pages: [Page + describe], truncated}`.
     pub const PAGES_FIND: &str = "pages.find";
+
+    /// Milestone 6's Secret Vault (E9), behind the daemon's `vault` switch; the shapes are in
+    /// `notchlingd`'s `vault_ops` module docs. Agent tier: `vault.find`, `vault.use` (an entry
+    /// marked ask-first waits for the app's approval) and `vault.request` (waits for the app's
+    /// form). App tier: the rest.
+    pub const VAULT_FIND: &str = "vault.find";
+    pub const VAULT_USE: &str = "vault.use";
+    pub const VAULT_REQUEST: &str = "vault.request";
+    pub const VAULT_LIST: &str = "vault.list";
+    pub const VAULT_SAVE: &str = "vault.save";
+    pub const VAULT_REMOVE: &str = "vault.remove";
+    /// `{id, decision: "deny" | "once" | "always"}`: the answer to a `vault.approval.pending`.
+    pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
+    /// `{id}`: the user closed a `vault.request.pending` form without saving.
+    pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
 }
 
 /// Event topics and the events they carry.
@@ -120,6 +135,18 @@ pub mod topics {
     pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
     /// The status after a change (`bridge.status`'s answer).
     pub const BRIDGE_CHANGED: &str = "bridge.changed";
+    /// The Secret Vault (app tier). Never carries a value.
+    pub const VAULT: &str = "vault";
+    /// `{id, names, entries, command, folder}`: an agent waits to use secrets marked ask-first.
+    pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
+    /// `{id, decision}`: answered, timed out, or the app left.
+    pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";
+    /// `{id, request, entry, existing, changes}`: an agent asks the user to add or update one.
+    pub const VAULT_REQUEST_PENDING: &str = "vault.request.pending";
+    /// `{id, saved}`.
+    pub const VAULT_REQUEST_RESOLVED: &str = "vault.request.resolved";
+    /// `{names, value_changed}`: the list changed (a save, a remove, Always Allow).
+    pub const VAULT_CHANGED: &str = "vault.changed";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.

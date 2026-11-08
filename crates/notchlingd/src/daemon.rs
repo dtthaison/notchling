@@ -22,6 +22,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
 use crate::layout::Layout;
 use crate::pages_ops::{PagesOps, PagesSetup};
+use crate::vault_ops::{SwitchFlag, VaultOps};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
@@ -119,6 +120,7 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
+    vault: Option<Arc<VaultOps>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
     /// What `sessions.list` waits for, and for how long.
@@ -135,6 +137,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
+            vault: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -171,6 +174,9 @@ impl Ops {
         if self.codex.is_some() || self.agy.is_some() {
             list.push(topics::TOOLS);
         }
+        if self.vault.is_some() {
+            list.push(topics::VAULT);
+        }
         self.topic_list = list;
         self
     }
@@ -185,6 +191,12 @@ impl Ops {
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
         self.pages = Some(pages);
         self
+    }
+
+    /// M6's Secret Vault ([`VaultOps`]), behind its own switch, and the `vault` topic (app tier).
+    pub fn with_vault(mut self, vault: Arc<VaultOps>) -> Ops {
+        self.vault = Some(vault);
+        self.with_topics()
     }
 
     /// `sessions.list` waits up to `wait` for `first`, then answers with what the list holds.
@@ -240,7 +252,8 @@ impl Handler for Ops {
                 .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
-                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op))),
+                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op)))
+                .or_else(|| self.vault.as_ref().and_then(|v| v.spec(op))),
         }
     }
 
@@ -257,6 +270,9 @@ impl Handler for Ops {
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
             return pages.call(op, args);
         }
+        if let Some(vault) = self.vault.as_ref().filter(|v| v.spec(op).is_some()) {
+            return vault.call(caller, op, args);
+        }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
             (op, Some(acting)) => acting.call(caller, op, args),
@@ -269,10 +285,10 @@ impl Handler for Ops {
     }
 
     /// The held prompts are the app's: their ids are what answers them. So are the bridge's
-    /// pairing requests.
+    /// pairing requests and the vault's approvals and forms.
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
-            topics::PROMPTS | topics::BRIDGE => Tier::App,
+            topics::PROMPTS | topics::BRIDGE | topics::VAULT => Tier::App,
             _ => Tier::Agent,
         }
     }
@@ -512,6 +528,13 @@ pub fn run(
         room.clone(),
     ));
     acting_ops.attach_agy(agy.clone());
+    // Off at every start, like acting: no Keychain read and no vault file until the app turns
+    // it on.
+    let vault = Arc::new(VaultOps::for_daemon(
+        &layout,
+        Arc::new(SwitchFlag::off()),
+        room.clone(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -528,6 +551,7 @@ pub fn run(
                 .with_pages(Arc::new(
                     PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
                 ))
+                .with_vault(vault.clone())
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )
@@ -585,6 +609,7 @@ pub fn run(
     acting_ops.close();
     codex_ops.close();
     agy.close();
+    vault.close();
     bridge.close();
     handle.shutdown();
     match thread.join() {

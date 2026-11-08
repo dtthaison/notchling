@@ -17,7 +17,10 @@
 //!
 //! Milestone 3 adds the acting ops ([`acting_ops`], session control in [`control_ops`], the real
 //! terminal and launcher in [`attach`]), switched off by [`acting`] until the maintainer hands
-//! sessions over. Later milestones add `secret`, `delegate` and `page`.
+//! sessions over.
+//!
+//! Milestone 6 adds the Secret Vault ([`vault_ops`], behind its own `vault` switch) and its
+//! command line, `notchling secrets`, `secret` and `secret-request` ([`vault_cli`]).
 
 pub mod acting;
 pub mod acting_ops;
@@ -42,6 +45,10 @@ pub mod pages_ops;
 pub mod prompts;
 pub mod service;
 pub mod signals;
+pub mod vault_args;
+pub mod vault_cli;
+pub mod vault_ops;
+pub mod vault_wait;
 
 #[cfg(test)]
 mod acting_ops_tests;
@@ -94,6 +101,9 @@ pub fn run(command: Command) -> i32 {
         },
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
+        Command::Secrets { args } => vault_cli::secrets(&args),
+        Command::Secret { args } => vault_cli::secret(&args),
+        Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {

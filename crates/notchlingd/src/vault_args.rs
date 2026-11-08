@@ -1,0 +1,99 @@
+//! What the vault service reads from a call and the switch it sits behind: the `vault` switch's
+//! stand-in, the approval's decision, and argument readers whose errors are fixed texts (serde's
+//! could quote what it read, and that could be a value).
+
+use notchling_engine::vault::{default_vars, Kind, VaultEntry, VaultValue};
+use notchling_local_api::ApiError;
+use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// STAND-IN, to be replaced by `crate::switches::SwitchFlag` when m6-accounts lands: the `vault`
+/// switch, off at every start, in memory only.
+#[derive(Default)]
+pub struct SwitchFlag(AtomicBool);
+
+impl SwitchFlag {
+    pub fn off() -> SwitchFlag {
+        SwitchFlag::default()
+    }
+    pub fn is_on(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+    /// Flips it; true when that changed it.
+    pub fn set(&self, on: bool) -> bool {
+        self.0.swap(on, Ordering::SeqCst) != on
+    }
+}
+
+/// The app's answer to an approval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Deny,
+    Once,
+    Always,
+}
+
+impl Decision {
+    pub(crate) fn parse(text: &str) -> Option<Decision> {
+        match text {
+            "deny" => Some(Decision::Deny),
+            "once" => Some(Decision::Once),
+            "always" => Some(Decision::Always),
+            _ => None,
+        }
+    }
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Decision::Deny => "deny",
+            Decision::Once => "once",
+            Decision::Always => "always",
+        }
+    }
+}
+
+/// A string field, at most `max` bytes; a field that is there and not a string is an error.
+pub(crate) fn text(args: &Value, key: &str, max: usize) -> Result<Option<String>, ApiError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.len() <= max => Ok(Some(s.clone())),
+        Some(Value::String(_)) => Err(ApiError::bad_request(format!("{key} is over {max} bytes"))),
+        Some(_) => Err(ApiError::bad_request(format!("{key} must be a string"))),
+    }
+}
+
+/// An entry as the app sends it in `vault.save`. Parse errors are fixed texts: serde's could
+/// quote the text it read.
+pub(crate) fn entry_from(value: Option<&Value>) -> Result<VaultEntry, ApiError> {
+    let bad = || ApiError::bad_request("entry must be {name, kind, …} as vault.json holds it");
+    let mut entry: VaultEntry =
+        serde_json::from_value(value.cloned().ok_or_else(bad)?).map_err(|_| bad())?;
+    let (user, secret) = default_vars(&entry.name, entry.kind);
+    if entry.secret_var.is_empty() {
+        entry.secret_var = secret;
+    }
+    if entry.kind == Kind::Login && entry.user_var.is_empty() {
+        entry.user_var = user;
+    }
+    Ok(entry)
+}
+
+/// `{username?, secret}`; `None` keeps the stored value.
+pub(crate) fn value_from(value: Option<&Value>) -> Result<Option<VaultValue>, ApiError> {
+    let bad = || ApiError::bad_request("value must be {username?: string, secret: string}");
+    let Some(v) = value.filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let field = |key: &str| match v.get(key) {
+        None | Some(Value::Null) => Ok(String::new()),
+        Some(Value::String(s)) => Ok(s.clone()),
+        Some(_) => Err(bad()),
+    };
+    Ok(Some(VaultValue {
+        username: field("username")?,
+        secret: field("secret")?,
+    }))
+}
+
+pub(crate) fn entry_json(e: &VaultEntry) -> Value {
+    serde_json::to_value(e).unwrap_or(Value::Null)
+}
