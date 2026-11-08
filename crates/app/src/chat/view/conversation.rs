@@ -241,6 +241,10 @@ pub fn render(view: &ChatView, a: Appearance) -> Stateful<Div> {
         .flex()
         .flex_col()
         .gap(px(12.0));
+    if view.loading {
+        // The picked session's conversation is on its way; the previous one's would mislead.
+        return column;
+    }
     if view.selected_session().is_none() {
         return column.child(
             div()

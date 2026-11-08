@@ -23,6 +23,26 @@ pub enum Tool {
     Codex,
 }
 
+/// The folders with none scanned twice. A lane's `projects` is a symlink to the main one, so
+/// several config folders reach the same files by different paths; and a folder inside another
+/// watched one is scanned with it. The first spelling of each is kept, in order.
+fn distinct_folders(folders: Vec<PathBuf>) -> Vec<PathBuf> {
+    let keyed: Vec<(PathBuf, PathBuf)> = folders
+        .into_iter()
+        .map(|f| (std::fs::canonicalize(&f).unwrap_or_else(|_| f.clone()), f))
+        .collect();
+    keyed
+        .iter()
+        .enumerate()
+        .filter(|(i, (path, _))| {
+            !keyed.iter().enumerate().any(|(j, (other, _))| {
+                j != *i && path.starts_with(other) && (path != other || j < *i)
+            })
+        })
+        .map(|(_, (_, folder))| folder.clone())
+        .collect()
+}
+
 /// A sidebar session: the engine's row, its tool and where its transcript is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Session {
@@ -134,7 +154,7 @@ impl DataRoot {
     }
 
     /// The folders whose changes mean a reload: jobs, sessions and transcripts of every config
-    /// folder, and Codex's sessions.
+    /// folder, and Codex's sessions. Each real folder once: the watcher scans all of it every poll.
     pub fn watch_folders(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for config in notchling_engine::sessions::config_dirs(&self.roots()) {
@@ -143,7 +163,7 @@ impl DataRoot {
             out.push(config.dir.join("projects"));
         }
         out.push(self.codex_dir.join("sessions"));
-        out
+        distinct_folders(out)
     }
 
     pub fn projects_dir(&self) -> PathBuf {
@@ -241,6 +261,68 @@ impl DataRoot {
     }
 }
 
+/// One read of everything Chat shows.
+#[derive(Clone, Debug)]
+pub struct Loaded {
+    pub sessions: Vec<Session>,
+    /// The session the conversation is of: the one asked for if it is listed, else the first.
+    pub selected: Option<String>,
+    pub conversation: Conversation,
+    pub subagents: Vec<Subagent>,
+    pub now_ms: i64,
+}
+
+/// Reads a data root again and again, keeping what polls need between them: the monitor's memory of
+/// ended terminal sessions (they show as Exited) and which rows had no transcript. Owns no view
+/// state, so a view can send it to the background executor and take it back.
+pub struct Loader {
+    root: DataRoot,
+    monitor: Monitor,
+    locator: Locator,
+}
+
+impl Loader {
+    pub fn new(root: DataRoot) -> Loader {
+        Loader {
+            monitor: root.new_monitor(),
+            locator: root.new_locator(),
+            root,
+        }
+    }
+
+    /// The sessions, and the conversation and subagents of `selected` (else the first session).
+    /// `now_ms` is the clock.
+    pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
+        let sessions = self
+            .root
+            .sessions_with(&mut self.monitor, &mut self.locator, now_ms);
+        let selected = selected
+            .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
+            .map(str::to_owned)
+            .or_else(|| sessions.first().map(|s| s.agent.id.clone()));
+        let session = selected
+            .as_deref()
+            .and_then(|id| sessions.iter().find(|s| s.agent.id == id));
+        let (conversation, subagents) = match session {
+            Some(session) => {
+                let conversation = self.root.conversation(session);
+                let subagents = self
+                    .root
+                    .subagents(session, &conversation, now_ms as f64 / 1000.0);
+                (conversation, subagents)
+            }
+            None => (Conversation::default(), Vec::new()),
+        };
+        Loaded {
+            sessions,
+            selected,
+            conversation,
+            subagents,
+            now_ms,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +363,110 @@ mod tests {
                 .completed_window_ms
                 > 1 << 50
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lanes_share_one_projects_folder_so_it_is_watched_once() {
+        use crate::testutil::Scratch;
+        let s = Scratch::new("watch-lanes");
+        let main = s.dir("claude");
+        for sub in ["jobs", "sessions", "projects"] {
+            s.dir(&format!("claude/{sub}"));
+        }
+        let lane = s.dir("lanes/work");
+        s.dir("lanes/work/jobs");
+        s.dir("lanes/work/sessions");
+        // The lane's projects is the main one, as `LaneStore.shared` links it.
+        std::os::unix::fs::symlink(main.join("projects"), lane.join("projects")).unwrap();
+        s.write(
+            "notchling/lanes.json",
+            &format!(
+                r#"[{{"name":"work","path":{:?},"accountID":"a1","email":"w@example.com"}}]"#,
+                lane.to_string_lossy()
+            ),
+        );
+
+        let folders = DataRoot::fixture(s.path()).watch_folders();
+        let projects = std::fs::canonicalize(main.join("projects")).unwrap();
+        let hits = folders
+            .iter()
+            .filter(|f| std::fs::canonicalize(f).ok().as_ref() == Some(&projects))
+            .count();
+        assert_eq!(hits, 1, "{folders:?}");
+        // The lane's own jobs and sessions are still watched.
+        assert!(folders.contains(&lane.join("jobs")), "{folders:?}");
+        assert!(folders.contains(&lane.join("sessions")), "{folders:?}");
+        assert!(folders.contains(&main.join("jobs")), "{folders:?}");
+    }
+
+    #[test]
+    fn a_folder_inside_another_watched_folder_is_dropped() {
+        let folders = vec![
+            PathBuf::from("/nowhere/a"),
+            PathBuf::from("/nowhere/a/b"),
+            PathBuf::from("/nowhere/c"),
+            PathBuf::from("/nowhere/c"),
+        ];
+        assert_eq!(
+            distinct_folders(folders),
+            [PathBuf::from("/nowhere/a"), PathBuf::from("/nowhere/c")]
+        );
+    }
+
+    /// A fixture root with one live terminal session (this process's pid, so it is alive wherever
+    /// the tests run) and its transcript; the returned path is the session's file.
+    fn terminal_world(s: &crate::testutil::Scratch) -> PathBuf {
+        s.write(
+            "claude/projects/-work-app/term-1.jsonl",
+            "{\"type\":\"user\",\"timestamp\":\"2026-11-08T08:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n",
+        );
+        let pid = std::process::id();
+        s.write(
+            &format!("claude/sessions/{pid}.json"),
+            &format!(
+                r#"{{"sessionId":"term-1","pid":{pid},"cwd":"/work/app","status":"idle","name":"terminal one","startedAt":1794160000000}}"#
+            ),
+        )
+    }
+
+    #[test]
+    fn a_loader_keeps_its_monitor_so_an_ended_terminal_session_shows_as_exited() {
+        let s = crate::testutil::Scratch::new("loader-exited");
+        let file = terminal_world(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+
+        let first = loader.load(None, 1_000);
+        let row = first.sessions.iter().find(|r| r.agent.id == "term-1");
+        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Idle"));
+
+        // The terminal closes: its session file goes away.
+        std::fs::remove_file(&file).unwrap();
+        let second = loader.load(first.selected.as_deref(), 2_000);
+        let row = second.sessions.iter().find(|r| r.agent.id == "term-1");
+        assert_eq!(row.map(|r| r.agent.label.as_str()), Some("Exited"));
+        // Its conversation is still readable by id.
+        assert!(!second.conversation.items.is_empty());
+    }
+
+    #[test]
+    fn a_loader_selects_the_asked_session_else_the_first_listed() {
+        let s = crate::testutil::Scratch::new("loader-select");
+        terminal_world(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+        assert_eq!(loader.load(None, 1_000).selected.as_deref(), Some("term-1"));
+        assert_eq!(
+            loader.load(Some("gone"), 1_000).selected.as_deref(),
+            Some("term-1")
+        );
+        assert_eq!(
+            loader.load(Some("term-1"), 1_000).selected.as_deref(),
+            Some("term-1")
+        );
+        let empty = crate::testutil::Scratch::new("loader-empty");
+        let none = Loader::new(DataRoot::fixture(empty.path())).load(Some("x"), 1_000);
+        assert_eq!(none.selected, None);
+        assert!(none.sessions.is_empty() && none.conversation.items.is_empty());
     }
 
     fn real_stand_in() -> Option<DataRoot> {

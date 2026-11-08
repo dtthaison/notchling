@@ -1,6 +1,9 @@
 //! The Chat window's GPUI views (macOS): sidebar, header, conversation, disabled reply box,
 //! inspector. Read-only: picking a session is the only thing a click does. The view reloads when
-//! `platform::watch` reports a change under the data root, and every 30 s for the ages.
+//! `platform::watch` reports a change under the data root (at most every 2 s while changes keep
+//! arriving) and every 30 s for the ages (`chat::reload`). Every load runs on the background
+//! executor: the [`Loader`] is sent there and taken back with the result, so the window never
+//! waits on the disk.
 
 mod conversation;
 mod header;
@@ -16,14 +19,13 @@ use notchling_engine::transcript::subagents::Subagent;
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
 use notchling_kit::ui::{hsla, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
-use notchling_platform::watch::{Batch, WatchConfig, Watcher};
+use notchling_platform::watch::{Batch, Watcher};
 
-use crate::chat::data::{DataRoot, Session};
+use crate::chat::data::{DataRoot, Loaded, Loader, Session};
+use crate::chat::reload::{watch_config, ReloadGate};
 
 /// How often the view looks for watch batches.
 const TICK: Duration = Duration::from_millis(500);
-/// Ages and the Done window move on their own: a full reload every this many ticks (30 s).
-const RELOAD_EVERY: u64 = 60;
 
 pub struct ChatView {
     root: DataRoot,
@@ -32,7 +34,16 @@ pub struct ChatView {
     conversation: Conversation,
     subagents: Vec<Subagent>,
     now_ms: i64,
-    ticks: u64,
+    /// `None` while a load has it on the background executor.
+    loader: Option<Loader>,
+    /// Another load is wanted as soon as the running one ends (a pick, or a change).
+    load_again: bool,
+    /// A session was picked and its conversation hasn't arrived: draw nothing rather than the
+    /// previous session's.
+    loading: bool,
+    /// Scroll to the end once the picked session's conversation is in.
+    scroll_to_end: bool,
+    gate: ReloadGate,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
     _appearance_changes: Subscription,
@@ -46,33 +57,30 @@ fn now_ms() -> i64 {
 }
 
 impl ChatView {
-    /// Lists the root's sessions, selects the first and starts watching for changes.
+    /// Starts the first load (it selects the first session) and watching for changes.
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let this = cx.weak_entity();
         let changes = window.observe_window_appearance(move |_, cx| {
             this.update(cx, |_, cx| cx.notify()).ok();
         });
-        let watch = Watcher::start(
-            root.watch_folders(),
-            WatchConfig {
-                poll: Duration::from_secs(1),
-                debounce: Duration::from_millis(500),
-            },
-        )
-        .ok();
+        let watch = Watcher::start(root.watch_folders(), watch_config()).ok();
         let mut view = ChatView {
+            loader: Some(Loader::new(root.clone())),
             root,
             sessions: Vec::new(),
             selected: None,
             conversation: Conversation::default(),
             subagents: Vec::new(),
             now_ms: 0,
-            ticks: 0,
+            load_again: false,
+            loading: true,
+            scroll_to_end: false,
+            gate: ReloadGate::default(),
             watch,
             conversation_scroll: ScrollHandle::new(),
             _appearance_changes: changes,
         };
-        view.reload();
+        view.start_load(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(TICK).await;
             if this.update(cx, |view, cx| view.tick(cx)).is_err() {
@@ -90,29 +98,57 @@ impl ChatView {
             .find(|s| Some(&s.agent.id) == self.selected.as_ref())
     }
 
-    fn reload(&mut self) {
-        self.now_ms = now_ms();
-        self.sessions = self.root.sessions(self.now_ms);
-        let known = self
-            .selected
-            .as_ref()
-            .is_some_and(|id| self.sessions.iter().any(|s| &s.agent.id == id));
-        if !known {
-            self.selected = self.sessions.first().map(|s| s.agent.id.clone());
-        }
-        self.load_conversation();
-    }
-
-    fn load_conversation(&mut self) {
-        let Some(session) = self.selected_session().cloned() else {
-            self.conversation = Conversation::default();
-            self.subagents.clear();
+    /// Reads everything again on the background executor, for the session picked now. A load
+    /// already running is not doubled: another follows it.
+    fn start_load(&mut self, cx: &mut Context<Self>) {
+        self.gate.reloaded(now_ms());
+        let Some(mut loader) = self.loader.take() else {
+            self.load_again = true;
             return;
         };
-        self.conversation = self.root.conversation(&session);
-        self.subagents =
-            self.root
-                .subagents(&session, &self.conversation, self.now_ms as f64 / 1000.0);
+        let asked = self.selected.clone();
+        let wanted = asked.clone();
+        cx.spawn(async move |this, cx| {
+            let (loader, loaded) = cx
+                .background_executor()
+                .spawn(async move {
+                    let loaded = loader.load(wanted.as_deref(), now_ms());
+                    (loader, loaded)
+                })
+                .await;
+            this.update(cx, |view, cx| view.apply(asked, loader, loaded, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Takes a finished load. `asked` is the session it was started for: if another was picked
+    /// meanwhile, its sessions list still counts but its conversation does not.
+    fn apply(
+        &mut self,
+        asked: Option<String>,
+        loader: Loader,
+        loaded: Loaded,
+        cx: &mut Context<Self>,
+    ) {
+        self.loader = Some(loader);
+        self.now_ms = loaded.now_ms;
+        self.sessions = loaded.sessions;
+        if self.selected == asked {
+            self.selected = loaded.selected;
+            self.conversation = loaded.conversation;
+            self.subagents = loaded.subagents;
+            self.loading = false;
+            if std::mem::take(&mut self.scroll_to_end) {
+                self.conversation_scroll.scroll_to_bottom();
+            }
+        } else {
+            self.load_again = true;
+        }
+        if std::mem::take(&mut self.load_again) {
+            self.start_load(cx);
+        }
+        cx.notify();
     }
 
     fn select(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -120,22 +156,22 @@ impl ChatView {
             return;
         }
         self.selected = Some(id.to_owned());
-        self.load_conversation();
-        self.conversation_scroll.scroll_to_bottom();
+        self.conversation = Conversation::default();
+        self.subagents.clear();
+        self.loading = true;
+        self.scroll_to_end = true;
+        self.start_load(cx);
         cx.notify();
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
-        self.ticks += 1;
-        let mut changed = false;
         if let Some((_, batches)) = &self.watch {
             while batches.try_recv().is_ok() {
-                changed = true;
+                self.gate.changed();
             }
         }
-        if changed || self.ticks.is_multiple_of(RELOAD_EVERY) {
-            self.reload();
-            cx.notify();
+        if self.gate.due(now_ms()) {
+            self.start_load(cx);
         }
     }
 }
