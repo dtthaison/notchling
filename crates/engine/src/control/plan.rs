@@ -75,6 +75,10 @@ pub struct RunStep {
     pub expect: Expect,
     /// False: a failure is reported but the plan goes on (the extra copies a Remove cleans up).
     pub required: bool,
+    /// True: a failure doesn't end the plan either, but the plan still fails with it once every
+    /// step has run (Remove: the current copy's result counts, yet the stale copies are removed
+    /// all the same). Only the first such failure is reported. Meaningful with `required`.
+    pub keep_going: bool,
     /// Wait this long after the step succeeds (the host lets go of the transcript after `claude stop`).
     pub pause_after_ms: u64,
 }

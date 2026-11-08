@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 /// How long one read waits before checking the clock again (`waitForQuiet`'s poll of 100 ms).
 const POLL: Duration = Duration::from_millis(100);
 
+/// How long [`Terminal::write`] waits for a program that has stopped reading its input.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A child on a pty and the screen it draws.
 #[derive(Debug)]
 pub struct Terminal {
@@ -43,7 +46,13 @@ impl Terminal {
 
     /// Writes keys as they are: the caller decides the pauses between them.
     pub fn write(&self, bytes: &[u8]) -> Result<(), PtyError> {
-        self.pty.write_all(bytes)
+        self.write_timeout(bytes, WRITE_TIMEOUT)
+    }
+
+    /// [`Terminal::write`] with its own limit: [`PtyError::Timeout`] when the program hasn't taken
+    /// all of it by then.
+    pub fn write_timeout(&self, bytes: &[u8], timeout: Duration) -> Result<(), PtyError> {
+        self.pty.write_all_timeout(bytes, timeout)
     }
 
     /// Feeds output into the screen until nothing arrives for `quiet`. False if no output arrived
@@ -103,7 +112,7 @@ impl Terminal {
         if replies.is_empty() {
             return Ok(());
         }
-        self.pty.write_all(&replies)
+        self.pty.write_all_timeout(&replies, WRITE_TIMEOUT)
     }
 
     /// Resizes the screen (rows kept in place) and the pty (the child gets SIGWINCH).

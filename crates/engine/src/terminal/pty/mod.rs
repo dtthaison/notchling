@@ -1,8 +1,8 @@
-//! A program on a pseudo-terminal, started with `forkpty` (`TerminalSession.swift`'s start, and the
-//! recorder's `Capture`). The pty becomes the child's controlling terminal the way a terminal app's
-//! does, so a resize reaches it as SIGWINCH and it repaints; with posix_spawn, `claude attach` got the
-//! signal but never repainted. macOS and Linux only; elsewhere [`Pty::spawn`] is
-//! [`PtyError::Unsupported`].
+//! A program on a pseudo-terminal, started the way `forkpty` does (`TerminalSession.swift`'s start,
+//! and the recorder's `Capture`), but with every descriptor close-on-exec from the start. The pty
+//! becomes the child's controlling terminal the way a terminal app's does, so a resize reaches it as
+//! SIGWINCH and it repaints; with posix_spawn, `claude attach` got the signal but never repainted.
+//! macOS and Linux only; elsewhere [`Pty::spawn`] is [`PtyError::Unsupported`].
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -121,10 +121,17 @@ pub enum PtyError {
     Unsupported,
     /// A program, argument, variable or folder has a NUL byte in it.
     Nul,
-    /// `forkpty` failed.
+    /// The pty or the fork failed.
     Spawn(std::io::Error),
+    /// The child was forked but could not get as far as running the program.
+    Start {
+        step: StartStep,
+        error: std::io::Error,
+    },
     /// Reading, writing, resizing or waiting failed.
     Io(std::io::Error),
+    /// The program didn't take its input within the time allowed (it has stopped reading).
+    Timeout,
 }
 
 impl fmt::Display for PtyError {
@@ -133,12 +140,35 @@ impl fmt::Display for PtyError {
             PtyError::Unsupported => write!(f, "a terminal isn't supported on this system yet"),
             PtyError::Nul => write!(f, "a NUL byte in the command"),
             PtyError::Spawn(e) => write!(f, "couldn't open a terminal: {e}"),
+            PtyError::Start { step, error } => write!(f, "couldn't {step}: {error}"),
             PtyError::Io(e) => write!(f, "terminal: {e}"),
+            PtyError::Timeout => write!(f, "the program isn't reading its input"),
         }
     }
 }
 
 impl std::error::Error for PtyError {}
+
+/// The step of starting a child that failed, as it reports through the spawn's error pipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartStep {
+    /// Taking the pty as the child's controlling terminal.
+    Terminal,
+    /// `chdir` to the folder asked for (it doesn't exist, or isn't a folder it may enter).
+    Folder,
+    /// `execve` of the program (not found, not executable).
+    Program,
+}
+
+impl fmt::Display for StartStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            StartStep::Terminal => "set up the terminal",
+            StartStep::Folder => "enter the folder",
+            StartStep::Program => "run the program",
+        })
+    }
+}
 
 /// What one read got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

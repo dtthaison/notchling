@@ -15,7 +15,7 @@ fn sh(script: &str, scratch: &Scratch) -> PtyCommand {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod unix {
     use super::*;
-    use notchling_engine::terminal::Terminal;
+    use notchling_engine::terminal::{StartStep, Terminal};
     use std::time::Duration;
 
     fn text(terminal: &Terminal) -> String {
@@ -139,6 +139,41 @@ mod unix {
         wait_for(&mut terminal, &real.to_string_lossy());
     }
 
+    /// A program that has stopped reading (raw mode, never reads) fills the tty's input queue, and
+    /// the next write would block for as long as it lives.
+    #[test]
+    fn writing_to_a_child_that_never_reads_gives_up() {
+        use std::time::Instant;
+        let scratch = Scratch::new("pty-stuck");
+        let command = sh("stty raw -echo; echo ready; exec sleep 20", &scratch);
+        let mut terminal = Terminal::spawn(&command).expect("sh starts");
+        wait_for(&mut terminal, "ready");
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = terminal.write_timeout(&vec![b'x'; 1 << 20], Duration::from_millis(300));
+            let _ = done.send((result, started.elapsed()));
+            // Dropping the terminal ends the child.
+        });
+        let (result, took) = finished
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the write came back");
+        assert!(matches!(result, Err(PtyError::Timeout)), "{result:?}");
+        assert!(took < Duration::from_secs(3), "{took:?}");
+    }
+
+    /// A reader that keeps up is not timed out, however much is written.
+    #[test]
+    fn a_large_write_to_a_reading_child_completes() {
+        let scratch = Scratch::new("pty-big");
+        let command = sh("stty raw -echo; echo ready; exec cat > /dev/null", &scratch);
+        let mut terminal = Terminal::spawn(&command).expect("sh starts");
+        wait_for(&mut terminal, "ready");
+        terminal
+            .write_timeout(&vec![b'y'; 1 << 20], Duration::from_secs(10))
+            .expect("all of it went in");
+    }
+
     #[test]
     fn exit_status_and_terminate() {
         let scratch = Scratch::new("pty-exit");
@@ -158,13 +193,131 @@ mod unix {
         assert_eq!(status, Some(128 + 15), "ended by SIGTERM");
     }
 
+    /// The child reports a failed exec through a close-on-exec pipe, so the caller learns it at spawn
+    /// instead of seeing a pty whose child exited 127.
     #[test]
-    fn a_program_that_cannot_run_exits_127() {
+    fn a_missing_program_is_an_error_at_spawn() {
         let scratch = Scratch::new("pty-missing");
         let mut command = PtyCommand::new(scratch.path("no-such-program"));
         command.cwd(&scratch.dir);
-        let pty = Pty::spawn(&command).expect("the fork itself works");
+        let error = Pty::spawn(&command).expect_err("nothing to run");
+        assert_eq!(errno(&error), Some(libc::ENOENT), "{error}");
+        assert!(
+            matches!(
+                error,
+                PtyError::Start {
+                    step: StartStep::Program,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("run the program"), "{error}");
+    }
+
+    #[test]
+    fn a_missing_folder_is_an_error_at_spawn() {
+        let scratch = Scratch::new("pty-nocwd");
+        let mut command = PtyCommand::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("true")
+            .cwd(scratch.path("no/such/folder"));
+        let error = Pty::spawn(&command).expect_err("nowhere to start");
+        assert_eq!(errno(&error), Some(libc::ENOENT), "{error}");
+        assert!(
+            matches!(
+                error,
+                PtyError::Start {
+                    step: StartStep::Folder,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("enter the folder"), "{error}");
+    }
+
+    /// A program that starts and then exits 127 itself is not a spawn failure.
+    #[test]
+    fn a_program_that_runs_and_exits_127_still_spawns() {
+        let scratch = Scratch::new("pty-127");
+        let pty = Pty::spawn(&sh("exit 127", &scratch)).expect("it ran");
         assert_eq!(pty.wait().expect("waited"), 127);
+    }
+
+    /// The os error behind a spawn failure.
+    fn errno(error: &PtyError) -> Option<i32> {
+        match error {
+            PtyError::Spawn(e) | PtyError::Io(e) | PtyError::Start { error: e, .. } => {
+                e.raw_os_error()
+            }
+            _ => None,
+        }
+    }
+
+    /// Lists, from inside a child, every descriptor above stderr that is a terminal (a pty master
+    /// or slave) by walking /dev/fd.
+    fn leaked_ttys() -> Vec<String> {
+        let script = r#"for f in /dev/fd/*; do n=${f##*/}; if [ "$n" -gt 2 ] && [ -t "$n" ]; then echo "$n"; fi; done"#;
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the probe runs");
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .map(String::from)
+            .collect()
+    }
+
+    /// With forkpty, the master was inheritable from the moment it opened until the parent set
+    /// close-on-exec, so a `Command` another thread started in that window got it (and kept the pty
+    /// open after the session ended). posix_openpt with O_CLOEXEC has no such window.
+    #[test]
+    fn a_command_started_meanwhile_inherits_no_pty_descriptor() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        // The probe has to see a descriptor that does leak, or finding none proves nothing.
+        // SAFETY: opens a pty master on purpose without close-on-exec, and closes it below.
+        let leaking = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
+        assert!(leaking >= 0, "a pty to leak");
+        let seen = leaked_ttys();
+        // SAFETY: the descriptor opened above.
+        unsafe { libc::close(leaking) };
+        assert!(
+            seen.contains(&leaking.to_string()),
+            "the probe can't see a leaked pty ({leaking}): {seen:?}"
+        );
+
+        let scratch = Scratch::new("pty-leak");
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawners: Vec<_> = (0..3)
+            .map(|_| {
+                let stop = stop.clone();
+                let command = sh("exit 0", &scratch);
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::SeqCst) {
+                        if let Ok(pty) = Pty::spawn(&command) {
+                            let _ = pty.wait();
+                        }
+                    }
+                })
+            })
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut leaked = Vec::new();
+        while leaked.is_empty() && Instant::now() < deadline {
+            leaked = leaked_ttys();
+        }
+        stop.store(true, Ordering::SeqCst);
+        for spawner in spawners {
+            spawner.join().expect("spawner thread");
+        }
+        assert!(leaked.is_empty(), "a Command inherited pty fds {leaked:?}");
     }
 
     #[test]

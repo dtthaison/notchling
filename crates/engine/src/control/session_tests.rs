@@ -109,9 +109,48 @@ fn remove_runs_rm_on_every_copy_and_only_the_current_one_counts() {
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].command.argv, ["claude", "rm", "ab12"]);
     assert_eq!(config(&steps[0].command), Some(Some(r.lane.clone())));
-    assert!(steps[0].required);
+    assert!(steps[0].required && steps[0].keep_going);
     assert_eq!(config(&steps[1].command), Some(None));
     assert!(!steps[1].required);
+}
+
+/// Swift's remove loop runs `claude rm` in every folder and keeps only the current copy's result.
+fn moved_job(tag: &str) -> Rig {
+    let r = rig(tag);
+    r.tmp.write(
+        "home/.claude/jobs/ab12/state.json",
+        r#"{"state":"stopped","updatedAt":"2026-11-02T08:00:00.000Z"}"#,
+    );
+    r.tmp.write(
+        "lane-b/jobs/ab12/state.json",
+        r#"{"state":"working","updatedAt":"2026-11-03T08:00:00.000Z"}"#,
+    );
+    r
+}
+
+#[test]
+fn a_failed_current_copy_still_lets_the_stale_copy_go() {
+    let r = moved_job("remove-current-fails");
+    let plan = plan_remove(&job("ab12"), &r.roots).expect("plan");
+    let fake = FakeLauncher::new();
+    fake.push_output(Ok(LaunchOutput::failed(1, "denied")));
+    let result = execute(&plan, &fake, &|_| {});
+    assert_eq!(result, Err(ControlError::Failed("denied".into())));
+    let commands = fake.commands();
+    assert_eq!(commands.len(), 2, "the stale copy is removed anyway");
+    assert_eq!(config(&commands[1]), Some(None));
+}
+
+#[test]
+fn a_failed_stale_copy_is_not_the_removes_failure() {
+    let r = moved_job("remove-stale-fails");
+    let plan = plan_remove(&job("ab12"), &r.roots).expect("plan");
+    let fake = FakeLauncher::new();
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::failed(1, "already gone")));
+    let report = execute(&plan, &fake, &|_| {}).expect("the current copy went");
+    assert_eq!(report.ignored_failures, ["already gone"]);
+    assert_eq!(fake.commands().len(), 2);
 }
 
 #[test]

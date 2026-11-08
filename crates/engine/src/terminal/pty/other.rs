@@ -30,6 +30,9 @@ impl Pty {
     pub fn write_all(&self, _bytes: &[u8]) -> Result<(), PtyError> {
         match self.never {}
     }
+    pub fn write_all_timeout(&self, _bytes: &[u8], _timeout: Duration) -> Result<(), PtyError> {
+        match self.never {}
+    }
     pub fn resize(&self, _rows: u16, _cols: u16) -> Result<(), PtyError> {
         match self.never {}
     }

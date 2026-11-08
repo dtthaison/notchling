@@ -9,7 +9,8 @@ use crate::HostError;
 use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -20,10 +21,58 @@ pub const SCROLLBACK_LIMIT: usize = 2 * 1024 * 1024;
 const START_COLUMNS: u16 = 200;
 const START_ROWS: u16 = 50;
 
+/// How far behind a listener may fall before it is dropped. A client that stopped reading would
+/// otherwise grow the queue without end; one that has fallen this far behind (twice the scrollback)
+/// has lost the thread of the screen anyway and attaches again to get it back.
+pub const LISTENER_BACKLOG_LIMIT: usize = 2 * SCROLLBACK_LIMIT;
+
+/// One listener's queue. Each listener is called from a thread of its own, so a client whose socket
+/// is full (its call blocks in `write`) holds up neither the pty's reader nor the other clients.
+struct Slot {
+    queue: Sender<Vec<u8>>,
+    /// Bytes queued or being delivered; the listener's thread subtracts as it finishes a chunk.
+    pending: Arc<AtomicUsize>,
+    /// Cleared when the slot goes (removed or dropped for lagging): the thread stops at once.
+    alive: Arc<AtomicBool>,
+}
+
+impl Slot {
+    /// Queues `chunk`; false when the listener is gone or has fallen too far behind.
+    fn push(&self, chunk: &[u8]) -> bool {
+        let queued = self.pending.fetch_add(chunk.len(), Ordering::SeqCst);
+        if queued + chunk.len() > LISTENER_BACKLOG_LIMIT {
+            return false;
+        }
+        self.queue.send(chunk.to_vec()).is_ok()
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The listener's thread: calls it for each queued chunk, in order, until the slot is dropped.
+fn deliver(
+    listener: &Listener,
+    chunks: &Receiver<Vec<u8>>,
+    pending: &AtomicUsize,
+    alive: &AtomicBool,
+) {
+    for chunk in chunks {
+        if !alive.load(Ordering::SeqCst) {
+            return;
+        }
+        listener(&chunk);
+        pending.fetch_sub(chunk.len(), Ordering::SeqCst);
+    }
+}
+
 #[derive(Default)]
 struct Delivery {
     scrollback: Vec<u8>,
-    listeners: HashMap<u64, Listener>,
+    listeners: HashMap<u64, Slot>,
     next: u64,
 }
 
@@ -34,7 +83,8 @@ struct Exit {
 }
 
 struct Shared {
-    /// Held while output is delivered, so a new listener's replay and the live bytes never interleave.
+    /// Held only to copy bytes into the scrollback and the listeners' queues, never while a listener
+    /// runs (a client that stopped reading would hold up the rest, and its own removal).
     delivery: Mutex<Delivery>,
     exit: Mutex<Exit>,
 }
@@ -133,10 +183,8 @@ fn read_loop(pty: &Pty, shared: &Shared) {
                 if over > 0 {
                     delivery.scrollback.drain(..over);
                 }
-                let listeners: Vec<Listener> = delivery.listeners.values().cloned().collect();
-                for listener in listeners {
-                    listener(chunk);
-                }
+                // A listener that has fallen too far behind is dropped here.
+                delivery.listeners.retain(|_, slot| slot.push(chunk));
             }
             Ok(ReadOutcome::Timeout) => continue,
             Ok(ReadOutcome::Closed) | Err(_) => break,
@@ -181,18 +229,32 @@ impl Handle for PtyHandle {
         }
         exit.handlers.push(handler);
     }
+    /// The replay is delivered on the caller's thread before this returns (`PTYSession.addListener`),
+    /// outside the lock; live chunks that arrive meanwhile wait in the queue for the listener's own
+    /// thread, which starts after the replay, so the two never interleave.
     fn add_listener(&self, listener: Listener) -> u64 {
-        let mut delivery = self
-            .shared
-            .delivery
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        delivery.next += 1;
-        let token = delivery.next;
-        delivery.listeners.insert(token, listener.clone());
-        if !delivery.scrollback.is_empty() {
-            listener(&delivery.scrollback);
+        let (queue, chunks) = channel::<Vec<u8>>();
+        let slot = Slot {
+            queue,
+            pending: Arc::new(AtomicUsize::new(0)),
+            alive: Arc::new(AtomicBool::new(true)),
+        };
+        let (pending, alive) = (slot.pending.clone(), slot.alive.clone());
+        let (token, replay) = {
+            let mut delivery = self
+                .shared
+                .delivery
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            delivery.next += 1;
+            let token = delivery.next;
+            delivery.listeners.insert(token, slot);
+            (token, delivery.scrollback.clone())
+        };
+        if !replay.is_empty() {
+            listener(&replay);
         }
+        std::thread::spawn(move || deliver(&listener, &chunks, &pending, &alive));
         token
     }
     fn remove_listener(&self, token: u64) {

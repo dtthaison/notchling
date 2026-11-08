@@ -1,4 +1,6 @@
-//! Private files: written atomically, readable by the owner only.
+//! Private files: written atomically, readable by the owner only. [`write_private`] follows a
+//! symlink (a lane's shared files are links); [`write_private_no_follow`] refuses one, for the files
+//! Notchling owns.
 //!
 //! On Unix the file is created 0600 and folders 0700. On Windows the default access control of the
 //! user's profile folders already limits them to the user, so only the atomic write applies.
@@ -65,9 +67,37 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
 /// a 0600 temp file in the same folder, flushed to disk, then renamed over the target. The temp
 /// file is removed when anything fails, and the old content stays. When `path` is a symlink the
 /// write goes to the file it points at (the link stays a link), with the temp file beside that file.
+///
+/// That is for a lane's shared files, which are links into `~/.claude`. For a file Notchling owns
+/// (the daemon's settings, say), use [`write_private_no_follow`]: a link planted there must not
+/// steer the write.
 pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     let path = resolve_links(path)?;
-    let path = path.as_path();
+    write_atomic(&path, data)
+}
+
+/// [`write_private`] for files Notchling owns: when `path` is a symlink (dangling or not) it is
+/// refused with an error and nothing is written, so a link planted where the file belongs can't send
+/// the write to another file. Anything else is written the same way: a 0600 temp file beside it,
+/// flushed, then renamed over the old content.
+///
+/// A link swapped in between the check and the rename is replaced, not followed: the temp file is
+/// created exclusively and `rename` replaces the link itself, so no target is ever opened.
+pub fn write_private_no_follow(path: &Path, data: &[u8]) -> Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("refusing to write through a symlink: {}", path.display()),
+            )
+            .into());
+        }
+    }
+    write_atomic(path, data)
+}
+
+/// The temp file and rename both writes share. `path` is written as given (links resolved by the caller).
+fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let temp = temp_beside(path);
     let result = (|| -> std::io::Result<()> {
         let mut file = create_private(&temp)?;
@@ -264,6 +294,57 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("settings")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_follow_refuses_a_symlink_and_leaves_its_target_alone() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"precious").unwrap();
+        let link = dir.path().join("settings.json");
+        symlink(&victim, &link).unwrap();
+        assert!(write_private_no_follow(&link, b"attacker").is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"precious");
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        // Nothing was left beside it either.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_follow_refuses_a_dangling_symlink_without_creating_its_target() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        let target = dir.path().join("not-yet");
+        let link = dir.path().join("link");
+        symlink(&target, &link).unwrap();
+        assert!(write_private_no_follow(&link, b"x").is_err());
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn no_follow_writes_a_plain_file_like_write_private() {
+        let dir = TempDir::new();
+        let file = dir.path().join("daemon.json");
+        write_private_no_follow(&file, b"one").unwrap();
+        write_private_no_follow(&file, b"two").unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"two");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("daemon.json")]);
     }
 
     #[cfg(unix)]

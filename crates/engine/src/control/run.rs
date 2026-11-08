@@ -62,13 +62,15 @@ pub fn job_id_in_launch_output(text: &str) -> Option<String> {
 }
 
 /// Runs every step in order. `pause` waits for the given milliseconds (a test passes a recorder; the
-/// daemon passes a sleep). A required step that fails ends the plan; others are noted and skipped.
+/// daemon passes a sleep). A required step that fails ends the plan, unless it is `keep_going`: then
+/// the rest still run and its error is the plan's at the end. Other failures are noted and skipped.
 pub fn execute(
     plan: &Plan,
     launcher: &dyn Launcher,
     pause: &dyn Fn(u64),
 ) -> Result<Report, ControlError> {
     let mut report = Report::default();
+    let mut deferred: Option<ControlError> = None;
     for step in &plan.steps {
         match step {
             Step::Run(run) => match run_step(run, launcher) {
@@ -77,6 +79,9 @@ pub fn execute(
                     if run.pause_after_ms > 0 {
                         pause(run.pause_after_ms);
                     }
+                }
+                Err(error) if run.required && run.keep_going => {
+                    deferred.get_or_insert(error);
                 }
                 Err(error) if run.required => return Err(error),
                 Err(error) => report.ignored_failures.push(error.to_string()),
@@ -87,7 +92,10 @@ pub fn execute(
             },
         }
     }
-    Ok(report)
+    match deferred {
+        Some(error) => Err(error),
+        None => Ok(report),
+    }
 }
 
 fn run_step(run: &RunStep, launcher: &dyn Launcher) -> Result<Option<String>, ControlError> {
