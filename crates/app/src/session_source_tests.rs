@@ -1,0 +1,339 @@
+use super::*;
+use crate::testutil::Scratch;
+#[cfg(unix)]
+use notchling_engine::sessions::{AgentGroup, AgentTarget};
+use std::sync::atomic::AtomicUsize;
+
+fn quick() -> Backoff {
+    Backoff {
+        first: Duration::from_millis(20),
+        max: Duration::from_millis(80),
+    }
+}
+
+/// A row; only the socket tests (Unix) build rows.
+#[cfg(unix)]
+fn agent(id: &str) -> Agent {
+    Agent {
+        id: id.into(),
+        name: format!("name {id}"),
+        project: "p".into(),
+        cwd: "/w/p".into(),
+        group: AgentGroup::Working,
+        label: "Working".into(),
+        detail: None,
+        since_ms: 1_000,
+        target: AgentTarget::Job(id.into()),
+        suggested_reply: None,
+        transcript_path: None,
+        host: "Background".into(),
+        headless: false,
+        config_dir: None,
+        command: None,
+        resume_session_id: None,
+    }
+}
+
+#[cfg(unix)]
+fn ids(view: &View) -> Vec<String> {
+    view.agents.iter().flatten().map(|a| a.id.clone()).collect()
+}
+
+/// Polls the source until `ok` says the view is what is wanted, or panics after 10 s.
+fn wait_for(source: &SessionSource, what: &str, ok: impl Fn(&View) -> bool) -> View {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let view = source.view();
+        if ok(&view) {
+            return view;
+        }
+        assert!(Instant::now() < end, "waited for {what}; saw {view:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn real_root(data_dir: &Path) -> DataRoot {
+    DataRoot {
+        claude_dir: data_dir.join("claude"),
+        data_dir: data_dir.to_path_buf(),
+        codex_dir: data_dir.join("codex"),
+        home: data_dir.to_path_buf(),
+        fixture: None,
+    }
+}
+
+/// A starter that counts its calls and finds nothing to start.
+fn failing_starter(calls: &Arc<AtomicUsize>) -> Starter {
+    let calls = calls.clone();
+    Arc::new(move |_| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Err(ClientError::Timeout)
+    })
+}
+
+#[test]
+fn backoff_doubles_and_never_passes_ten_seconds() {
+    let b = Backoff::default();
+    let secs: Vec<u64> = (0..6).map(|n| b.delay(n).as_secs()).collect();
+    assert_eq!(secs, [1, 2, 4, 8, 10, 10]);
+    assert_eq!(b.delay(40), Duration::from_secs(10));
+    assert_eq!(b.delay(u32::MAX), Duration::from_secs(10));
+}
+
+#[test]
+fn a_fixture_root_gets_no_daemon_configuration() {
+    let exe = Path::new("/Applications/Notchling.app/Contents/MacOS/notchling-app");
+    assert!(config_for(&DataRoot::fixture(Path::new("/f")), Some(exe)).is_none());
+}
+
+#[test]
+fn the_real_root_names_the_socket_in_its_data_folder_and_the_binary_beside_the_app() {
+    let root = real_root(Path::new("/data"));
+    let exe = Path::new("/Applications/Notchling.app/Contents/MacOS/notchling-app");
+    let config = config_for(&root, Some(exe)).expect("a configuration");
+    assert_eq!(config.socket, Path::new("/data").join(SOCKET_NAME));
+    assert!(config.start.is_some());
+    assert_eq!(config.backoff, Backoff::default());
+    // No executable path: still connects, never starts anything.
+    assert!(config_for(&root, None)
+        .expect("a configuration")
+        .start
+        .is_none());
+}
+
+#[test]
+fn a_fixture_source_reads_files_and_says_nothing_about_a_daemon() {
+    let source = SessionSource::for_run(
+        Some(&DataRoot::fixture(Path::new("/f"))),
+        Some(Path::new("/x/target/debug/notchling-app")),
+    );
+    let view = source.view();
+    assert_eq!(view.link, Link::Files);
+    assert!(view.agents.is_none() && !view.daemon_down());
+    let none = SessionSource::for_run(None, None);
+    assert_eq!(none.view().link, Link::Files);
+}
+
+#[test]
+fn with_no_socket_it_falls_back_says_so_and_starts_the_daemon_only_once() {
+    let scratch = Scratch::new("ss-none");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let source = SessionSource::start(SourceConfig {
+        socket: scratch.path().join(SOCKET_NAME),
+        start: Some(failing_starter(&calls)),
+        backoff: quick(),
+        version: "test".into(),
+        check_server: true,
+    });
+    let view = wait_for(&source, "the fallback", View::daemon_down);
+    assert!(view.agents.is_none(), "files are read instead");
+    // Several retries pass; the daemon was asked for once.
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(source.view().daemon_down());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn without_a_starter_nothing_is_started_and_the_source_still_retries() {
+    let scratch = Scratch::new("ss-nostart");
+    let source = SessionSource::start(SourceConfig {
+        socket: scratch.path().join(SOCKET_NAME),
+        start: None,
+        backoff: quick(),
+        version: "test".into(),
+        check_server: true,
+    });
+    wait_for(&source, "the fallback", View::daemon_down);
+    assert!(!scratch.path().join(SOCKET_NAME).exists());
+}
+
+#[test]
+fn the_ui_side_never_waits_on_the_socket() {
+    let scratch = Scratch::new("ss-fast");
+    // A starter that takes long, like a daemon that is slow to come up.
+    let slow: Starter = Arc::new(|_| {
+        std::thread::sleep(Duration::from_millis(800));
+        Err(ClientError::Timeout)
+    });
+    let began = Instant::now();
+    let source = SessionSource::start(SourceConfig {
+        socket: scratch.path().join(SOCKET_NAME),
+        start: Some(slow),
+        backoff: quick(),
+        version: "test".into(),
+        check_server: true,
+    });
+    let view = source.view();
+    assert!(began.elapsed() < Duration::from_millis(300));
+    assert_eq!(view.link, Link::Connecting, "no note while still trying");
+    assert!(!view.daemon_down());
+}
+
+#[cfg(unix)]
+mod over_a_socket {
+    use super::*;
+    use notchling_local_api::{
+        Allowlist, ApiError, Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle,
+    };
+    use serde_json::Value;
+    use std::thread::JoinHandle;
+
+    type Running = (ServerHandle, JoinHandle<std::io::Result<()>>);
+
+    /// The daemon's two session ops over a list the test sets.
+    struct Fake {
+        list: Arc<Mutex<Value>>,
+    }
+
+    impl Handler for Fake {
+        fn spec(&self, op: &str) -> Option<OpSpec> {
+            (op == "sessions.list").then_some(OpSpec::AGENT)
+        }
+
+        fn call(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, ApiError> {
+            Ok(self.list.lock().unwrap_or_else(|e| e.into_inner()).clone())
+        }
+
+        fn topics(&self) -> &[&str] {
+            &["sessions"]
+        }
+    }
+
+    fn list_of(names: &[&str]) -> Arc<Mutex<Value>> {
+        let agents: Vec<Agent> = names.iter().map(|n| agent(n)).collect();
+        Arc::new(Mutex::new(serde_json::to_value(agents).expect("rows")))
+    }
+
+    fn serve(socket: &Path, list: &Arc<Mutex<Value>>) -> Running {
+        let server = Server::bind(
+            ServerConfig {
+                socket: socket.to_path_buf(),
+                allowlist: Allowlist::empty(),
+                audit: None,
+                version: "test".into(),
+                limits: Limits::default(),
+            },
+            Arc::new(Fake { list: list.clone() }),
+        )
+        .expect("bind");
+        server.spawn().expect("serve")
+    }
+
+    fn stop((handle, thread): Running) {
+        handle.shutdown();
+        thread.join().expect("server thread").expect("server ended");
+    }
+
+    /// The server here is this test binary, not a `notchling`, so the server check is off.
+    fn config(socket: &Path, start: Option<Starter>) -> SourceConfig {
+        SourceConfig {
+            socket: socket.to_path_buf(),
+            start,
+            backoff: quick(),
+            version: "test".into(),
+            check_server: false,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_socket_served_by_something_else_is_not_talked_to_and_says_so() {
+        let scratch = Scratch::new("ss-untrusted");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let running = serve(&socket, &list_of(&["from-a-stranger"]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source = SessionSource::start(SourceConfig {
+            check_server: true,
+            ..config(&socket, Some(failing_starter(&calls)))
+        });
+        let view = wait_for(&source, "the untrusted note", |v| v.link == Link::Untrusted);
+        assert!(view.agents.is_none(), "files are read instead");
+        assert_eq!(view.note(), Some(DAEMON_UNTRUSTED_NOTE));
+        // Nothing was started over it, and it heard no hello.
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(running.0.status().clients, Default::default());
+        stop(running);
+    }
+
+    #[test]
+    fn it_lists_then_follows_sessions_changed() {
+        let scratch = Scratch::new("ss-follow");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let running = serve(&socket, &list_of(&["a", "b"]));
+        let source = SessionSource::start(config(&socket, None));
+
+        let view = wait_for(&source, "the first list", |v| v.link == Link::Daemon);
+        assert_eq!(ids(&view), ["a", "b"]);
+        assert!(!view.daemon_down());
+
+        let before = source.generation();
+        let next = serde_json::to_value(vec![agent("c")]).expect("rows");
+        running.0.publish("sessions", "sessions.changed", &next);
+        let view = wait_for(&source, "the change", |v| ids(v) == ["c"]);
+        assert!(view.generation > before);
+        stop(running);
+    }
+
+    #[test]
+    fn a_daemon_that_goes_away_falls_back_and_a_new_one_is_picked_up() {
+        let scratch = Scratch::new("ss-redo");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let first = serve(&socket, &list_of(&["a"]));
+        let source = SessionSource::start(config(&socket, None));
+        wait_for(&source, "the daemon", |v| ids(v) == ["a"]);
+
+        stop(first);
+        let down = wait_for(&source, "the fallback", View::daemon_down);
+        assert!(down.agents.is_none());
+
+        let second = serve(&socket, &list_of(&["b", "c"]));
+        let up = wait_for(&source, "the new daemon", |v| v.link == Link::Daemon);
+        assert_eq!(ids(&up), ["b", "c"]);
+        stop(second);
+    }
+
+    #[test]
+    fn a_missing_daemon_is_started_once_and_then_used() {
+        let scratch = Scratch::new("ss-spawn");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let started: Arc<Mutex<Option<Running>>> = Arc::new(Mutex::new(None));
+        let starter: Starter = {
+            let (calls, started) = (calls.clone(), started.clone());
+            Arc::new(move |socket| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                *started.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(serve(socket, &list_of(&["from-the-new-daemon"])));
+                Ok(Started::Spawned)
+            })
+        };
+        let source = SessionSource::start(config(&socket, Some(starter)));
+        let view = wait_for(&source, "the started daemon", |v| v.link == Link::Daemon);
+        assert_eq!(ids(&view), ["from-the-new-daemon"]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // It goes away again: the app does not start another one behind the user's back.
+        let running = started.lock().unwrap_or_else(|e| e.into_inner()).take();
+        stop(running.expect("the started daemon"));
+        wait_for(&source, "the fallback", View::daemon_down);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dropping_the_source_ends_its_connection() {
+        let scratch = Scratch::new("ss-drop");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let running = serve(&socket, &list_of(&["a"]));
+        let source = SessionSource::start(config(&socket, None));
+        wait_for(&source, "the daemon", |v| v.link == Link::Daemon);
+        assert_eq!(running.0.connections(), 1);
+        drop(source);
+        let end = Instant::now() + Duration::from_secs(5);
+        while running.0.connections() > 0 {
+            assert!(Instant::now() < end, "the client stayed connected");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        stop(running);
+    }
+}

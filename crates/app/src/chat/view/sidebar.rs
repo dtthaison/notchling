@@ -10,7 +10,8 @@ use super::ChatView;
 use crate::chat::data::Tool;
 use crate::chat::sidebar::sections;
 
-fn footer(a: Appearance) -> Div {
+/// The footer, with what there is to say about the daemon (down, or not trusted).
+fn footer(a: Appearance, note: Option<&'static str>) -> Div {
     div()
         .h(px(44.0))
         .flex_shrink_0()
@@ -32,6 +33,7 @@ fn footer(a: Appearance) -> Div {
             PartState::Disabled,
             a,
         ))
+        .children(note.map(|note| label(note, TypeRole::Meta, Ink::TextFaint, a)))
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
@@ -109,5 +111,5 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .child(label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a)),
         )
         .child(list)
-        .child(footer(a))
+        .child(footer(a, view.daemon_note))
 }

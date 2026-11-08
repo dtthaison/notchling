@@ -200,7 +200,22 @@ impl DataRoot {
         locator: &mut Locator,
         now_ms: i64,
     ) -> Vec<Session> {
-        let agents = monitor.poll(&self.roots(), &Probes::from_proc(), now_ms);
+        self.sessions_from(monitor, locator, None, now_ms)
+    }
+
+    /// [`DataRoot::sessions_with`] with Claude Code's rows given: the daemon's list
+    /// (`session_source`) in place of reading the jobs and sessions folders here. `None` reads them.
+    pub fn sessions_from(
+        &self,
+        monitor: &mut Monitor,
+        locator: &mut Locator,
+        claude: Option<Vec<Agent>>,
+        now_ms: i64,
+    ) -> Vec<Session> {
+        let agents = match claude {
+            Some(agents) => agents,
+            None => monitor.poll(&self.roots(), &Probes::from_proc(), now_ms),
+        };
         let projects = self.projects_dir();
         let mut out: Vec<Session> = agents
             .iter()
@@ -293,9 +308,19 @@ impl Loader {
     /// The sessions, and the conversation and subagents of `selected` (else the first session).
     /// `now_ms` is the clock.
     pub fn load(&mut self, selected: Option<&str>, now_ms: i64) -> Loaded {
-        let sessions = self
-            .root
-            .sessions_with(&mut self.monitor, &mut self.locator, now_ms);
+        self.load_from(selected, None, now_ms)
+    }
+
+    /// [`Loader::load`] with Claude Code's rows from the daemon when it gave any.
+    pub fn load_from(
+        &mut self,
+        selected: Option<&str>,
+        claude: Option<Vec<Agent>>,
+        now_ms: i64,
+    ) -> Loaded {
+        let sessions =
+            self.root
+                .sessions_from(&mut self.monitor, &mut self.locator, claude, now_ms);
         let selected = selected
             .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
             .map(str::to_owned)

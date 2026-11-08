@@ -5,6 +5,7 @@
 //! to whatever is underneath; inside, it takes them. Every 2 s the sessions are read again, off the
 //! main thread.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
@@ -24,6 +25,7 @@ use super::model::NotchModel;
 use super::source::{now_ms, Source};
 use super::view::NotchView;
 use crate::mac::capture::ns_window;
+use crate::session_source::SessionSource;
 
 const TICK: Duration = Duration::from_millis(50);
 const POLL: Duration = Duration::from_secs(2);
@@ -50,7 +52,11 @@ fn screen_info(mtm: MainThreadMarker) -> Option<ScreenInfo> {
 /// Opens the notch over the camera, reading the sessions `source` reads: the same root Chat reads
 /// (`--data-root`, `NOTCHLING_DATA_ROOT`, else the user's own). `None` when there's no screen or
 /// GPUI can't open the window.
-pub fn open(cx: &mut App, source: Source) -> Option<WindowHandle<NotchView>> {
+pub fn open(
+    cx: &mut App,
+    source: Source,
+    sessions: Arc<SessionSource>,
+) -> Option<WindowHandle<NotchView>> {
     let mtm = MainThreadMarker::new()?;
     let geometry = geometry(&screen_info(mtm)?);
     let options = WindowOptions {
@@ -83,6 +89,7 @@ pub fn open(cx: &mut App, source: Source) -> Option<WindowHandle<NotchView>> {
             view.ns_window = ns;
             view.geometry = Some(geometry);
             view.source = Some(source);
+            view.sessions = Some(sessions);
             cx.spawn(async move |this, cx| loop {
                 if this.update(cx, tick).is_err() {
                     break;
@@ -152,20 +159,31 @@ fn place(w: &NSWindow, g: &Geometry) {
 /// Reads the sessions every [`POLL`], off the main thread, and the display's geometry with them.
 async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
     loop {
-        let taken = this.update(cx, |view, _| view.source.take());
-        let Ok(source) = taken else {
+        let taken = this.update(cx, |view, _| {
+            let answer = view.sessions.as_ref().map(|s| s.view());
+            (view.source.take(), answer)
+        });
+        let Ok((source, answer)) = taken else {
             break;
+        };
+        let (claude, note) = match answer {
+            Some(answer) => {
+                let note = answer.note();
+                (answer.agents, note)
+            }
+            None => (None, None),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
                 .background_executor()
                 .spawn(async move {
-                    let loaded = source.load(now_ms());
+                    let loaded = source.load_from(claude, now_ms());
                     (source, loaded)
                 })
                 .await;
             let applied = this.update(cx, |view, cx| {
                 view.source = Some(source);
+                view.model.daemon_note = note;
                 let now = now_ms();
                 view.model.now_ms = now;
                 if let Some(info) = MainThreadMarker::new().and_then(screen_info) {
