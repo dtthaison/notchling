@@ -78,9 +78,8 @@ pub fn arguments(
         common.push(format!("model_reasoning_effort=\"{effort}\""));
     }
     let mut args: Vec<String> = vec!["exec".into()];
-    match session {
-        Some(_) => args.push("resume".into()),
-        None => {}
+    if session.is_some() {
+        args.push("resume".into());
     }
     args.extend(common);
     if session.is_none() {

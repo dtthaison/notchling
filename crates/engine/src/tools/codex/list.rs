@@ -79,6 +79,39 @@ pub fn rollouts(
     out
 }
 
+/// The rollout of session `id`: the file `rollout-<time>-<id>.jsonl`, newest day first. `id` must
+/// be a plain session id (letters, digits, `-`), so it can't name a path.
+pub fn find_rollout(sessions_dir: &Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let wanted = format!("{id}.jsonl");
+    for (_, year) in numbered_dirs(sessions_dir, 4) {
+        for (_, month) in numbered_dirs(&year, 2) {
+            for (_, day) in numbered_dirs(&month, 2) {
+                let Ok(entries) = std::fs::read_dir(&day) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    // `rollout-` + a 19-character time (`2026-11-08T09-00-00`) + `-` + the id.
+                    let rest = name
+                        .to_string_lossy()
+                        .strip_prefix("rollout-")
+                        .map(String::from);
+                    let named = rest.as_deref().is_some_and(|r| {
+                        r.as_bytes().get(19) == Some(&b'-') && r.get(20..) == Some(wanted.as_str())
+                    });
+                    if named {
+                        return Some(entry.path());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// The first eight characters of an id, for a row with no title. Characters, not bytes: an id from
 /// a file can hold anything, and cutting inside a multi-byte character panics.
 fn short_id(id: &str) -> String {
@@ -189,6 +222,22 @@ mod tests {
         );
         assert_eq!(rollouts(&tmp.0, None, now_ms, 1), [b]);
         assert!(rollouts(&tmp.0.join("missing"), None, now_ms, 30).is_empty());
+    }
+
+    #[test]
+    fn a_rollout_is_found_by_its_session_id() {
+        let tmp = Tmp::new();
+        let a = tmp.file("2026/11/07/rollout-2026-11-07T08-00-00-aaa-111.jsonl");
+        let b = tmp.file("2026/11/08/rollout-2026-11-08T09-00-00-bbb-222.jsonl");
+        assert_eq!(find_rollout(&tmp.0, "aaa-111"), Some(a));
+        assert_eq!(find_rollout(&tmp.0, "bbb-222"), Some(b));
+        // Only the whole id after the time matches, not the end of one.
+        assert_eq!(find_rollout(&tmp.0, "111"), None);
+        assert_eq!(find_rollout(&tmp.0, "nope"), None);
+        // Nothing that could name a path.
+        for bad in ["", "../x", "a/b", "*", "aaa-111.jsonl"] {
+            assert_eq!(find_rollout(&tmp.0, bad), None, "{bad:?}");
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! leaves the waiting messages to go on, as Chat's Stop does.
 
 use super::events::{parse_line, Event};
-use super::plan::{failure_of, turn_spec, Pick, Turn};
+use super::plan::{failure_of, turn_spec, Pick, Turn, TurnSpec};
 use super::process::{Next, Stream, ToolProcess, ToolSpawner};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -82,6 +82,7 @@ impl std::error::Error for SendError {}
 
 struct Live {
     process: Arc<dyn ToolProcess>,
+    folder: String,
 }
 
 struct Waiting {
@@ -102,8 +103,8 @@ struct State {
 
 struct Inner {
     spawner: Arc<dyn ToolSpawner>,
-    codex: PathBuf,
-    path: Option<String>,
+    codex: Mutex<PathBuf>,
+    path: Mutex<Option<String>>,
     sink: Arc<dyn TurnSink>,
     network: AtomicBool,
     announce_ms: AtomicU64,
@@ -129,8 +130,8 @@ impl CodexRuns {
         CodexRuns {
             inner: Arc::new(Inner {
                 spawner,
-                codex,
-                path,
+                codex: Mutex::new(codex),
+                path: Mutex::new(path),
                 sink,
                 network: AtomicBool::new(true),
                 announce_ms: AtomicU64::new(ANNOUNCE_WAIT.as_millis() as u64),
@@ -142,6 +143,13 @@ impl CodexRuns {
     /// "Allow Network in Codex Turns" (`codexNetwork`, on unless turned off).
     pub fn set_network(&self, on: bool) {
         self.inner.network.store(on, Ordering::SeqCst);
+    }
+
+    /// The command to run and the PATH it runs with, looked up again before each send so a Codex
+    /// installed while the daemon runs is found.
+    pub fn set_command(&self, codex: PathBuf, path: Option<String>) {
+        *self.inner.codex.lock().unwrap_or_else(|e| e.into_inner()) = codex;
+        *self.inner.path.lock().unwrap_or_else(|e| e.into_inner()) = path;
     }
 
     /// How long a new session may take to be named (tests shorten it).
@@ -182,11 +190,15 @@ impl CodexRuns {
         if let Some(session) = request.session.clone() {
             let mut state = self.state();
             if state.running.contains_key(&session) || state.reserved.contains(&session) {
+                let folder = match state.running.get(&session) {
+                    Some(live) if request.folder.is_empty() => live.folder.clone(),
+                    _ => request.folder,
+                };
                 let queue = state.outbox.entry(session.clone()).or_default();
                 queue.push_back(Waiting {
                     text: request.text,
                     pick: request.pick,
-                    folder: request.folder,
+                    folder,
                 });
                 let waiting = queue.len();
                 drop(state);
@@ -241,15 +253,11 @@ impl CodexRuns {
         }
     }
 
-    /// Starts the process and the thread that follows it.
-    fn begin(
-        &self,
-        request: &Request,
-        session: Option<&str>,
-        announce: Option<Announce>,
-    ) -> Result<Arc<dyn ToolProcess>, SendError> {
-        let spec = turn_spec(
-            &self.inner.codex,
+    fn spec_for(&self, request: &Request, session: Option<&str>) -> TurnSpec {
+        let codex = self.inner.codex.lock().unwrap_or_else(|e| e.into_inner());
+        let path = self.inner.path.lock().unwrap_or_else(|e| e.into_inner());
+        turn_spec(
+            &codex,
             &Turn {
                 prompt: &request.text,
                 session,
@@ -257,8 +265,18 @@ impl CodexRuns {
                 pick: &request.pick,
                 network: self.inner.network.load(Ordering::SeqCst),
             },
-            self.inner.path.as_deref(),
-        );
+            path.as_deref(),
+        )
+    }
+
+    /// Starts the process and the thread that follows it.
+    fn begin(
+        &self,
+        request: &Request,
+        session: Option<&str>,
+        announce: Option<Announce>,
+    ) -> Result<Arc<dyn ToolProcess>, SendError> {
+        let spec = self.spec_for(request, session);
         let process = self
             .inner
             .spawner
@@ -271,6 +289,7 @@ impl CodexRuns {
                 session.to_string(),
                 Live {
                     process: process.clone(),
+                    folder: request.folder.clone(),
                 },
             );
         }
@@ -283,9 +302,10 @@ impl CodexRuns {
         let runs = self.clone();
         let following = process.clone();
         let owner = session.map(String::from);
+        let folder = request.folder.clone();
         std::thread::Builder::new()
             .name("codex-turn".into())
-            .spawn(move || runs.follow(following, owner, announce))
+            .spawn(move || runs.follow(following, owner, folder, announce))
             .map_err(|e| {
                 process.interrupt();
                 if let Some(session) = session {
@@ -305,6 +325,7 @@ impl CodexRuns {
         &self,
         mut process: Arc<dyn ToolProcess>,
         mut session: Option<String>,
+        folder: String,
         mut announce: Option<Announce>,
     ) {
         loop {
@@ -325,6 +346,7 @@ impl CodexRuns {
                                         thread_id.clone(),
                                         Live {
                                             process: process.clone(),
+                                            folder: folder.clone(),
                                         },
                                     );
                                     self.inner.sink.event(TurnEvent::Started {
@@ -416,22 +438,13 @@ impl CodexRuns {
     }
 
     fn restart(&self, request: &Request, session: &str) -> Result<Arc<dyn ToolProcess>, String> {
-        let spec = turn_spec(
-            &self.inner.codex,
-            &Turn {
-                prompt: &request.text,
-                session: Some(session),
-                folder: &request.folder,
-                pick: &request.pick,
-                network: self.inner.network.load(Ordering::SeqCst),
-            },
-            self.inner.path.as_deref(),
-        );
+        let spec = self.spec_for(request, Some(session));
         let process = self.inner.spawner.spawn(&spec).map_err(|e| e.to_string())?;
         self.state().running.insert(
             session.to_string(),
             Live {
                 process: process.clone(),
+                folder: request.folder.clone(),
             },
         );
         Ok(process)
@@ -447,6 +460,18 @@ impl CodexRuns {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Stops every running turn (the daemon is going away); what waits behind them is dropped.
+    pub fn stop_all(&self) {
+        let processes: Vec<Arc<dyn ToolProcess>> = {
+            let mut state = self.state();
+            state.outbox.clear();
+            state.running.values().map(|l| l.process.clone()).collect()
+        };
+        for process in processes {
+            process.interrupt();
         }
     }
 

@@ -182,6 +182,9 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
         ops::FOLDER_TRUST,
         ops::SESSION_MOVE,
         ops::SESSION_COMMAND,
+        ops::CODEX_SEND,
+        ops::CODEX_STOP,
+        ops::CODEX_DELETE,
     ] {
         match app.call(op, json!({"id": "sess-notch", "text": "hi"})) {
             Err(ClientError::Api(e)) => {
@@ -197,6 +200,7 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
     // Each refusal is on the record.
     let audit = std::fs::read_to_string(root.join("notchling/audit.jsonl")).unwrap();
     assert!(audit.contains("\"op\":\"session.reply\""), "{audit}");
+    assert!(audit.contains("\"op\":\"codex.send\""), "{audit}");
     assert!(audit.contains("\"result\":\"forbidden\""), "{audit}");
     // Nothing turned it on: the settings file was never written.
     assert!(!root.join("notchling/notchlingd-settings.json").exists());

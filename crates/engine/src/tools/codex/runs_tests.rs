@@ -341,3 +341,18 @@ fn network_and_picks_reach_the_command() {
     assert!(args.windows(2).any(|w| w == ["-m", "m1"]));
     assert!(args.iter().any(|a| a == "model_reasoning_effort=\"high\""));
 }
+
+#[test]
+fn a_waiting_message_without_a_folder_runs_where_the_session_does() {
+    let (runs, spawner, sink) = setup();
+    spawner.push(FakeRun::held(&[]));
+    spawner.push(FakeRun::ok(&[]));
+    runs.send(request("first", Some("abc"))).expect("sends");
+    let mut next = request("second", Some("abc"));
+    next.folder = String::new();
+    runs.send(next).expect("queues");
+    spawner.processes()[0].release();
+    sink.wait_for(5);
+    idle(&runs);
+    assert_eq!(spawner.specs()[1].cwd, "/work");
+}

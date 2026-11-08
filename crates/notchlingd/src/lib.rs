@@ -19,6 +19,7 @@ pub mod bridge_backend;
 pub mod bridge_ops;
 pub mod cli;
 pub mod clients;
+pub mod codex_ops;
 pub mod control_ops;
 pub mod daemon;
 pub mod hook;
