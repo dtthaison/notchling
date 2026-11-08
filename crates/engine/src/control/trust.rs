@@ -11,17 +11,16 @@ pub const DOWN: &str = "\u{1b}[B";
 pub const ENTER: &str = "\r";
 pub const CTRL_C: &str = "\u{03}";
 
-/// The script for `folder`. `config_dir` is a lane's folder, whose trust list is its own; `None`
-/// leaves the environment as it is. No `NO_COLOR` (it left Claude Code's menus gray) and a TERM it
+/// The script for `folder`. `config_dir` is a lane's folder, whose trust list is its own; `None` is the
+/// main login, so `CLAUDE_CONFIG_DIR` is removed rather than inherited (a daemon started from a lane
+/// would trust the folder in that lane). No `NO_COLOR` (it left Claude Code's menus gray) and a TERM it
 /// draws in.
 pub fn plan_trust_folder(folder: &str, config_dir: Option<&str>) -> PtyScript {
-    let mut command = Command::new(&["claude"])
+    let command = Command::new(&["claude"])
         .in_dir(folder)
         .with_env("TERM", Some("xterm-256color"))
-        .with_env("NO_COLOR", None);
-    if let Some(dir) = config_dir {
-        command = command.for_config_dir(Some(dir));
-    }
+        .with_env("NO_COLOR", None)
+        .for_config_dir(config_dir);
     let step = |keys: &str, pause_ms: u64, then_quiet: Option<Quiet>| KeyStep {
         keys: keys.to_string(),
         pause_ms,
@@ -86,8 +85,9 @@ mod tests {
             script.command.env.get("CLAUDE_CONFIG_DIR"),
             Some(&Some("/lanes/a".to_string()))
         );
-        // The main login leaves the variable alone.
+        // The main login removes it: trusting for the main login must not land in the lane the daemon
+        // itself was started from.
         let main = plan_trust_folder("/w", None);
-        assert!(!main.command.env.contains_key("CLAUDE_CONFIG_DIR"));
+        assert_eq!(main.command.env.get("CLAUDE_CONFIG_DIR"), Some(&None));
     }
 }
