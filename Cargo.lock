@@ -3320,6 +3320,7 @@ dependencies = [
  "notchling-platform",
  "serde",
  "serde_json",
+ "unicode-properties",
 ]
 
 [[package]]
