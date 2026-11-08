@@ -205,7 +205,10 @@ impl AccountProvider for DesktopStore {
                 let uuid = uuid_of(&account.id).to_string();
                 let active = inner.active.as_deref() == Some(uuid.as_str());
                 let saved = inner.saved.contains(&uuid);
-                (active || saved).then(|| ProviderAccount {
+                if !(active || saved) {
+                    return None;
+                }
+                Some(ProviderAccount {
                     id: uuid,
                     email: account.email,
                     plan: None,

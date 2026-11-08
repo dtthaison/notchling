@@ -87,14 +87,29 @@ fn sync_saves_the_live_login_under_its_account() {
     let login = fake_login("1234", "a@example.com", "t1");
     rig.set_live(&login);
     rig.store.sync(false);
-    assert_eq!(rig.keychain.get(SERVICE, "1234").as_deref(), Some(login.as_str()));
+    assert_eq!(
+        rig.keychain.get(SERVICE, "1234").as_deref(),
+        Some(login.as_str())
+    );
     let state = rig.store.state();
     assert_eq!(state.active_id.as_deref(), Some("1234"));
     assert_eq!(state.accounts[0].email, "a@example.com");
     // A second sync of an unchanged login doesn't write the Keychain again.
-    let writes = rig.keychain.calls().iter().filter(|c| c.starts_with("write")).count();
+    let writes = rig
+        .keychain
+        .calls()
+        .iter()
+        .filter(|c| c.starts_with("write"))
+        .count();
     rig.store.sync(false);
-    assert_eq!(rig.keychain.calls().iter().filter(|c| c.starts_with("write")).count(), writes);
+    assert_eq!(
+        rig.keychain
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("write"))
+            .count(),
+        writes
+    );
 }
 
 #[test]
@@ -110,7 +125,10 @@ fn the_email_only_format_joins_the_saved_account_with_that_email() {
     // An email Notchling hasn't seen is its own account until an id login names it.
     rig.set_live(&fake_email_login("new@example.com", "t3"));
     rig.store.sync(false);
-    assert_eq!(rig.store.state().active_id.as_deref(), Some("email:new@example.com"));
+    assert_eq!(
+        rig.store.state().active_id.as_deref(),
+        Some("email:new@example.com")
+    );
 }
 
 #[test]
@@ -125,7 +143,9 @@ fn the_file_mirror_is_read_when_the_item_is_missing() {
 fn a_switch_quits_first_then_sets_the_item_and_the_mirror_then_reopens() {
     let rig = Rig::new(
         "switch",
-        FakeApps::new().running(BUNDLE_IDS[0]).running(BUNDLE_IDS[1]),
+        FakeApps::new()
+            .running(BUNDLE_IDS[0])
+            .running(BUNDLE_IDS[1]),
     );
     let a = fake_login("1", "a@example.com", "ta");
     let b = fake_login("2", "b@example.com", "tb");
@@ -134,17 +154,33 @@ fn a_switch_quits_first_then_sets_the_item_and_the_mirror_then_reopens() {
     let seen = Arc::new(std::sync::Mutex::new(vec![]));
     let (kc, s2) = (rig.keychain.clone(), seen.clone());
     rig.apps.when_quitting(move |_| {
-        s2.lock().unwrap().push(kc.get(LIVE_SERVICE, LIVE_ACCOUNT).and_then(|v| decode_keyring(&v)));
+        s2.lock().unwrap().push(
+            kc.get(LIVE_SERVICE, LIVE_ACCOUNT)
+                .and_then(|v| decode_keyring(&v)),
+        );
     });
     rig.store.switch_to("2").unwrap();
     for at_quit in seen.lock().unwrap().iter() {
-        assert_eq!(at_quit.as_deref(), Some(a.as_str()), "the login was still the old one when the apps quit");
+        assert_eq!(
+            at_quit.as_deref(),
+            Some(a.as_str()),
+            "the login was still the old one when the apps quit"
+        );
     }
     assert_eq!(rig.live().as_deref(), Some(b.as_str()));
-    assert_eq!(std::fs::read_to_string(rig.token_file()).unwrap(), b, "the mirror is set too");
+    assert_eq!(
+        std::fs::read_to_string(rig.token_file()).unwrap(),
+        b,
+        "the mirror is set too"
+    );
     // Our copy of the account being left holds what was live (it might have been renewed).
     assert_eq!(rig.keychain.get(SERVICE, "1").as_deref(), Some(a.as_str()));
-    let events: Vec<_> = rig.apps.events().into_iter().filter(|e| !e.starts_with("is_running")).collect();
+    let events: Vec<_> = rig
+        .apps
+        .events()
+        .into_iter()
+        .filter(|e| !e.starts_with("is_running"))
+        .collect();
     assert_eq!(
         events,
         vec![
@@ -164,7 +200,9 @@ fn the_login_item_is_updated_in_place_and_never_deleted_by_a_switch() {
     rig.save("2", &fake_login("2", "b@example.com", "tb"));
     rig.store.switch_to("2").unwrap();
     let calls = rig.keychain.calls();
-    assert!(!calls.iter().any(|c| c == &format!("delete {LIVE_SERVICE}/{LIVE_ACCOUNT}")));
+    assert!(!calls
+        .iter()
+        .any(|c| c == &format!("delete {LIVE_SERVICE}/{LIVE_ACCOUNT}")));
     assert!(calls.contains(&format!("write {LIVE_SERVICE}/{LIVE_ACCOUNT}")));
 }
 
@@ -183,7 +221,10 @@ fn an_email_only_login_drops_the_stale_mirror_instead_of_writing_it() {
 fn an_app_that_will_not_quit_changes_nothing_and_reopens_what_it_closed() {
     let rig = Rig::new(
         "stubborn",
-        FakeApps::new().running(BUNDLE_IDS[0]).running(BUNDLE_IDS[1]).stubborn(BUNDLE_IDS[1]),
+        FakeApps::new()
+            .running(BUNDLE_IDS[0])
+            .running(BUNDLE_IDS[1])
+            .stubborn(BUNDLE_IDS[1]),
     );
     let a = fake_login("1", "a@example.com", "ta");
     rig.set_live(&a);
@@ -191,7 +232,10 @@ fn an_app_that_will_not_quit_changes_nothing_and_reopens_what_it_closed() {
     let err = rig.store.switch_to("2").unwrap_err();
     assert!(err.message().contains("didn't quit"));
     assert_eq!(rig.live().as_deref(), Some(a.as_str()));
-    assert!(rig.apps.events().contains(&format!("open {}", BUNDLE_IDS[0])));
+    assert!(rig
+        .apps
+        .events()
+        .contains(&format!("open {}", BUNDLE_IDS[0])));
     assert!(!rig.store.state().busy);
 }
 
@@ -219,12 +263,22 @@ fn add_account_saves_the_current_login_deletes_the_item_and_waits_for_the_next()
     rig.set_live(&a);
     std::fs::write(rig.token_file(), &a).unwrap();
     rig.store.begin_add().unwrap();
-    assert_eq!(rig.keychain.get(SERVICE, "1").as_deref(), Some(a.as_str()), "kept before it goes");
-    assert!(rig.live().is_none(), "the item is deleted so Antigravity starts at its sign-in screen");
+    assert_eq!(
+        rig.keychain.get(SERVICE, "1").as_deref(),
+        Some(a.as_str()),
+        "kept before it goes"
+    );
+    assert!(
+        rig.live().is_none(),
+        "the item is deleted so Antigravity starts at its sign-in screen"
+    );
     assert!(!rig.token_file().exists());
     let state = rig.store.state();
     assert!(state.adding && state.active_id.is_none());
-    assert_eq!(rig.store.poll_add(), AddProgress::Waiting { sign_in_url: None });
+    assert_eq!(
+        rig.store.poll_add(),
+        AddProgress::Waiting { sign_in_url: None }
+    );
     // The user signs in to another account in Antigravity.
     rig.set_live(&fake_login("2", "b@example.com", "tb"));
     assert_eq!(rig.store.poll_add(), AddProgress::Done);
@@ -262,18 +316,31 @@ fn cancelling_an_add_puts_the_previous_login_back() {
 #[test]
 fn limits_come_from_the_local_server_for_the_active_account() {
     let procs = FakeProcs::new()
-        .answer("/usr/bin/pgrep -f bin/language_server --standalone", "4242\n")
+        .answer(
+            "/usr/bin/pgrep -f bin/language_server --standalone",
+            "4242\n",
+        )
         .answer("/bin/ps -o command= -p 4242", "x --csrf_token tok\n")
-        .answer("/usr/sbin/lsof -nP -a -p 4242 -iTCP -sTCP:LISTEN", "l 4242 me 1u IPv4 0 0t0 TCP 127.0.0.1:5000 (LISTEN)\n");
+        .answer(
+            "/usr/sbin/lsof -nP -a -p 4242 -iTCP -sTCP:LISTEN",
+            "l 4242 me 1u IPv4 0 0t0 TCP 127.0.0.1:5000 (LISTEN)\n",
+        );
     let rig = Rig::with_procs("limits", procs, FakeApps::new());
     rig.set_live(&fake_login("1", "a@example.com", "ta"));
-    rig.http.ok(200, r#"{"userStatus":{"email":"a@example.com","userTier":{"name":"Antigravity Pro Quota"}}}"#);
+    rig.http.ok(
+        200,
+        r#"{"userStatus":{"email":"a@example.com","userTier":{"name":"Antigravity Pro Quota"}}}"#,
+    );
     rig.http.ok(200, r#"{"response":{"groups":[{"displayName":"G","buckets":[{"window":"weekly","remainingFraction":0.5}]}]}}"#);
     rig.store.sync(false);
     let report = rig.store.usage_report("1").unwrap();
     assert_eq!(report.bars()[0].percent, 50.0);
     assert_eq!(rig.store.state().accounts[0].plan.as_deref(), Some("Pro"));
-    assert!(rig.http.requests().iter().all(|r| r.url.starts_with("https://127.0.0.1:5000/")));
+    assert!(rig
+        .http
+        .requests()
+        .iter()
+        .all(|r| r.url.starts_with("https://127.0.0.1:5000/")));
 }
 
 #[test]
@@ -292,5 +359,8 @@ fn a_restart_confirmation_only_while_antigravity_runs() {
     let rig = Rig::new("confirm", FakeApps::new());
     assert!(rig.store.switch_confirmation("x").is_none());
     let rig2 = Rig::new("confirm2", FakeApps::new().running(BUNDLE_IDS[1]));
-    assert_eq!(rig2.store.switch_confirmation("x").unwrap().title, "Restart Antigravity?");
+    assert_eq!(
+        rig2.store.switch_confirmation("x").unwrap().title,
+        "Restart Antigravity?"
+    );
 }

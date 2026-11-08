@@ -162,9 +162,7 @@ fn client_config(trust: Trust) -> Result<rustls::ClientConfig, String> {
             for cert in rustls_native_certs::load_native_certs().certs {
                 let _ = roots.add(cert);
             }
-            builder
-                .with_root_certificates(roots)
-                .with_no_client_auth()
+            builder.with_root_certificates(roots).with_no_client_auth()
         }
         Trust::LoopbackSelfSigned => builder
             .dangerous()
@@ -325,7 +323,8 @@ mod tests {
 
     #[test]
     fn reads_status_plain_and_chunked_bodies() {
-        let plain = parse_response(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}").unwrap();
+        let plain =
+            parse_response(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}").unwrap();
         assert_eq!((plain.status, plain.body.as_slice()), (404, &b"{}"[..]));
         let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n{\"k\r\n4\r\n\":1}\r\n0\r\n\r\n";
         let r = parse_response(chunked).unwrap();
@@ -347,7 +346,10 @@ mod tests {
             "https://localhost:9000/x",
             "https://127.0.0.1:0/x",
         ] {
-            assert!(Target::parse(bad, Trust::LoopbackSelfSigned).is_err(), "{bad}");
+            assert!(
+                Target::parse(bad, Trust::LoopbackSelfSigned).is_err(),
+                "{bad}"
+            );
         }
         let ok = Target::parse("https://127.0.0.1:4433/a/B", Trust::LoopbackSelfSigned).unwrap();
         assert_eq!((ok.host, ok.port), (Host::Loopback, 4433));
@@ -400,8 +402,10 @@ mod tests {
                 }
                 got.extend_from_slice(&buf[..n]);
             }
-            tls.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n")
-                .unwrap();
+            tls.write_all(
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n",
+            )
+            .unwrap();
             tls.flush().unwrap();
             tls.conn.send_close_notify();
             let _ = tls.flush();
@@ -415,7 +419,10 @@ mod tests {
             .unwrap();
         assert_eq!((reply.status, reply.body.as_slice()), (200, &b"{}"[..]));
         let seen = handle.join().unwrap();
-        assert!(seen.starts_with("POST /svc/GetUserStatus HTTP/1.1"), "{seen}");
+        assert!(
+            seen.starts_with("POST /svc/GetUserStatus HTTP/1.1"),
+            "{seen}"
+        );
         assert!(seen.contains("x-codeium-csrf-token: tok"));
     }
 }

@@ -29,8 +29,10 @@ mod tests {
     fn reads_claims_with_or_without_padding() {
         let token = fake(&json!({"sub": "1234", "email": "a@example.com"}));
         assert_eq!(claims(&token).unwrap()["sub"], "1234");
-        let padded = token.replacen('.', ".", 1);
-        assert!(claims(&padded).is_some());
+        let (head, rest) = token.split_once('.').unwrap();
+        let (payload, sig) = rest.split_once('.').unwrap();
+        let padded = format!("{head}.{payload}==.{sig}");
+        assert!(claims(&padded).is_some(), "padding is tolerated");
         assert!(claims("nodots").is_none());
         assert!(claims("a.@@@.c").is_none());
         assert!(claims("a.bm90IGpzb24.c").is_none(), "base64 of 'not json'");

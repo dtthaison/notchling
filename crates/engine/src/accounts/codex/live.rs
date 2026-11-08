@@ -94,7 +94,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(auth_path(&home)).unwrap().permissions().mode();
+            let mode = std::fs::metadata(auth_path(&home))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
         let _ = std::fs::remove_dir_all(&home);

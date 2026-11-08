@@ -16,8 +16,8 @@ use crate::accounts::generic_password::Keychain;
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
-    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation,
-    HttpClient, HttpRequest, ProviderAccount, ProviderId, ProviderState, Trust,
+    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation, HttpClient,
+    HttpRequest, ProviderAccount, ProviderId, ProviderState, Trust,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -148,7 +148,9 @@ impl CodexStore {
         if self.saved(id).as_deref() == Some(login) {
             return true;
         }
-        self.deps.keychain.write(SERVICE, id, &STANDARD.encode(login))
+        self.deps
+            .keychain
+            .write(SERVICE, id, &STANDARD.encode(login))
     }
 
     fn save_book(&self, accounts: &[Saved]) {
@@ -275,7 +277,8 @@ impl CodexStore {
     }
 
     fn save_new_login(&self, scratch: &std::path::Path, code: i32) -> AddProgress {
-        let not_finished = || AddProgress::Failed(AccountError::new("Codex didn't finish signing in."));
+        let not_finished =
+            || AddProgress::Failed(AccountError::new("Codex didn't finish signing in."));
         let data = match std::fs::read(auth_path(scratch)) {
             Ok(d) if code == 0 => d,
             _ => return not_finished(),
@@ -317,15 +320,15 @@ impl CodexStore {
     }
 }
 
-/// The sign-in page `codex login` printed: the first `https://auth.openai.com/…` word.
+/// The sign-in page `codex login` printed: the first `https://auth.openai.com/…`, up to the next
+/// white space or control character (so a colour code after it isn't part of it).
 pub fn sign_in_url(output: &str) -> Option<String> {
-    output
-        .split_whitespace()
-        .find(|w| w.starts_with(SIGN_IN_PREFIX))
-        .map(|w| {
-            w.trim_matches(|c: char| c.is_control() || c == '\u{1b}')
-                .to_string()
-        })
+    let start = output.find(SIGN_IN_PREFIX)?;
+    let url: String = output[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    (url.len() > SIGN_IN_PREFIX.len()).then_some(url)
 }
 
 impl AccountProvider for CodexStore {

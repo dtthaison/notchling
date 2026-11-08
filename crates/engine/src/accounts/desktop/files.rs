@@ -27,11 +27,7 @@ fn config(claude_dir: &Path) -> PathBuf {
 
 /// An account id that is safe to use as a file name: letters, digits and `-`, up to 64.
 pub fn valid_uuid(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// The account Desktop is on: `lastKnownAccountUuid` in `config.json`.
@@ -126,7 +122,8 @@ fn set_active(claude_dir: &Path, uuid: Option<&str>) -> Result<(), &'static str>
             root.remove("bootSideSessions");
         }
     }
-    let out = serde_json::to_vec(&Value::Object(root)).map_err(|_| "config.json can't be written")?;
+    let out =
+        serde_json::to_vec(&Value::Object(root)).map_err(|_| "config.json can't be written")?;
     write_keeping_mode(&path, &out).map_err(|_| "config.json can't be written")
 }
 
@@ -151,7 +148,8 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("nl-desktop-files-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("nl-desktop-files-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -181,7 +179,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&mine).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&mine).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
         std::fs::write(cookies(&dir), b"cookie-store-2").unwrap();
         assert!(capture(&dir, &mine));
@@ -211,7 +212,10 @@ mod tests {
         }
         let config: Value = serde_json::from_slice(&std::fs::read(config(&dir)).unwrap()).unwrap();
         assert_eq!(config["lastKnownAccountUuid"], "u-2");
-        assert_eq!(config["bootSideSessions"], json!({"accountUuid": "u-2", "supported": true}));
+        assert_eq!(
+            config["bootSideSessions"],
+            json!({"accountUuid": "u-2", "supported": true})
+        );
         assert_eq!(config["theme"], "dark", "other keys stay");
         // A second restore keeps the first backup: it is the file Notchling found.
         restore(&dir, &saved, "u-2").unwrap();
@@ -258,7 +262,14 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(config(&dir), std::fs::Permissions::from_mode(0o640)).unwrap();
             set_active(&dir, Some("u")).unwrap();
-            assert_eq!(std::fs::metadata(config(&dir)).unwrap().permissions().mode() & 0o777, 0o640);
+            assert_eq!(
+                std::fs::metadata(config(&dir))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o640
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

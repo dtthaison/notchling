@@ -59,8 +59,7 @@ pub fn plan_write(service: &str, account: &str, value: &str) -> Option<WritePlan
         return None;
     }
     let hex = hex(value);
-    let line =
-        format!("add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{hex}\"\n");
+    let line = format!("add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{hex}\"\n");
     if line.len() < INTERACTIVE_LINE_LIMIT {
         return Some(WritePlan {
             args: vec!["-i".into()],

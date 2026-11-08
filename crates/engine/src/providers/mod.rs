@@ -185,7 +185,9 @@ pub enum AddProgress {
     /// No flow is under way.
     Idle,
     /// Waiting for the user.
-    Waiting { sign_in_url: Option<String> },
+    Waiting {
+        sign_in_url: Option<String>,
+    },
     /// The new account was saved.
     Done,
     /// The user cancelled.
@@ -255,7 +257,10 @@ impl ProviderRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn AccountProvider>> {
-        self.providers.iter().find(|p| p.id().as_str() == id).cloned()
+        self.providers
+            .iter()
+            .find(|p| p.id().as_str() == id)
+            .cloned()
     }
 
     pub fn sync_all(&self, force: bool) {

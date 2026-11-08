@@ -352,13 +352,15 @@ impl Procs for FakeProcs {
     }
 }
 
+type QuitHook = Box<dyn Fn(&str) + Send>;
+
 /// Which bundle ids are running; quitting removes one unless it is stubborn.
 #[derive(Default)]
 pub struct FakeApps {
     running: Mutex<HashSet<String>>,
     stubborn: Mutex<HashSet<String>>,
     events: Mutex<Vec<String>>,
-    on_quit: Mutex<Option<Box<dyn Fn(&str) + Send>>>,
+    on_quit: Mutex<Option<QuitHook>>,
 }
 
 impl FakeApps {

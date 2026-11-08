@@ -20,8 +20,8 @@ use crate::accounts::generic_password::Keychain;
 use crate::accounts::procs::{Apps, Procs};
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
-    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation,
-    HttpClient, ProviderAccount, ProviderId, ProviderState,
+    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation, HttpClient,
+    ProviderAccount, ProviderId, ProviderState,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -137,7 +137,9 @@ impl AntigravityStore {
             .keychain
             .write(LIVE_SERVICE, LIVE_ACCOUNT, &login::encode_keyring(login))
         {
-            return Err(AccountError::new("Couldn't update Antigravity's saved login."));
+            return Err(AccountError::new(
+                "Couldn't update Antigravity's saved login.",
+            ));
         }
         // The file mirror is the older format (with `id_token`). A newer-format login doesn't fit
         // it, so drop the old account's file instead; Antigravity writes it again from the item.
@@ -394,7 +396,9 @@ impl AccountProvider for AntigravityStore {
     fn switch_confirmation(&self, _id: &str) -> Option<Confirmation> {
         self.is_running().then(|| Confirmation {
             title: "Restart Antigravity?".into(),
-            message: "Antigravity quits and opens again on the other account. Agents running in it stop.".into(),
+            message:
+                "Antigravity quits and opens again on the other account. Agents running in it stop."
+                    .into(),
             button: "Restart".into(),
         })
     }

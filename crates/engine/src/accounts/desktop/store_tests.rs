@@ -87,8 +87,16 @@ fn sync_captures_the_active_accounts_cookies_and_lists_only_accounts_in_desktop(
     assert_eq!(std::fs::read(rig.ours("uuid-a")).unwrap(), b"cookies-a");
     let state = rig.store.state();
     assert_eq!(state.active_id.as_deref(), Some("uuid-a"));
-    let rows: Vec<_> = state.accounts.iter().map(|a| (a.id.as_str(), a.switchable)).collect();
-    assert_eq!(rows, vec![("uuid-a", true)], "b and c were never signed in to Desktop");
+    let rows: Vec<_> = state
+        .accounts
+        .iter()
+        .map(|a| (a.id.as_str(), a.switchable))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![("uuid-a", true)],
+        "b and c were never signed in to Desktop"
+    );
     assert_eq!(state.active_name().as_deref(), Some("a@example.com"));
 }
 
@@ -117,23 +125,43 @@ fn a_switch_quits_desktop_first_then_swaps_the_whole_cookie_store() {
 
     rig.store.switch_to("uuid-b").unwrap();
 
-    assert_eq!(seen.lock().unwrap().as_deref(), Some(&b"cookies-a"[..]), "still account a's when Desktop quit");
+    assert_eq!(
+        seen.lock().unwrap().as_deref(),
+        Some(&b"cookies-a"[..]),
+        "still account a's when Desktop quit"
+    );
     assert_eq!(std::fs::read(cookies(&rig.claude())).unwrap(), b"cookies-b");
     assert_eq!(std::fs::read(backup(&rig.claude())).unwrap(), b"cookies-a");
     let config = std::fs::read_to_string(rig.claude().join("config.json")).unwrap();
-    assert!(config.contains("uuid-b") && config.contains("bootSideSessions") && config.contains("dark"));
-    let events: Vec<_> = rig.apps.events().into_iter().filter(|e| !e.starts_with("is_running")).collect();
-    assert_eq!(events, vec![format!("quit {BUNDLE_ID}"), format!("open {BUNDLE_ID}")]);
+    assert!(
+        config.contains("uuid-b") && config.contains("bootSideSessions") && config.contains("dark")
+    );
+    let events: Vec<_> = rig
+        .apps
+        .events()
+        .into_iter()
+        .filter(|e| !e.starts_with("is_running"))
+        .collect();
+    assert_eq!(
+        events,
+        vec![format!("quit {BUNDLE_ID}"), format!("open {BUNDLE_ID}")]
+    );
     assert_eq!(rig.store.state().active_id.as_deref(), Some("uuid-b"));
 }
 
 #[test]
 fn desktop_that_will_not_quit_keeps_its_cookies() {
-    let rig = Rig::new("stubborn", FakeApps::new().running(BUNDLE_ID).stubborn(BUNDLE_ID));
+    let rig = Rig::new(
+        "stubborn",
+        FakeApps::new().running(BUNDLE_ID).stubborn(BUNDLE_ID),
+    );
     rig.sign_in("uuid-a", b"cookies-a");
     std::fs::create_dir_all(rig.root.join("ours/desktop")).unwrap();
     std::fs::write(rig.ours("uuid-b"), b"cookies-b").unwrap();
-    let rig = Rig::at(rig.root.clone(), FakeApps::new().running(BUNDLE_ID).stubborn(BUNDLE_ID));
+    let rig = Rig::at(
+        rig.root.clone(),
+        FakeApps::new().running(BUNDLE_ID).stubborn(BUNDLE_ID),
+    );
     let err = rig.store.switch_to("uuid-b").unwrap_err();
     assert!(err.message().contains("didn't quit"));
     assert_eq!(std::fs::read(cookies(&rig.claude())).unwrap(), b"cookies-a");
@@ -167,8 +195,18 @@ fn add_account_saves_this_one_signs_desktop_out_and_waits_for_the_next() {
     assert!(!config.contains("lastKnownAccountUuid") && config.contains("dark"));
     let state = rig.store.state();
     assert!(state.adding && state.active_id.is_none());
-    assert_eq!(state.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["uuid-a"]);
-    assert_eq!(rig.store.poll_add(), AddProgress::Waiting { sign_in_url: None });
+    assert_eq!(
+        state
+            .accounts
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["uuid-a"]
+    );
+    assert_eq!(
+        rig.store.poll_add(),
+        AddProgress::Waiting { sign_in_url: None }
+    );
     rig.sign_in("uuid-b", b"cookies-b");
     assert_eq!(rig.store.poll_add(), AddProgress::Done);
     assert_eq!(std::fs::read(rig.ours("uuid-b")).unwrap(), b"cookies-b");
@@ -207,6 +245,12 @@ fn confirmations_only_while_desktop_runs_and_availability_follows_the_app() {
     std::fs::create_dir_all(rig.root.join("Applications/Claude.app")).unwrap();
     assert!(rig.store.is_available());
     let running = Rig::new("confirm2", FakeApps::new().running(BUNDLE_ID));
-    assert_eq!(running.store.switch_confirmation("x").unwrap().title, "Restart Claude Desktop?");
-    assert_eq!(running.store.add_confirmation().unwrap().title, "Open Claude Desktop signed out?");
+    assert_eq!(
+        running.store.switch_confirmation("x").unwrap().title,
+        "Restart Claude Desktop?"
+    );
+    assert_eq!(
+        running.store.add_confirmation().unwrap().title,
+        "Open Claude Desktop signed out?"
+    );
 }

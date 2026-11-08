@@ -31,8 +31,7 @@ pub fn identity(login: &[u8]) -> Option<Identity> {
         .cloned()
         .unwrap_or(Value::Null);
     let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
-    let workspace =
-        text(&auth, "chatgpt_account_id").or_else(|| text(&tokens, "account_id"))?;
+    let workspace = text(&auth, "chatgpt_account_id").or_else(|| text(&tokens, "account_id"))?;
     let user = text(&auth, "chatgpt_user_id")
         .or_else(|| text(&auth, "user_id"))
         .or_else(|| text(&claims, "sub"))?;
@@ -71,9 +70,7 @@ pub fn access(login: &[u8], now: f64) -> Option<Access> {
     let tokens = tokens(login)?;
     let token = tokens.get("access_token")?.as_str()?.to_string();
     let workspace = tokens.get("account_id")?.as_str()?.to_string();
-    if let Some(exp) = jwt::claims(&token)
-        .and_then(|c| c.get("exp").and_then(Value::as_f64))
-    {
+    if let Some(exp) = jwt::claims(&token).and_then(|c| c.get("exp").and_then(Value::as_f64)) {
         if exp < now + 60.0 {
             return None;
         }
@@ -264,7 +261,10 @@ mod tests {
         let ok = access(&login(NOW + 86400.0), NOW).unwrap();
         assert_eq!(ok.workspace, "ws-1");
         assert!(access(&login(NOW - 10.0), NOW).is_none());
-        assert!(access(&login(NOW + 30.0), NOW).is_none(), "under a minute left");
+        assert!(
+            access(&login(NOW + 30.0), NOW).is_none(),
+            "under a minute left"
+        );
         assert!(!format!("{ok:?}").contains("eyJ"));
     }
 

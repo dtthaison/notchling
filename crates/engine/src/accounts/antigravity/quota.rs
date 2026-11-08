@@ -50,8 +50,8 @@ pub fn fetch(
                 return None;
             }
         }
-        let usage = post(http, "RetrieveUserQuotaSummary", port, &csrf)
-            .and_then(|d| parse_usage(&d, now));
+        let usage =
+            post(http, "RetrieveUserQuotaSummary", port, &csrf).and_then(|d| parse_usage(&d, now));
         return Some(Snapshot { plan, usage });
     }
     None
@@ -243,7 +243,10 @@ mod tests {
     #[test]
     fn lsof_is_asked_for_one_process_with_a_and_nothing_else() {
         let args = lsof_args("4242");
-        assert!(args.contains(&"-a"), "without -a lsof ORs its filters and lists every listener");
+        assert!(
+            args.contains(&"-a"),
+            "without -a lsof ORs its filters and lists every listener"
+        );
         let at = |s: &str| args.iter().position(|a| *a == s).unwrap();
         assert!(at("-a") < at("-p") && at("-a") < at("-iTCP"));
         assert_eq!(args[at("-p") + 1], "4242");
@@ -262,7 +265,11 @@ mod tests {
             (bars[0].0.as_str(), bars[0].1.percent, bars[0].1.resets_at),
             ("Week", 25.0, Some(1_794_268_800.0))
         );
-        assert_eq!((bars[1].0.as_str(), bars[1].1.percent), ("5h", 0.0), "clamped");
+        assert_eq!(
+            (bars[1].0.as_str(), bars[1].1.percent),
+            ("5h", 0.0),
+            "clamped"
+        );
         assert_eq!(bars[2].1.percent, 100.0, "clamped");
         assert!(parse_usage(b"{}", 0.0).is_none());
         assert!(parse_usage(br#"{"response":{"groups":[]}}"#, 0.0).is_none());
@@ -284,14 +291,21 @@ mod tests {
             reqs[0].url,
             "https://127.0.0.1:50730/exa.language_server_pb.LanguageServerService/GetUserStatus"
         );
-        assert!(reqs[1].url.starts_with("https://127.0.0.1:50731/") && reqs[1].url.ends_with("GetUserStatus"));
+        assert!(
+            reqs[1].url.starts_with("https://127.0.0.1:50731/")
+                && reqs[1].url.ends_with("GetUserStatus")
+        );
         assert!(reqs[2].url.ends_with("RetrieveUserQuotaSummary"));
         for r in &reqs {
             assert_eq!(r.trust, Trust::LoopbackSelfSigned);
             assert_eq!(r.method, "POST");
             assert_eq!(r.body.as_deref(), Some(&b"{}"[..]));
-            assert!(r.headers.contains(&("x-codeium-csrf-token".into(), "abc-123".into())));
-            assert!(r.headers.contains(&("Connect-Protocol-Version".into(), "1".into())));
+            assert!(r
+                .headers
+                .contains(&("x-codeium-csrf-token".into(), "abc-123".into())));
+            assert!(r
+                .headers
+                .contains(&("Connect-Protocol-Version".into(), "1".into())));
         }
         assert!(!format!("{reqs:?}").contains("abc-123"));
     }
@@ -310,11 +324,20 @@ mod tests {
         let http = FakeHttp::new();
         assert!(fetch(&FakeProcs::new(), &http, None, 0.0).is_none());
         let no_token = FakeProcs::new()
-            .answer("/usr/bin/pgrep -f bin/language_server --standalone", "4242\n")
-            .answer("/bin/ps -o command= -p 4242", "language_server --standalone\n");
+            .answer(
+                "/usr/bin/pgrep -f bin/language_server --standalone",
+                "4242\n",
+            )
+            .answer(
+                "/bin/ps -o command= -p 4242",
+                "language_server --standalone\n",
+            );
         assert!(fetch(&no_token, &http, None, 0.0).is_none());
         let no_ports = FakeProcs::new()
-            .answer("/usr/bin/pgrep -f bin/language_server --standalone", "4242\n")
+            .answer(
+                "/usr/bin/pgrep -f bin/language_server --standalone",
+                "4242\n",
+            )
             .answer("/bin/ps -o command= -p 4242", "x --csrf_token t1\n");
         assert!(fetch(&no_ports, &http, None, 0.0).is_none());
         assert_eq!(http.calls(), 0);
