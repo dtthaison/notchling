@@ -26,6 +26,8 @@ use crate::search::panel::AppSearch;
 use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
 use crate::tools::second_opinion::store_for_run;
+use crate::welcome::switches::Switches;
+use crate::welcome::window::{self as welcome_window, AppSwitches, WelcomeSetup, Which};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 
 /// The app's state while it runs.
@@ -64,11 +66,12 @@ pub struct AppPairing(pub Arc<PairingFeed>);
 
 impl Global for AppPairing {}
 
-/// Milestone 6's switch feed (`accounts`, `vault`, `install`, and the vault's pending prompts),
-/// shared by the Accounts window, the vault sheet and the prompt windows. Not set in a render.
-pub struct AppSwitches(pub Arc<crate::switches::feed::SwitchFeed>);
+/// Milestone 6's switch feed (the `settings.switch` events, and the vault's pending prompts),
+/// shared by the Accounts window, the vault sheet and the prompt windows. The welcome window's
+/// `AppSwitches` polls the same switches for the handover checklist. Not set in a render.
+pub struct AppSwitchFeed(pub Arc<crate::switches::feed::SwitchFeed>);
 
-impl Global for AppSwitches {}
+impl Global for AppSwitchFeed {}
 
 /// The accounts store (Claude Code, lanes, the other providers, limits, cost). Not set in a render.
 pub struct AppAccounts(pub Arc<crate::accounts::store::Accounts>);
@@ -126,17 +129,20 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         cx.set_global(AppBridge(bridge.clone()));
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
-        cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
-        let switches = Arc::new(crate::switches::feed::SwitchFeed::for_run(root.as_ref()));
+        let switches = Arc::new(Switches::for_run(root.as_ref()));
         cx.set_global(AppSwitches(switches.clone()));
+        cx.set_global(WelcomeSetup { root: root.clone() });
+        cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
+        let feed = Arc::new(crate::switches::feed::SwitchFeed::for_run(root.as_ref()));
+        cx.set_global(AppSwitchFeed(feed.clone()));
         cx.set_global(AppAccounts(Arc::new(
             crate::accounts::store::Accounts::for_run(root.as_ref()),
         )));
         let vault = Arc::new(crate::vault::store::Vault::for_run(root.as_ref()));
         cx.set_global(AppVault(vault.clone()));
-        if switches.is_live() {
+        if feed.is_live() {
             // The daemon asks the person about a secret only while this follows `vault`.
-            super::vault_prompts::watch(cx, switches, vault);
+            super::vault_prompts::watch(cx, feed, vault);
         }
         if let Some(root) = root.as_ref() {
             // A page's copy is only ever loaded from here.
@@ -170,6 +176,18 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
             })
             .detach();
         }
+        if switches.is_live() {
+            // The daemon's accounts, vault and install switches are off at every start: this
+            // brings each one the user chose on back.
+            cx.spawn(async move |cx| loop {
+                let asked = switches.clone();
+                cx.background_executor()
+                    .spawn(async move { asked.refresh() })
+                    .await;
+                cx.background_executor().timer(BRIDGE_POLL).await;
+            })
+            .detach();
+        }
         // ⌘⇧P from anywhere opens the search panel. Another app holding the key only costs the
         // shortcut; the panel still opens from a session's page or search in Chat.
         let hot_key = {
@@ -195,6 +213,8 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         if let Some(source) = notch {
             crate::notch::panel::open(cx, source, for_notch, actions);
         }
+        // Once, the first time: who owns what, and the Swift app's settings.
+        welcome_window::open_first_run_once(cx);
     });
     0
 }
@@ -206,6 +226,9 @@ fn handle(command: Command, cx: &mut App) {
         Command::Accounts => {
             crate::accounts::window::open(cx, None);
         }
+        Command::About => welcome_window::open(cx, Which::About),
+        Command::Welcome => welcome_window::open(cx, Which::FirstRun),
+        Command::Handover => welcome_window::open(cx, Which::Handover),
         Command::SetAwake(mode) => {
             let shell = cx.global_mut::<Shell>();
             shell.state.awake = mode;

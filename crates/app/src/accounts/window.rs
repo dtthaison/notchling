@@ -18,7 +18,7 @@ use super::renders::{self, Shown};
 use super::store::Accounts;
 use super::view::AccountsView;
 use super::view_rows::{limit_groups, meter};
-use crate::mac::shell::{AppAccounts, AppSwitches};
+use crate::mac::shell::{AppAccounts, AppSwitchFeed};
 use crate::switches::feed::SwitchFeed;
 
 /// The window's size in points.
@@ -31,7 +31,7 @@ pub fn app_stores(cx: &App) -> (Arc<Accounts>, Arc<SwitchFeed>) {
         .map(|s| s.0.clone())
         .unwrap_or_else(|| Arc::new(Accounts::fixed(Default::default())));
     let feed = cx
-        .try_global::<AppSwitches>()
+        .try_global::<AppSwitchFeed>()
         .map(|f| f.0.clone())
         .unwrap_or_else(|| Arc::new(SwitchFeed::none()));
     (store, feed)
