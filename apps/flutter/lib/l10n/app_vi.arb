@@ -151,6 +151,9 @@
   "macsActive": "Đang dùng",
   "macsUse": "Dùng Mac này",
   "macsRemove": "Gỡ Mac",
+  "computerOffline": "Chưa kết nối",
+  "computerRevoked": "Đã thu hồi",
+  "computerNoSessions": "Không có session",
   "macsRemoveConfirm": "Gỡ “{name}” khỏi điện thoại?",
   "@macsRemoveConfirm": {
     "placeholders": {

@@ -278,6 +278,15 @@ class AppL10nVi extends AppL10n {
   String get macsRemove => 'Gỡ Mac';
 
   @override
+  String get computerOffline => 'Chưa kết nối';
+
+  @override
+  String get computerRevoked => 'Đã thu hồi';
+
+  @override
+  String get computerNoSessions => 'Không có session';
+
+  @override
   String macsRemoveConfirm(String name) {
     return 'Gỡ “$name” khỏi điện thoại?';
   }

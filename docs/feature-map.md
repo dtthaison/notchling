@@ -76,9 +76,9 @@ The phone stays Flutter; its parts are P0 to P3, and it isn't ported. Rules for 
 | --- | --- | --- | --- | --- |
 | Phone shell, kit and strings | `apps/flutter/lib/main.dart`, `apps/flutter/lib/app/` (theme, widgets, alerts, notifications), `apps/flutter/lib/l10n/`, `apps/flutter/DESIGN.md` | `widgets_test`, `motion_test`, `background_alerts_test`, `message_alerts_test`, `keyboard_close_gap_test`, `goldens/kit_golden_test` | protected | P0, P3 |
 | Phone protocol and network | `apps/flutter/lib/core/protocol/` (`models.dart`, hand-written, is what the app reads; `generated.dart` comes from `tools/protocol/gen.py`), `apps/flutter/lib/core/net/` | `bridge_client_test`, `tunnel_test`, `tunnel_socket_test`, `phase2_test`, `protocol_conformance_test` (every fixture through both) | protected | P1, E5 |
-| Phone pairing and Macs | `apps/flutter/lib/core/pairing/`, `apps/flutter/lib/features/pairing/`, `apps/flutter/lib/features/macs/`, `apps/flutter/lib/features/connection/` | `pairing_test`, `tunnel_test`, `chat_sync_test` | mixed: `features/macs/`, `features/connection/` auto | P2, U6 |
+| Phone pairing and Macs | `apps/flutter/lib/core/pairing/`, `apps/flutter/lib/features/pairing/`, `apps/flutter/lib/features/macs/`, `apps/flutter/lib/features/connection/` | `pairing_test`, `tunnel_test`, `chat_sync_test`, `computers_test` (two computers, same session id; decision 0012) | mixed: `features/macs/`, `features/connection/` auto | P2, U6 |
 | Phone chat | `apps/flutter/lib/features/chat/` | `chat_kit_test`, `chat_sync_test`, `markdown_table_test`, `send_now_test`, `takeover_test`, `keyboard_composer_gap_test`, `keyboard_focus_test`, `goldens/kit_golden_test` | auto | P1 (generated types) |
-| Phone sessions | `apps/flutter/lib/features/sessions/` | `takeover_row_test`, `state_test`, `widgets_test` | auto | P2 |
+| Phone sessions | `apps/flutter/lib/features/sessions/` | `takeover_row_test`, `state_test`, `widgets_test`, `computers_view_test` (sessions grouped per computer) | auto | P2 |
 | Phone voice | `apps/flutter/lib/features/voice/` | `voice_controller_test`, `voice_logic_test` | auto | none |
 | Phone visualize | `apps/flutter/lib/features/visualize/` | `state_test` | auto | E15 (Mac side) |
 | Phone settings | `apps/flutter/lib/features/settings/` | `settings_test` | auto | none |

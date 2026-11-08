@@ -278,6 +278,15 @@ class AppL10nEn extends AppL10n {
   String get macsRemove => 'Remove Mac';
 
   @override
+  String get computerOffline => 'Not connected';
+
+  @override
+  String get computerRevoked => 'Revoked';
+
+  @override
+  String get computerNoSessions => 'No sessions';
+
+  @override
   String macsRemoveConfirm(String name) {
     return 'Remove “$name” from this phone?';
   }

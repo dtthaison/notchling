@@ -91,7 +91,11 @@ class ArchivedSessionsNotifier extends Notifier<Map<String, int>> {
 }
 
 /// The archived sessions still hidden: one that has moved since it was archived (new activity) comes back by itself.
-Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) => <String>{
+Set<String> hiddenSessionIds(Map<String, int> archived, List<Session> sessions) => hiddenSessionIdsIn(archived, sessions, '');
+
+/// [hiddenSessionIds] for the sessions of the computer whose storage scope is [scope]: the archive keys carry the
+/// scope (decision 0012), so archiving `s1` on one computer leaves `s1` on another in the list. Returns bare ids.
+Set<String> hiddenSessionIdsIn(Map<String, int> archived, List<Session> sessions, String scope) => <String>{
       for (final Session s in sessions)
-        if (archived[s.id] != null && s.lastActivity.millisecondsSinceEpoch <= archived[s.id]!) s.id,
+        if (archived[scope.isEmpty ? s.id : '$scope/${s.id}'] case final int at when s.lastActivity.millisecondsSinceEpoch <= at) s.id,
     };
