@@ -363,6 +363,10 @@ impl VaultOps {
                 Err(e) => return Err(fail(failed(e.to_string()))),
             }
         }
+        // A Keychain read can wait on the user's prompt: a vault turned off meanwhile answers off.
+        if !self.switch.is_on() {
+            return Err(fail(self.switch.refusal()));
+        }
         let (env, hide) = list::environment(&pairs);
         Ok((json!({"env": env, "hide": hide}), used))
     }
