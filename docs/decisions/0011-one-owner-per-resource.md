@@ -35,3 +35,7 @@ Accepted. The rule came from the reviews and is part of revision 2 of the design
 ## Date
 
 2026-11-07
+
+## Notes
+
+- 2026-11-08 (Milestone 3): the daemon now holds the code for its M2 and M3 resources (the hook, `notchling hook` with `hook.request`; replies, answers, permissions, interrupt and take-back on live sessions; session control as it lands), but none of it is in use. Its `acting` setting (`<data dir>/notchlingd-settings.json`) is off by default: every acting op answers `forbidden` ("acting is off: the Swift app owns sessions until the maintainer turns this on") and the hook passes. The Swift app keeps the hook entries and every live session until the maintainer records the reply fixtures (docs/recording.md) and turns acting on with `settings.set_acting`. Ownership in the table above doesn't move until then.

@@ -126,6 +126,10 @@ fn the_daemon_knows_when_the_app_is_attached() {
     let me = std::env::current_exe().unwrap();
     let run = start(Allowlist::new([me]));
     assert!(!run.handle.app_attached());
+    // The app's own binary saying hello as the hook or the command line is no one to answer.
+    let _hook = connect(&run, ClientKind::Hook);
+    let _cli = connect(&run, ClientKind::Cli);
+    assert!(!run.handle.app_attached());
     let app = connect(&run, ClientKind::App);
     assert!(run.handle.app_attached());
     drop(app);

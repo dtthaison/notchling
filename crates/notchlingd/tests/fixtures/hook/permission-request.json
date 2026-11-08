@@ -1,0 +1,37 @@
+{
+  "session_id": "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c",
+  "transcript_path": "/tmp/notchling-fixture/projects/-tmp-demo/6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c.jsonl",
+  "cwd": "/tmp/demo",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rm -rf build",
+    "description": "Remove the build folder"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addRules",
+      "rules": [
+        {
+          "toolName": "Bash",
+          "ruleContent": "rm -rf build"
+        }
+      ],
+      "behavior": "allow",
+      "destination": "localSettings"
+    },
+    {
+      "type": "setMode",
+      "mode": "acceptEdits",
+      "destination": "session"
+    },
+    {
+      "type": "addDirectories",
+      "directories": [
+        "/tmp/demo/build"
+      ],
+      "destination": "session"
+    }
+  ]
+}

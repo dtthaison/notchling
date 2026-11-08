@@ -218,9 +218,10 @@ impl ServerHandle {
         self.shared.status()
     }
 
-    /// Whether a client with the app tier has said hello: someone who can answer a prompt.
+    /// Whether the app is attached: a client with the app tier that said hello as the app, someone
+    /// who can answer a prompt (the app's binary run as a hook or a command line isn't).
     pub fn app_attached(&self) -> bool {
-        self.shared.hub.app_attached()
+        self.shared.hub.app_client_attached()
     }
 
     /// Open connections, hello said or not.

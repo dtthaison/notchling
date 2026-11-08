@@ -81,6 +81,13 @@ impl Hub {
             .any(|e| e.kind.is_some() && e.tier == Tier::App)
     }
 
+    /// Whether an app-tier client said hello as the app: someone who can answer a held prompt.
+    pub(crate) fn app_client_attached(&self) -> bool {
+        self.entries()
+            .values()
+            .any(|e| e.kind == Some(ClientKind::App) && e.tier == Tier::App)
+    }
+
     pub(crate) fn counts(&self) -> ClientCounts {
         let mut counts = ClientCounts::default();
         for entry in self.entries().values() {

@@ -1,0 +1,48 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "updatedInput": {
+      "questions": [
+        {
+          "question": "Which pets?",
+          "header": "Pets",
+          "multiSelect": true,
+          "options": [
+            {
+              "label": "Cat",
+              "description": "Purrs"
+            },
+            {
+              "label": "Dog",
+              "description": "Barks"
+            },
+            {
+              "label": "Fish",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "question": "Where?",
+          "header": "Place",
+          "multiSelect": false,
+          "options": [
+            {
+              "label": "Home",
+              "description": ""
+            },
+            {
+              "label": "Away",
+              "description": "Elsewhere"
+            }
+          ]
+        }
+      ],
+      "answers": {
+        "Which pets?": "Cat, Fish",
+        "Where?": "Away"
+      }
+    }
+  }
+}
