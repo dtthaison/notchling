@@ -123,6 +123,13 @@ pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError::bad_request(message)
 }
 
+/// Whether `real` (a canonical path) is `/` or the home folder: a session the daemon starts for a
+/// caller never begins there, since its tool can write the folder it starts in.
+pub(crate) fn broad_folder(real: &std::path::Path, home: &std::path::Path) -> bool {
+    let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    real.parent().is_none() || real == home
+}
+
 /// Waits this many milliseconds (session control's pauses).
 pub type Pause = Box<dyn Fn(u64) + Send + Sync>;
 

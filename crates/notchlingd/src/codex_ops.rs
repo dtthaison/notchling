@@ -27,7 +27,7 @@
 //! - a prompt is at most 100 KB, and at most eight turns run at once.
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_ops::{bad, forbidden, text_arg, Room};
+use crate::acting_ops::{bad, broad_folder, forbidden, text_arg, Room};
 use crate::layout::Layout;
 use notchling_engine::control::{Command, Launcher, RealLauncher};
 use notchling_engine::sessions::AgentGroup;
@@ -314,8 +314,7 @@ impl CodexOps {
         if !real.is_dir() {
             return Err(bad(format!("{folder} isn't a folder")));
         }
-        let home = std::fs::canonicalize(&self.setup.home).unwrap_or(self.setup.home.clone());
-        if real.parent().is_none() || real == home {
+        if broad_folder(&real, &self.setup.home) {
             return Err(bad(
                 "a new session never starts in the root or the home folder",
             ));

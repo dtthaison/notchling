@@ -26,7 +26,7 @@
 //! closes every session, which cancels what was waiting.
 
 use crate::acting::{Acting, ACTING_OFF};
-use crate::acting_ops::{text_arg, Room};
+use crate::acting_ops::{broad_folder, text_arg, Room};
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::layout::Layout;
 use crate::pages_ops::Titles;
@@ -34,6 +34,7 @@ use notchling_engine::search::index::TitledSession;
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
+use notchling_engine::tools::codex::plan::MAX_PROMPT_BYTES;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -65,6 +66,8 @@ pub struct AgySetup {
     pub root: PathBuf,
     /// Our own folder for that copy.
     pub copy_dir: PathBuf,
+    /// The home folder: a new session never starts in it, or in `/`.
+    pub home: PathBuf,
     /// The `agy` to run; None when it isn't installed.
     pub binary: Option<String>,
     /// How long `agy.send` waits for a new session's id (under the client's call timeout).
@@ -90,6 +93,7 @@ fn failed(message: impl Into<String>) -> ApiError {
 fn run_error(e: RunError) -> ApiError {
     match e {
         RunError::Refused(why) => bad(why),
+        RunError::NotAllowed => ApiError::new(ErrorCode::Forbidden, ACTING_OFF),
         other => failed(other.to_string()),
     }
 }
@@ -103,6 +107,7 @@ impl AgyOps {
         setup: AgySetup,
     ) -> AgyOps {
         let shared = Arc::new(Shared::new(room));
+        let switch = acting.clone();
         let runner = Runner::new(
             spawner,
             setup.binary.clone(),
@@ -112,6 +117,8 @@ impl AgyOps {
             Arc::new(now_secs),
             setup.timing,
         );
+        // No process starts while acting is off, whichever op reaches the spawn.
+        runner.set_may_start(Arc::new(move || switch.is_on()));
         let _ = shared.runner.set(runner.clone());
         AgyOps {
             acting,
@@ -306,6 +313,13 @@ impl AgyOps {
         if text.trim().is_empty() {
             return Err(bad("the message is empty"));
         }
+        // The text goes down the agent's pipe in one write: a bounded one, as Codex's.
+        if text.len() > MAX_PROMPT_BYTES {
+            return Err(bad(format!(
+                "the message is over {} KB",
+                MAX_PROMPT_BYTES / 1024
+            )));
+        }
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
             let folder = self.folder_for(&session)?;
@@ -321,6 +335,14 @@ impl AgyOps {
         if !path.is_absolute() || !path.is_dir() {
             return Err(bad(
                 "draft_folder is an absolute path to a folder that exists",
+            ));
+        }
+        // The agent can write where it starts: never the whole disk or the home folder.
+        let real = std::fs::canonicalize(path)
+            .map_err(|_| bad("draft_folder is an absolute path to a folder that exists"))?;
+        if broad_folder(&real, &self.setup.home) {
+            return Err(bad(
+                "a new session never starts in the root or the home folder",
             ));
         }
         let started = self.runner.start(&folder, self.setup.start_wait);
@@ -420,6 +442,7 @@ impl AgyOps {
             AgySetup {
                 root: layout.antigravity_dir(),
                 copy_dir: layout.antigravity_copy_dir(),
+                home,
                 binary: binary.map(|p| p.to_string_lossy().into_owned()),
                 start_wait: Duration::from_secs(4),
                 timing: Timing::default(),

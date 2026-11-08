@@ -11,15 +11,15 @@
 //! Locks are never held across a call into the connection (its callbacks may run inline).
 
 use super::config::{AgyCommand, ConfigOption, Permission};
-use super::live::{cancelled, Inner, Job};
+use super::live::{cancelled, Inner, Job, MAX_OPEN};
 use crate::tools::acp::Spawner;
 use crate::transcript::model::Conversation;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// The tool's name in messages.
@@ -87,6 +87,8 @@ pub enum RunError {
     /// Not open, or not the permission that is waiting, or not a value the session offers.
     Refused(String),
     Start(String),
+    /// Starting processes is switched off (see [`Runner::set_may_start`]).
+    NotAllowed,
 }
 
 impl fmt::Display for RunError {
@@ -95,6 +97,7 @@ impl fmt::Display for RunError {
             RunError::NoBinary => f.write_str(NO_BINARY),
             RunError::Busy => f.write_str("a turn is running; send again when it ends"),
             RunError::Refused(why) | RunError::Start(why) => f.write_str(why),
+            RunError::NotAllowed => f.write_str("starting Antigravity sessions is switched off"),
         }
     }
 }
@@ -124,8 +127,21 @@ impl Runner {
                 now,
                 timing,
                 live: Mutex::new(HashMap::new()),
+                max_open: AtomicUsize::new(MAX_OPEN),
+                may_start: OnceLock::new(),
             }),
         }
+    }
+
+    /// What decides whether a process may start (once; without it any may): the daemon's `acting`
+    /// switch, so no `agy` is spawned while it's off, whichever op reaches the spawn.
+    pub fn set_may_start(&self, may_start: Arc<dyn Fn() -> bool + Send + Sync>) {
+        let _ = self.inner.may_start.set(may_start);
+    }
+
+    /// How many processes may run at once (tests set a small number).
+    pub fn set_max_open(&self, max: usize) {
+        self.inner.max_open.store(max, Ordering::SeqCst);
     }
 
     /// Starts a process for the session and loads it, unless one is open already. A load that
