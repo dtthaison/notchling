@@ -30,6 +30,10 @@ pub const DATA_ROOT_ENV: &str = "NOTCHLING_DATA_ROOT";
 /// Antigravity's folder under a home or a fixture root.
 pub const ANTIGRAVITY_DIR: &str = ".gemini/antigravity-cli";
 
+/// The app's own folder under the data folder: what only the app keeps. Beside the daemon's
+/// `daemon/`, and apart from the Swift app's files in the data folder itself.
+pub const APP_DIR: &str = "app";
+
 /// The folders read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataRoot {
@@ -71,9 +75,10 @@ impl DataRoot {
         }
     }
 
-    /// Where the Antigravity summaries copy goes: our own folder, never Antigravity's.
+    /// Where the Antigravity summaries copy goes: the app's own folder, never Antigravity's and
+    /// never the Swift app's or the daemon's copy, which other processes rewrite.
     pub fn antigravity_copy_dir(&self) -> PathBuf {
-        self.data_dir.join("antigravity")
+        self.data_dir.join(APP_DIR).join("antigravity")
     }
 
     /// What a render reads: [`DATA_ROOT_ENV`]'s folder, else the fixture this crate carries.
@@ -129,11 +134,17 @@ impl Source {
     pub fn new(root: DataRoot) -> Source {
         Source {
             locator: Locator::new(root.fixture.clone()),
-            agy_list: AgyList::new(root.antigravity_dir.clone(), root.antigravity_copy_dir()),
+            agy_list: AgyList::shared(root.antigravity_dir.clone(), root.antigravity_copy_dir()),
             root,
             monitor: Monitor::default(),
             agy_reader: None,
         }
+    }
+
+    /// The Antigravity list this source reads (a test checks it is Chat's too).
+    #[cfg(test)]
+    pub fn agy_list(&self) -> &AgyList {
+        &self.agy_list
     }
 
     /// A source that shows every finished row however old: a fixture's dates are fixed.
@@ -300,7 +311,7 @@ mod tests {
         assert_eq!(root.requests_dir(), root.data_dir.join("requests"));
         assert_eq!(
             root.antigravity_copy_dir(),
-            root.data_dir.join("antigravity")
+            root.data_dir.join("app").join("antigravity")
         );
     }
 

@@ -1,16 +1,17 @@
 //! Codex and Antigravity rows beside Claude Code's (`NotchForeign`, `ForeignSessions`): the
-//! Antigravity list from a copy of its summaries database (never the original), what the notch
+//! Antigravity list ([`AgyList`], over a copy of its summaries database, never the original), what the notch
 //! shows of each tool's rows (12 hours of Done rows, 8 per tool), and a conversation as the notch's
 //! lines. Codex rows come from the engine's rollout listing, as Chat's do.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use notchling_engine::bridge::foreign::tool_summary;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
-use notchling_engine::tools::agy::summaries::{self, Row};
+use notchling_engine::tools::agy::summaries::Row;
 use notchling_engine::transcript::model::{Conversation, ItemKind};
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind, Snapshot};
 
+pub use super::agy_list::AgyList;
 use super::requests::RowTool;
 
 /// Done rows older than this are left out of the notch (Chat lists 14 days).
@@ -19,8 +20,6 @@ pub const MAX_AGE_MS: i64 = 12 * 3600 * 1000;
 pub const PER_TOOL: usize = 8;
 /// A reply shows at most this many characters in the notch.
 const REPLY_CHARS: usize = 3000;
-/// The summaries copy is read again after this long.
-const LIST_EVERY_MS: i64 = 3000;
 
 /// An Antigravity summaries row as a session row (`AntigravitySessions.list`).
 pub fn agy_agent(row: &Row) -> Agent {
@@ -60,44 +59,6 @@ pub fn agy_agent(row: &Row) -> Agent {
         config_dir: None,
         command: None,
         resume_session_id: None,
-    }
-}
-
-/// The Antigravity list, read through a copy at most every few seconds (copying the database on
-/// every poll would be needless).
-#[derive(Debug)]
-pub struct AgyList {
-    /// `~/.gemini/antigravity-cli` (a fixture's `antigravity-cli`).
-    pub root: PathBuf,
-    /// Our own folder for the copy.
-    pub copy_dir: PathBuf,
-    listed_at_ms: Option<i64>,
-    rows: Vec<Agent>,
-}
-
-impl AgyList {
-    pub fn new(root: PathBuf, copy_dir: PathBuf) -> AgyList {
-        AgyList {
-            root,
-            copy_dir,
-            listed_at_ms: None,
-            rows: Vec::new(),
-        }
-    }
-
-    /// The rows, read again when the last read is older than [`LIST_EVERY_MS`].
-    pub fn rows(&mut self, now_ms: i64) -> Vec<Agent> {
-        let stale = self
-            .listed_at_ms
-            .is_none_or(|at| now_ms - at >= LIST_EVERY_MS || now_ms < at);
-        if stale {
-            self.rows = summaries::rows(&self.root, &self.copy_dir, now_ms as f64 / 1000.0)
-                .iter()
-                .map(agy_agent)
-                .collect();
-            self.listed_at_ms = Some(now_ms);
-        }
-        self.rows.clone()
     }
 }
 
@@ -305,24 +266,5 @@ mod tests {
         assert_eq!(snap.last_prompt.as_deref(), Some("fix it"));
         assert_eq!(snap.activity.as_deref(), Some("Running ls"));
         assert_eq!(snap.last_reply().map(str::len), Some(REPLY_CHARS));
-    }
-
-    #[test]
-    fn the_antigravity_list_is_empty_without_a_database_and_reads_every_few_seconds() {
-        let scratch = crate::testutil::Scratch::new("agy-list");
-        let mut list = AgyList::new(
-            scratch.path().join("antigravity-cli"),
-            scratch.path().join("copy"),
-        );
-        assert!(list.rows(1_000).is_empty());
-        assert_eq!(list.listed_at_ms, Some(1_000));
-        list.rows(2_000);
-        assert_eq!(list.listed_at_ms, Some(1_000), "not yet stale");
-        list.rows(4_000);
-        assert_eq!(list.listed_at_ms, Some(4_000));
-        assert!(
-            !scratch.path().join("copy/summaries.db").exists(),
-            "nothing to copy"
-        );
     }
 }
