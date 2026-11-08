@@ -74,10 +74,10 @@ impl ProviderStores {
         } else {
             // Gated on the switch as well as each op's own check ([`crate::providers_gate`]).
             (
-                Gated::new(&accounts, Arc::new(SecurityTool)),
-                Gated::new(&accounts, Arc::new(TlsHttp)),
-                Gated::new(&accounts, Arc::new(SystemProcs { home: home.clone() })),
-                Gated::new(&accounts, Arc::new(SystemApps)),
+                Gated::new(accounts, Arc::new(SecurityTool)),
+                Gated::new(accounts, Arc::new(TlsHttp)),
+                Gated::new(accounts, Arc::new(SystemProcs { home: home.clone() })),
+                Gated::new(accounts, Arc::new(SystemApps)),
             )
         };
         let (apps_dir, claude_dir) = if layout.fixture {
