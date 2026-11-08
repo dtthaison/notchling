@@ -6,6 +6,7 @@
 
 pub mod bridge;
 pub mod control;
+pub mod delegate;
 pub mod pages;
 pub mod reply;
 pub mod search;

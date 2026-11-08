@@ -35,6 +35,8 @@ pub fn build(
         other => crate::phone::view::build_render(other, cx)
             .or_else(|| crate::phone::prompt_view::build_render(other, cx))
             .or_else(|| crate::sheets::view::build_render(other, cx))
+            .or_else(|| crate::search::view::build_render(other, cx))
+            .or_else(|| crate::pages::view::build_render(other, cx))
             .or_else(|| crate::tools::view::build_render(other, cx)),
     }
 }

@@ -4,6 +4,7 @@
 pub mod capture;
 pub mod dock;
 pub mod gate;
+pub mod hotkey;
 pub mod pair_prompt;
 pub mod render;
 pub mod shell;

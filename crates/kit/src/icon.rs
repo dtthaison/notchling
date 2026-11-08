@@ -24,6 +24,8 @@ pub enum Icon {
     Phone,
     Check,
     More,
+    /// A saved Artifact page.
+    Page,
 }
 
 /// Where an icon sits decides its size.
@@ -48,7 +50,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 17] = [
+    pub const ALL: [Icon; 18] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -66,6 +68,7 @@ impl Icon {
         Icon::Phone,
         Icon::Check,
         Icon::More,
+        Icon::Page,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -88,6 +91,7 @@ impl Icon {
             Icon::Phone => "iphone",
             Icon::Check => "checkmark",
             Icon::More => "ellipsis",
+            Icon::Page => "doc.richtext",
         }
     }
 
@@ -111,6 +115,7 @@ impl Icon {
             Icon::Phone => "▯",
             Icon::Check => "✓",
             Icon::More => "…",
+            Icon::Page => "⎘",
         }
     }
 

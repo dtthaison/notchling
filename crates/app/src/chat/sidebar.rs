@@ -1,10 +1,12 @@
 //! The sidebar's sections and rows, from the sessions the engine lists.
 
+use notchling_engine::search::SessionTool;
 use notchling_engine::sessions::AgentGroup;
 use notchling_kit::Status;
 
 use super::data::{Session, Tool};
 use super::format::age;
+use crate::search::wire::SessionRef;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SidebarRow {
@@ -54,6 +56,31 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
         status: status_of(agent.group),
         tool: session.tool,
     }
+}
+
+/// The sidebar row a search hit opens (`SessionRef` from the search panel): a Codex row is keyed
+/// `codex:<session id>`; a Claude Code row by Claude Code's own session id, else by its
+/// transcript's file stem. Antigravity rows aren't in Chat yet (Milestone 5, Task 6), so none.
+pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
+    let id = target.session_id.as_str();
+    let found = match target.tool {
+        SessionTool::Codex => sessions
+            .iter()
+            .find(|s| s.tool == Tool::Codex && s.agent.id == format!("codex:{id}")),
+        SessionTool::Claude => sessions
+            .iter()
+            .filter(|s| s.tool == Tool::Claude)
+            .find(|s| {
+                s.agent.session_id().as_deref() == Some(id)
+                    || s.transcript
+                        .as_deref()
+                        .and_then(|p| p.file_stem())
+                        .and_then(|stem| stem.to_str())
+                        == Some(id)
+            }),
+        SessionTool::Antigravity => None,
+    };
+    found.map(|s| s.agent.id.clone())
 }
 
 /// Needs input, Working, Done, in that order; a group with no sessions has no section. The rows
@@ -145,5 +172,52 @@ mod tests {
     #[test]
     fn no_sessions_no_sections() {
         assert!(sections(&[], 0).is_empty());
+    }
+
+    fn target(tool: SessionTool, id: &str) -> SessionRef {
+        SessionRef {
+            tool,
+            session_id: id.into(),
+        }
+    }
+
+    #[test]
+    fn a_search_hit_finds_its_sidebar_row() {
+        let mut by_transcript = session("job-1", AgentGroup::Working, None, Tool::Claude);
+        by_transcript.transcript = Some("/claude/projects/-w-p/3f1c2a9e.jsonl".into());
+        let mut resumed = session("job-2", AgentGroup::Completed, None, Tool::Claude);
+        resumed.agent.target = AgentTarget::Resume {
+            session_id: "7c1e".into(),
+            cwd: "/w/p".into(),
+        };
+        let codex = session("codex:0199a1b2", AgentGroup::Completed, None, Tool::Codex);
+        let sessions = vec![by_transcript, resumed, codex];
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Claude, "3f1c2a9e")).as_deref(),
+            Some("job-1"),
+            "the transcript's stem"
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Claude, "7c1e")).as_deref(),
+            Some("job-2"),
+            "a resume target's id"
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Codex, "0199a1b2")).as_deref(),
+            Some("codex:0199a1b2")
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Codex, "3f1c2a9e")),
+            None
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Claude, "nope")),
+            None
+        );
+        assert_eq!(
+            row_for(&sessions, &target(SessionTool::Antigravity, "x")),
+            None,
+            "not in Chat yet"
+        );
     }
 }

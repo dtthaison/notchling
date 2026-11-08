@@ -1,11 +1,12 @@
-//! The menu bar app: the tray item, the Dock presence and the main window (Chat), wired together.
+//! The menu bar app: the tray item, the Dock presence and the main window (Chat), wired together,
+//! with the ⌘⇧P search panel (part U3) and the Artifacts window (part U4) it opens.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{App, Application, Global, WindowId};
+use gpui::{App, Application, Global, WindowHandle, WindowId};
 use objc2::MainThreadMarker;
 
 use super::dock;
@@ -18,6 +19,10 @@ use crate::dock::{policy_for, Policy};
 use crate::menu::{Command, MenuState};
 use crate::phone::bridge::{now_ms, Bridge};
 use crate::phone::pairing::PairingFeed;
+use crate::search::hotkey::{self, Registration};
+use crate::search::library::Library;
+use crate::search::panel::AppSearch;
+use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
 
 /// The app's state while it runs.
@@ -26,10 +31,14 @@ struct Shell {
     tray: Option<Tray>,
     /// Our titled windows: the ones that earn a Dock icon.
     titled: HashSet<WindowId>,
+    /// The Chat window, while one was opened over a data root (it may have closed since).
+    chat: Option<WindowHandle<ChatView>>,
     /// Where Chat reads from; `None` when the environment names no home folder.
     root: Option<DataRoot>,
     /// The session rows, from the daemon when it answers; shared by Chat and the notch.
     sessions: Arc<SessionSource>,
+    /// ⌘⇧P, while it is ours; dropping it would give the key up.
+    _hot_key: Option<Box<dyn Registration>>,
 }
 
 impl Global for Shell {}
@@ -88,6 +97,7 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         cx.set_global(AppBridge(bridge.clone()));
         let pairing = Arc::new(PairingFeed::for_run(root.as_ref()));
         cx.set_global(AppPairing(pairing.clone()));
+        cx.set_global(AppSearch(Arc::new(Library::for_run(root.as_ref()))));
         if pairing.is_live() {
             // The daemon asks the person only while this follows `bridge`.
             super::pair_prompt::watch(cx, pairing, bridge.clone());
@@ -103,12 +113,25 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
             })
             .detach();
         }
+        // ⌘⇧P from anywhere opens the search panel. Another app holding the key only costs the
+        // shortcut; the panel still opens from a session's page or search in Chat.
+        let hot_key = {
+            let async_cx = cx.to_async();
+            hotkey::for_system()
+                .register(Box::new(move || {
+                    async_cx.update(crate::search::panel::toggle).ok();
+                }))
+                .map_err(|e| eprintln!("no ⌘⇧P: {e}"))
+                .ok()
+        };
         cx.set_global(Shell {
             state,
             tray,
             titled: HashSet::new(),
+            chat: None,
             root,
             sessions,
+            _hot_key: hot_key,
         });
         cx.on_window_closed(update_dock).detach();
         // Not titled, so it never counts toward the Dock icon.
@@ -143,35 +166,56 @@ fn refresh_tray(shell: &Shell) {
     }
 }
 
+/// The Chat window, if it is still open.
+fn chat_window(cx: &App) -> Option<WindowHandle<ChatView>> {
+    let handle = cx.global::<Shell>().chat?;
+    let open = cx
+        .windows()
+        .iter()
+        .any(|w| w.window_id() == handle.window_id());
+    open.then_some(handle)
+}
+
 /// Brings the Chat window forward, opening it first if it isn't open.
 fn open_chat(cx: &mut App) {
-    let open: Vec<_> = cx.windows();
-    let existing = open
-        .iter()
-        .find(|w| cx.global::<Shell>().titled.contains(&w.window_id()))
-        .copied();
-    match existing {
-        Some(handle) => {
-            handle
-                .update(cx, |_, window, _| window.activate_window())
-                .ok();
-        }
-        None => {
-            let root = cx.global::<Shell>().root.clone();
-            let sessions = cx.global::<Shell>().sessions.clone();
-            let id = match root {
-                Some(root) => open_main_window(cx, |window, cx| {
+    if let Some(handle) = chat_window(cx) {
+        handle
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
+    } else {
+        let root = cx.global::<Shell>().root.clone();
+        let sessions = cx.global::<Shell>().sessions.clone();
+        let id = match root {
+            Some(root) => {
+                let handle = open_main_window(cx, |window, cx| {
                     ChatView::with_source(root, sessions, window, cx)
-                })
-                .map(|h| h.window_id()),
-                None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
-                    .map(|h| h.window_id()),
-            };
-            if let Some(id) = id {
-                cx.global_mut::<Shell>().titled.insert(id);
+                });
+                cx.global_mut::<Shell>().chat = handle;
+                handle.map(|h| h.window_id())
             }
+            None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
+                .map(|h| h.window_id()),
+        };
+        if let Some(id) = id {
+            cx.global_mut::<Shell>().titled.insert(id);
         }
     }
+    update_dock(cx);
+}
+
+/// Opens Chat on a conversation the search panel found (Return on a session).
+pub fn open_chat_session(cx: &mut App, target: SessionRef) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        handle
+            .update(cx, |view, _, cx| view.show_session(target, cx))
+            .ok();
+    }
+}
+
+/// Counts another titled window of ours (the Artifacts window) toward the Dock icon.
+pub fn note_titled(cx: &mut App, id: WindowId) {
+    cx.global_mut::<Shell>().titled.insert(id);
     update_dock(cx);
 }
 

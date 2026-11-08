@@ -28,8 +28,10 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::reload::{watch_config, ReloadGate};
+use crate::chat::sidebar::row_for;
 use crate::phone::bridge::Bridge;
 use crate::phone::view::PhonePanelView;
+use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
 
 /// How often the view looks for watch batches.
@@ -70,6 +72,8 @@ pub struct ChatView {
     phone: Option<Entity<PhonePanelView>>,
     /// Whether the Phone button's dot is lit, so a change redraws it.
     phone_dot: bool,
+    /// A session the search panel asked for that isn't listed yet: selected when it appears.
+    pending_session: Option<SessionRef>,
     _appearance_changes: Subscription,
 }
 
@@ -121,6 +125,7 @@ impl ChatView {
             bridge: phone::app_bridge(cx),
             phone: None,
             phone_dot: false,
+            pending_session: None,
             _appearance_changes: changes,
         };
         view.start_load(cx);
@@ -139,6 +144,22 @@ impl ChatView {
         self.sessions
             .iter()
             .find(|s| Some(&s.agent.id) == self.selected.as_ref())
+    }
+
+    /// Shows a conversation the search panel found: selects its row when it is listed, else
+    /// selects it as soon as a load lists it (`chat::sidebar::row_for`).
+    pub fn show_session(&mut self, target: SessionRef, cx: &mut Context<Self>) {
+        match row_for(&self.sessions, &target) {
+            Some(id) => {
+                self.pending_session = None;
+                self.select(&id, cx);
+            }
+            None => {
+                self.pending_session = Some(target);
+                self.gate.changed();
+                cx.notify();
+            }
+        }
     }
 
     /// Reads everything again on the background executor, for the session picked now. A load
@@ -179,6 +200,16 @@ impl ChatView {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
         self.sessions = loaded.sessions;
+        // The search panel's session, now that the list has it.
+        if let Some(id) = self
+            .pending_session
+            .as_ref()
+            .and_then(|target| row_for(&self.sessions, target))
+        {
+            self.pending_session = None;
+            self.select(&id, cx);
+            return;
+        }
         if self.selected == asked {
             self.selected = loaded.selected;
             // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
