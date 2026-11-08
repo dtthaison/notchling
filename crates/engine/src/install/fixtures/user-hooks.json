@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "BASH_DEFAULT_TIMEOUT_MS": "600000",
+    "RATIO": 1.50,
+    "BIG": 12345678901234567890123,
+    "SMALL": 1e-7
+  },
+  "permissions": {
+    "allow": ["Bash(git status)", "Bash(cargo test:*)", "WebFetch(domain:docs.rs)"],
+    "deny": ["Read(./.env)"],
+    "defaultMode": "acceptEdits"
+  },
+  "model": "opus",
+  "statusLine": { "type": "command", "command": "~/.claude/statusline.sh" },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "~/bin/guard-bash.sh", "timeout": 5 },
+          { "type": "command", "command": "~/bin/log-bash.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "prettier --write \"$CLAUDE_FILE\"" }]
+      }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "afplay /System/Library/Sounds/Glass.aiff" }] }
+    ]
+  },
+  "enabledPlugins": { "superpowers@claude-plugins": true },
+  "futureKey": { "nested": [1, 2, { "a": null }], "café": "naïve / ok" }
+}

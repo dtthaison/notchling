@@ -20,6 +20,7 @@ use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::codex_ops::CodexOps;
+use crate::install_ops::{InstallOps, InstallSetup, SwitchFlag};
 use crate::layout::Layout;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use notchling_engine::bridge::net::ports as bridge_ports;
@@ -119,6 +120,7 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
+    install: Option<Arc<InstallOps>>,
     /// The topics a client may follow: those of the ops this daemon has.
     topic_list: Vec<&'static str>,
     /// What `sessions.list` waits for, and for how long.
@@ -135,6 +137,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
+            install: None,
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
@@ -184,6 +187,12 @@ impl Ops {
     /// M5's pages library and session index ([`PagesOps`], agent tier, reads only).
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
         self.pages = Some(pages);
+        self
+    }
+
+    /// M6's installing into other tools ([`InstallOps`], app tier, behind the `install` switch).
+    pub fn with_install(mut self, install: Arc<InstallOps>) -> Ops {
+        self.install = Some(install);
         self
     }
 
@@ -237,6 +246,7 @@ impl Handler for Ops {
                 .pages
                 .as_ref()
                 .and_then(|p| p.spec(op))
+                .or_else(|| self.install.as_ref().and_then(|i| i.spec(op)))
                 .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
@@ -256,6 +266,9 @@ impl Handler for Ops {
         }
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
             return pages.call(op, args);
+        }
+        if let Some(install) = self.install.as_ref().filter(|i| i.spec(op).is_some()) {
+            return install.call(op, args);
         }
         match (op, &self.acting) {
             (ops::SESSIONS_LIST, _) => Ok(self.sessions_list().0),
@@ -512,6 +525,16 @@ pub fn run(
         room.clone(),
     ));
     acting_ops.attach_agy(agy.clone());
+    // Off at every start, like acting: nothing is written into settings.json or a skills folder
+    // until an app-tier call turns the switch on. (The switch is a stand-in until m6-accounts'
+    // named switches land; nothing turns it on yet.)
+    let install = Arc::new(InstallOps::new(
+        InstallSetup::from_layout(
+            &layout,
+            std::env::current_exe().and_then(std::fs::canonicalize).ok(),
+        ),
+        SwitchFlag::off(),
+    ));
     let server = Server::bind(
         ServerConfig {
             socket: layout.socket.clone(),
@@ -528,6 +551,7 @@ pub fn run(
                 .with_pages(Arc::new(
                     PagesOps::new(PagesSetup::from_layout(&layout)).with_titles(agy.titles()),
                 ))
+                .with_install(install)
                 .with_first_scan(first_scan.clone(), options.first_list_wait),
         ),
     )

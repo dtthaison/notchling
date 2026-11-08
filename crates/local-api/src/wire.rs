@@ -83,6 +83,16 @@ pub mod ops {
     pub const PAGES_LIST: &str = "pages.list";
     /// `{query}` → `{pages: [Page + describe], truncated}`.
     pub const PAGES_FIND: &str = "pages.find";
+
+    /// Milestone 6's installing into other tools (E13), app tier, behind the daemon's `install`
+    /// switch: while it is off `apply` and `remove` answer with the dry-run plan and the off
+    /// message, and write nothing. The shapes are in `notchlingd`'s `install_ops` module docs.
+    /// `{action?, what?, with_swift_hooks?}` → `{on, applied, plan}`; reads only.
+    pub const INSTALL_PLAN: &str = "install.plan";
+    /// `{what?, with_swift_hooks?}` → `{on, applied, plan, backup?}`.
+    pub const INSTALL_APPLY: &str = "install.apply";
+    /// `{what?}` → `{on, applied, plan, backup?}`.
+    pub const INSTALL_REMOVE: &str = "install.remove";
 }
 
 /// Event topics and the events they carry.
@@ -413,6 +423,9 @@ mod tests {
         }
         assert_eq!(ops::SETTINGS_SET_ACTING, "settings.set_acting");
         assert_eq!(ops::HOOK_REQUEST, "hook.request");
+        assert_eq!(ops::INSTALL_PLAN, "install.plan");
+        assert_eq!(ops::INSTALL_APPLY, "install.apply");
+        assert_eq!(ops::INSTALL_REMOVE, "install.remove");
         assert_eq!(topics::PROMPT_PENDING, "prompt.pending");
         assert_eq!(topics::PROMPT_RESOLVED, "prompt.resolved");
     }
