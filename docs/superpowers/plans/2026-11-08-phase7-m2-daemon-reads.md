@@ -16,6 +16,7 @@
   - The socket lives at `<data dir>/notchlingd.sock`, mode 0600. Its folder is 0700, created with `platform::files::ensure_private_dir`.
   - Windows uses the named pipe `\\.\pipe\notchlingd-<user>`. A stub returning `Unsupported` is acceptable in M2 if it type-checks.
   - `NOTCHLING_DATA_ROOT` (the M1 fixture convention) and an explicit `--socket` override the paths for tests and dev.
+  - One daemon per data folder (ruled 2026-11-08). The socket's `flock` sits beside the socket. Over the real folders, a daemon whose `--socket` is elsewhere also locks `<data dir>/notchlingd.lock`, so a second daemon can't read the same folders through another socket. Under `NOTCHLING_DATA_ROOT` only the socket's lock is taken: the root is the test's own, and a test socket elsewhere leaves nothing in it.
 - **Wire format.** One JSON object per line (UTF-8, `\n`), each line at most 1 MiB. A longer line closes the connection.
   - Request: `{"id": <u64>, "op": "<name>", "args": {...}}`.
   - Reply: `{"id": <u64>, "ok": <result>}` or `{"id": <u64>, "err": {"code": "<code>", "message": "..."}}`.

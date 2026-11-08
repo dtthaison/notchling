@@ -8,6 +8,7 @@
 
 use crate::layout::Layout;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
+use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
     ops, topics, Allowlist, ApiError, AuditLog, Caller, Handler, Limits, OpSpec, Server,
@@ -144,6 +145,19 @@ pub fn run(
         notchling_platform::files::ensure_private_dir(&layout.state_dir())
             .map_err(|e| DaemonError::Io(io::Error::other(e)))?;
     }
+    // One daemon per real data folder, wherever its socket is (the socket's own lock comes with
+    // `Server::bind`). Held until this returns.
+    let _data_lock = match layout.data_lock() {
+        Some(path) => {
+            notchling_platform::files::ensure_private_dir(&layout.data_dir)
+                .map_err(|e| DaemonError::Io(io::Error::other(e)))?;
+            match InstanceLock::try_acquire(&path).map_err(DaemonError::Io)? {
+                Some(lock) => Some(lock),
+                None => return Err(DaemonError::AlreadyRunning(layout.data_dir.clone())),
+            }
+        }
+        None => None,
+    };
     let allowlist = Allowlist::for_daemon(
         &installed_app_paths(),
         std::env::var_os(APP_TIER_PATHS_ENV).as_deref(),
@@ -267,6 +281,33 @@ mod tests {
             .call(&caller(), ops::SESSIONS_LIST, &Value::Null)
             .unwrap();
         assert_eq!(got, json!([{"id": "a"}]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_second_daemon_on_another_socket_over_the_same_data_folder_is_refused() {
+        // A stand-in for the real folders, in /tmp (socket paths are short); never the real ones.
+        let root = PathBuf::from(format!("/tmp/nl-datalock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let layout = Layout {
+            claude_dir: root.join("claude"),
+            data_dir: root.join("data"),
+            socket: root.join("elsewhere/x.sock"),
+            socket_given: true,
+            fixture: false,
+        };
+        // The first daemon, as far as the data folder knows.
+        let _first = InstanceLock::try_acquire(&root.join("data/notchlingd.lock"))
+            .unwrap()
+            .unwrap();
+        let result = run(layout, DaemonOptions::default(), &|| true);
+        assert!(
+            matches!(result, Err(DaemonError::AlreadyRunning(_))),
+            "{result:?}"
+        );
+        assert!(!root.join("elsewhere/x.sock").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
