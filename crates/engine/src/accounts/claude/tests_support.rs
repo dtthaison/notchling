@@ -59,14 +59,23 @@ pub fn profile_body(n: u8) -> String {
 
 impl World {
     pub fn new(tag: &str) -> World {
+        World::over(tag, |chain| chain)
+    }
+
+    /// A world whose Keychain runner is `wrap` around the in-memory one (a gate, say).
+    pub fn over(
+        tag: &str,
+        wrap: impl FnOnce(Arc<MemoryKeychain>) -> Arc<dyn crate::accounts::keychain::SecurityRunner>,
+    ) -> World {
         let tmp = TempDir::new(tag);
         let chain = Arc::new(MemoryKeychain::new());
+        let runner = wrap(chain.clone());
         let http = Arc::new(ScriptedHttp::new());
         let clock = Arc::new(AtomicI64::new(NOW));
         let now = clock.clone();
         let store = ClaudeAccounts::new(ClaudeEnv {
             keys: Keys {
-                runner: chain.clone(),
+                runner,
                 user: "me".into(),
             },
             http: http.clone(),

@@ -106,3 +106,71 @@ fn a_lane_whose_account_has_no_saved_slot_keeps_its_login() {
     assert!(w.store.close_lane(&lane.name).is_err());
     assert_eq!(w.chain.get(&service, "me"), before);
 }
+
+/// A Keychain that waits, as on a macOS prompt, while closed.
+struct Gate {
+    inner: Arc<crate::accounts::fake::MemoryKeychain>,
+    closed: std::sync::Mutex<bool>,
+    opened: std::sync::Condvar,
+    waiting: std::sync::atomic::AtomicBool,
+}
+
+impl crate::accounts::keychain::SecurityRunner for Gate {
+    fn run(
+        &self,
+        args: &[String],
+        stdin: Option<&[u8]>,
+    ) -> Result<crate::accounts::keychain::SecurityOutput, crate::accounts::keychain::KeychainError>
+    {
+        let mut closed = self.closed.lock().unwrap();
+        while *closed {
+            self.waiting
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            closed = self.opened.wait(closed).unwrap();
+        }
+        drop(closed);
+        self.inner.run(args, stdin)
+    }
+}
+
+#[test]
+fn the_list_is_read_while_a_switch_waits_on_the_keychain() {
+    let gate = std::sync::OnceLock::new();
+    let w = World::over("safe-snapshot", |chain| {
+        let g = Arc::new(Gate {
+            inner: chain,
+            closed: std::sync::Mutex::new(false),
+            opened: std::sync::Condvar::new(),
+            waiting: std::sync::atomic::AtomicBool::new(false),
+        });
+        let _ = gate.set(g.clone());
+        g
+    });
+    let gate = gate.get().unwrap().clone();
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.saved(2, 1, LATER);
+    w.store.sync().unwrap();
+    *gate.closed.lock().unwrap() = true;
+    std::thread::scope(|scope| {
+        let switching = scope.spawn(|| w.store.switch_to(&id(2)));
+        while !gate.waiting.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let store = &w.store;
+        scope.spawn(move || {
+            let _ = tx.send(store.snapshot());
+        });
+        let snap = rx.recv_timeout(std::time::Duration::from_secs(2));
+        *gate.closed.lock().unwrap() = false;
+        gate.opened.notify_all();
+        assert_eq!(
+            snap.map(|s| s.active),
+            Ok(Some(id(1))),
+            "the list waited behind the switch"
+        );
+        assert!(switching.join().unwrap().is_ok());
+    });
+    assert_eq!(w.store.snapshot().active, Some(id(2)));
+}

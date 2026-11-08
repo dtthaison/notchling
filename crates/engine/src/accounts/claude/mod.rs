@@ -114,7 +114,36 @@ struct State {
 
 pub struct ClaudeAccounts {
     env: ClaudeEnv,
+    /// Held for a whole operation, Keychain and network included.
     state: Mutex<State>,
+    /// The main login's account as the last operation left it, for [`ClaudeAccounts::snapshot`],
+    /// which must not wait behind a switch stuck on a Keychain prompt.
+    seen: Mutex<Option<String>>,
+}
+
+/// The operation lock. On release it publishes `active` to [`ClaudeAccounts::seen`].
+struct Op<'a> {
+    state: MutexGuard<'a, State>,
+    seen: &'a Mutex<Option<String>>,
+}
+
+impl std::ops::Deref for Op<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Op<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
+}
+
+impl Drop for Op<'_> {
+    fn drop(&mut self) {
+        *self.seen.lock().unwrap_or_else(|e| e.into_inner()) = self.state.active.clone();
+    }
 }
 
 impl ClaudeAccounts {
@@ -122,6 +151,7 @@ impl ClaudeAccounts {
         ClaudeAccounts {
             env,
             state: Mutex::new(State::default()),
+            seen: Mutex::new(None),
         }
     }
 
@@ -129,8 +159,11 @@ impl ClaudeAccounts {
         &self.env
     }
 
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> Op<'_> {
+        Op {
+            state: self.state.lock().unwrap_or_else(|e| e.into_inner()),
+            seen: &self.seen,
+        }
     }
 
     fn now(&self) -> i64 {
@@ -154,11 +187,12 @@ impl ClaudeAccounts {
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 
-    /// The list and the main login's account as last read; no Keychain, no network.
+    /// The list and the main login's account as last read; no Keychain, no network, and no
+    /// waiting for an operation under way.
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             accounts: self.saved_list(),
-            active: self.lock().active.clone(),
+            active: self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         }
     }
 
