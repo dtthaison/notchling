@@ -12,8 +12,12 @@
 //! on macOS a `notchling` in an app bundle or a cargo target folder). Anything else hears nothing;
 //! the files are read and both windows say "Daemon not trusted" ([`Link::Untrusted`]).
 //!
-//! Only the session list comes from the daemon. Transcripts and Codex rollouts are still read by
-//! the app, read-only.
+//! The held questions and permissions come from the daemon too: the thread also follows `prompts`
+//! (app tier only), seeded with `prompts.list`, and keeps them in [`View::prompts`]; the notch draws
+//! its cards from them and answers by each prompt's id. While they aren't followed (no daemon, or
+//! this binary isn't the app tier) `prompts` is `None` and the notch reads the Swift hook's
+//! `requests/` folder instead, read-only. Transcripts and Codex rollouts are still read by the app,
+//! read-only.
 //!
 //! The daemon is started at most once per run, from the `notchling` binary next to the app's own
 //! (`ensure_daemon` refuses anything outside an app bundle or a cargo target folder). A fixture
@@ -27,8 +31,10 @@ use std::time::{Duration, Instant};
 
 use notchling_engine::sessions::Agent;
 use notchling_local_api::{
-    ensure_daemon, topics, Client, ClientError, ClientKind, ConnectOptions, Started, SOCKET_NAME,
+    ensure_daemon, ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, Started,
+    SOCKET_NAME,
 };
+use serde_json::Value;
 
 use crate::chat::data::DataRoot;
 
@@ -116,6 +122,9 @@ pub enum Link {
 pub struct View {
     /// The daemon's rows; `None` means read the files.
     pub agents: Option<Vec<Agent>>,
+    /// The prompts the daemon holds (`prompt.pending`'s data), oldest first; `None` while they
+    /// aren't followed, when the Swift hook's `requests/` are read instead.
+    pub prompts: Option<Vec<Value>>,
     pub link: Link,
     /// Counts every change of rows or link, so a caller can tell something moved.
     pub generation: u64,
@@ -146,6 +155,7 @@ pub const DAEMON_UNTRUSTED_NOTE: &str = "Daemon not trusted";
 
 struct State {
     agents: Option<Vec<Agent>>,
+    prompts: Option<Vec<Value>>,
     link: Link,
     generation: u64,
 }
@@ -162,6 +172,38 @@ impl Shared {
             state.link = link;
             state.agents = agents;
             state.generation += 1;
+        }
+    }
+
+    fn set_prompts(&self, prompts: Option<Vec<Value>>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.prompts != prompts {
+            state.prompts = prompts;
+            state.generation += 1;
+        }
+    }
+
+    /// Applies one event: the rows, or a prompt held or let go.
+    fn apply(&self, event: Event) {
+        match event.event.as_str() {
+            topics::SESSIONS_CHANGED => {
+                if let Ok(agents) = serde_json::from_value::<Vec<Agent>>(event.data) {
+                    self.set(Link::Daemon, Some(agents));
+                }
+            }
+            topics::PROMPT_PENDING | topics::PROMPT_RESOLVED => {
+                let mut prompts = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .prompts
+                    .clone();
+                if let Some(list) = &mut prompts {
+                    held_change(list, &event);
+                    self.set_prompts(prompts);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -186,6 +228,7 @@ impl SessionSource {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
                     agents: None,
+                    prompts: None,
                     link,
                     generation: 0,
                 }),
@@ -221,6 +264,7 @@ impl SessionSource {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         View {
             agents: state.agents.clone(),
+            prompts: state.prompts.clone(),
             link: state.link,
             generation: state.generation,
         }
@@ -249,7 +293,8 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents)) => {
+            Ok((client, agents, prompts)) => {
+                shared.set_prompts(prompts);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -263,19 +308,21 @@ fn run(config: SourceConfig, shared: &Shared) {
         if shared.stopped() {
             return;
         }
+        shared.set_prompts(None);
         shared.set(link, None);
         // The short wait after a lost connection, longer after each failed attempt.
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
 
+/// A fresh connection, its rows and the held prompts (`None` when not followed).
+type Connected = (Client, Vec<Agent>, Option<Vec<Value>>);
+
 /// Connects (starting the daemon once if nobody listens), subscribes, then lists, so no change
 /// falls between the two. Events that came in meanwhile are not older than the list, so the last
-/// of them wins.
-fn connect(
-    config: &SourceConfig,
-    tried_start: &mut bool,
-) -> Result<(Client, Vec<Agent>), ClientError> {
+/// of them wins. The prompts are followed and listed the same way when the daemon lets this client
+/// (the app tier); a refusal leaves them `None`.
+fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
     let options = ConnectOptions {
         check_server: config.check_server,
         ..ConnectOptions::default()
@@ -292,27 +339,59 @@ fn connect(
         other => other?,
     };
     client.subscribe(&[topics::SESSIONS])?;
+    let followed = match client.subscribe(&[topics::PROMPTS]) {
+        Ok(_) => true,
+        // Not the app tier, or a daemon without prompts: the files, then.
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
     let mut agents = client.sessions::<Agent>()?;
+    let mut prompts = match followed {
+        true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {
+            Ok(Value::Array(list)) => Some(list),
+            Ok(_) | Err(ClientError::Api(_)) => None,
+            Err(e) => return Err(e),
+        },
+        false => None,
+    };
     while let Some(event) = client.next_event(Duration::ZERO)? {
-        if event.event == topics::SESSIONS_CHANGED {
-            if let Ok(newer) = serde_json::from_value(event.data) {
-                agents = newer;
+        match event.event.as_str() {
+            topics::SESSIONS_CHANGED => {
+                if let Ok(newer) = serde_json::from_value(event.data) {
+                    agents = newer;
+                }
+            }
+            _ => {
+                if let Some(list) = &mut prompts {
+                    held_change(list, &event);
+                }
             }
         }
     }
-    Ok((client, agents))
+    Ok((client, agents, prompts))
 }
 
-/// Applies `sessions.changed` until the connection ends or the source is dropped.
+/// Applies `prompt.pending` (added, once) or `prompt.resolved` (removed) to the held list.
+fn held_change(list: &mut Vec<Value>, event: &Event) {
+    let id = event.data.get("id").cloned().unwrap_or(Value::Null);
+    match event.event.as_str() {
+        topics::PROMPT_PENDING => {
+            if !list.iter().any(|p| p.get("id") == Some(&id)) {
+                list.push(event.data.clone());
+            }
+        }
+        topics::PROMPT_RESOLVED => list.retain(|p| p.get("id") != Some(&id)),
+        _ => {}
+    }
+}
+
+/// Applies `sessions.changed` and the prompt events until the connection ends or the source is
+/// dropped.
 fn follow(mut client: Client, shared: &Shared) {
     while !shared.stopped() {
         match client.next_event(Duration::from_millis(250)) {
-            Ok(Some(event)) if event.event == topics::SESSIONS_CHANGED => {
-                if let Ok(agents) = serde_json::from_value::<Vec<Agent>>(event.data) {
-                    shared.set(Link::Daemon, Some(agents));
-                }
-            }
-            Ok(_) => {}
+            Ok(Some(event)) => shared.apply(event),
+            Ok(None) => {}
             Err(_) => return,
         }
     }
@@ -333,3 +412,7 @@ fn sleep(total: Duration, shared: &Shared) {
 #[cfg(test)]
 #[path = "session_source_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_source_prompts_tests.rs"]
+mod prompts_tests;

@@ -273,13 +273,27 @@ impl PromptStore {
         let mut inner = self.inner();
         inner.closed = true;
         let held = std::mem::take(&mut inner.held);
-        held.into_values()
-            .map(|h| {
-                let _ = h.tx.send(pass("the daemon is stopping"));
-                h.prompt
-            })
-            .collect()
+        drop(inner);
+        pass_all(held, "the daemon is stopping")
     }
+
+    /// Acting was turned off: every held prompt passes; new ones may still be held later.
+    pub fn drain(&self) -> Vec<Prompt> {
+        let held = std::mem::take(&mut self.inner().held);
+        pass_all(held, "acting is off")
+    }
+}
+
+fn pass_all(held: BTreeMap<String, Held>, reason: &str) -> Vec<Prompt> {
+    let mut all: Vec<Prompt> = held
+        .into_values()
+        .map(|h| {
+            let _ = h.tx.send(pass(reason));
+            h.prompt
+        })
+        .collect();
+    all.sort_by_key(|p| p.created_ms);
+    all
 }
 
 /// A pass decision with its reason.

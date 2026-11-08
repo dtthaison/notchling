@@ -8,7 +8,7 @@
 //! anyway (a process can end without touching a file, and a lane can appear). A list that differs
 //! from the last one goes out as `sessions.changed` with the whole new list.
 
-use crate::acting::{Acting, SETTINGS_NAME};
+use crate::acting::{file_says_on, Acting, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::{ActingOps, Room};
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::layout::Layout;
@@ -19,8 +19,8 @@ use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
-    ops, topics, Allowlist, ApiError, AuditLog, Caller, Handler, Limits, OpSpec, Server,
-    ServerConfig, ServerHandle, APP_TIER_PATHS_ENV,
+    ops, topics, Allowlist, ApiError, AuditEntry, AuditLog, Caller, Handler, Limits, OpSpec,
+    Server, ServerConfig, ServerHandle, Tier, APP_TIER_PATHS_ENV,
 };
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
@@ -98,6 +98,14 @@ impl Handler for Ops {
         match self.acting {
             Some(_) => &[topics::SESSIONS, topics::PROMPTS, topics::SETTINGS],
             None => &[topics::SESSIONS],
+        }
+    }
+
+    /// The held prompts are the app's: their ids are what answers them.
+    fn topic_tier(&self, topic: &str) -> Tier {
+        match topic {
+            topics::PROMPTS => Tier::App,
+            _ => Tier::Agent,
         }
     }
 
@@ -233,8 +241,9 @@ pub fn run(
     let mut lister = Lister::new(layout.clone());
     let first = poll_or_keep(|| lister.poll()).unwrap_or_else(|| Value::Array(Vec::new()));
     let sessions = Arc::new(Mutex::new(first));
-    // Read once, at start; off unless the maintainer turned it on (decision 0011).
-    let acting = Arc::new(Acting::load(&layout.data_dir.join(SETTINGS_NAME)));
+    // Off at every start, whatever a file says: only the app's `settings.set_acting` during this
+    // run turns it on (decision 0007's note: files at rest are not a tier boundary).
+    let acting = Arc::new(Acting::off());
     let room = Arc::new(LateRoom::default());
     // The real terminal and launcher, used only while acting is on.
     let claude = claude_path(std::path::Path::new(&home_of(&layout.roots())));
@@ -265,6 +274,12 @@ pub fn run(
         io::ErrorKind::AddrInUse => DaemonError::AlreadyRunning(layout.socket.clone()),
         _ => DaemonError::Io(e),
     })?;
+    // Bound, so the audit log's folder exists.
+    if file_says_on(&layout.data_dir.join(SETTINGS_NAME)) {
+        let entry = AuditEntry::now(ops::SETTINGS_SET_ACTING, None, None, FILE_SAID_ON);
+        let _ = AuditLog::new(layout.audit_path()).append(&entry);
+        eprintln!("notchling: {SETTINGS_NAME} says acting is on; ignored, acting starts off");
+    }
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
     room.set(handle.clone());
     eprintln!(
@@ -343,7 +358,7 @@ fn wait_batch(rx: &Receiver<Batch>, wait: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notchling_local_api::{ClientKind, Tier};
+    use notchling_local_api::ClientKind;
     use serde_json::json;
 
     fn caller() -> Caller {
@@ -351,6 +366,7 @@ mod tests {
             tier: Tier::Agent,
             client: ClientKind::Cli,
             peer: None,
+            pid: None,
         }
     }
 

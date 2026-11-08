@@ -1,12 +1,17 @@
-//! Prompts the hook is holding open (`HookBridge.pendingRequests`), read-only: the hook writes
-//! `requests/<id>.json` in Notchling's data folder for a question or a permission prompt. The
-//! read-only notch shows them; it never writes a response, removes a file or signals a process, so
-//! it reads by age instead of checking the hook's process: past the hook's wait, a file is stale.
+//! Prompts a hook is holding open. Two sources:
+//!
+//! - the daemon's (`notchling hook` under `notchlingd`): `prompt.pending` events, which the session
+//!   source keeps ([`from_daemon`]). A card answers one by its prompt id.
+//! - the Swift hook's (`HookBridge.pendingRequests`), read only while the daemon's aren't followed:
+//!   `requests/<id>.json` in Notchling's data folder ([`read_dir`]). The notch never writes a
+//!   response, removes a file or signals a process there, so it reads by age instead of checking
+//!   the hook's process: past the hook's wait, a file is stale.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use notchling_engine::transcript::snapshot::{question, PendingQuestion};
+use notchling_engine::sessions::Agent;
+use notchling_engine::transcript::snapshot::{question, PendingQuestion, QuestionItem};
 use serde_json::{Map, Value};
 
 /// The hook waits 290 s for a decision; a request older than this is gone or about to be.
@@ -78,6 +83,68 @@ impl HookRequest {
         })
     }
 
+    /// A prompt the daemon holds, from `prompt.pending`'s data (the daemon's `Prompt::to_json`).
+    /// `None` without an id and session, or for a question with no questions in it.
+    pub fn from_prompt(p: &Value) -> Option<HookRequest> {
+        let text = |key: &str| p.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+        let id = p.get("id")?.as_str()?.to_owned();
+        let session_id = p.get("sessionId")?.as_str()?.to_owned();
+        let kind = match p.get("kind").and_then(Value::as_str) {
+            Some("question") => {
+                let strings = |v: Option<&Value>| -> Vec<String> {
+                    v.and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .map(String::from)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let items: Vec<QuestionItem> = p
+                    .get("question")
+                    .and_then(|q| q.get("items"))
+                    .and_then(Value::as_array)?
+                    .iter()
+                    .map(|i| QuestionItem {
+                        header: i.get("header").and_then(Value::as_str).unwrap_or("").into(),
+                        question: i
+                            .get("question")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .into(),
+                        options: strings(i.get("options")),
+                        details: strings(i.get("details")),
+                        multi_select: i
+                            .get("multiSelect")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                    .collect();
+                if items.is_empty() {
+                    return None;
+                }
+                RequestKind::Question(PendingQuestion {
+                    tool_use_id: format!("hook:{id}"),
+                    items,
+                })
+            }
+            _ => RequestKind::Permission,
+        };
+        Some(HookRequest {
+            created: p.get("createdMs").and_then(Value::as_f64).unwrap_or(0.0) / 1000.0,
+            tool_name: text("toolName"),
+            summary: text("summary"),
+            can_always_allow: p
+                .get("canAlwaysAllow")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            id,
+            session_id,
+            kind,
+        })
+    }
+
     pub fn question(&self) -> Option<&PendingQuestion> {
         match &self.kind {
             RequestKind::Question(q) => Some(q),
@@ -109,6 +176,29 @@ pub fn describe(input: &Map<String, Value>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The daemon's held prompts by row id: the row whose id or Claude Code session is the prompt's
+/// session, else the session id itself. The oldest wins when a row has several: it has waited
+/// longest, and the next shows once it's answered.
+pub fn from_daemon(prompts: &[Value], agents: &[Agent]) -> HashMap<String, HookRequest> {
+    let mut found: HashMap<String, HookRequest> = HashMap::new();
+    for request in prompts.iter().filter_map(HookRequest::from_prompt) {
+        let key = agents
+            .iter()
+            .find(|a| {
+                a.id == request.session_id
+                    || a.session_id().as_deref() == Some(request.session_id.as_str())
+            })
+            .map_or_else(|| request.session_id.clone(), |a| a.id.clone());
+        let older = found
+            .get(&key)
+            .is_none_or(|held| request.created < held.created);
+        if older {
+            found.insert(key, request);
+        }
+    }
+    found
 }
 
 /// Every fresh request in `dir`, by session id (the newest wins when a session has several).
