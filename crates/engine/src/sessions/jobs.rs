@@ -3,7 +3,8 @@
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::iso::parse_iso_ms;
 use super::lanes::{config_dirs, Roots};
-use super::successor::job_transcript;
+use crate::transcript::locate::job_transcript;
+use crate::transcript::model::Timestamp;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -56,12 +57,12 @@ pub fn config_dir_for_job(roots: &Roots, id: &str) -> Option<String> {
 }
 
 /// The row for a background job. `live` is its `sessions/<pid>.json`, when a process is attached.
-/// `modified` gives a file's modification time (milliseconds) for finding the transcript.
+/// `modified` gives a file's modification time (seconds since the epoch) for finding the transcript.
 pub fn agent_from_job(
     job: &Value,
     short_id: &str,
     live: Option<&Value>,
-    modified: &dyn Fn(&str) -> Option<i64>,
+    modified: &dyn Fn(&str) -> Option<Timestamp>,
 ) -> Agent {
     let state = str_field(job, "state").unwrap_or("");
     let tempo = str_field(job, "tempo");

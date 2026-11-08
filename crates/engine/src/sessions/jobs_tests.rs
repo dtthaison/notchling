@@ -6,7 +6,7 @@ use super::lanes::Roots;
 use super::testutil::TempDir;
 use serde_json::{json, Value};
 
-fn none(_: &str) -> Option<i64> {
+fn none(_: &str) -> Option<f64> {
     None
 }
 
@@ -196,7 +196,7 @@ fn transcript_follows_the_session_into_its_worktree() {
         "working",
         json!({"linkScanPath": start, "worktreePath": "/Users/me/app/.claude/worktrees/music"}),
     );
-    let at = |p: &str| (p == moved).then_some(5);
+    let at = |p: &str| (p == moved).then_some(5.0);
     assert_eq!(
         agent_from_job(&j, "ab", None, &at)
             .transcript_path
@@ -209,6 +209,20 @@ fn transcript_follows_the_session_into_its_worktree() {
             .as_deref(),
         Some(start)
     );
+}
+
+#[test]
+fn equal_modification_times_keep_the_recorded_path() {
+    // Swift's `max(by:)` keeps the first of equal elements, so a tie is the recorded `linkScanPath`.
+    let start = "/h/.claude/projects/-Users-me-app/sess-1.jsonl";
+    let moved = "/h/.claude/projects/-Users-me-app--claude-worktrees-music/sess-1.jsonl";
+    let j = job(
+        "working",
+        json!({"linkScanPath": start, "worktreePath": "/Users/me/app/.claude/worktrees/music"}),
+    );
+    let same = |_: &str| Some(5.0);
+    let found = agent_from_job(&j, "ab", None, &same).transcript_path;
+    assert_eq!(found.as_deref(), Some(start), "not {moved}");
 }
 
 #[test]

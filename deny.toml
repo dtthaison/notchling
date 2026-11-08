@@ -14,10 +14,23 @@ targets = [
 ]
 
 [advisories]
-ignore = []
-# Vulnerabilities stay errors. An unmaintained crate deep in GPUI's tree (zbus, rustybuzz, ttf-parser,
-# async-std…) is Zed's to replace, not ours: only a direct dependency of our crates fails on it.
-unmaintained = "workspace"
+# Every unmaintained crate fails, and so does every vulnerability. The ones below are in GPUI 0.2.2's
+# tree, which is Zed's to change and has no safe upgrade for us; each is ignored by its advisory id and
+# says why, so a new advisory (or a direct dependency of ours going unmaintained) still fails.
+# Revisit them when GPUI moves.
+unmaintained = "all"
+ignore = [
+    { id = "RUSTSEC-2025-0052", reason = "async-std is discontinued. gpui > gpui_http_client > zed-async-tar." },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils is archived. gpui > gpui_http_client > zed-async-tar > async-std." },
+    { id = "RUSTSEC-2024-0436", reason = "paste is archived. gpui > metal, core-video and others; a proc macro, build time only." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained. gpui > stacksafe > stacksafe-macro; a proc macro, build time only." },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained. gpui > gpui_http_client > zed-reqwest." },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is unmaintained (0.14 through cosmic-text, 0.20 through usvg). Both come from gpui's text and SVG stack." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained (0.20, 0.21 and 0.25). All come from gpui's text and SVG stack: cosmic-text, fontdb, usvg." },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained. gpui > oo7 and ashpd > zbus; the Linux desktop portal, not compiled on macOS." },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained. Same path as zvariant: gpui > oo7 and ashpd > zbus." },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained. Same path as zvariant: gpui > oo7 and ashpd > zbus." },
+]
 
 [licenses]
 allow = [
@@ -33,19 +46,20 @@ allow = [
 confidence-threshold = 0.8
 # Named exceptions, the maintainer's choice on 2026-11-08 (docs/decisions/0008): GPUI 0.2.2's tree
 # brings these. MPL-2.0 is file-level copyleft that reaches only its own files, which we use
-# unmodified from crates.io; CC0-1.0 is a public-domain dedication. One crate each, by name.
+# unmodified from crates.io; CC0-1.0 is a public-domain dedication. One crate each, pinned to the
+# version in Cargo.lock today: a new version of the same crate needs a new look and a new entry.
 exceptions = [
     # dirs ← zed-font-kit ← gpui: finds the user's font folders. Linked into the macOS app.
-    { crate = "option-ext", allow = ["MPL-2.0"] },
+    { crate = "option-ext@0.2.0", allow = ["MPL-2.0"] },
     # gpui's build script writes the C header for its Metal shaders. A build tool, never linked.
-    { crate = "cbindgen", allow = ["MPL-2.0"] },
+    { crate = "cbindgen@0.28.0", allow = ["MPL-2.0"] },
     # naga, in gpui's build script, compiles the shaders. Build time only, never linked.
-    { crate = "hexf-parse", allow = ["CC0-1.0"] },
+    { crate = "hexf-parse@0.2.1", allow = ["CC0-1.0"] },
     # The two below are compiled by no build of ours: zed-font-kit wants dwrote only on Windows and
     # zed-xim wants tiny-keccak (through ahash) only on Linux x11, while gpui itself is macOS-only
     # here. cargo-deny filters each edge by target on its own, so the pair survives `targets` above.
-    { crate = "dwrote", allow = ["MPL-2.0"] },
-    { crate = "tiny-keccak", allow = ["CC0-1.0"] },
+    { crate = "dwrote@0.11.5", allow = ["MPL-2.0"] },
+    { crate = "tiny-keccak@2.0.2", allow = ["CC0-1.0"] },
 ]
 
 [bans]

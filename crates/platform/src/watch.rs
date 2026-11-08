@@ -1,9 +1,10 @@
 //! Tells which files changed under some folders, so a scanner can look at just those.
 //!
 //! This is a polling watcher on every OS: it compares file sizes and modified times each tick and
-//! reports the changed paths once the folders have been quiet for the debounce time. A native
-//! watcher (FSEvents, inotify, ReadDirectoryChangesW) can replace the loop behind the same
-//! [`Watcher::start`] when scanning cost shows up; callers only see [`Batch`]es.
+//! reports the changed paths once the folders have been quiet for the debounce time, or after the
+//! maximum latency when something keeps writing. A native watcher (FSEvents, inotify,
+//! ReadDirectoryChangesW) can replace the loop behind the same [`Watcher::start`] when scanning cost
+//! shows up; callers only see [`Batch`]es.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -26,11 +27,16 @@ pub struct Batch {
     pub rescan: bool,
 }
 
-/// How often to look, and how long to wait for quiet.
+/// How often to look, how long to wait for quiet, and how long a change may wait at most.
 #[derive(Clone, Copy, Debug)]
 pub struct WatchConfig {
     pub poll: Duration,
+    /// A batch is sent once nothing has changed for this long.
     pub debounce: Duration,
+    /// ... or this long after its first change, whichever comes first, so something that writes
+    /// during every poll (a log, a busy session) still gets its batches through. Keep it above
+    /// `debounce`: below it the debounce never gets to wait.
+    pub max_latency: Duration,
 }
 
 impl Default for WatchConfig {
@@ -38,6 +44,7 @@ impl Default for WatchConfig {
         WatchConfig {
             poll: Duration::from_secs(1),
             debounce: Duration::from_secs(2),
+            max_latency: Duration::from_secs(5),
         }
     }
 }
@@ -143,6 +150,8 @@ fn run(
     let mut roots_present = vec![true; folders.len()];
     let mut pending = Batch::default();
     let mut quiet_since = Instant::now();
+    // When the batch now being collected got its first change.
+    let mut first_change = Instant::now();
     loop {
         match stop.recv_timeout(config.poll) {
             Err(RecvTimeoutError::Timeout) => {}
@@ -155,12 +164,18 @@ fn run(
         let changed = diff(&last, &next);
         last = next;
         if roots_changed || !changed.is_empty() {
+            // While a batch is already collecting only the quiet clock restarts.
+            if !pending.rescan && pending.paths.is_empty() {
+                first_change = Instant::now();
+            }
             pending.paths.extend(changed);
             pending.rescan |= roots_changed;
             quiet_since = Instant::now();
         }
         let waiting = pending.rescan || !pending.paths.is_empty();
-        let due = waiting && quiet_since.elapsed() >= config.debounce;
+        let due = waiting
+            && (quiet_since.elapsed() >= config.debounce
+                || first_change.elapsed() >= config.max_latency);
         if due && out.send(std::mem::take(&mut pending)).is_err() {
             return;
         }
@@ -175,6 +190,7 @@ mod tests {
     const FAST: WatchConfig = WatchConfig {
         poll: Duration::from_millis(20),
         debounce: Duration::from_millis(80),
+        max_latency: Duration::from_secs(2),
     };
     const WAIT: Duration = Duration::from_secs(5);
 
@@ -267,11 +283,62 @@ mod tests {
     }
 
     #[test]
+    fn steady_writes_still_produce_a_batch_within_the_max_latency() {
+        // Something writes during every poll, so the folder is never quiet for the debounce.
+        let dir = TempDir::new();
+        let file = dir.path().join("busy.log");
+        fs::write(&file, b"x").unwrap();
+        let config = WatchConfig {
+            poll: Duration::from_millis(20),
+            debounce: Duration::from_millis(300),
+            max_latency: Duration::from_millis(600),
+        };
+        let (_watcher, rx) = Watcher::start(vec![dir.path().to_path_buf()], config).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (file, stop) = (file.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut len = 1;
+                while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    len += 1;
+                    fs::write(&file, vec![b'x'; len]).unwrap();
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })
+        };
+        let started = Instant::now();
+        let first = rx.recv_timeout(Duration::from_millis(1500));
+        let waited = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        writer.join().unwrap();
+        let batch = first.expect("a batch although the writes never paused");
+        assert!(batch.paths.contains(&file));
+        assert!(waited < Duration::from_millis(1500), "{waited:?}");
+    }
+
+    #[test]
+    fn the_max_latency_does_not_cut_a_debounce_short() {
+        // One change, then quiet: sent after the debounce, not at once.
+        let dir = TempDir::new();
+        let config = WatchConfig {
+            poll: Duration::from_millis(20),
+            debounce: Duration::from_millis(300),
+            max_latency: Duration::from_secs(5),
+        };
+        let (_watcher, rx) = Watcher::start(vec![dir.path().to_path_buf()], config).unwrap();
+        fs::write(dir.path().join("f"), b"x").unwrap();
+        let started = Instant::now();
+        rx.recv_timeout(WAIT).unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(280));
+    }
+
+    #[test]
     fn dropping_the_watcher_stops_it_promptly() {
         let dir = TempDir::new();
         let slow = WatchConfig {
             poll: Duration::from_secs(30),
             debounce: Duration::from_secs(30),
+            max_latency: Duration::from_secs(30),
         };
         let (watcher, rx) = Watcher::start(vec![dir.path().to_path_buf()], slow).unwrap();
         let started = Instant::now();

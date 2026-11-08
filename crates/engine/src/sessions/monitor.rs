@@ -3,7 +3,7 @@
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::jobs::{agent_from_job, agent_from_session, rank, read_jobs, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
-use super::successor::file_modified_ms;
+use crate::transcript::util::modified_secs;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -16,19 +16,36 @@ pub struct Probes<'a> {
 }
 
 impl Probes<'static> {
-    /// The default without platform calls: liveness from Linux's `/proc` (everywhere else every pid is
-    /// assumed alive, so a stale file shows until the app adds a real probe) and no host app.
+    /// The default without the app's help: on Unix liveness is `kill(pid, 0)`, as `AgentMonitor.isAlive`
+    /// does (a process that exists but isn't ours answers `EPERM`, still alive); elsewhere every pid is
+    /// assumed alive, so a stale file shows until the app adds a real probe. No host app.
     pub fn from_proc() -> Self {
         Probes {
-            is_alive: &proc_alive,
+            is_alive: &pid_alive,
             host_app: &no_host,
         }
     }
 }
 
-fn proc_alive(pid: u32) -> bool {
-    let proc = std::path::Path::new("/proc");
-    !proc.join("self").exists() || proc.join(pid.to_string()).exists()
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // 0 and anything past `pid_t` would make `kill` probe a process group, not a process.
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: signal 0 delivers nothing; `kill` only checks that the process exists.
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+#[cfg(not(unix))]
+fn pid_alive(_: u32) -> bool {
+    true
 }
 
 fn no_host(_: u32) -> Option<String> {
@@ -81,7 +98,7 @@ impl Monitor {
 
             for (short_id, job) in &jobs {
                 let live_session = session_by_job.get(short_id).copied();
-                let mut agent = agent_from_job(job, short_id, live_session, &file_modified_ms);
+                let mut agent = agent_from_job(job, short_id, live_session, &modified_secs);
                 agent.config_dir = lane_path.clone();
                 let this = rank(job);
                 if let Some(index) = result.iter().position(|a| a.id == agent.id) {

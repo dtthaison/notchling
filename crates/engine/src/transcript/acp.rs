@@ -177,15 +177,16 @@ impl Transcript {
             let cached = if self.reported_context {
                 0
             } else {
-                int(usage.get("cachedReadTokens"))
+                count(usage.get("cachedReadTokens"))
             };
-            let input = int(usage.get("inputTokens")) + cached;
-            let output = int(usage.get("outputTokens"));
-            self.facts.input_tokens += input as u64;
-            self.facts.output_tokens += output as u64;
+            let input = count(usage.get("inputTokens")).saturating_add(cached);
+            let output = count(usage.get("outputTokens"));
+            self.facts.input_tokens = self.facts.input_tokens.saturating_add(input);
+            self.facts.output_tokens = self.facts.output_tokens.saturating_add(output);
             // A slash command Gemini handled itself reports zeros; the context didn't change.
-            if !self.reported_context && input + output > 0 {
-                self.facts.context_tokens = (input + output) as u64;
+            let context = input.saturating_add(output);
+            if !self.reported_context && context > 0 {
+                self.facts.context_tokens = context;
             }
         }
         self.reported_context = false;
@@ -290,6 +291,11 @@ pub fn text(content: Option<&Value>) -> String {
 
 fn int(v: Option<&Value>) -> i64 {
     v.and_then(int_of).unwrap_or(0)
+}
+
+/// A token count: a negative or missing number is zero.
+fn count(v: Option<&Value>) -> u64 {
+    int(v).max(0) as u64
 }
 
 fn paths(u: &Value) -> Vec<String> {

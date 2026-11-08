@@ -192,17 +192,22 @@ impl Parser {
             if !self.counted.contains(id) {
                 self.counted.insert(id.to_string());
                 self.counted_order.push(id.to_string());
-                self.c.facts.input_tokens += n(usage, "input_tokens")
-                    + n(usage, "cache_creation_input_tokens")
-                    + n(usage, "cache_read_input_tokens");
-                self.c.facts.output_tokens += n(usage, "output_tokens");
+                let input = n(usage, "input_tokens")
+                    .saturating_add(n(usage, "cache_creation_input_tokens"))
+                    .saturating_add(n(usage, "cache_read_input_tokens"));
+                self.c.facts.input_tokens = self.c.facts.input_tokens.saturating_add(input);
+                self.c.facts.output_tokens = self
+                    .c
+                    .facts
+                    .output_tokens
+                    .saturating_add(n(usage, "output_tokens"));
             }
         }
         if let Some(usage) = usage {
             let held = n(usage, "input_tokens")
-                + n(usage, "cache_creation_input_tokens")
-                + n(usage, "cache_read_input_tokens")
-                + n(usage, "output_tokens");
+                .saturating_add(n(usage, "cache_creation_input_tokens"))
+                .saturating_add(n(usage, "cache_read_input_tokens"))
+                .saturating_add(n(usage, "output_tokens"));
             // Synthetic messages (errors, interruptions) carry zeros.
             if held > 0 {
                 self.c.facts.context_tokens = held;
@@ -527,7 +532,10 @@ impl Parser {
     pub fn conversation(&self) -> Conversation {
         let mut c = self.c.clone();
         c.facts.files = self.files.clone();
-        c.turn_tokens = self.turn_output.values().sum();
+        c.turn_tokens = self
+            .turn_output
+            .values()
+            .fold(0u64, |sum, n| sum.saturating_add(*n));
         c.queued = self
             .queue
             .iter()

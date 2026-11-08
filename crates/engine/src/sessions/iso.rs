@@ -20,7 +20,11 @@ pub fn parse_iso_ms(text: &str) -> Option<i64> {
     let hour: i64 = t.next()?.parse().ok()?;
     let minute: i64 = t.next()?.parse().ok()?;
     let second: i64 = t.next()?.parse().ok()?;
-    if t.next().is_some() || hour > 23 || minute > 59 || second > 60 {
+    if t.next().is_some()
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+    {
         return None;
     }
     let millis = match fraction {
@@ -31,8 +35,17 @@ pub fn parse_iso_ms(text: &str) -> Option<i64> {
         }
         Some(_) => return None,
     };
-    let days = days_from_civil(year, month, day);
-    Some(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis - offset_ms)
+    // A year that isn't one the calendar can hold overflows somewhere in the sum: that is `None`.
+    let days = days_from_civil(year, month, day)?;
+    let minutes = days
+        .checked_mul(24)?
+        .checked_add(hour)?
+        .checked_mul(60)?
+        .checked_add(minute)?;
+    minutes
+        .checked_mul(60_000)?
+        .checked_add(second * 1000 + millis)?
+        .checked_sub(offset_ms)
 }
 
 /// The clock part and the zone's offset in milliseconds (east of UTC positive).
@@ -47,18 +60,28 @@ fn split_zone(rest: &str) -> Option<(&str, i64)> {
     let (h, m) = body.split_once(':').unwrap_or((body, "0"));
     let hours: i64 = h.parse().ok()?;
     let minutes: i64 = m.parse().ok()?;
-    Some((clock, sign * (hours * 60 + minutes) * 60_000))
+    let offset = hours
+        .checked_mul(60)?
+        .checked_add(minutes)?
+        .checked_mul(60_000)?;
+    Some((clock, sign * offset))
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
+fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
+    let y = if month <= 2 {
+        year.checked_sub(1)?
+    } else {
+        year
+    };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
     let mp = (month + 9) % 12;
     let doy = (153 * mp + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    era.checked_mul(146_097)?
+        .checked_add(doe)?
+        .checked_sub(719_468)
 }
 
 #[cfg(test)]
@@ -95,6 +118,26 @@ mod tests {
         assert_eq!(parse_iso_ms(""), None);
         assert_eq!(parse_iso_ms("yesterday"), None);
         assert_eq!(parse_iso_ms("2026-13-02T08:21:06Z"), None);
+    }
+
+    #[test]
+    fn a_huge_year_or_offset_is_none_not_an_overflow() {
+        assert_eq!(parse_iso_ms("99999999999999999-01-01T00:00:00Z"), None);
+        assert_eq!(parse_iso_ms("9223372036854775807-12-31T23:59:59Z"), None);
+        assert_eq!(
+            parse_iso_ms("2026-11-02T08:21:06+99999999999999999:00"),
+            None
+        );
+        assert_eq!(
+            parse_iso_ms("2026-11-02T08:21:06-9223372036854775807:59"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_negative_clock_field_is_none() {
+        assert_eq!(parse_iso_ms("2026-11-02T00:00:-9223372036854775808Z"), None);
+        assert_eq!(parse_iso_ms("2026-11-02T-1:00:00Z"), None);
     }
 
     #[test]

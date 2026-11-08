@@ -204,6 +204,27 @@ fn follows_several_clears_in_a_row() {
 }
 
 #[test]
+fn a_name_with_quotes_is_matched_as_json() {
+    let scratch = Scratch::new("succ-quote");
+    let old = s(&scratch.write("old.jsonl", "{}\n"));
+    tick();
+    let new = s(&scratch.write("new.jsonl", &cleared(r#"say \"hi\""#)));
+    assert_eq!(successor(&old, "say \"hi\""), Some(new));
+}
+
+#[test]
+fn two_matching_files_are_followed_oldest_created_first() {
+    // Created z then a: the chain ends at the newest (a), whatever the names sort like.
+    let scratch = Scratch::new("succ-order");
+    let old = s(&scratch.write("old.jsonl", "{}\n"));
+    tick();
+    scratch.write("z.jsonl", &cleared("worker"));
+    tick();
+    let newest = s(&scratch.write("a.jsonl", &cleared("worker")));
+    assert_eq!(successor(&old, "worker"), Some(newest));
+}
+
+#[test]
 fn folder_names() {
     // Checked against real folder names in ~/.claude/projects.
     assert_eq!(
@@ -252,6 +273,15 @@ fn the_newer_file_wins_when_both_exist() {
     };
     assert_eq!(
         job_transcript(Some(START), Some("abc"), Some(WORKTREE), older).as_deref(),
+        Some(START)
+    );
+}
+
+#[test]
+fn equal_dates_keep_the_recorded_path() {
+    // Swift's `max(by:)` keeps the first of equal elements.
+    assert_eq!(
+        job_transcript(Some(START), Some("abc"), Some(WORKTREE), |_| Some(7.0)).as_deref(),
         Some(START)
     );
 }
