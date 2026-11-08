@@ -9,7 +9,7 @@ pub struct ViewSpec {
     pub about: &'static str,
 }
 
-pub const ALL: [ViewSpec; 4] = [
+pub const ALL: [ViewSpec; 5] = [
     ViewSpec {
         name: "kit-gallery",
         size: (760.0, 900.0),
@@ -28,19 +28,30 @@ pub const ALL: [ViewSpec; 4] = [
     ViewSpec {
         name: "shell",
         size: (1040.0, 720.0),
-        about: "the main window as it opens (Chat arrives with U1)",
+        about: "the main window's empty shell",
+    },
+    ViewSpec {
+        name: "chat",
+        size: (1240.0, 780.0),
+        about: "the read-only Chat window over --data-root <dir> (a fixture, never ~/.claude)",
     },
 ];
 
-pub const NAMES: [&str; 4] = [
+pub const NAMES: [&str; 5] = [
     "kit-gallery",
     "kit-gallery-light",
     "kit-gallery-dark",
     "shell",
+    "chat",
 ];
 
 pub fn spec(name: &str) -> Option<&'static ViewSpec> {
     ALL.iter().find(|v| v.name == name)
+}
+
+/// Views that read sessions, and so take `--data-root` when rendered.
+pub fn needs_data_root(name: &str) -> bool {
+    name == "chat"
 }
 
 #[cfg(test)]
@@ -56,5 +67,6 @@ mod tests {
             assert!(!spec.about.is_empty());
         }
         assert_eq!(spec("notch"), None);
+        assert!(needs_data_root("chat") && !needs_data_root("shell"));
     }
 }

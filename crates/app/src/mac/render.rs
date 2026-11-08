@@ -31,7 +31,7 @@ impl Render for Root {
 }
 
 /// Runs the render; the exit code. Unknown views are refused by `cli::parse` first.
-pub fn run(view: &str, out: &Path) -> i32 {
+pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
     let Some(spec) = crate::views::spec(view) else {
         eprintln!("unknown view {view}");
         return 2;
@@ -39,6 +39,7 @@ pub fn run(view: &str, out: &Path) -> i32 {
     let (width, height) = spec.size;
     let name = view.to_owned();
     let out = out.to_path_buf();
+    let data_root = data_root.map(Path::to_path_buf);
     Application::new().run(move |cx: &mut App| {
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
@@ -75,7 +76,7 @@ pub fn run(view: &str, out: &Path) -> i32 {
                 ns.setHasShadow(false);
                 ns.setIgnoresMouseEvents(true);
             }
-            let view = views::build(&name, window, cx);
+            let view = views::build(&name, data_root.as_deref(), window, cx);
             cx.new(|cx| {
                 cx.spawn(async move |_, cx| {
                     cx.background_executor().timer(SETTLE).await;
