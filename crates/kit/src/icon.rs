@@ -28,6 +28,18 @@ pub enum Icon {
     Page,
     /// The Settings sheet.
     Settings,
+    /// A turn's time, in the turn footer.
+    Clock,
+    /// A thinking row.
+    Thinking,
+    /// A file read.
+    File,
+    /// A web search or fetch.
+    Web,
+    /// A subagent.
+    Agent,
+    /// A task list.
+    Task,
 }
 
 /// Where an icon sits decides its size.
@@ -52,7 +64,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 19] = [
+    pub const ALL: [Icon; 25] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -72,6 +84,12 @@ impl Icon {
         Icon::More,
         Icon::Page,
         Icon::Settings,
+        Icon::Clock,
+        Icon::Thinking,
+        Icon::File,
+        Icon::Web,
+        Icon::Agent,
+        Icon::Task,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -96,6 +114,12 @@ impl Icon {
             Icon::More => "ellipsis",
             Icon::Page => "doc.richtext",
             Icon::Settings => "gearshape",
+            Icon::Clock => "clock",
+            Icon::Thinking => "brain",
+            Icon::File => "doc.text",
+            Icon::Web => "globe",
+            Icon::Agent => "person.2",
+            Icon::Task => "checklist",
         }
     }
 
@@ -124,6 +148,12 @@ impl Icon {
             Icon::More => "…",
             Icon::Page => "▤",
             Icon::Settings => "⚙",
+            Icon::Clock => "◷",
+            Icon::Thinking => "∿",
+            Icon::File => "≡",
+            Icon::Web => "◎",
+            Icon::Agent => "⚇",
+            Icon::Task => "☑",
         }
     }
 

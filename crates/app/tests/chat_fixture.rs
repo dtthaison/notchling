@@ -87,12 +87,12 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
         "the edit's diff"
     );
     assert!(
-        tools.iter().any(|t| t.icon == Icon::Sessions),
+        tools.iter().any(|t| t.icon == Icon::Agent),
         "the Agent call"
     );
     assert!(rows
         .iter()
-        .any(|r| matches!(r, Row::TurnEnd { text } if text == "48s · Opus 5.5")));
+        .any(|r| matches!(r, Row::TurnEnd { text } if text == "Worked for 48s · Opus 5.5")));
     assert!(rows.iter().any(|r| matches!(
         r,
         Row::Notice {

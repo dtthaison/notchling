@@ -23,12 +23,13 @@ pub enum Row {
         text: String,
     },
     Thinking {
-        /// "Thought for 4s".
+        /// "Thought for 4s", or "Thought briefly" under a second.
         title: String,
         text: String,
     },
+    /// A run of tool calls between two messages; `chat::steps` folds it to one chip.
     Tools(Vec<ToolRow>),
-    /// "48s · Opus 5.5".
+    /// "Worked for 48s · Opus 5.5".
     TurnEnd {
         text: String,
     },
@@ -51,6 +52,9 @@ pub struct Output {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolRow {
+    /// The call's id: what a click expands (`ChatView::expanded`) and a second opinion's anchor.
+    pub id: String,
+    pub kind: ToolKind,
     pub icon: Icon,
     pub title: String,
     /// The command, path, query or input.
@@ -67,9 +71,12 @@ pub struct ToolRow {
 pub fn tool_icon(kind: ToolKind) -> Icon {
     match kind {
         ToolKind::Shell => Icon::Terminal,
-        ToolKind::Read | ToolKind::Search | ToolKind::Web => Icon::Search,
+        ToolKind::Read => Icon::File,
+        ToolKind::Search => Icon::Search,
+        ToolKind::Web => Icon::Web,
         ToolKind::Edit | ToolKind::Write | ToolKind::Other => Icon::Tools,
-        ToolKind::Agent | ToolKind::Task => Icon::Sessions,
+        ToolKind::Agent => Icon::Agent,
+        ToolKind::Task => Icon::Task,
         ToolKind::Ask => Icon::Question,
         ToolKind::Skill => Icon::Claude,
     }
@@ -168,6 +175,8 @@ pub fn cut_output(text: &str) -> Output {
 
 fn tool_row(call: &ToolCall) -> ToolRow {
     ToolRow {
+        id: call.id.clone(),
+        kind: call.kind,
         icon: tool_icon(call.kind),
         title: call.title.clone(),
         input: call.input.clone(),
@@ -200,14 +209,18 @@ fn row(item: &ChatItem) -> Row {
         },
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
-            title: format!("Thought for {}", duration(*seconds)),
+            title: if *seconds >= 1.0 {
+                format!("Thought for {}", duration(*seconds))
+            } else {
+                "Thought briefly".to_owned()
+            },
             text: text.clone(),
         },
         ItemKind::Tools(calls) => Row::Tools(calls.iter().map(tool_row).collect()),
         ItemKind::TurnEnd { seconds, model } => Row::TurnEnd {
             text: match model {
-                Some(model) => format!("{} · {}", duration(*seconds), model_name(model)),
-                None => duration(*seconds),
+                Some(model) => format!("Worked for {} · {}", duration(*seconds), model_name(model)),
+                None => format!("Worked for {}", duration(*seconds)),
             },
         },
         ItemKind::Notice { text, symbol } => Row::Notice {
@@ -299,6 +312,8 @@ mod tests {
             panic!("tools");
         };
         assert_eq!(tools[0].icon, Icon::Terminal);
+        assert_eq!(tools[0].id, "t1");
+        assert_eq!(tools[0].kind, ToolKind::Shell);
         assert_eq!(tools[0].title, "List files");
         assert_eq!(
             tools[0].output,
@@ -310,7 +325,7 @@ mod tests {
         assert_eq!(
             rows[4],
             Row::TurnEnd {
-                text: "48s · Opus 5.5".into()
+                text: "Worked for 48s · Opus 5.5".into()
             }
         );
         assert_eq!(
@@ -326,6 +341,31 @@ mod tests {
                 text: "And bump the version".into(),
                 images: 0,
                 queued: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_thought_under_a_second_and_a_turn_without_a_model() {
+        let c = Conversation {
+            items: vec![
+                item(ItemKind::Thinking {
+                    seconds: 0.4,
+                    text: String::new(),
+                }),
+                item(ItemKind::TurnEnd {
+                    seconds: 205.0,
+                    model: None,
+                }),
+            ],
+            ..Conversation::default()
+        };
+        let rows = rows(&c);
+        assert!(matches!(&rows[0], Row::Thinking { title, .. } if title == "Thought briefly"));
+        assert_eq!(
+            rows[1],
+            Row::TurnEnd {
+                text: "Worked for 3m 25s".into()
             }
         );
     }
@@ -453,9 +493,10 @@ mod tests {
 
     #[test]
     fn icons_by_kind_and_symbol() {
-        assert_eq!(tool_icon(ToolKind::Agent), Icon::Sessions);
+        assert_eq!(tool_icon(ToolKind::Agent), Icon::Agent);
         assert_eq!(tool_icon(ToolKind::Ask), Icon::Question);
-        assert_eq!(tool_icon(ToolKind::Read), Icon::Search);
+        assert_eq!(tool_icon(ToolKind::Read), Icon::File);
+        assert_eq!(tool_icon(ToolKind::Web), Icon::Web);
         assert_eq!(notice_icon("rectangle.compress.vertical"), Icon::Info);
         assert_eq!(notice_icon("exclamationmark.triangle"), Icon::Needs);
         assert_eq!(notice_icon("checkmark.circle"), Icon::Check);

@@ -11,12 +11,14 @@ mod composer;
 mod conversation;
 mod header;
 mod inspector;
+mod markdown;
 mod opinions;
 mod phone;
 mod sheets;
 mod sidebar;
 mod tools;
 
+use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -38,6 +40,9 @@ use crate::session_source::SessionSource;
 
 /// How often the view looks for watch batches.
 const TICK: Duration = Duration::from_millis(500);
+
+/// Set to `1`, a render draws every step group, step and thought open.
+pub const EXPAND_ENV: &str = "NOTCHLING_RENDER_EXPAND";
 
 pub struct ChatView {
     root: DataRoot,
@@ -64,6 +69,12 @@ pub struct ChatView {
     daemon_note: Option<&'static str>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
+    /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
+    /// the Swift app). Kept outside the rows so a reload doesn't fold them.
+    expanded: HashSet<String>,
+    /// Every group, step and thought drawn open: a render over a fixture
+    /// (`NOTCHLING_RENDER_EXPAND=1`), since nothing clicks in a picture.
+    expand_all: bool,
     /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
     tools: tools::ChatTools,
     /// New Session or Settings, over the window.
@@ -99,7 +110,22 @@ fn now_ms() -> i64 {
 impl ChatView {
     /// A Chat that reads the folders only (a render, a fixture root).
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx)
+        let mut view = ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx);
+        view.expand_all = std::env::var_os(EXPAND_ENV).is_some_and(|v| v == "1");
+        view
+    }
+
+    /// Whether the group, step or thought `id` is drawn open.
+    pub(super) fn is_open(&self, id: &str) -> bool {
+        self.expand_all || self.expanded.contains(id)
+    }
+
+    /// Opens or folds `id`.
+    pub(super) fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.expanded.remove(id) {
+            self.expanded.insert(id.to_owned());
+        }
+        cx.notify();
     }
 
     /// Starts the first load (it selects the first session) and watching for changes; the session
@@ -131,13 +157,16 @@ impl ChatView {
             now_ms: 0,
             load_again: false,
             loading: true,
-            scroll_to_end: false,
+            // The first conversation opens at its newest message, as a picked one does.
+            scroll_to_end: true,
             gate: ReloadGate::default(),
             seen_generation: source.generation(),
             daemon_note: source.view().note(),
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
+            expanded: HashSet::new(),
+            expand_all: false,
             tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
