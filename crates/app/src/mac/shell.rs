@@ -98,7 +98,7 @@ const BRIDGE_POLL: Duration = Duration::from_secs(5);
 
 /// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
 /// root instead of the real folders; Chat and the notch read the same one.
-pub fn run(data_root: Option<PathBuf>) -> i32 {
+pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
     let root = DataRoot::for_run(data_root.as_deref());
     let notch = root.as_ref().map(DataRoot::notch_source);
     Application::new().run(move |cx: &mut App| {
@@ -222,6 +222,10 @@ pub fn run(data_root: Option<PathBuf>) -> i32 {
         }
         // Once, the first time: who owns what, and the Swift app's settings.
         welcome_window::open_first_run_once(cx);
+        if open_chat_now {
+            open_chat(cx);
+            cx.activate(true);
+        }
     });
     0
 }
