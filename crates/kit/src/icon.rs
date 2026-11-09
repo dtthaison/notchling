@@ -61,6 +61,14 @@ pub enum Icon {
     Plugin,
     /// A tool call that failed.
     Failed,
+    /// A session row's account on the main login (SF `person.crop.circle`).
+    Account,
+    /// A session row's account in a lane (SF `arrow.triangle.branch`).
+    Lane,
+    /// Codex's mark where the app's icon isn't to be had (SF `chevron.left.forwardslash.chevron.right`).
+    Code,
+    /// Antigravity's mark likewise (SF `paperplane`).
+    Paperplane,
 }
 
 /// Where an icon sits decides its size.
@@ -85,7 +93,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 33] = [
+    pub const ALL: [Icon; 37] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -119,6 +127,10 @@ impl Icon {
         Icon::Skill,
         Icon::Plugin,
         Icon::Failed,
+        Icon::Account,
+        Icon::Lane,
+        Icon::Code,
+        Icon::Paperplane,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -158,6 +170,10 @@ impl Icon {
             Icon::Plugin => "puzzlepiece.extension",
             // The Swift app's is filled; filled forms stay for status badges.
             Icon::Failed => "xmark.octagon",
+            Icon::Account => "person.crop.circle",
+            Icon::Lane => "arrow.triangle.branch",
+            Icon::Code => "chevron.left.forwardslash.chevron.right",
+            Icon::Paperplane => "paperplane",
         }
     }
 
@@ -200,6 +216,10 @@ impl Icon {
             Icon::Skill => "✧",
             Icon::Plugin => "◇",
             Icon::Failed => "✕",
+            Icon::Account => "◉",
+            Icon::Lane => "⑂",
+            Icon::Code => "</>",
+            Icon::Paperplane => "➤",
         }
     }
 
@@ -230,6 +250,10 @@ impl Icon {
             Icon::Skill => "icons/sparkles.svg",
             Icon::Plugin => "icons/puzzle.svg",
             Icon::Failed => "icons/octagon-x.svg",
+            Icon::Account => "icons/circle-user.svg",
+            Icon::Lane => "icons/git-branch.svg",
+            Icon::Code => "icons/code-xml.svg",
+            Icon::Paperplane => "icons/send.svg",
             Icon::Resume
             | Icon::Send
             | Icon::Permission
@@ -278,7 +302,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 23] = icons![
+const SVGS: [(&str, &[u8]); 27] = icons![
     "brain",
     "bot",
     "check",
@@ -287,10 +311,13 @@ const SVGS: [(&str, &[u8]); 23] = icons![
     "circle-alert",
     "circle-check",
     "circle-dashed",
+    "circle-user",
     "clock",
+    "code-xml",
     "copy",
     "file-plus",
     "file-text",
+    "git-branch",
     "globe",
     "info",
     "list-checks",
@@ -299,6 +326,7 @@ const SVGS: [(&str, &[u8]); 23] = icons![
     "pencil",
     "puzzle",
     "search",
+    "send",
     "sparkles",
     "square-terminal",
     "wrench",

@@ -98,6 +98,8 @@ Title bar hidden and transparent, full-size content. Traffic lights stay where A
 ### Session row (`KitSessionRowStyle`)
 Avatar 30 with a status badge, name (heading), status line (meta, muted), age (meta, faint). Height 52, inset 8, radius md.
 
+The sidebar's row (Rust `session_row_marked`) has three lines: the tool icon (14) before the name, the account (9 pt person, or a branch in a lane, then the email; meta, faint), the status line (accent text while the session needs you). Height 62 whether or not the account is known. The Rust app also shows the active Codex and Antigravity account, which the Swift row leaves blank.
+
 | State | Fill | Border |
 | --- | --- | --- |
 | rest | none | none |

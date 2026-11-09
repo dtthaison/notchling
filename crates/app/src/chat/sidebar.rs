@@ -6,6 +6,8 @@ use notchling_kit::Status;
 
 use super::data::{Session, Tool};
 use super::format::age;
+use crate::accounts::model::{ANTIGRAVITY, CODEX};
+use crate::accounts::store::Snapshot;
 use crate::search::wire::SessionRef;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +19,57 @@ pub struct SidebarRow {
     pub age: String,
     pub status: Status,
     pub tool: Tool,
+    /// The Claude Code lane folder the session was found in; `None` on the main login.
+    pub config_dir: Option<String>,
+}
+
+/// The account a row names under the session's name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowAccount {
+    /// The email.
+    pub text: String,
+    /// The session runs in a lane, not on the main login (the icon says which).
+    pub lane: bool,
+}
+
+/// The account a session runs on, for its row (the Swift `ChatModel.account(for:)`):
+/// - Claude Code: the lane whose folder the session was found in, else the main login's account.
+///   A folder no lane names is not guessed at, and nobody signed in on the main login says nothing.
+/// - Codex and Antigravity: the provider's active account, which the Swift app leaves blank (they
+///   have one login each, so it is the account any session of theirs runs on).
+///
+/// Only what the accounts store already holds, so it is `None` until the daemon has answered.
+pub fn row_account(tool: Tool, config_dir: Option<&str>, s: &Snapshot) -> Option<RowAccount> {
+    let named = |email: &str, lane: bool| {
+        (!email.is_empty()).then(|| RowAccount {
+            text: email.to_owned(),
+            lane,
+        })
+    };
+    match tool {
+        Tool::Claude => match config_dir {
+            Some(dir) => {
+                let lane = s.lanes.iter().find(|l| l.path == dir)?;
+                named(lane.email.as_deref().unwrap_or(&lane.name), true)
+            }
+            None => {
+                let active = s.claude.active.as_ref()?;
+                let account = s.claude.accounts.iter().find(|a| &a.id == active)?;
+                named(&account.email, false)
+            }
+        },
+        Tool::Codex | Tool::Antigravity => {
+            let id = if tool == Tool::Codex {
+                CODEX
+            } else {
+                ANTIGRAVITY
+            };
+            let provider = s.providers.providers.iter().find(|p| p.id == id)?;
+            let active = provider.active_id.as_ref()?;
+            let account = provider.accounts.iter().find(|a| &a.id == active)?;
+            named(&account.email, false)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +108,7 @@ fn row(session: &Session, now_ms: i64) -> SidebarRow {
         age: age(now_ms, agent.since_ms),
         status: status_of(agent.group),
         tool: session.tool,
+        config_dir: agent.config_dir.clone(),
     }
 }
 
@@ -219,6 +273,123 @@ mod tests {
         assert_eq!(sections[1].rows[0].status_line, "Idle");
         assert_eq!(sections[1].rows[0].age, "2m");
         assert_eq!(sections[1].rows[1].tool, Tool::Codex);
+    }
+
+    fn accounts() -> Snapshot {
+        use crate::accounts::wire::{
+            ClaudeAccount, ClaudeList, Lane, Provider, ProviderAccount, ProviderList,
+        };
+        let provider = |id: &str, email: &str| Provider {
+            id: id.into(),
+            active_id: Some("x1".into()),
+            accounts: vec![ProviderAccount {
+                id: "x1".into(),
+                email: email.into(),
+                ..ProviderAccount::default()
+            }],
+            ..Provider::default()
+        };
+        Snapshot {
+            claude: ClaudeList {
+                on: true,
+                active: Some("a1".into()),
+                accounts: vec![ClaudeAccount {
+                    id: "a1".into(),
+                    email: "me@example.com".into(),
+                    ..ClaudeAccount::default()
+                }],
+            },
+            lanes: vec![
+                Lane {
+                    name: "night".into(),
+                    path: "/lanes/night".into(),
+                    account_id: Some("a2".into()),
+                    email: Some("ops@example.com".into()),
+                },
+                Lane {
+                    name: "bare".into(),
+                    path: "/lanes/bare".into(),
+                    account_id: None,
+                    email: None,
+                },
+            ],
+            providers: ProviderList {
+                accounts_on: true,
+                providers: vec![
+                    provider("codex", "cx@example.com"),
+                    provider("antigravity", "ag@example.com"),
+                ],
+                syncing: false,
+            },
+            ..Snapshot::default()
+        }
+    }
+
+    fn account(tool: Tool, dir: Option<&str>, s: &Snapshot) -> Option<(String, bool)> {
+        row_account(tool, dir, s).map(|a| (a.text, a.lane))
+    }
+
+    #[test]
+    fn a_claude_row_names_its_lane_or_the_main_login() {
+        let s = accounts();
+        assert_eq!(
+            account(Tool::Claude, None, &s),
+            Some(("me@example.com".into(), false))
+        );
+        assert_eq!(
+            account(Tool::Claude, Some("/lanes/night"), &s),
+            Some(("ops@example.com".into(), true))
+        );
+        // A lane that has no email yet is told by its name.
+        assert_eq!(
+            account(Tool::Claude, Some("/lanes/bare"), &s),
+            Some(("bare".into(), true))
+        );
+    }
+
+    #[test]
+    fn a_claude_row_in_a_folder_no_lane_names_has_no_account() {
+        assert_eq!(account(Tool::Claude, Some("/elsewhere"), &accounts()), None);
+    }
+
+    #[test]
+    fn nobody_signed_in_or_no_daemon_says_nothing() {
+        assert_eq!(account(Tool::Claude, None, &Snapshot::default()), None);
+        assert_eq!(account(Tool::Codex, None, &Snapshot::default()), None);
+        let mut s = accounts();
+        s.claude.active = None;
+        assert_eq!(account(Tool::Claude, None, &s), None);
+        s.claude.active = Some("gone".into());
+        assert_eq!(account(Tool::Claude, None, &s), None);
+    }
+
+    #[test]
+    fn codex_and_antigravity_rows_name_their_active_account() {
+        let s = accounts();
+        assert_eq!(
+            account(Tool::Codex, None, &s),
+            Some(("cx@example.com".into(), false))
+        );
+        assert_eq!(
+            account(Tool::Antigravity, None, &s),
+            Some(("ag@example.com".into(), false))
+        );
+        let mut s = s;
+        s.providers.providers[0].active_id = None;
+        assert_eq!(account(Tool::Codex, None, &s), None);
+        s.providers.providers[1].accounts[0].email.clear();
+        assert_eq!(account(Tool::Antigravity, None, &s), None);
+    }
+
+    #[test]
+    fn a_row_keeps_its_lane_folder() {
+        let mut lane = session("l", AgentGroup::Working, None, Tool::Claude);
+        lane.agent.config_dir = Some("/lanes/night".into());
+        let sections = sections(&[lane], 0);
+        assert_eq!(
+            sections[0].rows[0].config_dir.as_deref(),
+            Some("/lanes/night")
+        );
     }
 
     #[test]

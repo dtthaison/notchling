@@ -6,6 +6,11 @@ pub const TITLE_BAR: f32 = 38.0;
 /// Buttons and fields.
 pub const CONTROL: f32 = 28.0;
 pub const SESSION_ROW: f32 = 52.0;
+/// The sidebar's session row, which has a third line for the account: one height whether or not
+/// the account is known, so the list doesn't jump when the accounts load.
+pub const SESSION_ROW_ACCOUNT: f32 = 62.0;
+/// A session row's tool icon.
+pub const TOOL_ICON: f32 = 14.0;
 pub const RADIUS_SM: f32 = 6.0;
 pub const RADIUS_MD: f32 = 10.0;
 pub const RADIUS_CARD: f32 = 14.0;

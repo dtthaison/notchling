@@ -6,11 +6,12 @@ use gpui::{
     div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Stateful,
 };
 
+use super::icons::icon;
 use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::ink::{avatar as avatar_colors, claude_mark_top};
 use crate::metric::{
     AVATAR, BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
-    SESSION_ROW,
+    SESSION_ROW, SESSION_ROW_ACCOUNT,
 };
 use crate::part::{
     button_look, field_look, initials, option_look, row_look, ButtonKind, Look, PartState,
@@ -192,10 +193,169 @@ pub fn session_row(
     focused: bool,
     appearance: Appearance,
 ) -> Stateful<Div> {
-    let element = div()
+    let lines = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w(px(0.0))
+        .gap(px(2.0))
+        .overflow_hidden()
+        // One line each, clipped with an ellipsis, so every row keeps the same height.
+        .child(label(name, TypeRole::Heading, Ink::Text, appearance).elide())
+        .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).elide());
+    session_row_shell(
+        id,
+        div().min_h(px(SESSION_ROW)),
+        name,
+        lines,
+        age,
+        status,
+        state,
+        focused,
+        appearance,
+    )
+}
+
+/// Which tool runs a session, for [`tool_icon`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolMark {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+impl ToolMark {
+    /// The tool's name, for a tooltip or a label.
+    pub fn name(self) -> &'static str {
+        match self {
+            ToolMark::Claude => "Claude Code",
+            ToolMark::Codex => "Codex",
+            ToolMark::Antigravity => "Antigravity CLI",
+        }
+    }
+
+    /// The Swift `SessionTool.symbol`: what it draws when the tool's app isn't installed.
+    fn icon(self) -> Icon {
+        match self {
+            ToolMark::Claude => Icon::Claude,
+            ToolMark::Codex => Icon::Code,
+            ToolMark::Antigravity => Icon::Paperplane,
+        }
+    }
+}
+
+/// Spec: Tool icon (the Swift `ToolIcon`), `size` square: Claude's mark, else the tool's symbol at
+/// three quarters of the box in muted ink, as the Swift app draws it with no app icon to hand.
+/// The OpenAI and Google marks are brand artwork and aren't copied here.
+pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
+    match tool {
+        ToolMark::Claude => claude_mark(size, appearance),
+        other => div()
+            .flex_shrink_0()
+            .size(px(size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon(other.icon(), size * 0.75, Ink::TextMuted, appearance)),
+    }
+}
+
+/// Spec: a session row's account line: a 9 pt person (the main login) or branch (a lane) and the
+/// email, meta type in faint ink, clipped with an ellipsis.
+pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .min_w(px(0.0))
+        .child(icon(
+            if lane { Icon::Lane } else { Icon::Account },
+            9.0,
+            Ink::TextFaint,
+            appearance,
+        ))
+        .child(
+            label(text, TypeRole::Meta, Ink::TextFaint, appearance)
+                .flex_1()
+                .min_w(px(0.0))
+                .elide(),
+        )
+}
+
+/// Spec: Session row, the sidebar's: three lines, who (the tool icon and the name), on which
+/// account, doing what; the status line is accent text while the session needs you. `tool` and
+/// `account` are built by the caller (`tool_icon`, `account_line`) so it can name them as parts.
+/// Fixed at [`SESSION_ROW_ACCOUNT`], with or without an account line.
+#[allow(clippy::too_many_arguments)]
+pub fn session_row_marked(
+    id: impl Into<ElementId>,
+    name: &str,
+    tool: impl IntoElement,
+    account: Option<impl IntoElement>,
+    status_line: &str,
+    age: &str,
+    status: Status,
+    state: PartState,
+    focused: bool,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    let status_ink = if status == Status::Needs {
+        Ink::AccentText
+    } else {
+        Ink::TextMuted
+    };
+    let who = div()
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .min_w(px(0.0))
+        .child(tool)
+        .child(
+            label(name, TypeRole::Heading, Ink::Text, appearance)
+                .flex_1()
+                .min_w(px(0.0))
+                .elide(),
+        );
+    let lines = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w(px(0.0))
+        .gap(px(2.0))
+        .overflow_hidden()
+        .child(who)
+        .children(account)
+        .child(label(status_line, TypeRole::Meta, status_ink, appearance).elide());
+    session_row_shell(
+        id,
+        div().h(px(SESSION_ROW_ACCOUNT)),
+        name,
+        lines,
+        age,
+        status,
+        state,
+        focused,
+        appearance,
+    )
+}
+
+/// What the two session rows share: the frame, the avatar, the lines column, the age.
+#[allow(clippy::too_many_arguments)]
+fn session_row_shell(
+    id: impl Into<ElementId>,
+    frame: Div,
+    name: &str,
+    lines: Div,
+    age: &str,
+    status: Status,
+    state: PartState,
+    focused: bool,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    let element = frame
         .id(id)
         .w_full()
-        .min_h(px(SESSION_ROW))
+        .flex_shrink_0()
         .px(px(10.0))
         .flex()
         .items_center()
@@ -203,18 +363,7 @@ pub fn session_row(
         .rounded(px(RADIUS_MD))
         .look(&row_look(state, focused, appearance))
         .child(avatar(name, AVATAR, Some(status), Ink::Sidebar, appearance))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w(px(0.0))
-                .gap(px(2.0))
-                .overflow_hidden()
-                // One line each, clipped with an ellipsis, so every row keeps the same height.
-                .child(label(name, TypeRole::Heading, Ink::Text, appearance).elide())
-                .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).elide()),
-        )
+        .child(lines)
         .child(label(age, TypeRole::Meta, Ink::TextFaint, appearance));
     interactive(
         element,

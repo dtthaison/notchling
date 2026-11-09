@@ -21,8 +21,8 @@ pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitP
 pub use resize::{resize_edges, TopBorder};
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use widgets::{
-    avatar, button, button_with, card, claude_mark, field, label, option_row, phone_mark,
-    session_row, status_pill,
+    account_line, avatar, button, button_with, card, claude_mark, field, label, option_row,
+    phone_mark, session_row, session_row_marked, status_pill, tool_icon, ToolMark,
 };
 
 use gpui::{px, FontWeight, Hsla, Rgba, Styled, Window, WindowAppearance};

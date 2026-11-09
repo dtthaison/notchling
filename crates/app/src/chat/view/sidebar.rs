@@ -3,17 +3,18 @@
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::labels::Corner;
+use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, hsla, label, parts_button, parts_on, parts_tip, session_row, toggle_parts, KitPart,
-    KitStyled,
+    account_line, button, hsla, label, parts_button, parts_on, parts_tip, session_row_marked,
+    toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::data::Tool;
-use crate::chat::sidebar::sections;
+use crate::chat::sidebar::{row_account, sections};
 use crate::mac::gate;
 
 /// A footer button, named "<Title> Button" for the ? button as in the Swift sidebar.
@@ -77,8 +78,18 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         }))
 }
 
+fn mark_of(tool: Tool) -> ToolMark {
+    match tool {
+        Tool::Claude => ToolMark::Claude,
+        Tool::Codex => ToolMark::Codex,
+        Tool::Antigravity => ToolMark::Antigravity,
+    }
+}
+
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let sections = sections(&view.sessions, view.now_ms);
+    // Each row names its account from what the accounts store holds now.
+    let accounts = view.accounts.snapshot();
     let count = view.sessions.len();
     let mut list = div()
         .id("sessions")
@@ -113,15 +124,28 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             } else {
                 PartState::Rest
             };
-            let status_line = match row.tool {
-                Tool::Claude => row.status_line.clone(),
-                other => format!("{} · {}", other.name(), row.status_line),
-            };
+            let tool = gate::tip_text(
+                tool_icon(mark_of(row.tool), TOOL_ICON, a)
+                    .id(SharedString::from(format!("tool-{}", row.id))),
+                mark_of(row.tool).name().into(),
+                a,
+            )
+            .part_at("Tool Icon", Corner::Leading, a, cx);
+            let account = row_account(row.tool, row.config_dir.as_deref(), &accounts).map(|acc| {
+                account_line(&acc.text, acc.lane, a).part_at(
+                    "Session Account",
+                    Corner::Trailing,
+                    a,
+                    cx,
+                )
+            });
             list = list.child(
-                session_row(
+                session_row_marked(
                     SharedString::from(format!("session-{}", row.id)),
                     &row.name,
-                    &status_line,
+                    tool,
+                    account,
+                    &row.status_line,
                     &row.age,
                     row.status,
                     state,
