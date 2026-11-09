@@ -61,6 +61,18 @@ pub enum Icon {
     Plugin,
     /// A tool call that failed.
     Failed,
+    /// A session's folder.
+    Folder,
+    /// A git branch.
+    Branch,
+    /// The model.
+    Cpu,
+    /// Turns: back and forth.
+    Turns,
+    /// Tokens: text.
+    Tokens,
+    /// The effort level.
+    Gauge,
 }
 
 /// Where an icon sits decides its size.
@@ -85,7 +97,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 33] = [
+    pub const ALL: [Icon; 39] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -119,6 +131,12 @@ impl Icon {
         Icon::Skill,
         Icon::Plugin,
         Icon::Failed,
+        Icon::Folder,
+        Icon::Branch,
+        Icon::Cpu,
+        Icon::Turns,
+        Icon::Tokens,
+        Icon::Gauge,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -158,6 +176,12 @@ impl Icon {
             Icon::Plugin => "puzzlepiece.extension",
             // The Swift app's is filled; filled forms stay for status badges.
             Icon::Failed => "xmark.octagon",
+            Icon::Folder => "folder",
+            Icon::Branch => "arrow.triangle.branch",
+            Icon::Cpu => "cpu",
+            Icon::Turns => "arrow.left.arrow.right",
+            Icon::Tokens => "text.word.spacing",
+            Icon::Gauge => "gauge",
         }
     }
 
@@ -200,6 +224,12 @@ impl Icon {
             Icon::Skill => "✧",
             Icon::Plugin => "◇",
             Icon::Failed => "✕",
+            Icon::Folder => "▭",
+            Icon::Branch => "⑂",
+            Icon::Cpu => "▣",
+            Icon::Turns => "⇄",
+            Icon::Tokens => "≣",
+            Icon::Gauge => "◔",
         }
     }
 
@@ -230,6 +260,12 @@ impl Icon {
             Icon::Skill => "icons/sparkles.svg",
             Icon::Plugin => "icons/puzzle.svg",
             Icon::Failed => "icons/octagon-x.svg",
+            Icon::Folder => "icons/folder.svg",
+            Icon::Branch => "icons/git-branch.svg",
+            Icon::Cpu => "icons/cpu.svg",
+            Icon::Turns => "icons/arrow-left-right.svg",
+            Icon::Tokens => "icons/text.svg",
+            Icon::Gauge => "icons/gauge.svg",
             Icon::Resume
             | Icon::Send
             | Icon::Permission
@@ -278,7 +314,8 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 23] = icons![
+const SVGS: [(&str, &[u8]); 29] = icons![
+    "arrow-left-right",
     "brain",
     "bot",
     "check",
@@ -289,8 +326,12 @@ const SVGS: [(&str, &[u8]); 23] = icons![
     "circle-dashed",
     "clock",
     "copy",
+    "cpu",
     "file-plus",
     "file-text",
+    "folder",
+    "gauge",
+    "git-branch",
     "globe",
     "info",
     "list-checks",
@@ -301,6 +342,7 @@ const SVGS: [(&str, &[u8]); 23] = icons![
     "search",
     "sparkles",
     "square-terminal",
+    "text",
     "wrench",
 ];
 

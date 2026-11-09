@@ -12,17 +12,17 @@ pub struct ViewSpec {
 pub const ALL: [ViewSpec; 5] = [
     ViewSpec {
         name: "kit-gallery",
-        size: (760.0, 900.0),
+        size: (760.0, 1080.0),
         about: "every kit part in every state, in the system's appearance",
     },
     ViewSpec {
         name: "kit-gallery-light",
-        size: (760.0, 900.0),
+        size: (760.0, 1080.0),
         about: "the kit gallery, light",
     },
     ViewSpec {
         name: "kit-gallery-dark",
-        size: (760.0, 900.0),
+        size: (760.0, 1080.0),
         about: "the kit gallery, dark",
     },
     ViewSpec {

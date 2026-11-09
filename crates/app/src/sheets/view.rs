@@ -10,7 +10,7 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{button, card, hsla, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::new_session::{folder_title, parent_line, trust_text, NewSession, Stage, TRUST_TITLE};
@@ -406,7 +406,7 @@ impl Render for NewSessionView {
                     .min_h(px(0.0))
                     .flex()
                     .child(self.accounts(a, cx))
-                    .child(self.folders(a, cx)),
+                    .child(scrollable(self.folders(a, cx))),
             )
             .child(self.footer(a, cx))
             .children(self.trust_pop_up(a, cx))

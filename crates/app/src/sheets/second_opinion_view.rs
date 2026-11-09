@@ -9,7 +9,7 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{button, hsla, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::view::{sheet_header, Acts, Dismiss};
@@ -283,7 +283,7 @@ impl Render for SecondOpinionView {
                             a,
                         )),
                 )
-                .child(self.prompt_box(a, window, cx))
+                .child(scrollable(self.prompt_box(a, window, cx)))
         };
         div()
             .relative()

@@ -11,7 +11,7 @@ use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Sta
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, label, phone_mark, window_appearance, KitStyled, MONO_FONT,
+    button, card, hsla, label, phone_mark, scrollable, window_appearance, KitStyled, MONO_FONT,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -484,7 +484,7 @@ impl Render for PhonePanelView {
             .border_color(hsla(Ink::Hairline.color(a)))
             .fill(Ink::Window, a)
             .child(self.header(&panel.status, a))
-            .child(body)
+            .child(scrollable(body))
             .children(error.map(|e| {
                 label(&e, TypeRole::Meta, Ink::Needs, a)
                     .px(px(SIDE_PADDING))

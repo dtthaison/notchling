@@ -12,7 +12,7 @@ use gpui::{
     div, prelude::*, px, ClipboardItem, Context, EventEmitter, Render, SharedString, Window,
 };
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
-use notchling_kit::ui::{label, resize_edges, window_appearance, KitStyled, TopBorder};
+use notchling_kit::ui::{label, resize_edges, scrollable, window_appearance, KitStyled, TopBorder};
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
 use super::cost::Range;
@@ -539,7 +539,7 @@ impl AccountsView {
                         pick,
                     )),
             )
-            .child(list)
+            .child(scrollable(list))
             .child(add_panel(&page.add, a, cx, on_add))
             .into_any_element()
     }
@@ -551,7 +551,7 @@ impl Render for AccountsView {
         let s = self.store.snapshot();
         let body = match self.tab {
             Tab::Accounts => self.accounts_page(&s, a, cx),
-            Tab::TokenCost => self.cost_tab(&s, a, cx).into_any_element(),
+            Tab::TokenCost => scrollable(self.cost_tab(&s, a, cx)).into_any_element(),
         };
         let alert = self.alert.as_ref().map(|(alert, _)| {
             let on: super::view_rows::Handler<Self, bool> =

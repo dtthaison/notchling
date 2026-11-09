@@ -3,7 +3,8 @@
 //! window drawn, but never key and never taking clicks), captures it after it has drawn, writes
 //! the PNG and exits. Prints `wrote <path> (<w>x<h>, <bytes> bytes)` on success.
 //! `NOTCHLING_RENDER_APPEARANCE=light|dark` draws the view in that appearance instead of the
-//! system's, for checking both without changing the Mac's setting.
+//! system's, for checking both without changing the Mac's setting. `NOTCHLING_RENDER_SCROLLBARS=1`
+//! draws every overlay scroll bar as if it had just scrolled, since a still frame has no scroll.
 
 use std::path::Path;
 use std::time::Duration;
@@ -27,6 +28,9 @@ const SETTLE: Duration = Duration::from_millis(900);
 
 /// The environment's name for the appearance to render in.
 pub const APPEARANCE_ENV: &str = "NOTCHLING_RENDER_APPEARANCE";
+
+/// The environment's name for the switch that pins the scroll bars on.
+pub const SCROLLBARS_ENV: &str = "NOTCHLING_RENDER_SCROLLBARS";
 
 /// Forces the app's appearance, so every window (and `window_appearance`) follows it.
 fn force_appearance(appearance: Appearance) {
@@ -69,6 +73,9 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
     app.run(move |cx: &mut App| {
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
+        if std::env::var_os(SCROLLBARS_ENV).is_some_and(|v| v == "1") {
+            cx.set_global(notchling_kit::ui::PinScrollbars);
+        }
         if let Some(appearance) = forced {
             force_appearance(appearance);
         }

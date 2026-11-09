@@ -9,7 +9,8 @@ use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Win
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, claude_mark, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+    button, card, claude_mark, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
+    TopBorder,
 };
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
@@ -286,7 +287,7 @@ impl Render for FirstRunView {
             .flex()
             .flex_col()
             .fill(Ink::Window, a)
-            .child(
+            .child(scrollable(
                 div()
                     .id("first-run-body")
                     .flex_1()
@@ -335,7 +336,7 @@ impl Render for FirstRunView {
                         Ink::TextFaint,
                         a,
                     )),
-            )
+            ))
             .child(
                 div()
                     .flex_shrink_0()

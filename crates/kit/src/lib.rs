@@ -26,6 +26,7 @@ pub mod motion;
 mod palette;
 pub mod part;
 pub mod resize;
+pub mod scrollbar;
 pub mod text_edit;
 pub mod typescale;
 #[cfg(target_os = "macos")]

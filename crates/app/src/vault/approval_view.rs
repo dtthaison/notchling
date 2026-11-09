@@ -14,7 +14,7 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, window_appearance, KitStyled, MONO_FONT};
+use notchling_kit::ui::{button, hsla, label, scrollable, window_appearance, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::approval::{ApprovalModel, ALWAYS, COMMAND, DENY, FOLDER, ONCE, WINDOW_TITLE};
@@ -282,7 +282,11 @@ impl Render for VaultApprovalView {
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
-                    .child(mono_box(prompt.element("command-box"), &prompt.command, a))
+                    .child(scrollable(mono_box(
+                        prompt.element("command-box"),
+                        &prompt.command,
+                        a,
+                    )))
                     .children(
                         prompt
                             .command_size

@@ -12,6 +12,7 @@ mod gallery;
 mod icons;
 mod parts;
 mod resize;
+mod scrollbar;
 mod text_editor;
 mod widgets;
 
@@ -19,6 +20,7 @@ pub use gallery::KitGallery;
 pub use icons::{icon, KitAssets};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart};
 pub use resize::{resize_edges, TopBorder};
+pub use scrollbar::{scrollable, PinScrollbars, Scrollable};
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use widgets::{
     avatar, button, button_with, card, claude_mark, field, label, option_row, phone_mark,
