@@ -24,6 +24,7 @@
 //! root (`--data-root`, `NOTCHLING_DATA_ROOT`) and every render read files only: [`config_for`]
 //! gives them no configuration, so no socket is touched and nothing is started.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -136,6 +137,10 @@ pub struct View {
     /// What the `tools` topic has said about Codex and Antigravity sessions; empty without a
     /// daemon.
     pub tools: ToolLive,
+    /// Prompts answered from this app's windows (a hook prompt's id, a question's tool use id),
+    /// hidden in the notch and in Chat until the session's files catch up: one answered state for
+    /// both, so answering in one clears the other (`NotchModel::answered`).
+    pub answered: HashSet<String>,
     pub link: Link,
     /// Counts every change of rows or link, so a caller can tell something moved.
     pub generation: u64,
@@ -168,6 +173,7 @@ struct State {
     agents: Option<Vec<Agent>>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
+    answered: HashSet<String>,
     link: Link,
     generation: u64,
 }
@@ -257,6 +263,7 @@ impl SessionSource {
                     agents: None,
                     prompts: None,
                     tools: ToolLive::default(),
+                    answered: HashSet::new(),
                     link,
                     generation: 0,
                 }),
@@ -294,8 +301,25 @@ impl SessionSource {
             agents: state.agents.clone(),
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
+            answered: state.answered.clone(),
             link: state.link,
             generation: state.generation,
+        }
+    }
+
+    /// The held prompts and what was answered, without cloning the rest of the view: what Chat
+    /// reads on every draw.
+    pub fn held(&self) -> (Option<Vec<Value>>, HashSet<String>) {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        (state.prompts.clone(), state.answered.clone())
+    }
+
+    /// Records that a window answered the prompt keyed `key` (see [`View::answered`]); both
+    /// windows see it on their next read.
+    pub fn mark_answered(&self, key: &str) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.answered.insert(key.to_owned()) {
+            state.generation += 1;
         }
     }
 

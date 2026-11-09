@@ -18,6 +18,7 @@ mod markdown;
 mod message_actions;
 mod opinions;
 mod phone;
+mod prompts;
 mod sheets;
 mod sidebar;
 mod tasks;
@@ -78,6 +79,9 @@ pub const DETAILS_HIDDEN_ENV: &str = "NOTCHLING_RENDER_DETAILS_HIDDEN";
 pub const ACTIONS_ENV: &str = "NOTCHLING_RENDER_ACTIONS";
 /// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
 pub const DROP_ENV: &str = drop::PREVIEW_ENV;
+/// Set to `question` or `permission`, a render draws that card above the reply box, over the
+/// selected Claude Code session, with its controls live (`chat::prompts::Preview`).
+pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
 
 /// Whether a render switch is on.
 fn switch(name: &str) -> bool {
@@ -154,6 +158,8 @@ pub struct ChatView {
     /// The accounts store the header's meters and account menu read, and the switch feed.
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
+    /// The question or permission card above the reply box.
+    prompt: prompts::State,
     /// The reply box's + menu, and a render's forced states.
     composer: composer::State,
     /// The usage-limit ring's hover state under the reply box.
@@ -201,6 +207,9 @@ impl ChatView {
             },
             cx,
         );
+        view.prompt.preview = std::env::var(PROMPT_ENV)
+            .ok()
+            .and_then(|v| crate::chat::prompts::Preview::parse(&v));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         if switch(PARTS_ENV) {
@@ -294,6 +303,7 @@ impl ChatView {
         let mut view = ChatView {
             accounts,
             switches,
+            prompt: prompts::State::new(None, cx),
             composer: composer::State::default(),
             limit_ring: limit_ring::State::default(),
             account_menu: false,
@@ -385,6 +395,8 @@ impl ChatView {
         let wanted = asked.clone();
         let view = self.source.view();
         let (claude, live) = (view.agents, view.tools);
+        // The Swift hook's files are read only while the daemon's held prompts aren't followed.
+        loader.files_prompts = view.prompts.is_none();
         cx.spawn(async move |this, cx| {
             let (loader, loaded) = cx
                 .background_executor()
@@ -411,6 +423,7 @@ impl ChatView {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
         self.sessions = loaded.sessions;
+        self.prompt.files = loaded.requests;
         // The search panel's session, now that the list has it, or never.
         if let Some(pending) = self.pending_session.as_mut() {
             match pending.after_load(&self.sessions, now_ms()) {
@@ -441,6 +454,7 @@ impl ChatView {
                 self.conversation_scroll.scroll_to_bottom();
             }
             self.subagents = loaded.subagents;
+            self.prompt.transcript = loaded.question;
         } else {
             self.load_again = true;
         }
@@ -513,6 +527,7 @@ impl ChatView {
         self.selected = Some(id.to_owned());
         self.conversation = Conversation::default();
         self.subagents.clear();
+        self.prompt.transcript = None;
         self.loading = true;
         self.scroll_to_end = true;
         self.tools.error = None;
@@ -585,6 +600,7 @@ impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         self.drawn_ms = now_ms();
+        self.sync_prompt();
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.phone.is_some()

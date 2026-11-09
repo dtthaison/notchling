@@ -15,6 +15,7 @@ use serde_json::Value;
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::chat::data::Tool;
+use crate::chat::prompts::is_dialog;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::{held_prompt, HeldPrompt};
@@ -310,7 +311,12 @@ impl ChatView {
                         format!("{sent_text}\n\n{typed}")
                     };
                     view.put_draft(&id, back, cx);
+                    // A question or permission is open: read it again, for the card.
+                    let asking = is_dialog(&message);
                     view.tools.error = Some(message);
+                    if asking {
+                        view.reload_now(cx);
+                    }
                 }
             },
             cx,

@@ -209,12 +209,18 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, prompts, live, note) = match answer {
+        let (claude, prompts, live, note, answered) = match answer {
             Some(answer) => {
                 let note = answer.note();
-                (answer.agents, answer.prompts, answer.tools, note)
+                (
+                    answer.agents,
+                    answer.prompts,
+                    answer.tools,
+                    note,
+                    answer.answered,
+                )
             }
-            None => (None, None, ToolLive::default(), None),
+            None => (None, None, ToolLive::default(), None, Default::default()),
         };
         if let Some(mut source) = source {
             let (source, loaded) = cx
@@ -227,6 +233,8 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
             let applied = this.update(cx, |view, cx| {
                 view.source = Some(source);
                 view.model.daemon_note = note;
+                // What Chat answered is answered here too.
+                view.model.answered.extend(answered);
                 let now = now_ms();
                 view.model.now_ms = now;
                 if let Some(info) = MainThreadMarker::new().and_then(screen_info) {

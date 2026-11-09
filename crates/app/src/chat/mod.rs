@@ -23,6 +23,7 @@ pub mod limit_ring;
 pub mod loader;
 pub mod markdown;
 pub mod message_meta;
+pub mod prompts;
 pub mod reload;
 pub mod rows;
 pub mod sidebar;

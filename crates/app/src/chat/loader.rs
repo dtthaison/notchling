@@ -3,11 +3,15 @@
 //! polls need between reads; owns no view state, so a view sends it to the background executor
 //! and takes it back.
 
+use std::collections::HashMap;
+
 use notchling_engine::sessions::{Agent, Monitor};
 use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::snapshot::{self, PendingQuestion};
 use notchling_engine::transcript::subagents::Subagent;
 
 use super::data::{DataRoot, Session, Tool};
+use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
 use crate::transcripts::Locator;
@@ -20,6 +24,11 @@ pub struct Loaded {
     pub selected: Option<String>,
     pub conversation: Conversation,
     pub subagents: Vec<Subagent>,
+    /// The selected Claude Code session's unanswered AskUserQuestion, from its transcript tail.
+    pub question: Option<PendingQuestion>,
+    /// The Swift hook's held prompts by session id (`requests/`), read only while the daemon's
+    /// aren't followed ([`Loader::files_prompts`]).
+    pub requests: HashMap<String, HookRequest>,
     pub now_ms: i64,
 }
 
@@ -31,6 +40,9 @@ pub struct Loader {
     monitor: Monitor,
     locator: Locator,
     agy: AgyList,
+    /// Read the Swift hook's `requests/` folder too: set while the daemon's held prompts aren't
+    /// followed (no daemon, or this isn't the app tier), as the notch does.
+    pub files_prompts: bool,
 }
 
 impl Loader {
@@ -39,6 +51,7 @@ impl Loader {
             monitor: root.new_monitor(),
             locator: root.new_locator(),
             agy: root.new_agy_list(),
+            files_prompts: false,
             root,
         }
     }
@@ -101,6 +114,15 @@ impl Loader {
         let session = selected
             .as_deref()
             .and_then(|id| sessions.iter().find(|s| s.agent.id == id));
+        let question = session
+            .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
+            .and_then(|s| s.transcript.as_ref())
+            .and_then(|path| snapshot::read(&path.to_string_lossy()).question);
+        let requests = if self.files_prompts {
+            requests::read_dir(&self.root.data_dir.join("requests"), now_ms as f64 / 1000.0)
+        } else {
+            HashMap::new()
+        };
         let (conversation, subagents) = match session {
             Some(session) => {
                 let conversation = self.root.conversation(session);
@@ -116,6 +138,8 @@ impl Loader {
             selected,
             conversation,
             subagents,
+            question,
+            requests,
             now_ms,
         }
     }

@@ -10,8 +10,8 @@
 //! (`chat::drops`, the drop target is the column in `view::mod`); the card's edge turns accent
 //! while one is over it. Under the card, one row: the model or options picker at the left, the
 //! status line (the error, "Sending…", what waits, or why the box is off) and the usage-limit ring
-//! (`view::limit_ring`). Above it, an Antigravity permission card when the daemon holds one for
-//! the row, and the picker's pop-up. Disabled while acting isn't on; the reason is the status
+//! (`view::limit_ring`). Above it, the question or permission a Claude Code session waits on
+//! (`view::prompts`), an Antigravity permission card when the daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the reason is the status
 //! line, and only there.
 
 use gpui::{
@@ -31,6 +31,7 @@ use super::tools::Picker;
 use super::ChatView;
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
 use crate::chat::data::Tool;
+use crate::chat::prompts::error_text;
 use crate::mac::gate;
 use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
@@ -162,7 +163,8 @@ fn status(
     cx: &Context<ChatView>,
 ) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
-        (error.clone(), Ink::Needs)
+        // The daemon's "asking you something" refusal points at the card when one is up.
+        (error_text(error, view.prompt.is_shown()), Ink::Needs)
     } else if view.tools.sending {
         ("Sending…".to_owned(), Ink::TextMuted)
     } else if let Some(n) = view
@@ -628,6 +630,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .flex_col()
         .pt(px(8.0))
         .pb(px(SIDE_PADDING))
+        .children(super::prompts::card(view, a, window, cx))
         .children(permission(view, a, cx))
         .child(card)
         .child(footer)

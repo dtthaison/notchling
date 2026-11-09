@@ -156,6 +156,7 @@ impl NotchView {
         self.sending = true;
         self.send_error = None;
         let actions = self.actions.clone();
+        let shared = self.sessions.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -167,6 +168,10 @@ impl NotchView {
                     Ok(_) => {
                         if let Some(key) = &key {
                             view.model.mark_answered_key(key);
+                            // Chat shows the same prompts: it must not keep offering this one.
+                            if let Some(sessions) = &shared {
+                                sessions.mark_answered(key);
+                            }
                         }
                         view.fold_peek();
                     }
