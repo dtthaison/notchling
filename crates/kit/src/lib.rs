@@ -32,7 +32,7 @@ pub use icon::{Icon, IconSize};
 pub use ink::{Ink, Status};
 pub use motion::{Curve, Motion};
 pub use part::{ButtonKind, PartState};
-pub use typescale::{TypeRole, TypeSpec, Weight};
+pub use typescale::{sentence, TypeRole, TypeSpec, Weight};
 
 /// The crate's short name.
 pub fn crate_name() -> &'static str {

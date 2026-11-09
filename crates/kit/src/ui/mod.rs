@@ -10,7 +10,8 @@ mod widgets;
 
 pub use gallery::KitGallery;
 pub use widgets::{
-    avatar, button, card, claude_mark, field, label, option_row, session_row, status_pill,
+    avatar, button, button_with, card, claude_mark, field, label, option_row, phone_mark,
+    session_row, status_pill,
 };
 
 use gpui::{px, FontWeight, Hsla, Rgba, Styled, Window, WindowAppearance};
@@ -75,6 +76,15 @@ pub trait KitStyled: Styled + Sized {
     /// Background in an ink.
     fn fill(self, ink: Ink, appearance: Appearance) -> Self {
         self.bg(hsla(ink.color(appearance)))
+    }
+
+    /// One line, cut with an ellipsis where it runs out of room. GPUI 0.2.2's `truncate()` sets
+    /// `nowrap` too, and a nowrap text keeps its first (max-content) measurement, so the ellipsis
+    /// never draws and the text is clipped mid-word at the edge; without `nowrap` the definite
+    /// width is measured again and the text is cut to it. The element needs a definite width (a
+    /// `flex_1` item with `min_w(0)`, or `w_full`), as with `truncate()`.
+    fn elide(self) -> Self {
+        self.overflow_hidden().text_ellipsis()
     }
 
     /// A part's look in one state: fill, edge (the focus ring wins over the border), text, opacity.

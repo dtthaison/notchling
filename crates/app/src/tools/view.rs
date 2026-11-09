@@ -78,7 +78,7 @@ pub fn agy_card<V: 'static>(
             a,
         ))
         .child(div().flex_1())
-        .children(agent.map(|name| label(name, TypeRole::Meta, Ink::TextMuted, a).truncate()));
+        .children(agent.map(|name| label(name, TypeRole::Meta, Ink::TextMuted, a).elide()));
     let preview = div()
         .w_full()
         .p(px(8.0))
@@ -179,7 +179,7 @@ fn pick_row(
                 .min_w(px(0.0))
                 .flex()
                 .flex_col()
-                .child(label(title, TypeRole::Label, Ink::Text, a).truncate())
+                .child(label(title, TypeRole::Label, Ink::Text, a).elide())
                 .when(!detail.is_empty(), |d| {
                     d.child(label(detail, TypeRole::Meta, Ink::TextFaint, a).line_clamp(2))
                 }),

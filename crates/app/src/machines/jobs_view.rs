@@ -212,7 +212,7 @@ impl MachinesView {
             .gap(px(8.0))
             .children(sw.note.as_deref().map(|n| {
                 label(n, TypeRole::Meta, Ink::TextFaint, a)
-                    .truncate()
+                    .elide()
                     .max_w(px(260.0))
             }))
             .child(label("Running", TypeRole::Label, Ink::Text, a))

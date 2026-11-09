@@ -233,7 +233,7 @@ impl MachinesView {
             ));
         }
         if let Some(error) = &chip.error {
-            row = row.child(label(error, TypeRole::Meta, Ink::Expired, a).truncate());
+            row = row.child(label(error, TypeRole::Meta, Ink::Expired, a).elide());
         }
         row
     }
