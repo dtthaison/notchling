@@ -113,6 +113,8 @@ A question's answer: number badge (1, 2, 3, matching the terminal's digits), tit
 ### Composer
 Card fill, radius composer, hairline border (accent 60% while focused), soft shadow. Send is a 30 pt accent disc with an `arrow.up`, faint when empty.
 
+**Text editor** (the Rust app's `TextEditor`, `crates/kit/src/ui/text_editor/`): body type, 16 pt lines, one to eight then it scrolls with the caret kept in view. Caret 1.5 pt accent, on for half a second after anything happens, then blinking at 0.5 s while focused. Selection accent 35%. Text the input method is composing is underlined 1 pt in the text color; the candidate window sits under it. Placeholder in textFaint. Disabled: 50% opacity, no caret, no focus. A file dragged over the card turns its edge accent; dropped, its path goes in at the caret.
+
 **Shell mode**, when the draft starts with `!`: a 1.5 pt shell border over a shellWash fill, a header row (`terminal` icon, "Shell command" in label type, then "runs in <folder> · Claude sees the output" in meta), the draft in mono, a shell-colored run disc, and the hint "Return runs it like ! in the terminal · delete the ! to send a message instead". A sent `! command` shows in a shellWash bubble, mono, with the `!` in shell. When putting a copied command back together changes it, a raised "Will run" box under the header shows the command as it will run.
 
 **Header meters**, between the title and the buttons: Context (`148.8k / 400k`, a 3 pt bar, only for models whose window is known), then the account's 5h and Week limits. Bars are `working`, `needs` from 80%. Exact numbers and reset times are in the tooltips.

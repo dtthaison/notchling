@@ -1,12 +1,13 @@
 //! Every part in every state, for review in light and dark. Rendered by `notchling-app --render
 //! kit-gallery` (U10), never shown in the app.
 
-use gpui::{div, prelude::*, px, Context, Div, Render, SharedString, Subscription, Window};
+use gpui::{div, prelude::*, px, Context, Div, Entity, Render, SharedString, Subscription, Window};
 
+use super::text_editor::TextEditor;
 use super::widgets::{
     avatar, button, claude_mark, field, label, option_row, session_row, status_pill,
 };
-use super::{window_appearance, KitStyled};
+use super::{hsla, window_appearance, KitStyled};
 use crate::metric::RADIUS_MD;
 use crate::part::{ButtonKind, PartState};
 use crate::{Appearance, Ink, Status, TypeRole};
@@ -14,6 +15,8 @@ use crate::{Appearance, Ink, Status, TypeRole};
 /// The gallery view. `appearance: None` follows the window (the system); `Some` forces one.
 pub struct KitGallery {
     appearance: Option<Appearance>,
+    /// The text editor in its states: placeholder, caret, selection, marked text, disabled.
+    editors: Vec<Entity<TextEditor>>,
     _appearance_changes: Subscription,
 }
 
@@ -30,6 +33,7 @@ impl KitGallery {
         });
         Self {
             appearance,
+            editors: editors(cx),
             _appearance_changes: changes,
         }
     }
@@ -38,6 +42,62 @@ impl KitGallery {
     pub fn appearance(&self, window: &Window) -> Appearance {
         self.appearance.unwrap_or_else(|| window_appearance(window))
     }
+}
+
+/// The editor as a render would never catch it live: the caret and selection drawn without focus
+/// (`preview`), a composition marked by hand.
+fn editors(cx: &mut Context<KitGallery>) -> Vec<Entity<TextEditor>> {
+    vec![
+        cx.new(|cx| TextEditor::new("Reply…", 8, cx).preview()),
+        cx.new(|cx| {
+            let mut e = TextEditor::new("", 8, cx).preview();
+            e.set_text(
+                "A reply long enough to wrap onto a second row of the box, with the caret here",
+                cx,
+            );
+            e.select(46, 46, cx);
+            e
+        }),
+        cx.new(|cx| {
+            let mut e = TextEditor::new("", 8, cx).preview();
+            e.set_text("Drag over a few words to select them", cx);
+            e.select(16, 26, cx);
+            e
+        }),
+        cx.new(|cx| {
+            let mut e = TextEditor::new("", 8, cx).preview();
+            e.set_text("xin chào việt", cx);
+            e.mark(10..16, cx);
+            e
+        }),
+        cx.new(|cx| {
+            let mut e = TextEditor::new("", 8, cx).preview();
+            e.set_text("Off while acting is off", cx);
+            e.set_enabled(false, cx);
+            e
+        }),
+    ]
+}
+
+fn text_editors(editors: &[Entity<TextEditor>], a: Appearance) -> Div {
+    div()
+        .w(px(320.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .children(editors.iter().map(|editor| {
+            div()
+                .px(px(10.0))
+                .py(px(6.0))
+                .rounded(px(RADIUS_MD))
+                .fill(Ink::Card, a)
+                .border(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .kit_type(TypeRole::Body)
+                .line_height(px(16.0))
+                .ink(Ink::Text, a)
+                .child(editor.clone())
+        }))
 }
 
 fn id(part: &str, detail: &str) -> SharedString {
@@ -199,6 +259,13 @@ impl Render for KitGallery {
                     .child(section("Session rows", a, rows(a)))
                     .child(section("Options", a, options(a))),
             )
-            .child(section("Pills, avatars, field", a, small_parts(a)))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(24.0))
+                    .child(section("Pills, avatars, field", a, small_parts(a)))
+                    .child(section("Text editor", a, text_editors(&self.editors, a))),
+            )
     }
 }

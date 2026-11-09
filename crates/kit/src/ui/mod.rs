@@ -1,16 +1,19 @@
 //! The widget layer over GPUI: the tokens applied. macOS only for now (`LINT-GPUI-MACOS-ONLY`).
 //!
 //! Views style through [`KitStyled`] (`kit_type`, `ink`, `fill`, `look`) and build parts with the
-//! functions in `widgets`, never with a raw color or size. What GPUI can't do yet is noted where it
+//! functions in `widgets`, never with a raw color or size. [`TextEditor`] is the text box with a
+//! caret, a selection and the input method (the reply box). What GPUI can't do yet is noted where it
 //! matters: no SF Symbols (icons draw their text glyph), no letter spacing (section headers are
 //! uppercase but not tracked), no press scale.
 
 mod gallery;
 mod resize;
+mod text_editor;
 mod widgets;
 
 pub use gallery::KitGallery;
 pub use resize::{resize_edges, TopBorder};
+pub use text_editor::{TextEditor, TextEditorEvent};
 pub use widgets::{
     avatar, button, button_with, card, claude_mark, field, label, option_row, phone_mark,
     session_row, status_pill,
