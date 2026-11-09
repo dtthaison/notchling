@@ -260,17 +260,21 @@ impl Element for Scrollable {
         if alpha > 0.0 {
             if let Some(thumb) = geometry.thumb() {
                 let ink = Ink::TextMuted.color(appearance);
-                if hovered || dragging {
-                    let track = Ink::TextFaint
-                        .color(appearance)
-                        .with_alpha(TRACK_ALPHA * alpha);
-                    window.paint_quad(fill(strip(bounds), hsla(track)));
-                }
                 let width = if hovered || dragging {
                     THUMB_WIDTH_HOVER
                 } else {
                     THUMB_WIDTH
                 };
+                // The track is the thumb's lane: its width, inset and rounded ends, never the
+                // wider hover strip.
+                if hovered || dragging {
+                    let track = Ink::TextFaint
+                        .color(appearance)
+                        .with_alpha(TRACK_ALPHA * alpha);
+                    window.paint_quad(
+                        fill(lane(bounds, width), hsla(track)).corner_radii(px(width / 2.0)),
+                    );
+                }
                 let top = f32::from(bounds.top()) + EDGE_INSET + thumb.start;
                 let rect = Bounds {
                     origin: point(bounds.right() - px(EDGE_INSET + width), px(top)),
@@ -386,6 +390,20 @@ impl Element for Scrollable {
 }
 
 /// The bar's strip: along the container's right edge, its whole height.
+/// The lane the thumb runs in: `width` wide, [`EDGE_INSET`] in from the right, top and bottom.
+fn lane(bounds: Bounds<Pixels>, width: f32) -> Bounds<Pixels> {
+    Bounds {
+        origin: point(
+            bounds.right() - px(EDGE_INSET + width),
+            bounds.top() + px(EDGE_INSET),
+        ),
+        size: size(
+            px(width),
+            (bounds.size.height - px(2.0 * EDGE_INSET)).max(px(0.0)),
+        ),
+    }
+}
+
 fn strip(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     Bounds {
         origin: point(bounds.right() - px(ZONE_WIDTH), bounds.top()),
