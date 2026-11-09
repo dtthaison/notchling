@@ -119,6 +119,8 @@ pub enum Icon {
     Paperclip,
     /// Slash commands.
     SlashBox,
+    /// A task under way, half done (SF `circle.lefthalf.filled`).
+    Halfway,
 }
 
 /// Where an icon sits decides its size.
@@ -143,7 +145,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 62] = [
+    pub const ALL: [Icon; 63] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -206,6 +208,7 @@ impl Icon {
         Icon::Return,
         Icon::Paperclip,
         Icon::SlashBox,
+        Icon::Halfway,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -274,6 +277,7 @@ impl Icon {
             Icon::Return => "return",
             Icon::Paperclip => "paperclip",
             Icon::SlashBox => "square.slash",
+            Icon::Halfway => "circle.lefthalf.filled",
         }
     }
 
@@ -345,6 +349,7 @@ impl Icon {
             Icon::Return => "↵",
             Icon::Paperclip => "⌁",
             Icon::SlashBox => "/",
+            Icon::Halfway => "◐",
         }
     }
 
@@ -405,6 +410,7 @@ impl Icon {
             Icon::Return => "icons/corner-down-left.svg",
             Icon::Paperclip => "icons/paperclip.svg",
             Icon::SlashBox => "icons/square-slash.svg",
+            Icon::Halfway => "icons/contrast.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -454,7 +460,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 59] = icons![
+const SVGS: [(&str, &[u8]); 60] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -475,6 +481,7 @@ const SVGS: [(&str, &[u8]); 59] = icons![
     "circle-x",
     "clock",
     "code-xml",
+    "contrast",
     "copy",
     "corner-down-left",
     "cpu",

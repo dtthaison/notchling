@@ -20,6 +20,7 @@ mod opinions;
 mod phone;
 mod sheets;
 mod sidebar;
+mod tasks;
 mod tools;
 
 use std::collections::HashSet;
@@ -67,6 +68,8 @@ pub const WORKING_ENV: &str = "NOTCHLING_RENDER_WORKING";
 pub const ADD_ENV: &str = "NOTCHLING_RENDER_ADD";
 /// Set to `1`, a render draws the usage-limit card open (`limit_ring::LIMITS_ENV`).
 pub const LIMITS_ENV: &str = limit_ring::LIMITS_ENV;
+/// Set to `1`, a render draws the Tasks bar open, its list under it.
+pub const TASKS_OPEN_ENV: &str = "NOTCHLING_RENDER_TASKS_OPEN";
 /// Set to `1`, a render draws the sidebar hidden, as its toggle leaves it.
 pub const SIDEBAR_HIDDEN_ENV: &str = "NOTCHLING_RENDER_SIDEBAR_HIDDEN";
 /// Set to `1`, a render draws the Details panel hidden.
@@ -112,6 +115,8 @@ pub struct ChatView {
     /// Every group, step and thought drawn open: a render over a fixture
     /// (`NOTCHLING_RENDER_EXPAND=1`), since nothing clicks in a picture.
     expand_all: bool,
+    /// The Tasks bar drawn open (`NOTCHLING_RENDER_TASKS_OPEN=1`).
+    tasks_open_preview: bool,
     /// The drop hint drawn as if a file were over the column (`NOTCHLING_RENDER_DROP=1`), since
     /// nothing drags in a picture.
     drop_preview: bool,
@@ -183,6 +188,7 @@ impl ChatView {
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx);
         view.expand_all = switch(EXPAND_ENV);
+        view.tasks_open_preview = switch(TASKS_OPEN_ENV);
         view.drop_preview = switch(DROP_ENV);
         view.latest_preview = switch(LATEST_ENV);
         view.actions_preview = switch(ACTIONS_ENV);
@@ -231,6 +237,11 @@ impl ChatView {
     /// Whether the group, step or thought `id` is drawn open.
     pub(super) fn is_open(&self, id: &str) -> bool {
         self.expand_all || self.expanded.contains(id)
+    }
+
+    /// Whether the Tasks bar is open.
+    pub(super) fn tasks_open(&self) -> bool {
+        self.tasks_open_preview || self.expanded.contains(tasks::OPEN_ID)
     }
 
     /// Opens or folds `id`.
@@ -307,6 +318,7 @@ impl ChatView {
             conversation_scroll: ScrollHandle::new(),
             expanded: HashSet::new(),
             expand_all: false,
+            tasks_open_preview: false,
             drop_preview: false,
             latest_preview: false,
             actions_preview: false,
@@ -590,6 +602,8 @@ impl Render for ChatView {
             .child(
                 scrollable(conversation::render(self, a, cx)).tracking(&self.conversation_scroll),
             )
+            // Over the messages, so it stays while they scroll.
+            .children(tasks::render(self, a, cx))
             .children(conversation::latest_pill(self, a, cx))
             .part_at("Conversation", Corner::Bottom, a, cx);
         let column = div()

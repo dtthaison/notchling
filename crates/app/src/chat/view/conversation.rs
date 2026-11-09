@@ -644,7 +644,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         .overflow_y_scroll()
         .track_scroll(&view.conversation_scroll)
         .px(px(SIDE_PADDING))
-        .py(px(COLUMN_PADDING_VERTICAL))
+        .pb(px(COLUMN_PADDING_VERTICAL))
+        // The Tasks bar sits over the top, so the first row starts under it.
+        .pt(px(if super::tasks::shown(view) {
+            super::tasks::INSET + COLUMN_PADDING_VERTICAL
+        } else {
+            COLUMN_PADDING_VERTICAL
+        }))
         .flex()
         .flex_col()
         .gap(px(ROW_GAP));
