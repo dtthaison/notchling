@@ -111,6 +111,8 @@ pub enum Icon {
     PanelRight,
     /// Something is in progress: drawn turning, by `ui::spinner` (SF `progress.indicator`).
     Spinner,
+    /// A task under way, half done (SF `circle.lefthalf.filled`).
+    Halfway,
 }
 
 /// Where an icon sits decides its size.
@@ -135,7 +137,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 58] = [
+    pub const ALL: [Icon; 59] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -194,6 +196,7 @@ impl Icon {
         Icon::PanelLeft,
         Icon::PanelRight,
         Icon::Spinner,
+        Icon::Halfway,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -258,6 +261,7 @@ impl Icon {
             Icon::PanelLeft => "sidebar.left",
             Icon::PanelRight => "sidebar.right",
             Icon::Spinner => "progress.indicator",
+            Icon::Halfway => "circle.lefthalf.filled",
         }
     }
 
@@ -325,6 +329,7 @@ impl Icon {
             Icon::PanelLeft => "◧",
             Icon::PanelRight => "◨",
             Icon::Spinner => "◌",
+            Icon::Halfway => "◐",
         }
     }
 
@@ -381,6 +386,7 @@ impl Icon {
             Icon::PanelLeft => "icons/panel-left.svg",
             Icon::PanelRight => "icons/panel-right.svg",
             Icon::Spinner => "icons/loader-circle.svg",
+            Icon::Halfway => "icons/contrast.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -430,7 +436,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 55] = icons![
+const SVGS: [(&str, &[u8]); 56] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -450,6 +456,7 @@ const SVGS: [(&str, &[u8]); 55] = icons![
     "circle-x",
     "clock",
     "code-xml",
+    "contrast",
     "copy",
     "cpu",
     "ellipsis",

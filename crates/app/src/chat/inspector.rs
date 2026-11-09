@@ -66,6 +66,55 @@ fn task_row(subject: &str, status: TaskStatus) -> TaskRow {
     }
 }
 
+/// The session's tasks as rows, in list order.
+pub fn task_rows(conversation: &Conversation) -> Vec<TaskRow> {
+    conversation
+        .tasks
+        .iter()
+        .map(|t| task_row(&t.subject, t.status))
+        .collect()
+}
+
+/// What the pinned Tasks bar says: done of all, the task under way, how far along.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskSummary {
+    pub done: usize,
+    pub total: usize,
+    /// The first task in progress ("Now: …").
+    pub current: Option<String>,
+}
+
+impl TaskSummary {
+    /// `None` for no tasks: the bar isn't drawn.
+    pub fn of(tasks: &[TaskRow]) -> Option<TaskSummary> {
+        if tasks.is_empty() {
+            return None;
+        }
+        Some(TaskSummary {
+            done: tasks.iter().filter(|t| t.status == Status::Done).count(),
+            total: tasks.len(),
+            current: tasks
+                .iter()
+                .find(|t| t.status == Status::Working)
+                .map(|t| t.subject.clone()),
+        })
+    }
+
+    /// "Tasks 1/3" (the Swift bar's heading; the Details section writes "Tasks · 1/3").
+    pub fn title(&self) -> String {
+        format!("Tasks {}/{}", self.done, self.total)
+    }
+
+    /// The progress bar's fill, 0 to 1.
+    pub fn fraction(&self) -> f32 {
+        self.done as f32 / self.total as f32
+    }
+
+    pub fn all_done(&self) -> bool {
+        self.done == self.total
+    }
+}
+
 fn subagent_row(agent: &Subagent) -> SubagentRow {
     let (status, word, mark) = match agent.status {
         SubagentStatus::Running => (Status::Working, "Running", Mark::Spinner),
@@ -279,11 +328,7 @@ pub fn inspector(
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
     Inspector {
-        tasks: conversation
-            .tasks
-            .iter()
-            .map(|t| task_row(&t.subject, t.status))
-            .collect(),
+        tasks: task_rows(conversation),
         facts: facts(conversation, home),
         subagents: subagents.iter().map(subagent_row).collect(),
         shells: conversation
@@ -510,6 +555,30 @@ mod tests {
         assert_eq!(i.subagents[0].detail, "Running");
         assert_eq!(i.subagents[1].detail, "Failed · Plan");
         assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn the_tasks_bar_counts_done_of_all() {
+        let row = |subject: &str, status| task_row(subject, status);
+        assert_eq!(TaskSummary::of(&[]), None);
+        let none_done =
+            TaskSummary::of(&[row("a", TaskStatus::Pending), row("b", TaskStatus::Pending)])
+                .unwrap();
+        assert_eq!(none_done.title(), "Tasks 0/2");
+        assert_eq!((none_done.fraction(), none_done.current), (0.0, None));
+        let mid = TaskSummary::of(&[
+            row("a", TaskStatus::Completed),
+            row("b", TaskStatus::InProgress),
+            row("c", TaskStatus::InProgress),
+            row("d", TaskStatus::Pending),
+        ])
+        .unwrap();
+        assert_eq!(mid.title(), "Tasks 1/4");
+        assert_eq!(mid.fraction(), 0.25);
+        assert_eq!(mid.current.as_deref(), Some("b"));
+        assert!(!mid.all_done());
+        let all = TaskSummary::of(&[row("a", TaskStatus::Completed)]).unwrap();
+        assert!(all.all_done() && all.fraction() == 1.0);
     }
 
     #[test]
