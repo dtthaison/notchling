@@ -14,8 +14,11 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use notchling_local_api::{Client, ClientError, ClientKind, ConnectOptions, SOCKET_NAME};
+use notchling_local_api::{
+    Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT, SOCKET_NAME,
+};
 use serde_json::{json, Value};
 
 use crate::acting::{self, ops, Acting, Request};
@@ -33,9 +36,27 @@ pub struct Socket {
     pub version: String,
 }
 
+/// How long a call that types into a session waits. The daemon may take 15 s to attach, then
+/// types, waits for the screen and detaches (3 s); an answer walks several pages. Giving up sooner
+/// reports a failure for a message the daemon still sends, and sending it again doubles it.
+pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long the app waits for `op`'s reply: the session ops drive a terminal, the rest are reads
+/// and settings that answer at once.
+pub fn call_timeout(op: &str) -> Duration {
+    if op.starts_with("session.") || op == ops::FOLDER_TRUST {
+        SESSION_CALL_TIMEOUT
+    } else {
+        CALL_TIMEOUT
+    }
+}
+
 impl Transport for Socket {
     fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
-        let options = ConnectOptions::default();
+        let options = ConnectOptions {
+            timeout: call_timeout(op),
+            ..ConnectOptions::default()
+        };
         let mut client =
             Client::connect_with(&self.socket, ClientKind::App, &self.version, &options)?;
         client.call(op, args)
@@ -258,6 +279,36 @@ mod tests {
     use crate::switches::restart::{Area, RestartNotice};
     use notchling_local_api::{ApiError, ErrorCode};
     use std::sync::Arc;
+
+    #[test]
+    fn calls_that_type_into_a_session_wait_longer_than_the_daemon_does() {
+        // A reply attaches (up to 15 s), types and detaches (3 s): the app gave up at 5 s, said
+        // it failed while the daemon still sent it, and a second send doubled the message.
+        for op in [
+            ops::SESSION_REPLY,
+            ops::SESSION_ANSWER,
+            ops::SESSION_PERMISSION,
+            ops::SESSION_INTERRUPT,
+            ops::SESSION_TAKE_BACK,
+            ops::SESSION_COMMAND,
+            ops::SESSION_NEW,
+            ops::FOLDER_TRUST,
+            ops::SESSION_MOVE,
+            ops::SESSION_STOP,
+            ops::SESSION_REMOVE,
+        ] {
+            assert_eq!(call_timeout(op), SESSION_CALL_TIMEOUT, "{op}");
+        }
+        assert!(SESSION_CALL_TIMEOUT >= std::time::Duration::from_secs(60));
+        assert_eq!(
+            call_timeout(ops::DAEMON_STATUS),
+            notchling_local_api::CALL_TIMEOUT
+        );
+        assert_eq!(
+            call_timeout(ops::SETTINGS_SET_ACTING),
+            notchling_local_api::CALL_TIMEOUT
+        );
+    }
 
     type Calls = Arc<Mutex<Vec<(String, Value)>>>;
     type Script = Box<dyn Fn(&str) -> Result<Value, ClientError> + Send + Sync>;
