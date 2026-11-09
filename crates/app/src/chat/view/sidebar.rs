@@ -4,27 +4,39 @@
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::TOOL_ICON;
-use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR};
+use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    account_line, button, hsla, label, parts_button, parts_on, parts_tip, scrollable,
+    account_line, hsla, icon_button, label, parts_button, parts_on, parts_tip, scrollable,
     session_row_marked, toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
 };
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::data::Tool;
 use crate::chat::sidebar::{row_account, sections};
 use crate::mac::gate;
 
-/// A footer button, named "<Title> Button" for the ? button as in the Swift sidebar.
+/// A footer button, an icon with its words as the tooltip as in the Swift sidebar, named
+/// "<Title> Button" for the ? button.
 fn footer_button(
     id: &'static str,
+    mark: Icon,
     title: &str,
+    help: &str,
     a: Appearance,
     cx: &Context<ChatView>,
 ) -> gpui::Stateful<Div> {
-    button(id, title, ButtonKind::Ghost, PartState::Rest, a).part_at(
+    let button = icon_button(
+        id,
+        mark,
+        IconSize::Button.points(),
+        ButtonKind::Ghost,
+        PartState::Rest,
+        a,
+    );
+    gate::tip_text(button, help.to_owned().into(), a).part_at(
         &format!("{title} Button"),
         Corner::TopLeading,
         a,
@@ -50,20 +62,49 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         .items_center()
         .gap(px(8.0))
         .child(
-            footer_button("settings", "Settings", a, cx)
-                .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
+            footer_button(
+                "settings",
+                Icon::Settings,
+                "Settings",
+                "Settings: accounts, token cost and the app (⌘,)",
+                a,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
         )
         .child(
-            footer_button("accounts", "Accounts", a, cx)
-                .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
+            footer_button(
+                "accounts",
+                Icon::Account,
+                "Accounts",
+                "Accounts: add, switch and sign out",
+                a,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
         )
         .child(
-            footer_button("vault", "Vault", a, cx)
-                .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
+            footer_button(
+                "vault",
+                Icon::Key,
+                "Vault",
+                "Secret Vault: passwords and tokens agents can use without seeing them",
+                a,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
         )
         // Here as well as in the menu bar, whose item a full menu bar hides behind the notch.
         .child(
-            footer_button("handover", "Handover", a, cx).on_click(|_, _, cx| {
+            footer_button(
+                "handover",
+                Icon::Handover,
+                "Handover",
+                "Handover: turn each area over from the Swift app to this one",
+                a,
+                cx,
+            )
+            .on_click(|_, _, cx| {
                 crate::welcome::window::open(cx, crate::welcome::window::Which::Handover)
             }),
         )
@@ -78,6 +119,78 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         }))
 }
 
+/// Where the sidebar button sits: just right of the traffic lights (which end near 64), on their
+/// row, the button 24 tall about the lights' centre.
+const TOGGLE_LEFT: f32 = 76.0;
+const TOGGLE_TOP: f32 = 6.0;
+const TOGGLE_HEIGHT: f32 = 24.0;
+const TOGGLE_WIDTH: f32 = 28.0;
+/// How far a header starts from the window's left edge while the sidebar is hidden: past the
+/// traffic lights and this button.
+pub const HIDDEN_HEADER_START: f32 = TOGGLE_LEFT + TOGGLE_WIDTH + 4.0 + TOGGLE_WIDTH + 12.0;
+
+/// The button that hides and shows the sidebar, over the window beside the traffic lights.
+pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+    let hidden = view.sidebar_hidden;
+    let tip = if hidden {
+        "Show Sidebar"
+    } else {
+        "Hide Sidebar"
+    };
+    let button = icon_button(
+        "sidebar-toggle",
+        Icon::PanelLeft,
+        IconSize::Button.points(),
+        ButtonKind::Ghost,
+        PartState::Rest,
+        a,
+    )
+    .h(px(TOGGLE_HEIGHT))
+    .w(px(TOGGLE_WIDTH))
+    .px(px(0.0))
+    .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
+    div()
+        .absolute()
+        .top(px(TOGGLE_TOP))
+        .left(px(TOGGLE_LEFT))
+        .child(gate::tip_text(button, tip.into(), a).part_at(
+            "Sidebar Button",
+            Corner::Bottom,
+            a,
+            cx,
+        ))
+}
+
+/// The New Session button on the same row: at the sidebar's right end, or, with the sidebar
+/// hidden, right after the sidebar button so it stays beside the traffic lights.
+pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+    let left = if view.sidebar_hidden {
+        TOGGLE_LEFT + TOGGLE_WIDTH + 4.0
+    } else {
+        SIDEBAR_WIDTH - 12.0 - TOGGLE_WIDTH
+    };
+    let button = icon_button(
+        "new-session",
+        Icon::Plus,
+        IconSize::Button.points(),
+        ButtonKind::Ghost,
+        PartState::Rest,
+        a,
+    )
+    .h(px(TOGGLE_HEIGHT))
+    .w(px(TOGGLE_WIDTH))
+    .px(px(0.0))
+    .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx)));
+    div().absolute().top(px(TOGGLE_TOP)).left(px(left)).child(
+        gate::tip_text(button, "New Session".into(), a).part_at(
+            "New Session Button",
+            Corner::Bottom,
+            a,
+            cx,
+        ),
+    )
+}
+
 fn mark_of(tool: Tool) -> ToolMark {
     match tool {
         Tool::Claude => ToolMark::Claude,
@@ -90,13 +203,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
     let sections = sections(&view.sessions, view.now_ms);
     // Each row names its account from what the accounts store holds now.
     let accounts = view.accounts.snapshot();
-    let count = view.sessions.len();
     let mut list = div()
         .id("sessions")
         .flex_1()
         .min_h(px(0.0))
         .overflow_y_scroll()
-        .px(px(8.0))
+        .pl(px(8.0))
+        .pr(px(GUTTER))
         .flex()
         .flex_col()
         .gap(px(4.0));
@@ -114,8 +227,26 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .px(px(8.0))
                 .pt(px(12.0))
                 .pb(px(4.0))
-                .child(label(section.title, TypeRole::Section, Ink::TextFaint, a))
-                .part_at("Group Heading", Corner::Trailing, a, cx),
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    label(section.title, TypeRole::Section, Ink::TextFaint, a).part_at(
+                        "Group Heading",
+                        Corner::Trailing,
+                        a,
+                        cx,
+                    ),
+                )
+                .child(
+                    label(
+                        &section.rows.len().to_string(),
+                        TypeRole::Meta,
+                        Ink::TextFaint,
+                        a,
+                    )
+                    .part_at("Group Count", Corner::Bottom, a, cx),
+                ),
         );
         for row in section.rows {
             let id = row.id.clone();
@@ -166,36 +297,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         .border_color(hsla(Ink::Hairline.color(a)))
         .flex()
         .flex_col()
-        // The traffic lights sit here; nothing else does.
+        // The traffic lights and the two buttons beside them (drawn over this row) sit here.
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
-        .child(
-            div()
-                .px(px(SIDE_PADDING))
-                .pb(px(4.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Sessions", TypeRole::Title, Ink::Text, a))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(
-                            label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a).part_at(
-                                "Session Count",
-                                Corner::Bottom,
-                                a,
-                                cx,
-                            ),
-                        )
-                        .child(
-                            button("new-session", "+", ButtonKind::Ghost, PartState::Rest, a)
-                                .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx)))
-                                .part_at("New Session Button", Corner::Bottom, a, cx),
-                        ),
-                ),
-        )
         .child(scrollable(list))
         .child(footer(a, view.daemon_note, cx))
         .part_inside("Sidebar", Corner::Trailing, a, cx)

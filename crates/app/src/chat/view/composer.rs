@@ -19,11 +19,13 @@ use gpui::{
     KeyDownEvent, PathPromptOptions, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
-use notchling_kit::ui::{button_with, card as kit_card, hsla, icon, label, KitPart, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    button_with, card as kit_card, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
+};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::tools::Picker;
 use super::ChatView;
@@ -222,7 +224,12 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
         Some(Tool::Antigravity) => "Antigravity Options",
         _ => "Codex Model Picker",
     };
-    let title = label(&format!("{title} ▾"), TypeRole::Meta, ink, a);
+    let title = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(label(&title, TypeRole::Meta, ink, a))
+        .child(icon(Icon::ChevronDown, 7.0, ink, a));
     let b = button_with("picker", title, kind, state, a)
         .h(px(20.0))
         .px(px(6.0));
@@ -349,7 +356,7 @@ fn action_button(
             "send",
             icon(
                 Icon::Return,
-                13.0,
+                IconSize::Button.points(),
                 if enabled { Ink::Text } else { Ink::TextFaint },
                 a,
             )
@@ -359,6 +366,13 @@ fn action_button(
             } else {
                 PartState::Disabled
             },
+            "Send Button",
+        ),
+        // A message is going out: the small spinner where the arrow goes, as the Swift disc.
+        Action::Sending => (
+            "sending",
+            kit_spinner("send-spin", SPINNER_SMALL, Ink::TextMuted, a).into_any_element(),
+            PartState::Disabled,
             "Send Button",
         ),
         Action::Stop { dim } => (
@@ -529,7 +543,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .part("Reply Box", a, cx);
     // Under the text, inside the card: + at the left, send or stop at the right.
     let working = view.selected_working() || view.composer.preview.working;
-    let act = action(!empty, working, view.stopping());
+    let act = action(!empty, working, view.stopping(), view.tools.sending);
     // A forced render has no acting, so its Stop is drawn live.
     let live = control.enabled || view.composer.preview.working;
     let bottom = div()

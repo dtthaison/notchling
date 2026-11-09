@@ -1,6 +1,6 @@
 //! Icons (`KitIcon`) as data: the SF Symbol name the Swift app draws, the Lucide icon GPUI draws in
-//! its place, and a text stand-in for an icon with no Lucide match. One weight (medium), one size
-//! per place.
+//! its place, and a text stand-in for an icon with no Lucide match (only Claude's mark).
+//! One weight (medium), one size per place.
 //!
 //! SF Symbols may only ship in apps for Apple's systems, and this app builds for Windows and Linux
 //! too, so the line icons are Lucide's (ISC; `assets/icons/LICENSE`), the closest match to each
@@ -85,8 +85,32 @@ pub enum Icon {
     Tokens,
     /// The effort level.
     Gauge,
-    /// The reply box's + (Add menu).
+    /// Back, in the notch's detail header (SF `chevron.left`).
+    ChevronLeft,
+    /// Close, hide, remove (SF `xmark`).
+    Close,
+    /// Add (SF `plus`).
     Plus,
+    /// Subtract (SF `minus`).
+    Minus,
+    /// An empty circle: a step not done (SF `circle`).
+    Circle,
+    /// A check that failed (SF `xmark.circle`).
+    Fail,
+    /// A check that can't tell, and the ? button (SF `questionmark.circle`).
+    Unsure,
+    /// The Secret Vault (SF `key`).
+    Key,
+    /// Handing sessions over to Notchling (SF `arrow.left.arrow.right`).
+    Handover,
+    /// A caution (SF `exclamationmark.triangle`).
+    Warning,
+    /// Hide or show the sidebar (SF `sidebar.left`).
+    PanelLeft,
+    /// Hide or show the Details panel (SF `sidebar.right`).
+    PanelRight,
+    /// Something is in progress: drawn turning, by `ui::spinner` (SF `progress.indicator`).
+    Spinner,
     /// The reply box's send: a return arrow.
     Return,
     /// Add files or photos.
@@ -117,7 +141,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 49] = [
+    pub const ALL: [Icon; 61] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -163,7 +187,19 @@ impl Icon {
         Icon::Turns,
         Icon::Tokens,
         Icon::Gauge,
+        Icon::ChevronLeft,
+        Icon::Close,
         Icon::Plus,
+        Icon::Minus,
+        Icon::Circle,
+        Icon::Fail,
+        Icon::Unsure,
+        Icon::Key,
+        Icon::Handover,
+        Icon::Warning,
+        Icon::PanelLeft,
+        Icon::PanelRight,
+        Icon::Spinner,
         Icon::Return,
         Icon::Paperclip,
         Icon::SlashBox,
@@ -218,7 +254,19 @@ impl Icon {
             Icon::Turns => "arrow.left.arrow.right",
             Icon::Tokens => "text.word.spacing",
             Icon::Gauge => "gauge",
+            Icon::ChevronLeft => "chevron.left",
+            Icon::Close => "xmark",
             Icon::Plus => "plus",
+            Icon::Minus => "minus",
+            Icon::Circle => "circle",
+            Icon::Fail => "xmark.circle",
+            Icon::Unsure => "questionmark.circle",
+            Icon::Key => "key",
+            Icon::Handover => "arrow.left.arrow.right",
+            Icon::Warning => "exclamationmark.triangle",
+            Icon::PanelLeft => "sidebar.left",
+            Icon::PanelRight => "sidebar.right",
+            Icon::Spinner => "progress.indicator",
             Icon::Return => "return",
             Icon::Paperclip => "paperclip",
             Icon::SlashBox => "square.slash",
@@ -276,7 +324,19 @@ impl Icon {
             Icon::Turns => "⇄",
             Icon::Tokens => "≣",
             Icon::Gauge => "◔",
+            Icon::ChevronLeft => "‹",
+            Icon::Close => "×",
             Icon::Plus => "+",
+            Icon::Minus => "−",
+            Icon::Circle => "○",
+            Icon::Fail => "✗",
+            Icon::Unsure => "?",
+            Icon::Key => "⚿",
+            Icon::Handover => "⇄",
+            Icon::Warning => "⚠",
+            Icon::PanelLeft => "◧",
+            Icon::PanelRight => "◨",
+            Icon::Spinner => "◌",
             Icon::Return => "↵",
             Icon::Paperclip => "⌁",
             Icon::SlashBox => "/",
@@ -284,7 +344,7 @@ impl Icon {
     }
 
     /// The Lucide icon drawn for the symbol, as an asset path ([`asset`]); `None` keeps the glyph
-    /// (Claude's mark and the phone have drawn marks of their own).
+    /// (Claude's mark is drawn).
     pub fn svg(self) -> Option<&'static str> {
         Some(match self {
             Icon::Needs => "icons/circle-alert.svg",
@@ -323,20 +383,33 @@ impl Icon {
             Icon::Turns => "icons/arrow-left-right.svg",
             Icon::Tokens => "icons/text.svg",
             Icon::Gauge => "icons/gauge.svg",
+            Icon::ChevronLeft => "icons/chevron-left.svg",
+            Icon::Close => "icons/x.svg",
             Icon::Plus => "icons/plus.svg",
+            Icon::Minus => "icons/minus.svg",
+            Icon::Circle => "icons/circle.svg",
+            Icon::Fail => "icons/circle-x.svg",
+            Icon::Unsure => "icons/circle-help.svg",
+            Icon::Key => "icons/key-round.svg",
+            Icon::Handover => "icons/arrow-left-right.svg",
+            Icon::Warning => "icons/triangle-alert.svg",
+            Icon::PanelLeft => "icons/panel-left.svg",
+            Icon::PanelRight => "icons/panel-right.svg",
+            Icon::Spinner => "icons/loader.svg",
             Icon::Return => "icons/corner-down-left.svg",
             Icon::Paperclip => "icons/paperclip.svg",
             Icon::SlashBox => "icons/square-slash.svg",
-            Icon::Resume
-            | Icon::Send
-            | Icon::Permission
-            | Icon::Claude
-            | Icon::Back
-            | Icon::Sessions
-            | Icon::Phone
-            | Icon::More
-            | Icon::Page
-            | Icon::Settings => return None,
+            Icon::Resume => "icons/rotate-cw.svg",
+            Icon::Send => "icons/arrow-up.svg",
+            Icon::Permission => "icons/shield.svg",
+            Icon::Back => "icons/undo-2.svg",
+            Icon::Sessions => "icons/messages-square.svg",
+            // Views prefer the drawn `ui::phone_mark`, whose home button Lucide's lacks.
+            Icon::Phone => "icons/smartphone.svg",
+            Icon::More => "icons/ellipsis.svg",
+            Icon::Page => "icons/app-window.svg",
+            Icon::Settings => "icons/settings.svg",
+            Icon::Claude => return None,
         })
     }
 
@@ -375,23 +448,30 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 38] = icons![
+const SVGS: [(&str, &[u8]); 58] = icons![
+    "app-window",
     "arrow-down",
     "arrow-left-right",
+    "arrow-up",
     "brain",
     "bot",
     "check",
     "chevron-down",
+    "chevron-left",
     "chevron-right",
+    "circle",
     "circle-alert",
     "circle-check",
     "circle-dashed",
+    "circle-help",
     "circle-user",
+    "circle-x",
     "clock",
     "code-xml",
     "copy",
     "corner-down-left",
     "cpu",
+    "ellipsis",
     "file-plus",
     "file-text",
     "folder",
@@ -399,21 +479,34 @@ const SVGS: [(&str, &[u8]); 38] = icons![
     "git-branch",
     "globe",
     "info",
+    "key-round",
     "list-checks",
+    "loader",
     "message-circle-question",
+    "messages-square",
+    "minus",
     "octagon-x",
+    "panel-left",
+    "panel-right",
     "paperclip",
     "pencil",
     "plus",
     "puzzle",
+    "rotate-cw",
     "search",
     "send",
+    "settings",
+    "shield",
+    "smartphone",
     "sparkles",
     "square",
     "square-slash",
     "square-terminal",
     "text",
+    "triangle-alert",
+    "undo-2",
     "wrench",
+    "x",
 ];
 
 /// An embedded icon's SVG by its asset path (the GPUI asset source serves these).
@@ -485,6 +578,16 @@ mod tests {
         assert_eq!(asset("icons/none.svg"), None);
         assert_eq!(Icon::Terminal.svg(), Some("icons/square-terminal.svg"));
         assert_eq!(Icon::Claude.svg(), None, "Claude's mark is drawn");
+        for icon in Icon::ALL {
+            assert!(
+                icon.svg().is_some() || icon == Icon::Claude,
+                "{icon:?} has no Lucide icon"
+            );
+        }
+        assert_eq!(Icon::Resume.svg(), Some("icons/rotate-cw.svg"));
+        assert_eq!(Icon::PanelLeft.svg(), Some("icons/panel-left.svg"));
+        assert_eq!(Icon::PanelRight.svg(), Some("icons/panel-right.svg"));
+        assert_eq!(Icon::Spinner.svg(), Some("icons/loader.svg"));
         assert_eq!(Icon::Stop.svg(), Some("icons/square.svg"));
         assert_eq!(Icon::ArrowDown.svg(), Some("icons/arrow-down.svg"));
         assert_eq!(svg_box(12.0), 15.0);

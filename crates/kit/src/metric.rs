@@ -7,8 +7,15 @@ pub const TITLE_BAR: f32 = 38.0;
 pub const CONTROL: f32 = 28.0;
 pub const SESSION_ROW: f32 = 52.0;
 /// The sidebar's session row, which has a third line for the account: one height whether or not
-/// the account is known, so the list doesn't jump when the accounts load.
-pub const SESSION_ROW_ACCOUNT: f32 = 66.0;
+/// the account is known, so the list doesn't jump when the accounts load. The Swift row's three
+/// lines (16 + 13 + 13, 2 apart) are 46 tall, under the row's 52 minimum, which is what it is.
+pub const SESSION_ROW_ACCOUNT: f32 = 52.0;
+/// A session row's line heights, the Swift row's: SwiftUI's for 13 pt semibold and 11 pt.
+pub const SESSION_LINE_HEADING: f32 = 16.0;
+pub const SESSION_LINE_META: f32 = 13.0;
+/// The loading spinner's diameters: the Swift `ProgressView`'s mini and small control sizes.
+pub const SPINNER_MINI: f32 = 10.0;
+pub const SPINNER_SMALL: f32 = 16.0;
 /// A session row's tool icon.
 pub const TOOL_ICON: f32 = 14.0;
 pub const RADIUS_SM: f32 = 6.0;

@@ -8,7 +8,7 @@ use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::vault::entry::{Field as Changed, Kind};
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, label, KitStyled, MONO_FONT};
+use notchling_kit::ui::{button, field, hsla, icon, label, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::form::{Field, Form, Mode};
@@ -156,7 +156,12 @@ fn checkbox<V: 'static>(
         .items_center()
         .justify_center()
         .when(on_now, |m| {
-            m.child(label(Icon::Check.glyph(), TypeRole::Meta, Ink::OnAccent, a))
+            m.child(icon(
+                Icon::Check,
+                TypeRole::Meta.spec().size,
+                Ink::OnAccent,
+                a,
+            ))
         });
     div()
         .id(SharedString::from(id.to_owned()))
@@ -306,9 +311,9 @@ pub fn form_body<V: 'static>(
                 .fill(Ink::AccentWash, a)
                 .flex()
                 .gap(px(8.0))
-                .child(label(
-                    Icon::Claude.glyph(),
-                    TypeRole::Body,
+                .child(icon(
+                    Icon::Claude,
+                    TypeRole::Body.spec().size,
                     Ink::AccentText,
                     a,
                 ))
@@ -445,9 +450,13 @@ pub fn form_body<V: 'static>(
         .items_center()
         .gap(px(6.0))
         .cursor_pointer()
-        .child(label(
-            if form.advanced { "▾" } else { "▸" },
-            TypeRole::Meta,
+        .child(icon(
+            if form.advanced {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            },
+            9.0,
             Ink::TextMuted,
             a,
         ))

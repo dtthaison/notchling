@@ -9,12 +9,12 @@ use notchling_engine::machines::morning::{MorningEntry, MorningItem, MorningKind
 use notchling_engine::machines::registry::{Machine, SdWorkerSettings};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, label, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::JobForm;
 use super::model::Sheet;
 use super::pieces::job_facts;
-use super::view::{text_line, MachinesView, CARD_PADDING};
+use super::view::{marked, text_line, MachinesView, CARD_PADDING};
 
 /// A switch: a capsule with its knob at the end it's set to.
 pub(super) fn switch(id: SharedString, on: bool, enabled: bool, a: Appearance) -> Stateful<Div> {
@@ -49,16 +49,18 @@ impl MachinesView {
             cards = cards.child(self.job_card(&shown, a, cx));
         }
         if let Some(note) = &self.model.github_note {
-            cards = cards.child(label(
-                &format!("⚠ {note}"),
+            cards = cards.child(marked(
+                Icon::Warning,
+                note,
                 TypeRole::Label,
                 Ink::TextMuted,
                 a,
             ));
         }
         for warning in self.model.token_warnings() {
-            cards = cards.child(label(
-                &format!("⚠ {warning}"),
+            cards = cards.child(marked(
+                Icon::Warning,
+                &warning,
                 TypeRole::Label,
                 Ink::AccentText,
                 a,

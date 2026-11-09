@@ -12,6 +12,9 @@ pub const THUMB_WIDTH: f32 = 7.0;
 pub const THUMB_WIDTH_HOVER: f32 = 9.0;
 /// The thumb's gap to the container's right edge, and the track's to its top and bottom.
 pub const EDGE_INSET: f32 = 2.0;
+/// The right padding a scrolling list keeps so its rows end before the bar's lane (the inset, the
+/// widest thumb and a hair), and a row's fill or border never draws under the bar.
+pub const GUTTER: f32 = EDGE_INSET + THUMB_WIDTH_HOVER + 2.0;
 /// The strip along the right edge that counts as the bar: showing it, grabbing it.
 pub const ZONE_WIDTH: f32 = 14.0;
 /// The bar stays fully shown this long after the last scroll, then fades over `FADE`.

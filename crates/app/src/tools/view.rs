@@ -10,7 +10,9 @@ use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::transcript::model::DiffKind;
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, option_row, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, card, hsla, icon, label, option_row, window_appearance, KitStyled,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::agy_options::NOTE as AGY_NOTE;
@@ -65,9 +67,9 @@ pub fn agy_card<V: 'static>(
         .flex()
         .items_center()
         .gap(px(7.0))
-        .child(label(
-            Icon::Permission.glyph(),
-            TypeRole::Heading,
+        .child(icon(
+            Icon::Permission,
+            TypeRole::Heading.spec().size,
             Ink::AccentText,
             a,
         ))
@@ -167,12 +169,9 @@ fn pick_row(
         .gap(px(8.0))
         .cursor_pointer()
         .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(div().w(px(14.0)).flex_shrink_0().child(label(
-            if selected { Icon::Check.glyph() } else { "" },
-            TypeRole::Label,
-            Ink::AccentText,
-            a,
-        )))
+        .child(div().w(px(14.0)).flex_shrink_0().children(
+            selected.then(|| icon(Icon::Check, TypeRole::Label.spec().size, Ink::AccentText, a)),
+        ))
         .child(
             div()
                 .flex_1()

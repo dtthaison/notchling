@@ -8,9 +8,13 @@ use gpui::{
     div, prelude::*, px, Context, Div, EventEmitter, PathPromptOptions, Render, SharedString,
     Stateful, Window,
 };
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING, TITLE_BAR};
+use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING, SPINNER_SMALL, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, scrollable, window_appearance, KitStyled};
+use notchling_kit::scrollbar::GUTTER;
+use notchling_kit::ui::{
+    button, card, hsla, icon, icon as kit_icon, label, scrollable, spinner, window_appearance,
+    KitStyled,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::new_session::{folder_title, parent_line, trust_text, NewSession, Stage, TRUST_TITLE};
@@ -51,7 +55,12 @@ pub fn sheet_header(icon: Icon, title: &str, end: Stateful<Div>, a: Appearance) 
         .fill(Ink::Card, a)
         .border_b(px(1.0))
         .border_color(hsla(Ink::Hairline.color(a)))
-        .child(label(icon.glyph(), TypeRole::Heading, Ink::TextMuted, a))
+        .child(kit_icon(
+            icon,
+            TypeRole::Heading.spec().size,
+            Ink::TextMuted,
+            a,
+        ))
         .child(label(title, TypeRole::Heading, Ink::Text, a))
         .child(div().flex_1())
         .child(end)
@@ -248,6 +257,7 @@ impl NewSessionView {
             .h_full()
             .overflow_y_scroll()
             .p(px(12.0))
+            .pr(px(GUTTER))
             .flex()
             .flex_col()
             .gap(px(4.0))
@@ -287,6 +297,11 @@ impl NewSessionView {
             .gap(px(10.0))
             .border_t(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
+            .children(
+                self.model
+                    .busy()
+                    .then(|| spinner("start-spin", SPINNER_SMALL, Ink::Working, a)),
+            )
             .child(line)
             .child(start)
     }
@@ -351,9 +366,9 @@ impl NewSessionView {
                                 .flex()
                                 .items_center()
                                 .gap(px(8.0))
-                                .child(label(
-                                    Icon::Permission.glyph(),
-                                    TypeRole::Heading,
+                                .child(icon(
+                                    Icon::Permission,
+                                    TypeRole::Heading.spec().size,
                                     Ink::AccentText,
                                     a,
                                 ))

@@ -14,17 +14,19 @@ mod parts;
 mod resize;
 mod scrollbar;
 mod text_editor;
+mod tool_images;
 mod widgets;
 
 pub use gallery::KitGallery;
-pub use icons::{icon, KitAssets};
+pub use icons::{icon, icon_in, spinner, KitAssets};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart};
 pub use resize::{resize_edges, TopBorder};
 pub use scrollbar::{scrollable, PinScrollbars, Scrollable};
 pub use text_editor::{TextEditor, TextEditorEvent};
+pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{
-    account_line, avatar, button, button_with, card, claude_mark, field, label, option_row,
-    phone_mark, session_row, session_row_marked, status_pill, tool_icon, ToolMark,
+    account_line, avatar, button, button_with, card, claude_mark, field, icon_button, label,
+    option_row, phone_mark, session_row, session_row_marked, status_pill, tool_icon, ToolMark,
 };
 
 use gpui::{px, FontWeight, Hsla, Rgba, Styled, Window, WindowAppearance};

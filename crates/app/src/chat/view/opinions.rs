@@ -11,8 +11,8 @@ use notchling_engine::transcript::model::{ChatItem, ItemKind, ToolKind};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, KitPart, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::ui::{button, card, hsla, icon_button, label, KitPart, KitStyled};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
 use crate::acting::Control;
@@ -128,9 +128,10 @@ fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ChatView>) -> D
             cx.notify();
         }))
     } else {
-        button(
+        icon_button(
             SharedString::from(format!("opinion-remove-{}", run.id)),
-            "×",
+            Icon::Close,
+            10.0,
             ButtonKind::Ghost,
             PartState::Rest,
             a,

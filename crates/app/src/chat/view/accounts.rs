@@ -9,7 +9,7 @@ use std::time::Duration;
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button_with, card, hsla, label, KitStyled};
+use notchling_kit::ui::{button_with, card, hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
@@ -244,9 +244,26 @@ pub(super) fn account_control(
         ButtonKind::Ghost
     };
     // The email shrinks to "…" in a narrow header rather than spilling over what's beside it.
+    // The chevron is placed over the text's own padding (see `marked_line`): wrapping the text in a
+    // row would measure it narrow.
     let b = button_with(
         "account-button",
-        div().min_w(px(0.0)).child(format!("{text} ▾")).elide(),
+        div()
+            .min_w(px(0.0))
+            .relative()
+            .pr(px(12.0))
+            .child(text)
+            .child(
+                div()
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .child(icon(Icon::ChevronDown, 7.0, Ink::Text, a)),
+            )
+            .elide(),
         kind,
         PartState::Rest,
         a,
@@ -288,12 +305,13 @@ fn menu_row(
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(label(
-            if checked { Icon::Check.glyph() } else { " " },
-            TypeRole::Label,
-            ink,
-            a,
-        ))
+        // A fixed slot, so the titles line up whether or not one is ticked.
+        .child(
+            div()
+                .w(px(14.0))
+                .flex_shrink_0()
+                .children(checked.then(|| icon(Icon::Check, TypeRole::Label.spec().size, ink, a))),
+        )
         .child(label(title, TypeRole::Label, ink, a))
 }
 

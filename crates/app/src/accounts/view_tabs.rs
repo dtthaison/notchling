@@ -8,8 +8,8 @@ use std::time::Duration;
 use gpui::{div, prelude::*, px, Context, Div, Stateful};
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink};
+use notchling_kit::ui::{button, hsla, icon_button, KitStyled};
+use notchling_kit::{Appearance, Icon, IconSize, Ink};
 
 use super::cost::{cost_view, Range};
 use super::model::{Tab, CLAUDE_CODE, REFRESH_TIP};
@@ -69,9 +69,10 @@ impl AccountsView {
             tooltip: Some(REFRESH_TIP),
         };
         let refresh = gate::tip(
-            button(
+            icon_button(
                 "accounts-refresh",
-                Icon::Resume.glyph(),
+                Icon::Resume,
+                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 gate::state(refresh_control),
                 a,

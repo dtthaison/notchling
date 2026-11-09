@@ -13,17 +13,22 @@ pub enum Action {
     None,
     /// A return arrow: the box has text.
     Send,
+    /// A message is going out and the box is empty: a spinner where the arrow was.
+    Sending,
     /// A solid square while the session works; dimmed while a Stop is on its way.
     Stop { dim: bool },
 }
 
 /// Which button shows. A working session shows Stop even with text typed (Return still queues the
-/// text); an idle one shows Send once the box has more than blanks.
-pub fn action(has_text: bool, working: bool, stopping: bool) -> Action {
+/// text); an idle one shows Send once the box has more than blanks, and a spinner in its place
+/// while a message goes out.
+pub fn action(has_text: bool, working: bool, stopping: bool, sending: bool) -> Action {
     if working {
         Action::Stop { dim: stopping }
     } else if has_text {
         Action::Send
+    } else if sending {
+        Action::Sending
     } else {
         Action::None
     }
@@ -100,13 +105,25 @@ mod tests {
 
     #[test]
     fn the_action_is_stop_while_working_else_send_with_text_else_nothing() {
-        assert_eq!(action(false, false, false), Action::None);
-        assert_eq!(action(true, false, false), Action::Send);
-        assert_eq!(action(false, true, false), Action::Stop { dim: false });
-        assert_eq!(action(true, true, false), Action::Stop { dim: false });
-        assert_eq!(action(true, true, true), Action::Stop { dim: true });
+        assert_eq!(action(false, false, false, false), Action::None);
+        assert_eq!(action(true, false, false, false), Action::Send);
+        assert_eq!(
+            action(false, true, false, false),
+            Action::Stop { dim: false }
+        );
+        assert_eq!(
+            action(true, true, false, false),
+            Action::Stop { dim: false }
+        );
+        assert_eq!(action(true, true, true, false), Action::Stop { dim: true });
         // A stop that lands after the turn ended no longer shows.
-        assert_eq!(action(false, false, true), Action::None);
+        assert_eq!(action(false, false, true, false), Action::None);
+        assert_eq!(action(false, false, false, true), Action::Sending);
+        assert_eq!(action(true, false, false, true), Action::Send);
+        assert_eq!(
+            action(false, true, false, true),
+            Action::Stop { dim: false }
+        );
     }
 
     #[test]

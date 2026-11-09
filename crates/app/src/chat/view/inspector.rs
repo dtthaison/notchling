@@ -5,15 +5,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::Duration;
 
-use gpui::{
-    div, prelude::*, px, relative, Animation, AnimationExt, App, Div, Global, SharedString, Window,
-    WindowId,
-};
+use gpui::{div, prelude::*, px, relative, App, Div, Global, SharedString, Window, WindowId};
 use notchling_kit::labels::Corner;
+use notchling_kit::metric::SPINNER_MINI as MINI;
 use notchling_kit::metric::{METER_BAR, SIDE_PADDING, TITLE_BAR};
-use notchling_kit::ui::{hsla, icon, label, scrollable, KitPart, KitStyled};
+use notchling_kit::ui::{
+    hsla, icon, label, scrollable, spinner as kit_spinner, KitPart, KitStyled,
+};
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::ChatView;
@@ -224,12 +223,13 @@ fn empty(text: &str, a: Appearance) -> Div {
     label(text, TypeRole::Meta, Ink::TextMuted, a)
 }
 
-/// A small spinner: the working icon, breathing.
+/// The mini spinner on a running row (Swift `controlSize(.mini)`).
 fn spinner(key: &str, a: Appearance) -> impl IntoElement {
-    icon(Icon::Working, 11.0, Ink::Working, a).with_animation(
+    kit_spinner(
         SharedString::from(format!("inspector-spin-{key}")),
-        Animation::new(Duration::from_millis(1000)).repeat(),
-        |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
+        MINI,
+        Ink::Working,
+        a,
     )
 }
 

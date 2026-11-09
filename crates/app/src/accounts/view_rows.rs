@@ -6,10 +6,15 @@
 use std::rc::Rc;
 
 use gpui::{deferred, div, prelude::*, px, Context, Div, ElementId, SharedString, Stateful};
-use notchling_kit::metric::{AVATAR, METER_BAR, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::metric::{
+    AVATAR, METER_BAR, RADIUS_MD, RADIUS_SM, SIDE_PADDING, SPINNER_SMALL as SMALL,
+};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{avatar, button, card, hsla, label, KitStyled, MONO_FONT};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    avatar, button, card, hsla, icon, icon_button, label, spinner as kit_spinner, KitStyled,
+    MONO_FONT,
+};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::flows::{AddPanel, Alert};
 use super::limits::{Fill, LimitGroup, LimitLine, Meter};
@@ -167,9 +172,10 @@ pub fn account_row<V: 'static>(
     if !row.menu.is_empty() {
         let handler = on.clone();
         right = right.child(
-            button(
+            icon_button(
                 SharedString::from(format!("menu-{key}")),
-                Icon::More.glyph(),
+                Icon::More,
+                IconSize::Button.points(),
                 if menu_open {
                     ButtonKind::Secondary
                 } else {
@@ -370,9 +376,9 @@ pub fn add_panel<V: 'static>(
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(label(
-                        Icon::Working.glyph(),
-                        TypeRole::Heading,
+                    .child(kit_spinner(
+                        "working-view_rows.rs-1",
+                        SMALL,
                         Ink::Working,
                         a,
                     ))
@@ -386,9 +392,9 @@ pub fn add_panel<V: 'static>(
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(label(
-                    Icon::Working.glyph(),
-                    TypeRole::Heading,
+                .child(kit_spinner(
+                    "working-view_rows.rs-2",
+                    SMALL,
                     Ink::Working,
                     a,
                 ))
@@ -399,7 +405,12 @@ pub fn add_panel<V: 'static>(
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(label(Icon::Done.glyph(), TypeRole::Heading, Ink::Done, a))
+                .child(icon(
+                    Icon::Done,
+                    TypeRole::Heading.spec().size,
+                    Ink::Done,
+                    a,
+                ))
                 .child(label(line, TypeRole::Body, Ink::Text, a).flex_1())
                 .child(act(
                     "another",
@@ -421,7 +432,12 @@ pub fn add_panel<V: 'static>(
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(label(Icon::Needs.glyph(), TypeRole::Heading, Ink::Needs, a))
+                .child(icon(
+                    Icon::Needs,
+                    TypeRole::Heading.spec().size,
+                    Ink::Needs,
+                    a,
+                ))
                 .child(
                     label(message, TypeRole::Body, Ink::Text, a)
                         .flex_1()

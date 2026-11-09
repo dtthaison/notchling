@@ -65,6 +65,10 @@ pub const WORKING_ENV: &str = "NOTCHLING_RENDER_WORKING";
 pub const ADD_ENV: &str = "NOTCHLING_RENDER_ADD";
 /// Set to `1`, a render draws the usage-limit card open (`limit_ring::LIMITS_ENV`).
 pub const LIMITS_ENV: &str = limit_ring::LIMITS_ENV;
+/// Set to `1`, a render draws the sidebar hidden, as its toggle leaves it.
+pub const SIDEBAR_HIDDEN_ENV: &str = "NOTCHLING_RENDER_SIDEBAR_HIDDEN";
+/// Set to `1`, a render draws the Details panel hidden.
+pub const DETAILS_HIDDEN_ENV: &str = "NOTCHLING_RENDER_DETAILS_HIDDEN";
 /// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
 pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 
@@ -142,6 +146,12 @@ pub struct ChatView {
     /// Whether `codex` is installed (the account menu's Codex Accounts…), looked up with the
     /// accounts poll rather than on every render.
     codex_installed: bool,
+    /// The sidebar is hidden (its toggle beside the traffic lights, ⌘⌃S). Kept for this window
+    /// only: the Swift app has no such toggle, so there is no saved setting to follow.
+    sidebar_hidden: bool,
+    /// The Details panel is hidden. The Swift app saves this as `chatInspector` (hidden until
+    /// first opened); here the panel starts shown and the choice lasts for the window.
+    details_hidden: bool,
     _appearance_changes: Subscription,
     /// Esc hides the part names, wherever the keys go.
     _parts_escape: Subscription,
@@ -170,10 +180,24 @@ impl ChatView {
             },
             cx,
         );
+        view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
+        view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         if switch(PARTS_ENV) {
             set_parts(cx, true);
         }
         view
+    }
+
+    /// Hides the sidebar, or shows it again.
+    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_hidden = !self.sidebar_hidden;
+        cx.notify();
+    }
+
+    /// Hides the Details panel, or shows it again.
+    pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
+        self.details_hidden = !self.details_hidden;
+        cx.notify();
     }
 
     /// Whether the group, step or thought `id` is drawn open.
@@ -205,8 +229,18 @@ impl ChatView {
         // Esc turns the part names off from any window; the editor lets Esc through.
         // Otherwise Esc stops a working session's turn, as in the terminal, unless something was
         // up that Esc closes (observers run after the handlers, so it is read as last drawn).
-        let parts_escape = cx.observe_keystrokes(|this, event, _, cx| {
-            if event.keystroke.key != "escape" {
+        let parts_escape = cx.observe_keystrokes(|this, event, window, cx| {
+            // ⌘⌃S, the system's shortcut for the sidebar, in the window that is up.
+            let keys = &event.keystroke;
+            if keys.key == "s"
+                && keys.modifiers.platform
+                && keys.modifiers.control
+                && window.is_window_active()
+            {
+                this.toggle_sidebar(cx);
+                return;
+            }
+            if keys.key != "escape" {
                 return;
             }
             if parts_on(cx) {
@@ -247,6 +281,8 @@ impl ChatView {
             expand_all: false,
             drop_preview: false,
             latest_preview: false,
+            sidebar_hidden: false,
+            details_hidden: false,
             follow_sent: false,
             clock_second: 0,
             overlay_open: false,
@@ -542,9 +578,12 @@ impl Render for ChatView {
             .size_full()
             .flex()
             .fill(Ink::Window, a)
-            .child(sidebar::render(self, a, cx))
+            .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
             .child(column)
-            .child(inspector::render(self, a, cx))
+            .children((!self.details_hidden).then(|| inspector::render(self, a, cx)))
+            // Beside the traffic lights, over the sidebar's top or the header's start.
+            .child(sidebar::toggle_button(self, a, cx))
+            .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))

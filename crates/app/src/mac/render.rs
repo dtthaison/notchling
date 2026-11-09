@@ -71,6 +71,9 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
         .and_then(|v| Appearance::parse(&v));
     let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
     app.run(move |cx: &mut App| {
+        // Real app icons from this Mac, as the live app draws them; a render over made-up data
+        // still differs per machine.
+        crate::mac::app_icons::install();
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
         if std::env::var_os(SCROLLBARS_ENV).is_some_and(|v| v == "1") {

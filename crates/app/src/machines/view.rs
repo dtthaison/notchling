@@ -16,9 +16,10 @@ use notchling_engine::machines::actions::MorningActions;
 use notchling_engine::machines::morning::MorningItem;
 use notchling_engine::machines::poller::INTERVAL_SECS;
 use notchling_engine::machines::step::StepId;
-use notchling_kit::metric::SIDE_PADDING;
+use notchling_kit::metric::{SIDE_PADDING, SPINNER_MINI, SPINNER_SMALL};
 use notchling_kit::ui::{
-    label, resize_edges, scrollable, window_appearance, KitStyled, Scrollable, TopBorder,
+    icon, label, resize_edges, scrollable, spinner as kit_spinner, window_appearance, KitStyled,
+    Scrollable, TopBorder,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
@@ -528,17 +529,60 @@ pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     Some(cx.new(|cx| MachinesView::fixed(model, cx)).into())
 }
 
-/// Shared by the cards: the step state's glyph and ink.
+/// Shared by the cards: the step state's icon and ink.
 pub(super) fn state_mark(
     state: Option<&notchling_engine::machines::step::CheckState>,
-) -> (&'static str, Ink) {
+) -> (Icon, Ink) {
     use notchling_engine::machines::step::CheckState;
     match state {
-        Some(CheckState::Pass(_)) => (Icon::Check.glyph(), Ink::Done),
-        Some(CheckState::Fail(_)) => ("✗", Ink::Expired),
-        Some(CheckState::CantTell(_)) => ("?", Ink::TextFaint),
-        None => ("◌", Ink::TextFaint),
+        Some(CheckState::Pass(_)) => (Icon::Done, Ink::Done),
+        Some(CheckState::Fail(_)) => (Icon::Fail, Ink::Expired),
+        Some(CheckState::CantTell(_)) => (Icon::Unsure, Ink::TextFaint),
+        None => (Icon::Working, Ink::TextFaint),
     }
+}
+
+/// A step state's icon, or the mini spinner while the step is being checked.
+pub(super) fn state_icon(
+    key: impl Into<SharedString>,
+    mark: Icon,
+    ink: Ink,
+    role: TypeRole,
+    a: Appearance,
+) -> Div {
+    if mark == Icon::Working {
+        kit_spinner(key.into(), SPINNER_MINI, ink, a)
+    } else {
+        icon(mark, role.spec().size, ink, a)
+    }
+}
+
+/// A line that says something is under way: the small spinner, then the words.
+pub(super) fn busy_line(
+    key: impl Into<SharedString>,
+    text: &str,
+    role: TypeRole,
+    ink: Ink,
+    a: Appearance,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(kit_spinner(key.into(), SPINNER_SMALL, Ink::Working, a))
+        .child(label(text, role, ink, a))
+}
+
+/// A line of text led by an icon in the line's own ink, wrapping under the text, not the icon.
+pub(super) fn marked(mark: Icon, text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .items_start()
+        .gap(px(6.0))
+        .child(icon(mark, role.spec().size, ink, a))
+        .child(label(text, role, ink, a).flex_1().min_w(px(0.0)))
 }
 
 /// A box of monospaced lines on the sidebar's fill, scrolling past `max_h`.
