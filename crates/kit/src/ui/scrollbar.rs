@@ -4,10 +4,10 @@
 //! painted over its right edge. It is the same layout node (no wrapper, so the div's `flex_1`,
 //! `h`, padding and the rest keep meaning what they did) and takes no room of its own.
 //!
-//! - The thumb is thin and rounded, 7 pt wide and 9 under the pointer, 2 pt in from the edge. There
-//!   is no track at rest; a faint one shows while the pointer is over the bar's strip or the thumb
-//!   is held. It shows while the content scrolls and fades about a second after it stops; frames
-//!   are drawn for the fade only while the bar is visible.
+//! - The thumb is thin and rounded, 7 pt wide and 9 under the pointer, 2 pt in from the edge, with
+//!   no track behind it. It shows only while the content scrolls and fades about a second after it
+//!   stops; the pointer over a shown bar keeps it (so it can be grabbed), but never shows a hidden
+//!   one. Frames are drawn for the fade only while the bar is visible.
 //! - Dragging the thumb scrolls; a press in the track pages toward it. Both take the press, so the
 //!   content under the 14 pt strip doesn't also get it, and the pointer stays an arrow there. While
 //!   the bar is hidden its strip passes presses and the pointer through; wheel scrolling over it
@@ -36,9 +36,7 @@ use crate::Ink;
 
 /// The thumb at rest and while its bar is hovered or dragged: the ink's alpha.
 const THUMB_ALPHA: f32 = 0.55;
-const THUMB_ALPHA_ACTIVE: f32 = 0.75;
-/// The track's, while hovered.
-const TRACK_ALPHA: f32 = 0.16;
+const THUMB_ALPHA_ACTIVE: f32 = 0.9;
 
 /// Draws every bar as if it had just scrolled, for a render (a still frame has no scroll). Set by the
 /// render path (`NOTCHLING_RENDER_SCROLLBARS=1`), never by the app.
@@ -231,7 +229,9 @@ impl Element for Scrollable {
                 state.active = Some(now);
             }
             let dragging = state.drag.is_some();
-            let hovered = dragging || zone.is_hovered(window);
+            // The pointer only holds a bar that scrolling already showed (so it can be grabbed);
+            // over a hidden bar it shows nothing.
+            let hovered = dragging || (zone.is_hovered(window) && (state.shown || state.hovered));
             if hovered != state.hovered {
                 state.hovered = hovered;
                 if !hovered {
@@ -265,16 +265,6 @@ impl Element for Scrollable {
                 } else {
                     THUMB_WIDTH
                 };
-                // The track is the thumb's lane: its width, inset and rounded ends, never the
-                // wider hover strip.
-                if hovered || dragging {
-                    let track = Ink::TextFaint
-                        .color(appearance)
-                        .with_alpha(TRACK_ALPHA * alpha);
-                    window.paint_quad(
-                        fill(lane(bounds, width), hsla(track)).corner_radii(px(width / 2.0)),
-                    );
-                }
                 let top = f32::from(bounds.top()) + EDGE_INSET + thumb.start;
                 let rect = Bounds {
                     origin: point(bounds.right() - px(EDGE_INSET + width), px(top)),
@@ -390,20 +380,6 @@ impl Element for Scrollable {
 }
 
 /// The bar's strip: along the container's right edge, its whole height.
-/// The lane the thumb runs in: `width` wide, [`EDGE_INSET`] in from the right, top and bottom.
-fn lane(bounds: Bounds<Pixels>, width: f32) -> Bounds<Pixels> {
-    Bounds {
-        origin: point(
-            bounds.right() - px(EDGE_INSET + width),
-            bounds.top() + px(EDGE_INSET),
-        ),
-        size: size(
-            px(width),
-            (bounds.size.height - px(2.0 * EDGE_INSET)).max(px(0.0)),
-        ),
-    }
-}
-
 fn strip(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     Bounds {
         origin: point(bounds.right() - px(ZONE_WIDTH), bounds.top()),
