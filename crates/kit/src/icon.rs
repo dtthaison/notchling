@@ -165,7 +165,7 @@ impl Icon {
             // The Swift app's is filled; filled forms stay for status badges.
             Icon::Failed => "xmark.octagon",
             Icon::ArrowDown => "arrow.down",
-            Icon::Stop => "stop.fill",
+            Icon::Stop => "stop",
         }
     }
 
