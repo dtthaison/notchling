@@ -137,16 +137,34 @@ pub struct Listing {
 }
 
 /// Which subagents to list. `running` says, for each one oldest first, whether it still runs.
-/// While any run, only those are listed. With none running, the `FINISHED_SHOWN` most recent
-/// finished ones, then "Show N more"; `expanded` lists them all, then "Show less".
+/// While any run, those are listed, then "Show N more" for the finished ones; `expanded` adds
+/// them after the running ones. With none running, the `FINISHED_SHOWN` most recent finished
+/// ones, then "Show N more"; `expanded` lists them all, then "Show less".
 pub fn list_subagents(running: &[bool], expanded: bool) -> Listing {
     let newest_first = (0..running.len()).rev();
     if running.iter().any(|r| *r) {
-        let rows: Vec<usize> = newest_first.filter(|i| running[*i]).collect();
+        // The running ones lead; the finished ones wait behind "Show N more", never out of reach.
+        let mut rows: Vec<usize> = newest_first.clone().filter(|i| running[*i]).collect();
+        let finished: Vec<usize> = newest_first.filter(|i| !running[*i]).collect();
+        if finished.is_empty() {
+            return Listing {
+                rows,
+                hidden: 0,
+                fold: Fold::None,
+            };
+        }
+        if expanded {
+            rows.extend(finished);
+            return Listing {
+                rows,
+                hidden: 0,
+                fold: Fold::Less,
+            };
+        }
         return Listing {
-            hidden: running.len() - rows.len(),
             rows,
-            fold: Fold::None,
+            hidden: finished.len(),
+            fold: Fold::More(finished.len()),
         };
     }
     let all: Vec<usize> = newest_first.collect();
@@ -562,12 +580,17 @@ mod tests {
 
     // Oldest first, as the subagents come: `true` is a running one.
     #[test]
-    fn while_any_run_only_those_are_listed() {
+    fn while_any_run_those_show_and_the_finished_ones_open_from_show_more() {
         let l = list_subagents(&[false, true, false, true, false], false);
         assert_eq!(l.rows, [3, 1], "newest first");
-        assert_eq!((l.hidden, l.fold), (3, Fold::None));
-        // Expanding changes nothing while some run.
-        assert_eq!(list_subagents(&[false, true, false, true, false], true), l);
+        assert_eq!((l.hidden, l.fold), (3, Fold::More(3)));
+        // Opened: the running ones still first, then every finished one, newest first.
+        let open = list_subagents(&[false, true, false, true, false], true);
+        assert_eq!(open.rows, [3, 1, 4, 2, 0]);
+        assert_eq!((open.hidden, open.fold), (0, Fold::Less));
+        // All running: nothing to open.
+        let all = list_subagents(&[true, true], false);
+        assert_eq!((all.rows, all.fold), (vec![1, 0], Fold::None));
     }
 
     #[test]
