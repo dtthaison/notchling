@@ -113,6 +113,12 @@ pub enum Icon {
     Spinner,
     /// A message that reached the session: two checks (SF `checkmark.circle`).
     Delivered,
+    /// The reply box's send: a return arrow.
+    Return,
+    /// Add files or photos.
+    Paperclip,
+    /// Slash commands.
+    SlashBox,
 }
 
 /// Where an icon sits decides its size.
@@ -137,7 +143,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 59] = [
+    pub const ALL: [Icon; 62] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -197,6 +203,9 @@ impl Icon {
         Icon::PanelRight,
         Icon::Spinner,
         Icon::Delivered,
+        Icon::Return,
+        Icon::Paperclip,
+        Icon::SlashBox,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -262,6 +271,9 @@ impl Icon {
             Icon::PanelRight => "sidebar.right",
             Icon::Spinner => "progress.indicator",
             Icon::Delivered => "checkmark.circle",
+            Icon::Return => "return",
+            Icon::Paperclip => "paperclip",
+            Icon::SlashBox => "square.slash",
         }
     }
 
@@ -330,6 +342,9 @@ impl Icon {
             Icon::PanelRight => "◨",
             Icon::Spinner => "◌",
             Icon::Delivered => "✓✓",
+            Icon::Return => "↵",
+            Icon::Paperclip => "⌁",
+            Icon::SlashBox => "/",
         }
     }
 
@@ -387,6 +402,9 @@ impl Icon {
             Icon::PanelRight => "icons/panel-right.svg",
             Icon::Spinner => "icons/loader-circle.svg",
             Icon::Delivered => "icons/check-check.svg",
+            Icon::Return => "icons/corner-down-left.svg",
+            Icon::Paperclip => "icons/paperclip.svg",
+            Icon::SlashBox => "icons/square-slash.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -436,7 +454,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 56] = icons![
+const SVGS: [(&str, &[u8]); 59] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -458,6 +476,7 @@ const SVGS: [(&str, &[u8]); 56] = icons![
     "clock",
     "code-xml",
     "copy",
+    "corner-down-left",
     "cpu",
     "ellipsis",
     "file-plus",
@@ -476,6 +495,7 @@ const SVGS: [(&str, &[u8]); 56] = icons![
     "octagon-x",
     "panel-left",
     "panel-right",
+    "paperclip",
     "pencil",
     "plus",
     "puzzle",
@@ -487,6 +507,7 @@ const SVGS: [(&str, &[u8]); 56] = icons![
     "smartphone",
     "sparkles",
     "square",
+    "square-slash",
     "square-terminal",
     "text",
     "triangle-alert",

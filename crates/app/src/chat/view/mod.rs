@@ -13,6 +13,7 @@ mod conversation;
 mod drop;
 mod header;
 mod inspector;
+mod limit_ring;
 mod markdown;
 mod message_actions;
 mod opinions;
@@ -58,6 +59,14 @@ pub const EXPAND_ENV: &str = "NOTCHLING_RENDER_EXPAND";
 pub const PARTS_ENV: &str = "NOTCHLING_RENDER_PARTS";
 /// Set to `1`, a render draws the "Latest" pill, as if the conversation were scrolled up.
 pub const LATEST_ENV: &str = "NOTCHLING_RENDER_LATEST";
+/// Set to `1`, a render types a sample into the reply box.
+pub const TYPED_ENV: &str = "NOTCHLING_RENDER_TYPED";
+/// Set to `1`, a render draws the session as working, so the reply box shows Stop.
+pub const WORKING_ENV: &str = "NOTCHLING_RENDER_WORKING";
+/// Set to `1`, a render draws the reply box's + menu open.
+pub const ADD_ENV: &str = "NOTCHLING_RENDER_ADD";
+/// Set to `1`, a render draws the usage-limit card open (`limit_ring::LIMITS_ENV`).
+pub const LIMITS_ENV: &str = limit_ring::LIMITS_ENV;
 /// Set to `1`, a render draws the sidebar hidden, as its toggle leaves it.
 pub const SIDEBAR_HIDDEN_ENV: &str = "NOTCHLING_RENDER_SIDEBAR_HIDDEN";
 /// Set to `1`, a render draws the Details panel hidden.
@@ -140,6 +149,10 @@ pub struct ChatView {
     /// The accounts store the header's meters and account menu read, and the switch feed.
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
+    /// The reply box's + menu, and a render's forced states.
+    composer: composer::State,
+    /// The usage-limit ring's hover state under the reply box.
+    limit_ring: limit_ring::State,
     /// The header's account menu is open.
     account_menu: bool,
     /// When the accounts store was last read for the header (ms).
@@ -173,6 +186,15 @@ impl ChatView {
         view.drop_preview = switch(DROP_ENV);
         view.latest_preview = switch(LATEST_ENV);
         view.actions_preview = switch(ACTIONS_ENV);
+        view.limit_ring = limit_ring::State::preview(switch(LIMITS_ENV));
+        view.preview_composer(
+            composer::Preview {
+                typed: switch(TYPED_ENV),
+                working: switch(WORKING_ENV),
+                menu: switch(ADD_ENV),
+            },
+            cx,
+        );
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         if switch(PARTS_ENV) {
@@ -251,6 +273,8 @@ impl ChatView {
             }
             if parts_on(cx) {
                 set_parts(cx, false);
+            } else if this.composer.close_menu() {
+                cx.notify();
             } else if !this.overlay_open && this.selected_working() {
                 this.stop(cx);
             }
@@ -259,6 +283,8 @@ impl ChatView {
         let mut view = ChatView {
             accounts,
             switches,
+            composer: composer::State::default(),
+            limit_ring: limit_ring::State::default(),
             account_menu: false,
             accounts_polled_ms: 0,
             codex_installed: accounts::codex_installed(&root.home),
@@ -551,6 +577,7 @@ impl Render for ChatView {
             || self.account_menu
             || self.phone.is_some()
             || self.tools.picker.is_some()
+            || self.composer.is_open()
             || parts_on(cx);
         // Files from Finder land anywhere on the middle column while the box can take them.
         let takes_drops = self.composer_control(cx).enabled;

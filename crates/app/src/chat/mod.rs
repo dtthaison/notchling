@@ -12,12 +12,14 @@
 
 pub mod activity;
 pub mod codex_list;
+pub mod composer;
 pub mod data;
 pub mod drops;
 pub mod follow;
 pub mod format;
 pub mod header;
 pub mod inspector;
+pub mod limit_ring;
 pub mod loader;
 pub mod markdown;
 pub mod message_meta;
