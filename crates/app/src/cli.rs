@@ -10,6 +10,9 @@ pub enum Command {
     /// The menu bar app, over the real folders or a fixture root.
     Run {
         data_root: Option<PathBuf>,
+        /// Open Chat at launch, for when the menu bar item is hidden (a full menu bar on a Mac
+        /// with a notch hides the items that don't fit).
+        open_chat: bool,
     },
     /// Open `view` off to the side, write it to `out` as a PNG, exit (part U10). A view that reads
     /// sessions reads `data_root`, else `NOTCHLING_DATA_ROOT`, else the crate's fixture: never the
@@ -32,8 +35,10 @@ where
     let mut view: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut data_root: Option<PathBuf> = None;
+    let mut open_chat = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--open-chat" => open_chat = true,
             "--render" => view = Some(value(&mut args, "--render", "a view name")?),
             "--out" => out = Some(PathBuf::from(value(&mut args, "--out", "a file path")?)),
             "--data-root" => {
@@ -45,7 +50,13 @@ where
         }
     }
     match (view, out) {
-        (None, None) => Ok(Command::Run { data_root }),
+        (None, None) => Ok(Command::Run {
+            data_root,
+            open_chat,
+        }),
+        (Some(_), Some(_)) if open_chat => {
+            Err("--open-chat runs the app; a render opens no Chat".to_owned())
+        }
         (Some(view), Some(out)) => {
             if views::spec(&view).is_none() {
                 return Err(format!(
@@ -88,7 +99,7 @@ pub fn version_line() -> String {
 
 pub fn usage() -> String {
     let mut text = String::from(
-        "usage: notchling-app [--data-root <dir>]                     the menu bar app\n       \
+        "usage: notchling-app [--data-root <dir>] [--open-chat]       the menu bar app (--open-chat: open Chat at launch)\n       \
          notchling-app --render <view> --out <file.png> [--data-root <dir>]\n       \
          notchling-app --version | --help\n\n--data-root <dir> (or NOTCHLING_DATA_ROOT) reads \
          sessions from a fixture root laid out as <dir>/claude, <dir>/notchling and <dir>/codex, \
@@ -111,13 +122,33 @@ mod tests {
 
     #[test]
     fn nothing_runs_the_app() {
-        assert_eq!(parse_str(""), Ok(Command::Run { data_root: None }));
+        assert_eq!(
+            parse_str(""),
+            Ok(Command::Run {
+                data_root: None,
+                open_chat: false
+            })
+        );
         assert_eq!(
             parse_str("--data-root /f"),
             Ok(Command::Run {
-                data_root: Some(PathBuf::from("/f"))
+                data_root: Some(PathBuf::from("/f")),
+                open_chat: false
             })
         );
+    }
+
+    #[test]
+    fn open_chat_opens_chat_at_launch_and_never_with_a_render() {
+        assert_eq!(
+            parse_str("--open-chat"),
+            Ok(Command::Run {
+                data_root: None,
+                open_chat: true
+            })
+        );
+        assert!(parse_str("--open-chat --render chat --out /tmp/c.png").is_err());
+        assert!(usage().contains("--open-chat"));
     }
 
     #[test]

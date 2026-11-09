@@ -19,7 +19,10 @@ use crate::cli::Command;
 /// Runs a command; the exit code.
 pub fn run(command: Command) -> i32 {
     match command {
-        Command::Run { data_root } => shell::run(data_root),
+        Command::Run {
+            data_root,
+            open_chat,
+        } => shell::run(data_root, open_chat),
         Command::Render {
             view,
             out,
