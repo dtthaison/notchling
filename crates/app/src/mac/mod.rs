@@ -1,6 +1,7 @@
 //! The macOS app over GPUI and AppKit: the menu bar item, the Dock presence, the main window, and
 //! `--render`, which captures a view's window to a PNG (GPUI has no offscreen path; spike S4).
 
+pub mod app_icons;
 pub mod capture;
 pub mod dock;
 pub mod gate;

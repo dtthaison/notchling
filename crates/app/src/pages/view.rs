@@ -14,6 +14,7 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{row_look, ButtonKind, PartState};
+use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
     button, card, field, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
     TopBorder,
@@ -231,6 +232,7 @@ impl PagesView {
             .min_h(px(0.0))
             .overflow_y_scroll()
             .p(px(8.0))
+            .pr(px(GUTTER))
             .flex()
             .flex_col()
             .gap(px(2.0));

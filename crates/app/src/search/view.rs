@@ -13,7 +13,8 @@ use gpui::{
     KeyDownEvent, Render, ScrollHandle, SharedString, Subscription, Window,
 };
 use notchling_kit::metric::RADIUS_CARD;
-use notchling_kit::ui::{hsla, label, scrollable, window_appearance, KitStyled, Scrollable};
+use notchling_kit::scrollbar::GUTTER;
+use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitStyled, Scrollable};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -265,9 +266,9 @@ impl SearchPanelView {
             .flex()
             .items_center()
             .gap(px(12.0))
-            .child(label(
-                Icon::Search.glyph(),
-                TypeRole::Title,
+            .child(icon(
+                Icon::Search,
+                TypeRole::Title.spec().size,
                 Ink::TextMuted,
                 a,
             ))
@@ -316,6 +317,7 @@ impl SearchPanelView {
             .flex_shrink_0()
             .overflow_y_scroll()
             .p(px(layout::LIST_PADDING))
+            .pr(px(GUTTER))
             .flex()
             .flex_col();
         for (index, item) in self.model.items().iter().enumerate() {
@@ -364,9 +366,9 @@ impl SearchPanelView {
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .child(label(
-                        Icon::Check.glyph(),
-                        TypeRole::Meta,
+                    .child(icon(
+                        Icon::Check,
+                        TypeRole::Meta.spec().size,
                         Ink::AccentText,
                         a,
                     ))

@@ -104,6 +104,8 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
     // The kit's icons are SVG assets.
     let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
     app.run(move |cx: &mut App| {
+        // The tools' app icons, for every window that draws a tool (Chat, Search).
+        crate::mac::app_icons::install();
         dock::register(cx);
         dock::apply(policy_for(0));
         dock::set_main_menu(cx, policy_for(0));

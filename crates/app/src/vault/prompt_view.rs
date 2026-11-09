@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, FocusHandle, Focusable, KeyDownEvent, Render, Window};
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
-use notchling_kit::ui::{hsla, label, scrollable, window_appearance, KitStyled};
+use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::form::{Form, Typed};
@@ -221,9 +221,9 @@ impl Render for VaultRequestView {
                     .gap(px(8.0))
                     .border_b(px(1.0))
                     .border_color(hsla(Ink::Hairline.color(a)))
-                    .child(label(
-                        Icon::Permission.glyph(),
-                        TypeRole::Heading,
+                    .child(icon(
+                        Icon::Permission,
+                        TypeRole::Heading.spec().size,
                         Ink::TextMuted,
                         a,
                     ))

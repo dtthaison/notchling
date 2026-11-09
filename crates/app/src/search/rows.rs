@@ -5,7 +5,7 @@
 use gpui::{div, prelude::*, px, Div, FontWeight, HighlightStyle, SharedString, StyledText};
 use notchling_engine::search::{age_text, SessionTool};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
-use notchling_kit::ui::{claude_mark, hsla, label, KitStyled};
+use notchling_kit::ui::{hsla, icon, label, tool_icon, KitStyled, ToolMark};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::marks;
@@ -40,18 +40,13 @@ fn icon_box(selected: bool, a: Appearance) -> Div {
         )
 }
 
-/// A tool's mark: Claude's sparkle, else its short name.
+/// A tool's mark: its installed app's icon, else the kit's own.
 fn tool_mark(tool: SessionTool, selected: bool, a: Appearance) -> Div {
-    let ink = if selected {
-        Ink::AccentText
-    } else {
-        Ink::TextMuted
-    };
     match tool {
-        SessionTool::Claude => icon_box(selected, a).child(claude_mark(20.0, a)),
-        SessionTool::Codex => icon_box(selected, a).child(label("Cx", TypeRole::Label, ink, a)),
+        SessionTool::Claude => icon_box(selected, a).child(tool_icon(ToolMark::Claude, 20.0, a)),
+        SessionTool::Codex => icon_box(selected, a).child(tool_icon(ToolMark::Codex, 20.0, a)),
         SessionTool::Antigravity => {
-            icon_box(selected, a).child(label("Ag", TypeRole::Label, ink, a))
+            icon_box(selected, a).child(tool_icon(ToolMark::Antigravity, 20.0, a))
         }
     }
 }
@@ -87,9 +82,9 @@ pub(super) fn page_row(page: &Page, selected: bool, now_secs: f64, a: Appearance
         .filter(|s| !s.is_empty())
         .collect();
     row_frame(layout::PAGE_ROW, selected, a)
-        .child(icon_box(selected, a).child(label(
-            Icon::Page.glyph(),
-            TypeRole::Heading,
+        .child(icon_box(selected, a).child(icon(
+            Icon::Page,
+            TypeRole::Heading.spec().size,
             if selected {
                 Ink::AccentText
             } else {

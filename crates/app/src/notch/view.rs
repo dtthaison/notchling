@@ -12,8 +12,9 @@ use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, scrollable, status_pill, KitPart, KitStyled};
-use notchling_kit::{Color, Ink, TypeRole};
+use notchling_kit::scrollbar::GUTTER;
+use notchling_kit::ui::{hsla, icon_button, scrollable, status_pill, KitPart, KitStyled};
+use notchling_kit::{Color, Icon, IconSize, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 
@@ -270,7 +271,7 @@ impl NotchView {
                     .flex_col()
                     .gap(px(4.0))
                     .pl(px(6.0))
-                    .pr(px(12.0))
+                    .pr(px(GUTTER))
                     .pt(px(2.0))
                     .pb(px(6.0))
                     .children(rows.into_iter().map(|a| self.row(a, cx))),
@@ -481,6 +482,7 @@ impl NotchView {
             div()
                 .id("notch-conversation")
                 .overflow_y_scroll()
+                .pr(px(GUTTER))
                 .flex_1()
                 .min_h(px(0.0))
                 .flex()
@@ -531,12 +533,18 @@ impl NotchView {
             .items_center()
             .gap(px(10.0))
             .child(
-                button("notch-back", "‹", ButtonKind::Ghost, PartState::Rest, A).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.model.go(NotchState::List);
-                        cx.notify();
-                    }),
-                ),
+                icon_button(
+                    "notch-back",
+                    Icon::ChevronLeft,
+                    IconSize::Button.points(),
+                    ButtonKind::Ghost,
+                    PartState::Rest,
+                    A,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.model.go(NotchState::List);
+                    cx.notify();
+                })),
             )
             .child(
                 div()
@@ -550,12 +558,19 @@ impl NotchView {
             )
             .child(status_pill(group_status, group_status.word(), A))
             .child(
-                button("notch-close", "×", ButtonKind::Ghost, PartState::Rest, A)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.model.go(NotchState::Collapsed);
-                        cx.notify();
-                    }))
-                    .part_at("Hide Button", Corner::BottomTrailing, A, cx),
+                icon_button(
+                    "notch-close",
+                    Icon::Close,
+                    IconSize::Button.points(),
+                    ButtonKind::Ghost,
+                    PartState::Rest,
+                    A,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.model.go(NotchState::Collapsed);
+                    cx.notify();
+                }))
+                .part_at("Hide Button", Corner::BottomTrailing, A, cx),
             )
             .part_at("Notch Detail Header", Corner::Bottom, A, cx)
     }

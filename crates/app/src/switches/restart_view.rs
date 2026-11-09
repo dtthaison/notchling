@@ -8,7 +8,7 @@ use std::sync::Arc;
 use gpui::{div, prelude::*, px, size, AnyView, Context, Render, Window};
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{button, hsla, icon, label, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::restart::{turn_back_on, Area, Restart, RestartNotice, Said, TurnOn, NOTICE_BUTTON};
@@ -195,12 +195,7 @@ impl Render for RestartNoticeView {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(label(
-                                Icon::Permission.glyph(),
-                                TypeRole::Title,
-                                Ink::Needs,
-                                a,
-                            ))
+                            .child(icon(Icon::Permission, TypeRole::Title.spec().size, Ink::Needs, a))
                             .child(label(&banner, TypeRole::Heading, Ink::Text, a)),
                     )
                     .child(label(

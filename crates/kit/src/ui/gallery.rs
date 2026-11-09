@@ -3,6 +3,7 @@
 
 use gpui::{div, prelude::*, px, Context, Div, Entity, Render, SharedString, Subscription, Window};
 
+use super::icons::{icon, spinner};
 use super::scrollbar::scrollable;
 use super::text_editor::TextEditor;
 use super::widgets::{
@@ -10,9 +11,9 @@ use super::widgets::{
     session_row_marked, status_pill, tool_icon, ToolMark,
 };
 use super::{hsla, window_appearance, KitStyled};
-use crate::metric::{RADIUS_MD, TOOL_ICON};
+use crate::metric::{RADIUS_MD, SPINNER_MINI, SPINNER_SMALL, TOOL_ICON};
 use crate::part::{ButtonKind, PartState};
-use crate::{Appearance, Ink, Status, TypeRole};
+use crate::{Appearance, Icon, Ink, Status, TypeRole};
 
 /// The gallery view. `appearance: None` follows the window (the system); `Some` forces one.
 pub struct KitGallery {
@@ -129,6 +130,27 @@ fn scroll_demo(a: Appearance) -> Div {
                     )
                 })),
         ))
+}
+
+/// Every icon at the row size in its ink, and the spinner at both sizes.
+fn icon_grid(a: Appearance) -> Div {
+    div()
+        .w(px(440.0))
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(6.0))
+        .children(Icon::ALL.map(|shape| {
+            div()
+                .w(px(34.0))
+                .h(px(28.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(shape, 13.0, Ink::Text, a))
+        }))
+        .child(spinner("gallery-mini", SPINNER_MINI, Ink::Working, a))
+        .child(spinner("gallery-small", SPINNER_SMALL, Ink::Working, a))
 }
 
 fn id(part: &str, detail: &str) -> SharedString {
@@ -303,7 +325,14 @@ impl Render for KitGallery {
             .items_start()
             .gap(px(18.0))
             .child(label("Chat kit", TypeRole::Title, Ink::Text, a))
-            .child(section("Buttons", a, buttons(a)))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(24.0))
+                    .child(section("Buttons", a, buttons(a)))
+                    .child(section("Icons", a, icon_grid(a))),
+            )
             .child(
                 div()
                     .flex()

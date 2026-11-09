@@ -7,10 +7,10 @@ use notchling_engine::machines::merge::MergeOutcome;
 use notchling_engine::machines::morning::{MorningItem, MorningKind};
 use notchling_engine::machines::status::{NeedsYouEntry, ReadyEntry, StuckEntry};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, label};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::ui::{button, card, field, icon, label};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::view::{mono_box, text_line, Confirming, MachinesView, CARD_PADDING};
+use super::view::{busy_line, mono_box, text_line, Confirming, MachinesView, CARD_PADDING};
 
 fn state(busy: bool) -> PartState {
     if busy {
@@ -47,7 +47,13 @@ impl MachinesView {
         let actions = &self.model.parts.actions;
         let mut column = div().flex().flex_col().gap(px(4.0));
         if actions.is_running(&item.id) {
-            column = column.child(label("Working…", TypeRole::Label, Ink::TextMuted, a));
+            column = column.child(busy_line(
+                SharedString::from(format!("working-{}", item.id)),
+                "Working…",
+                TypeRole::Label,
+                Ink::TextMuted,
+                a,
+            ));
         }
         let error = actions.last_error(&item.id);
         if let Some(error) = &error {
@@ -489,9 +495,9 @@ fn checklist(outcome: &MergeOutcome, a: Appearance) -> Div {
                 .flex()
                 .items_center()
                 .gap(px(4.0))
-                .child(label(
-                    if ok { "✓" } else { "○" },
-                    TypeRole::Meta,
+                .child(icon(
+                    if ok { Icon::Check } else { Icon::Circle },
+                    TypeRole::Meta.spec().size,
                     if ok { Ink::Done } else { Ink::TextFaint },
                     a,
                 ))
