@@ -8,7 +8,7 @@
 //! | --- | --- |
 //! | [`keys`] | The key bytes, the bracketed paste with its escapes taken out, the pauses, the dialog markers |
 //! | [`question`] | Answers to an AskUserQuestion: digits, Tab, the text row, the review `1`; the hook's answers |
-//! | [`plan`] | The planners: reply, answer, take back the queue, interrupt |
+//! | [`plan`] | The planners: reply, answer, take back the queue, interrupt, a permission's digit |
 //! | [`exec`] | The executor and its `Pty` and `ScreenCheck` traits |
 //! | [`shell`] | `!` commands copied from a terminal, put back together before they're sent |
 //! | [`popall`] | Reading `popAll` back from the transcript, which is how a take-back is known to have worked |

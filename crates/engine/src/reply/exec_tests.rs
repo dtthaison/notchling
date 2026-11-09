@@ -366,3 +366,199 @@ fn failures_say_what_the_swift_app_says() {
         "That question isn't open in the session any more."
     );
 }
+
+/// A permission dialog as `claude attach` draws it (made up from the known layout; no recording).
+fn bash_dialog(always: bool) -> Vec<String> {
+    let rule = "─".repeat(120);
+    let mut rows = vec![
+        rule.as_str(),
+        " Bash command",
+        "",
+        "   rm -rf build",
+        "   Remove the build output",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+    ];
+    if always {
+        rows.push("   2. Yes, and don't ask again for rm commands in /w/api");
+        rows.push("   3. No, and tell Claude what to do differently (esc)");
+    } else {
+        rows.push("   2. No, and tell Claude what to do differently (esc)");
+    }
+    rows.push(" Esc to cancel");
+    lines(&rows)
+}
+
+fn rm_build() -> plan::Expected {
+    plan::Expected {
+        tool: "Bash".into(),
+        summary: "rm -rf build".into(),
+    }
+}
+
+/// The dialog closes on any digit it offers; any other key leaves it as it is.
+fn permission_pty(always: bool) -> Fake {
+    let options = if always { 3 } else { 2 };
+    let mut fake = Fake::new(&[]);
+    fake.screen = bash_dialog(always);
+    fake.reacting(move |keys, screen| {
+        if keys
+            .parse::<usize>()
+            .is_ok_and(|n| (1..=options).contains(&n))
+        {
+            *screen = lines(&["⏺ Bash(rm -rf build)", "> ", "  ? for shortcuts"]);
+        }
+    })
+}
+
+#[test]
+fn a_permission_is_one_digit_per_decision() {
+    for (decision, always, digit) in [
+        (plan::Decision::Allow, true, "1"),
+        (plan::Decision::Always, true, "2"),
+        (plan::Decision::Deny, true, "3"),
+        (plan::Decision::Allow, false, "1"),
+        (plan::Decision::Deny, false, "2"),
+    ] {
+        let mut pty = permission_pty(always);
+        let out = execute(
+            &plan::permission(decision, &rm_build()),
+            &mut pty,
+            &Markers,
+            &mut NoQueueLog,
+        );
+        assert_eq!(out, Ok(Outcome::default()), "{decision:?}");
+        assert_eq!(pty.writes(), vec![digit.to_string()], "{decision:?}");
+        assert_eq!(
+            pty.events[..3],
+            [
+                Ev::Wait(500, 15_000),
+                Ev::Write(digit.into()),
+                Ev::Sleep(150)
+            ]
+        );
+        assert_eq!(pty.events.last(), Some(&Ev::Wait(400, 3_000)), "detached");
+    }
+}
+
+#[test]
+fn a_permission_about_something_else_types_nothing() {
+    let other = plan::Expected {
+        tool: "Bash".into(),
+        summary: "rm -rf dist".into(),
+    };
+    let edit = plan::Expected {
+        tool: "Edit".into(),
+        summary: "rm -rf build".into(),
+    };
+    for expect in [other, edit] {
+        let mut pty = permission_pty(true);
+        let out = execute(
+            &plan::permission(plan::Decision::Allow, &expect),
+            &mut pty,
+            &Markers,
+            &mut NoQueueLog,
+        );
+        assert_eq!(out, Err(Failure::PermissionMismatch), "{expect:?}");
+        assert!(pty.writes().is_empty());
+    }
+}
+
+#[test]
+fn always_without_a_dont_ask_again_option_types_nothing() {
+    let mut pty = permission_pty(false);
+    let out = execute(
+        &plan::permission(plan::Decision::Always, &rm_build()),
+        &mut pty,
+        &Markers,
+        &mut NoQueueLog,
+    );
+    assert_eq!(out, Err(Failure::NoAlways));
+    assert!(pty.writes().is_empty());
+}
+
+#[test]
+fn no_permission_on_screen_types_nothing() {
+    let question = lines(&[
+        &"─".repeat(120),
+        "Do you want to deploy?",
+        "❯ 1. Yes",
+        "  2. No",
+        "  3. Type something.",
+        "  4. Chat about this",
+        "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ]);
+    // The prompt, an AskUserQuestion, and a dialog with no rule over it (a layout not known).
+    for screen in [lines(PROMPT), question, lines(PERMISSION)] {
+        let mut pty = Fake::new(&[]);
+        pty.screen = screen.clone();
+        let out = execute(
+            &plan::permission(plan::Decision::Deny, &rm_build()),
+            &mut pty,
+            &Markers,
+            &mut NoQueueLog,
+        );
+        assert_eq!(out, Err(Failure::NotPermission), "{screen:?}");
+        assert!(pty.writes().is_empty());
+    }
+}
+
+#[test]
+fn a_permission_that_stays_open_after_its_digit_says_so() {
+    // The digit goes in and the screen doesn't change: no second key, no Enter, no Esc.
+    let mut pty = Fake::new(&[]);
+    pty.screen = bash_dialog(true);
+    let out = execute(
+        &plan::permission(plan::Decision::Allow, &rm_build()),
+        &mut pty,
+        &Markers,
+        &mut NoQueueLog,
+    );
+    assert_eq!(out, Err(Failure::PermissionStillOpen));
+    assert_eq!(pty.writes(), vec!["1".to_string()]);
+}
+
+#[test]
+fn a_new_request_in_place_of_the_answered_one_counts_as_gone() {
+    let mut pty = Fake::new(&[]).reacting(|keys, screen| {
+        if keys == "1" {
+            *screen = bash_dialog(true);
+            screen[3] = "   cargo test".into();
+        }
+    });
+    pty.screen = bash_dialog(true);
+    let out = execute(
+        &plan::permission(plan::Decision::Allow, &rm_build()),
+        &mut pty,
+        &Markers,
+        &mut NoQueueLog,
+    );
+    assert_eq!(out, Ok(Outcome::default()));
+    assert_eq!(pty.writes(), vec!["1".to_string()]);
+}
+
+#[test]
+fn the_permission_plan_has_no_key_of_its_own() {
+    // The digit is read off the screen; no Enter, Esc or text is ever planned.
+    let p = plan::permission(plan::Decision::Deny, &rm_build());
+    assert!(p.writes().is_empty());
+    assert!(!p
+        .steps
+        .iter()
+        .chain(&p.detach)
+        .any(|s| matches!(s, plan::Step::Keys(_) | plan::Step::Paste(_))));
+}
+
+#[test]
+fn permission_failures_never_read_as_the_dialog_refusal() {
+    for f in [
+        Failure::NotPermission,
+        Failure::PermissionMismatch,
+        Failure::NoAlways,
+        Failure::PermissionStillOpen,
+    ] {
+        assert!(!f.to_string().contains("asking you something"), "{f}");
+        assert!(f.to_string().ends_with('.'), "{f}");
+    }
+}

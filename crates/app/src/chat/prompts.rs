@@ -4,10 +4,14 @@
 //! the transcript's tail, then the summary in a background job's state ("answer: Which target?
 //! (A · B)"). A permission wins over a question, as in the notch.
 //!
+//! A permission read from the job's state summary ("approve Bash: ls -la") has no hook prompt to
+//! decide; its answer goes to the job's terminal instead ([`permission_request`]): the daemon reads
+//! the dialog off the screen and types the option's digit only when the dialog asks about the tool
+//! and command the card showed.
+//!
 //! What none of them can see: a question a background job has asked but not yet written to its
 //! transcript, with several questions or one with brackets (the job's state summary doesn't carry
-//! them), and a permission dialog when no hook holds it (nothing installs the hook yet). The
-//! daemon has no op that reads the dialog off the screen (`session.question` answers
+//! them). The daemon has no op that reads a question off the screen (`session.question` answers
 //! `unimplemented` for one only on screen), so those stay in the terminal and the reply box says
 //! so ([`error_text`]).
 
@@ -17,6 +21,7 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use serde_json::Value;
 
+use crate::acting::{Decision, Request};
 use crate::chat::data::Tool;
 use crate::notch::model::question_from_needs;
 use crate::notch::requests::{HookRequest, RequestKind};
@@ -39,16 +44,6 @@ impl Prompt {
         }
     }
 
-    /// Whether Chat can send an answer: not for a permission read only from a job's state
-    /// summary, which no hook holds, so the daemon has no prompt to decide (`session.permission`
-    /// takes a held prompt's id, and nothing types into the permission dialog).
-    pub fn answerable(&self) -> bool {
-        match self {
-            Prompt::Question(_) => true,
-            Prompt::Permission(r) => !r.id.starts_with(NEEDS_PREFIX),
-        }
-    }
-
     /// The part's name, as `.part_at` and the ? button show it.
     pub fn part(&self) -> &'static str {
         match self {
@@ -61,12 +56,21 @@ impl Prompt {
 /// The id prefix of a permission read from a job's state summary.
 pub const NEEDS_PREFIX: &str = "needs:";
 
-/// Why such a permission's buttons are off.
-pub const NO_HOOK: &str =
-    "No hook holds this request, so Chat can't answer it. Answer it in the terminal.";
+/// What a Permission card's button sends: a hook-held prompt is decided by its own id; one read
+/// from a job's state is answered in the job's terminal, by the row and with what the card showed,
+/// so the daemon types nothing into a dialog that asks about something else.
+pub fn permission_request(r: &HookRequest, decision: Decision) -> Request {
+    if r.id.starts_with(NEEDS_PREFIX) {
+        Request::permission_on_screen(&r.session_id, decision, &r.tool_name, &r.summary)
+    } else {
+        Request::permission(&r.id, decision)
+    }
+}
 
 /// A background job waiting on a permission has no prompt in the daemon, only a summary in its
-/// state: "approve Bash: ls -la". The tool and what it would run, as a card shows them.
+/// state: "approve Bash: ls -la". The tool and what it would run, as a card shows them. Always
+/// allow is offered: the daemon refuses it, with nothing typed, when the dialog has no "don't ask
+/// again" option.
 pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
     if agent.group != AgentGroup::NeedsInput || !matches!(agent.target, AgentTarget::Job(_)) {
         return None;
@@ -87,7 +91,7 @@ pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
         kind: RequestKind::Permission,
         tool_name: tool.to_owned(),
         summary: summary.to_owned(),
-        can_always_allow: false,
+        can_always_allow: true,
         agy: None,
     })
 }
@@ -361,20 +365,43 @@ mod tests {
     }
 
     #[test]
-    fn a_job_waiting_on_a_permission_shows_it_from_its_state_but_cannot_answer_it() {
+    fn a_job_waiting_on_a_permission_shows_it_from_its_state_and_answers_it_on_screen() {
         let agent = job("job1", "sess-1", Some("approve Bash: ls -la && pwd"));
         let shown = pick(&agent, Some(&[]), None, &HashSet::new()).unwrap();
-        assert!(!shown.answerable());
-        let Prompt::Permission(r) = shown else {
+        let Prompt::Permission(r) = shown.clone() else {
             panic!("a permission")
         };
         assert_eq!(r.tool_name, "Bash");
         assert_eq!(r.summary, "ls -la && pwd");
-        // A hook's prompt for the same session is the real one.
+        assert!(
+            r.can_always_allow,
+            "the daemon refuses it if the dialog has none"
+        );
+        // Answered in the job's terminal, by the row, with what the card showed.
+        assert_eq!(
+            permission_request(&r, Decision::Deny),
+            Request::permission_on_screen("job1", Decision::Deny, "Bash", "ls -la && pwd")
+        );
+        assert_eq!(
+            permission_request(&r, Decision::Allow).args,
+            json!({"id": "job1", "decision": "allow",
+                   "expect": {"tool": "Bash", "summary": "ls -la && pwd"}})
+        );
+        // The card is hidden by its key once answered, and shows again for another request.
+        let answered: HashSet<String> = [shown.key()].into();
+        assert_eq!(pick(&agent, Some(&[]), None, &answered), None);
+        let next = job("job1", "sess-1", Some("approve Bash: cargo test"));
+        assert!(pick(&next, Some(&[]), None, &answered).is_some());
+        // A hook's prompt for the same session is the real one, decided by its own id.
         let held = vec![permission_prompt("p1", "sess-1", 1)];
-        assert!(pick(&agent, Some(&held), None, &HashSet::new())
-            .unwrap()
-            .answerable());
+        let Some(Prompt::Permission(hook)) = pick(&agent, Some(&held), None, &HashSet::new())
+        else {
+            panic!("the hook's permission")
+        };
+        assert_eq!(
+            permission_request(&hook, Decision::Always),
+            Request::permission("p1", Decision::Always)
+        );
         // Not for a session that isn't waiting.
         let mut idle = agent.clone();
         idle.group = AgentGroup::Working;

@@ -3,7 +3,8 @@
 //! multi select, a box for something else, Next and Submit) and "Permission needed" (Allow, Always
 //! allow, Deny). What it shows and where it comes from is `chat::prompts`; the answers are the
 //! notch's (`notch::answer::QuestionDraft`, `acting::Request::answer_for`/`permission`), sent
-//! through the same daemon ops. Answering here hides the card in the notch, and the other way
+//! through the same daemon ops; a permission read only from a job's state goes to its terminal
+//! (`chat::prompts::permission_request`). Answering here hides the card in the notch, and the other way
 //! round, by the session source's one answered set. Every control follows `Acting::control`: drawn
 //! disabled with the reason, and nothing is sent, while acting isn't on.
 
@@ -23,7 +24,7 @@ use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
 use crate::chat::prompts::{
-    is_dialog, preview_prompt, prompt_for, question_key, Preview, Prompt, NO_HOOK,
+    is_dialog, permission_request, preview_prompt, prompt_for, question_key, Preview, Prompt,
 };
 use crate::mac::gate;
 use crate::notch::answer::{type_key, QuestionDraft, Typed};
@@ -62,9 +63,9 @@ impl State {
         }
     }
 
-    /// Whether a card that can be answered is up: the reply box's refusal points at it then.
+    /// Whether a card is up: the reply box's refusal points at it then.
     pub fn is_shown(&self) -> bool {
-        self.shown.as_ref().is_some_and(Prompt::answerable)
+        self.shown.is_some()
     }
 }
 
@@ -195,13 +196,7 @@ pub(super) fn card(
 ) -> Option<Div> {
     let prompt = view.prompt.shown.clone()?;
     let row = view.selected.clone()?;
-    let mut gate = view.prompt_gate(cx);
-    if !prompt.answerable() {
-        gate = Control {
-            enabled: false,
-            tooltip: Some(NO_HOOK),
-        };
-    }
+    let gate = view.prompt_gate(cx);
     let content = match &prompt {
         Prompt::Question(q) => question(view, &row, q, gate, a, window, cx),
         Prompt::Permission(r) => permission(view, r, gate, a, cx),
@@ -449,12 +444,12 @@ fn permission(
                 gate::state(gate),
                 a,
             );
-            // The decision goes to the prompt by its own id, and hides that prompt only.
-            let prompt = r.id.clone();
+            // A hook's prompt is decided by its own id; one read from the job's state is typed
+            // into its terminal, checked against what this card shows. Either hides that one only.
+            let (key, request) = (r.id.clone(), permission_request(r, decision));
             gate::tip(row, gate, a).when(gate.enabled, |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
-                    let request = Request::permission(&prompt, decision);
-                    this.answer_prompt(prompt.clone(), request, cx);
+                    this.answer_prompt(key.clone(), request.clone(), cx);
                 }))
             })
         });

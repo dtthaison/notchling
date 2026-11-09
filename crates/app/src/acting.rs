@@ -213,6 +213,22 @@ impl Request {
         )
     }
 
+    /// A background job's permission dialog no hook holds, by its row id: the daemon types the
+    /// decision's digit only when the dialog on screen asks about `tool` and `summary`, what the
+    /// card showed.
+    pub fn permission_on_screen(
+        row: &str,
+        decision: Decision,
+        tool: &str,
+        summary: &str,
+    ) -> Request {
+        Request::new(
+            ops::SESSION_PERMISSION,
+            json!({ "id": row, "decision": decision.wire(),
+                    "expect": { "tool": tool, "summary": summary } }),
+        )
+    }
+
     pub fn interrupt(id: &str) -> Request {
         Request::new(ops::SESSION_INTERRUPT, json!({ "id": id }))
     }
@@ -392,6 +408,14 @@ mod tests {
             assert_eq!(r.op, "session.permission");
             assert_eq!(r.args, json!({"id": "s1", "decision": word}));
         }
+        assert_eq!(
+            Request::permission_on_screen("job1", Decision::Always, "Bash", "ls -la"),
+            Request {
+                op: "session.permission",
+                args: json!({"id": "job1", "decision": "always",
+                             "expect": {"tool": "Bash", "summary": "ls -la"}})
+            }
+        );
         assert_eq!(Request::interrupt("s1").op, "session.interrupt");
         assert_eq!(Request::stop("s1").op, "session.stop");
         assert_eq!(Request::remove("s1").op, "session.remove");

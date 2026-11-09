@@ -9,6 +9,9 @@
 //! - [`ask_dialog`]: [`ask_dialog::page`] reads the question page on screen, [`ask_dialog::shows`]
 //!   checks which question it is, [`ask_dialog::is_review`] spots the review screen;
 //!   [`dialog_open`] says whether any question or permission dialog is open.
+//! - [`permission_dialog`]: [`permission_dialog::read`] reads a permission dialog ("Bash command",
+//!   "Do you want to proceed?", "1. Yes"...), which option answers Allow, Always or Deny, and
+//!   whether it asks about what a card showed ([`permission_dialog::PermissionDialog::asks`]).
 //! - [`keys`]: what a key press or click sends.
 //! - [`pty`]: [`Pty`] runs a program on a pseudo-terminal, started the way `forkpty` does (macOS and
 //!   Linux; elsewhere [`PtyError::Unsupported`]); [`Terminal`] is a pty with a screen fed from it,
@@ -31,6 +34,7 @@ pub mod ask_dialog;
 mod csi;
 pub mod keys;
 mod live;
+pub mod permission_dialog;
 pub mod pty;
 mod screen;
 mod width;

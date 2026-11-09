@@ -7,6 +7,7 @@
 use super::keys::{self, timing::*, ENTER, ESC, SUBMIT, UP};
 use super::question::{page_keys, Choice, PendingQuestion};
 use super::shell;
+pub use crate::terminal::permission_dialog::{self, Decision, Expected};
 
 /// One thing the executor does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +53,15 @@ pub enum Step {
     },
     /// End the steps here (still detaching) unless `AwaitPopAll` saw it.
     EndUnlessTaken,
+    /// Read the permission dialog on screen ([`permission_dialog::read`]) and press the digit of
+    /// the option that gives `decision`, and nothing else. Stops with nothing typed unless the
+    /// screen shows a permission dialog (`NotPermission`) asking about `expect`
+    /// (`PermissionMismatch`) with an option for `decision` (`NoAlways`, or `NotPermission` for a
+    /// dialog with no Yes or No).
+    PressPermission {
+        decision: Decision,
+        expect: Expected,
+    },
 }
 
 /// What [`Step::WaitFor`] waits for.
@@ -61,6 +71,9 @@ pub enum Until {
     Shows(String),
     /// The review screen, or no dialog any more.
     ReviewOrGone,
+    /// The permission dialog [`Step::PressPermission`] answered isn't on screen any more
+    /// (`PermissionStillOpen` when it stays).
+    PermissionGone,
 }
 
 /// A whole attach: `steps`, then `detach` when they ended well (or at `EndUnlessTaken`).
@@ -230,6 +243,28 @@ pub fn answer(choices: &[Choice], question: &PendingQuestion) -> Plan {
     });
     Plan {
         steps,
+        detach: detach(),
+    }
+}
+
+/// Answers a background job's permission dialog that no hook holds: wait for the screen, read the
+/// dialog, check it asks about what Chat showed, press the one digit of the chosen option, then
+/// wait for the dialog to go. The digit is the only key: no Enter (a digit answers on its own),
+/// and never Esc or Ctrl+C, which would interrupt or cancel on a screen this doesn't know.
+pub fn permission(decision: Decision, expect: &Expected) -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::PressPermission {
+                decision,
+                expect: expect.clone(),
+            },
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::PermissionGone,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
         detach: detach(),
     }
 }

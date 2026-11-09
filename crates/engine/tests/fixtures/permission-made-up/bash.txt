@@ -1,0 +1,20 @@
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/work/api
+
+❯ Clean the build folder and rebuild.
+
+⏺ Bash(rm -rf build && cargo build --release --workspace)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   rm -rf build && cargo build --release --workspace
+   Remove the build folder and rebuild
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for rm commands in /Users/me/work/api
+   3. No, and tell Claude what to do differently (esc)
+
+ Esc to cancel

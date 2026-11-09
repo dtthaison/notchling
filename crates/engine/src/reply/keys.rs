@@ -105,6 +105,9 @@ pub mod timing {
     pub const PAGE_WAIT_MS: u64 = 4_000;
     /// After the review's `1`, the dialog should close within this long.
     pub const SUBMIT_WAIT_MS: u64 = 4_000;
+    /// After a permission's digit, its dialog should close within this long (no Swift twin: the
+    /// Swift app never typed into a permission dialog).
+    pub const PERMISSION_WAIT_MS: u64 = 4_000;
     /// Each Left of the walk back to the first question waits for quiet this long, or this long.
     pub const WALK_BACK_QUIET_MS: u64 = 400;
     pub const WALK_BACK_TIMEOUT_MS: u64 = 1_500;

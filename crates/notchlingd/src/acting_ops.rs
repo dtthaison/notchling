@@ -7,6 +7,7 @@
 //! | `session.reply` | app | `{id, text}` | `{"sent": true}` |
 //! | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
 //! | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
+//! | `session.permission` (no hook) | app | `{id: <row id>, decision, expect: {tool, summary}}` | `{"decided": decision, "answered": "terminal"}` |
 //! | `session.interrupt` | app | `{id}` | `{"sent": true}` |
 //! | `session.take_back` | app | `{id}` | `{"taken": bool}` |
 //! | `session.stop`, `.remove`, `.new`, `.move`, `.command`, `folder.trust` | app | see [`crate::control_ops`] | |
@@ -17,9 +18,17 @@
 //! | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
 //!
 //! An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from
-//! `prompt.pending` only (`session.permission` always; `session.answer` when the id is a prompt's,
-//! else it types into the row's dialog), never found from a row: a prompt is the one the app showed.
+//! `prompt.pending` only (`session.permission` and `session.answer` when the id is a prompt's,
+//! else they type into the row's dialog), never found from a row: a prompt is the one the app showed.
 //! A typing failure (a dialog open, the question gone) is code `failed`.
+//!
+//! `session.permission` with a row id and `expect` answers a background job's permission dialog
+//! that no hook holds (the app read it from the job's state, "approve Bash: ls"): it attaches,
+//! reads the dialog off the screen and types nothing unless it is a permission dialog asking about
+//! `expect` (the same tool, the summary's text in it, compared without whitespace and with an
+//! elided summary matched piece by piece) with an option for the decision; then it presses that
+//! option's digit only (Allow "Yes", Always the "don't ask again" one, Deny the "No" one) and
+//! waits for the dialog to go. Never Enter, Esc or Ctrl+C. A deny message isn't taken there.
 //!
 //! The hook is who its process is, never what it says: see [`crate::hook_ops`].
 
@@ -30,7 +39,7 @@ use crate::hook_ops::Parents;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
-use notchling_engine::reply::plan::{self, Plan, PlanError};
+use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
@@ -445,9 +454,15 @@ impl ActingOps {
 
     fn permission(&self, args: &Value) -> Result<Value, ApiError> {
         let decision = text_arg(args, "decision")?;
-        let prompt = self
-            .held(args)?
-            .ok_or_else(|| bad("no prompt with that id is waiting (answer by the prompt's id)"))?;
+        let Some(prompt) = self.held(args)? else {
+            // No hook holds it: with what the app showed, typed into the row's dialog.
+            if args.get("expect").is_some() {
+                return self.permission_on_screen(args, decision);
+            }
+            return Err(bad(
+                "no prompt with that id is waiting (answer by the prompt's id, or pass expect to answer a row's dialog)",
+            ));
+        };
         let response = match (decision, prompt.kind) {
             ("deny", _) => match args.get("message").and_then(Value::as_str) {
                 Some(message) => json!({"action": "deny", "message": message}),
@@ -462,6 +477,23 @@ impl ActingOps {
         };
         self.decide(&prompt, response, decision)?;
         Ok(json!({"decided": decision, "promptId": prompt.id}))
+    }
+
+    /// A background job's permission dialog that no hook holds, answered from its screen: the
+    /// dialog must ask about `expect` (the tool and summary the app showed), and then only the
+    /// chosen option's digit is typed ([`plan::permission`]).
+    fn permission_on_screen(&self, args: &Value, decision: &str) -> Result<Value, ApiError> {
+        let decision =
+            Decision::parse(decision).ok_or_else(|| bad("decision is allow, deny or always"))?;
+        if args.get("message").is_some() {
+            return Err(bad(
+                "a deny message can't be typed into the terminal's dialog; deny without one",
+            ));
+        }
+        let expect = expect_arg(args)?;
+        let agent = self.agent(args)?;
+        self.play(&agent, &plan::permission(decision, &expect), &mut NoLog)?;
+        Ok(json!({"decided": decision.word(), "answered": "terminal"}))
     }
 
     fn answer(&self, args: &Value) -> Result<Value, ApiError> {
@@ -534,6 +566,30 @@ pub(crate) fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiErr
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| bad(format!("{key} is needed")))
+}
+
+/// `args.expect`: `{"tool": "Bash", "summary": "ls -la"}`, what the app's card showed. The tool
+/// is needed; the summary may be empty (a card that showed the tool alone).
+fn expect_arg(args: &Value) -> Result<Expected, ApiError> {
+    let expect = args
+        .get("expect")
+        .filter(|e| e.is_object())
+        .ok_or_else(|| bad("expect is {\"tool\", \"summary\"}"))?;
+    let tool = expect
+        .get("tool")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| bad("expect.tool is needed"))?;
+    let summary = match expect.get("summary") {
+        None | Some(Value::Null) => "",
+        Some(Value::String(s)) => s.as_str(),
+        Some(_) => return Err(bad("expect.summary is a text")),
+    };
+    Ok(Expected {
+        tool: tool.to_string(),
+        summary: summary.to_string(),
+    })
 }
 
 /// `args.question`: `{"items": [{header?, question, options, details?, multiSelect?}]}`.

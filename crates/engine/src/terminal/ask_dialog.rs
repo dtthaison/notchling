@@ -98,17 +98,17 @@ fn footer(rows: &[&str]) -> Option<usize> {
 }
 
 /// A numbered row: "❯ 1. Red", "☐ 2. Dog", "3. [x] Fish".
-struct Numbered {
-    row: usize,
-    number: u64,
-    label: String,
-    boxed: bool,
+pub(crate) struct Numbered {
+    pub(crate) row: usize,
+    pub(crate) number: u64,
+    pub(crate) label: String,
+    pub(crate) boxed: bool,
 }
 
 /// The option-row pattern of the Swift code,
 /// `^(?:[❯>›]\s*)?(?:(\[[ xX✓✔]\]|[☐☑☒◻◼□■])\s*)?(\d+)\.\s+(.+?)\s*$`, read left to right; on a row
 /// already trimmed it never needs to backtrack.
-fn option_row(row: usize, text: &str) -> Option<Numbered> {
+pub(crate) fn option_row(row: usize, text: &str) -> Option<Numbered> {
     let mut rest = text;
     if let Some(r) = rest.strip_prefix(['❯', '>', '›']) {
         rest = r.trim_start();
@@ -264,7 +264,7 @@ fn chip_title(row: &str) -> Option<String> {
     (!title.is_empty() && title.chars().count() <= 40).then(|| title.to_string())
 }
 
-fn is_extra(label: &str) -> bool {
+pub(crate) fn is_extra(label: &str) -> bool {
     let text = label.to_lowercase();
     text.starts_with("type something") || text == "other" || text.starts_with("chat about this")
 }

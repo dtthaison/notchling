@@ -23,6 +23,10 @@ pub mod ops {
 
     pub const SESSION_REPLY: &str = "session.reply";
     pub const SESSION_ANSWER: &str = "session.answer";
+    /// `{id: <prompt id>, decision, message?}` decides a hook-held prompt; `{id: <row id>,
+    /// decision, expect: {tool, summary}}` types the decision's digit into a background job's
+    /// permission dialog, only when the dialog on screen asks about `expect` (`notchlingd`'s
+    /// `acting_ops` module docs).
     pub const SESSION_PERMISSION: &str = "session.permission";
     pub const SESSION_INTERRUPT: &str = "session.interrupt";
     pub const SESSION_STOP: &str = "session.stop";

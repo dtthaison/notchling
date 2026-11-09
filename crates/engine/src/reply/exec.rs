@@ -5,6 +5,7 @@
 use super::keys::{self, timing::*, LEFT, SUBMIT};
 use super::plan::{Plan, Step, Until};
 use super::popall;
+use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -104,6 +105,15 @@ pub enum Failure {
     QuestionGone,
     /// The terminal shows another question than the one being answered.
     QuestionMismatch,
+    /// No permission dialog this can read is open (gone, a question, or a layout it doesn't
+    /// know); nothing was typed.
+    NotPermission,
+    /// The permission dialog asks about something else than Chat showed; nothing was typed.
+    PermissionMismatch,
+    /// Always was asked for, and the dialog has no "don't ask again" option; nothing was typed.
+    NoAlways,
+    /// The digit went in, and the dialog is still there.
+    PermissionStillOpen,
 }
 
 impl std::fmt::Display for Failure {
@@ -119,6 +129,22 @@ impl std::fmt::Display for Failure {
             Failure::QuestionMismatch => write!(
                 f,
                 "The terminal shows a different question than Chat does, so nothing more was typed. Finish it in the terminal."
+            ),
+            Failure::NotPermission => write!(
+                f,
+                "The session isn't showing that permission in its terminal any more, so nothing was typed."
+            ),
+            Failure::PermissionMismatch => write!(
+                f,
+                "The terminal asks about something else than Chat shows, so nothing was typed. Answer it in the terminal."
+            ),
+            Failure::NoAlways => write!(
+                f,
+                "The terminal offers no \"don't ask again\" for this, so nothing was typed. Pick Allow or Deny."
+            ),
+            Failure::PermissionStillOpen => write!(
+                f,
+                "The answer was typed, but the permission is still open in the terminal. Check it there."
             ),
         }
     }
@@ -149,6 +175,7 @@ pub fn execute(
         check,
         log,
         taken: false,
+        pressed: None,
     };
     for step in &plan.steps {
         if !run.step(step)? {
@@ -166,6 +193,8 @@ struct Run<'a> {
     check: &'a dyn ScreenCheck,
     log: &'a mut dyn QueueLog,
     taken: bool,
+    /// The permission dialog a digit was pressed on, to see it go.
+    pressed: Option<PermissionDialog>,
 }
 
 impl Run<'_> {
@@ -246,10 +275,33 @@ impl Run<'_> {
                     Until::ReviewOrGone => {
                         run.check.is_review(lines) || !run.check.dialog_open(lines)
                     }
+                    // Gone, or another request in its place.
+                    Until::PermissionGone => permission_dialog::read(lines) != run.pressed,
                 });
                 if !moved {
-                    return Err(Failure::QuestionMismatch);
+                    return Err(match until {
+                        Until::PermissionGone => Failure::PermissionStillOpen,
+                        _ => Failure::QuestionMismatch,
+                    });
                 }
+            }
+            Step::PressPermission { decision, expect } => {
+                let lines = self.pty.screen();
+                let dialog = permission_dialog::read(&lines).ok_or(Failure::NotPermission)?;
+                if !dialog.asks(expect) {
+                    return Err(Failure::PermissionMismatch);
+                }
+                let option = dialog.option_for(*decision).ok_or(match decision {
+                    Decision::Always => Failure::NoAlways,
+                    _ => Failure::NotPermission,
+                })?;
+                // One key: a two-digit number would answer the first digit's option.
+                if !(1..=9).contains(&option.number) {
+                    return Err(Failure::NotPermission);
+                }
+                let digit = option.number.to_string();
+                self.pressed = Some(dialog);
+                self.write(&digit)?;
             }
             Step::SubmitIfReview { timeout_ms } => {
                 let lines = self.pty.screen();
