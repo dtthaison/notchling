@@ -3,6 +3,7 @@
 
 use gpui::{div, prelude::*, px, Context, Div, Entity, Render, SharedString, Subscription, Window};
 
+use super::scrollbar::scrollable;
 use super::text_editor::TextEditor;
 use super::widgets::{
     account_line, avatar, button, claude_mark, field, label, option_row, session_row,
@@ -99,6 +100,35 @@ fn text_editors(editors: &[Entity<TextEditor>], a: Appearance) -> Div {
                 .ink(Ink::Text, a)
                 .child(editor.clone())
         }))
+}
+
+/// A list taller than its box, so the overlay scroll bar has something to do. A render pins the bar
+/// on (`NOTCHLING_RENDER_SCROLLBARS=1`); in a window it shows while this scrolls.
+fn scroll_demo(a: Appearance) -> Div {
+    div()
+        .w(px(260.0))
+        .h(px(150.0))
+        .rounded(px(RADIUS_MD))
+        .fill(Ink::Sidebar, a)
+        .overflow_hidden()
+        .child(scrollable(
+            div()
+                .id("gallery-scroll")
+                .size_full()
+                .overflow_y_scroll()
+                .p(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .children((1..=14).map(|n| {
+                    label(
+                        &format!("A row of the list, {n} of 14"),
+                        TypeRole::Body,
+                        Ink::Text,
+                        a,
+                    )
+                })),
+        ))
 }
 
 fn id(part: &str, detail: &str) -> SharedString {
@@ -290,5 +320,6 @@ impl Render for KitGallery {
                     .child(section("Pills, avatars, field", a, small_parts(a)))
                     .child(section("Text editor", a, text_editors(&self.editors, a))),
             )
+            .child(section("Scroll bar", a, scroll_demo(a)))
     }
 }

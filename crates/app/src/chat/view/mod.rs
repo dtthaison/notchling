@@ -32,7 +32,7 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 use notchling_kit::labels::Corner;
 use notchling_kit::ui::{
-    parts_on, resize_edges, set_parts, window_appearance, KitPart, KitStyled, TopBorder,
+    parts_on, resize_edges, scrollable, set_parts, window_appearance, KitPart, KitStyled, TopBorder,
 };
 use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
@@ -481,7 +481,9 @@ impl Render for ChatView {
             .min_h(px(0.0))
             .flex()
             .flex_col()
-            .child(conversation::render(self, a, cx))
+            .child(
+                scrollable(conversation::render(self, a, cx)).tracking(&self.conversation_scroll),
+            )
             .children(conversation::latest_pill(self, a, cx))
             .part_at("Conversation", Corner::Bottom, a, cx);
         let column = div()

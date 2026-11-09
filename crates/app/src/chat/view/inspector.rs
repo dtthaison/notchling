@@ -1,24 +1,222 @@
-//! The inspector: tasks, facts, subagents and background shells of the selected session.
+//! The inspector: tasks, facts, subagents and background shells of the selected session, the Swift
+//! Details panel's rows (a status icon first, small text) with a chevron on each section that folds
+//! it. Which sections are folded is kept per window (`Folds`), so it outlives the panel being hidden
+//! and the session changing; the Swift panel has no folding, so every section starts open.
 
-use gpui::{div, prelude::*, px, App, Div, FontWeight};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::time::Duration;
+
+use gpui::{
+    div, prelude::*, px, relative, Animation, AnimationExt, App, Div, Global, SharedString, Window,
+    WindowId,
+};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{SIDE_PADDING, TITLE_BAR};
-use notchling_kit::ui::{hsla, label, status_pill, KitPart, KitStyled};
+use notchling_kit::metric::{METER_BAR, SIDE_PADDING, TITLE_BAR};
+use notchling_kit::ui::{hsla, icon, label, scrollable, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::ChatView;
-use crate::chat::inspector::{inspector, no_writers};
+use crate::chat::format::short_path;
+use crate::chat::inspector::{
+    fact_icon, fact_text, inspector, no_writers, Fold, Inspector, Mark, ShellRow, SubagentRow,
+    TaskRow,
+};
 
 const WIDTH: f32 = 260.0;
+/// A row's mark sits in a box this wide, so the text lines up whatever the mark.
+const MARK_BOX: f32 = 14.0;
 
-/// A section, named for the ? button with the Swift panel's name (`part`).
-fn section(title: &str, part: &str, a: Appearance, content: Div, cx: &App) -> Div {
+/// Which sections each window has folded, and whether its subagent list shows every finished one.
+#[derive(Default)]
+struct Folds {
+    folded: HashMap<WindowId, HashSet<&'static str>>,
+    all_subagents: HashSet<WindowId>,
+}
+
+impl Global for Folds {}
+
+fn is_folded(cx: &App, window: WindowId, section: &'static str) -> bool {
+    cx.try_global::<Folds>()
+        .is_some_and(|f| f.folded.get(&window).is_some_and(|s| s.contains(section)))
+}
+
+fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
+    let folds = cx.default_global::<Folds>();
+    let set = folds.folded.entry(window).or_default();
+    if !set.remove(section) {
+        set.insert(section);
+    }
+}
+
+/// The inspector panel, for the selected session.
+pub fn render(view: &ChatView, a: Appearance, _cx: &App) -> impl IntoElement {
+    let i = inspector(
+        &view.conversation,
+        &view.subagents,
+        &view.root.home,
+        &no_writers,
+    );
+    let folder = view.selected_session().map(|s| {
+        let full = s.agent.cwd.clone();
+        (short_path(&full, &view.root.home), full)
+    });
+    Panel { i, folder, a }
+}
+
+#[derive(IntoElement)]
+struct Panel {
+    i: Inspector,
+    /// The session's folder as shown (`~/…`), and as a path.
+    folder: Option<(String, String)>,
+    a: Appearance,
+}
+
+impl RenderOnce for Panel {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let a = self.a;
+        let id = window.window_handle().window_id();
+        let i = &self.i;
+
+        let tasks = if i.tasks.is_empty() {
+            empty("No tasks", a)
+        } else {
+            let done = i.tasks.iter().filter(|t| t.status == Status::Done).count();
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(progress(done as f32 / i.tasks.len() as f32, a))
+                .children(i.tasks.iter().enumerate().map(|(n, t)| task_row(n, t, a)))
+        };
+
+        let facts = {
+            let mut rows: Vec<Div> = Vec::new();
+            if let Some((shown, full)) = &self.folder {
+                rows.push(folder_row(shown, full, a));
+            }
+            rows.extend(
+                i.facts
+                    .iter()
+                    .map(|(name, value)| fact_row(fact_icon(name), &fact_text(name, value), a)),
+            );
+            if rows.is_empty() {
+                empty("Nothing read yet", a)
+            } else {
+                div().flex().flex_col().gap(px(6.0)).children(rows)
+            }
+        };
+
+        let all = cx
+            .try_global::<Folds>()
+            .is_some_and(|f| f.all_subagents.contains(&id));
+        let listing = i.subagent_listing(all);
+        let subagents = if i.subagents.is_empty() {
+            empty("None started", a)
+        } else {
+            let mut list = div().flex().flex_col().gap(px(6.0));
+            for index in &listing.rows {
+                list = list.child(subagent_row(*index, &i.subagents[*index], a));
+            }
+            match listing.fold {
+                Fold::More(n) => {
+                    list = list.child(fold_row(
+                        id,
+                        "subagents-more",
+                        &format!("Show {n} more"),
+                        true,
+                        a,
+                    ));
+                }
+                Fold::Less => {
+                    list = list.child(fold_row(id, "subagents-less", "Show less", false, a));
+                }
+                Fold::None => {}
+            }
+            list
+        };
+
+        let shells = if i.shells.is_empty() {
+            empty("None running", a)
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .children(i.shells.iter().enumerate().map(|(n, s)| shell_row(n, s, a)))
+        };
+
+        let sections = [
+            ("Tasks", "Task Panel", i.tasks_title(), tasks),
+            ("Facts", "Session Facts", "Facts".to_owned(), facts),
+            ("Subagents", "Subagents", i.subagents_title(), subagents),
+            ("Shells", "Background Shells", i.shells_title(), shells),
+        ];
+        let mut column = div()
+            .id("inspector")
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_y_scroll()
+            .px(px(SIDE_PADDING))
+            .pb(px(SIDE_PADDING))
+            .flex()
+            .flex_col()
+            .gap(px(16.0));
+        for (key, part, title, content) in sections {
+            column = column.child(section(id, key, part, &title, content, a, cx));
+        }
+
+        div()
+            .w(px(WIDTH))
+            .h_full()
+            .flex_shrink_0()
+            .fill(Ink::Sidebar, a)
+            .border_l(px(1.0))
+            .border_color(hsla(Ink::Hairline.color(a)))
+            .flex()
+            .flex_col()
+            .child(div().h(px(TITLE_BAR)).flex_shrink_0())
+            .child(scrollable(column))
+            // Inside: the panel reaches the window's top edge, where a badge outside would be cut.
+            .part_inside("Details Panel", Corner::TopTrailing, a, cx)
+    }
+}
+
+/// A section: its header (a chevron and the title, which folds it on a click) over its content, named
+/// for the ? button with the Swift panel's name (`part`). The title keeps its count when folded.
+fn section(
+    window: WindowId,
+    key: &'static str,
+    part: &str,
+    title: &str,
+    content: Div,
+    a: Appearance,
+    cx: &App,
+) -> Div {
+    let folded = is_folded(cx, window, key);
+    let chevron = if folded {
+        Icon::ChevronRight
+    } else {
+        Icon::ChevronDown
+    };
+    let header = div()
+        .id(SharedString::from(format!("fold-{key}")))
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .cursor_pointer()
+        .child(icon(chevron, 9.0, Ink::TextFaint, a))
+        .child(label(title, TypeRole::Section, Ink::TextFaint, a))
+        .on_click(move |_, window, cx| {
+            toggle_folded(cx, window.window_handle().window_id(), key);
+            window.refresh();
+        });
     div()
         .flex()
         .flex_col()
         .gap(px(6.0))
-        .child(label(title, TypeRole::Section, Ink::TextFaint, a))
-        .child(content)
+        .child(header)
+        .when(!folded, |d| d.child(content))
         .part_at(part, Corner::TopTrailing, a, cx)
 }
 
@@ -26,134 +224,153 @@ fn empty(text: &str, a: Appearance) -> Div {
     label(text, TypeRole::Meta, Ink::TextMuted, a)
 }
 
-fn status_glyph(icon: Icon, status: Status, a: Appearance) -> Div {
-    div()
-        .w(px(14.0))
-        .flex_shrink_0()
-        .text_size(px(11.0))
-        .font_weight(FontWeight::MEDIUM)
-        .ink(Ink::status(status), a)
-        .child(icon.glyph())
+/// A small spinner: the working icon, breathing.
+fn spinner(key: &str, a: Appearance) -> impl IntoElement {
+    icon(Icon::Working, 11.0, Ink::Working, a).with_animation(
+        SharedString::from(format!("inspector-spin-{key}")),
+        Animation::new(Duration::from_millis(1000)).repeat(),
+        |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
+    )
 }
 
-fn two_lines(first: &str, second: &str, a: Appearance) -> Div {
-    div()
-        .flex_1()
-        .min_w(px(0.0))
+/// The mark box that leads a row.
+fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
+    let holder = div()
+        .w(px(MARK_BOX))
+        .h(px(MARK_BOX))
+        .flex_shrink_0()
         .flex()
-        .flex_col()
-        .gap(px(1.0))
-        .child(label(first, TypeRole::Body, Ink::Text, a))
-        .child(label(second, TypeRole::Meta, Ink::TextMuted, a))
+        .items_center()
+        .justify_center();
+    match mark {
+        Mark::Spinner => holder.child(spinner(key, a)),
+        Mark::Icon(shape, ink) => holder.child(icon(shape, 11.0, ink, a)),
+    }
 }
 
-pub fn render(view: &ChatView, a: Appearance, cx: &App) -> Div {
-    let i = inspector(
-        &view.conversation,
-        &view.subagents,
-        &view.root.home,
-        &no_writers,
-    );
-    let tasks = if i.tasks.is_empty() {
-        empty("No tasks", a)
-    } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .children(i.tasks.iter().map(|t| {
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(6.0))
-                    .child(status_glyph(t.icon, t.status, a))
-                    .child(label(&t.subject, TypeRole::Body, Ink::Text, a))
-            }))
-    };
-    let facts = if i.facts.is_empty() {
-        empty("Nothing read yet", a)
-    } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .children(i.facts.iter().map(|(name, value)| {
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(8.0))
-                    .child(div().w(px(72.0)).flex_shrink_0().child(label(
-                        name,
-                        TypeRole::Meta,
-                        Ink::TextMuted,
-                        a,
-                    )))
-                    .child(div().flex_1().min_w(px(0.0)).child(label(
-                        value,
-                        TypeRole::Meta,
-                        Ink::Text,
-                        a,
-                    )))
-            }))
-    };
-    let subagents = if i.subagents.is_empty() {
-        empty("None started", a)
-    } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .children(i.subagents.iter().map(|s| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(two_lines(&s.description, &s.detail, a))
-                    .child(status_pill(s.status, &s.status_word, a))
-            }))
-    };
-    let shells = if i.shells.is_empty() {
-        empty("None running", a)
-    } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .children(i.shells.iter().map(|s| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(two_lines(&s.title, &s.command, a))
-                    .child(status_pill(s.status, &s.status_word, a))
-            }))
-    };
+/// The Swift fact row: a 10 pt faint icon in a 14 pt box, then the text in the meta type.
+fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
     div()
-        .w(px(WIDTH))
-        .h_full()
-        .flex_shrink_0()
-        .fill(Ink::Sidebar, a)
-        .border_l(px(1.0))
-        .border_color(hsla(Ink::Hairline.color(a)))
         .flex()
-        .flex_col()
-        .child(div().h(px(TITLE_BAR)).flex_shrink_0())
+        .items_start()
+        .gap(px(8.0))
         .child(
             div()
-                .id("inspector")
+                .w(px(MARK_BOX))
+                .h(px(16.0))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(shape, 10.0, Ink::TextFaint, a)),
+        )
+        .child(
+            div()
                 .flex_1()
-                .min_h(px(0.0))
-                .overflow_y_scroll()
-                .px(px(SIDE_PADDING))
-                .pb(px(SIDE_PADDING))
+                .min_w(px(0.0))
+                .child(label(text, TypeRole::Meta, Ink::Text, a)),
+        )
+}
+
+/// The session's folder: a fact row that reveals it in Finder.
+fn folder_row(shown: &str, full: &str, a: Appearance) -> Div {
+    let full = full.to_owned();
+    div().child(
+        fact_row(Icon::Folder, shown, a)
+            .id("inspector-folder")
+            .cursor_pointer()
+            .on_click(move |_, _, cx| cx.reveal_path(Path::new(&full))),
+    )
+}
+
+fn progress(share: f32, a: Appearance) -> Div {
+    div()
+        .w_full()
+        .h(px(METER_BAR))
+        .rounded(px(METER_BAR / 2.0))
+        .fill(Ink::Hairline, a)
+        .child(
+            div()
+                .h_full()
+                .w(relative(share.clamp(0.0, 1.0)))
+                .rounded(px(METER_BAR / 2.0))
+                .fill(Ink::Accent, a),
+        )
+}
+
+fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
+    let mark = match task.status {
+        Status::Done => Mark::Icon(Icon::Done, Ink::Done),
+        Status::Working => Mark::Spinner,
+        Status::Needs => Mark::Icon(Icon::Clock, Ink::TextFaint),
+    };
+    let ink = if task.status == Status::Done {
+        Ink::TextFaint
+    } else {
+        Ink::Text
+    };
+    div()
+        .flex()
+        .items_start()
+        .gap(px(6.0))
+        .child(mark_box(mark, &format!("task-{index}"), a))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(label(&task.subject, TypeRole::Meta, ink, a)),
+        )
+}
+
+fn subagent_row(index: usize, s: &SubagentRow, a: Appearance) -> Div {
+    div()
+        .flex()
+        .items_start()
+        .gap(px(7.0))
+        .child(mark_box(s.mark, &format!("agent-{index}"), a))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
                 .flex()
                 .flex_col()
-                .gap(px(16.0))
-                .child(section("Tasks", "Task Panel", a, tasks, cx))
-                .child(section("Facts", "Session Facts", a, facts, cx))
-                .child(section("Subagents", "Subagents", a, subagents, cx))
-                .child(section("Shells", "Background Shells", a, shells, cx)),
+                .gap(px(2.0))
+                .child(label(&s.description, TypeRole::Meta, Ink::Text, a))
+                .child(label(&s.detail, TypeRole::Meta, Ink::TextFaint, a)),
         )
-        // Inside: the panel reaches the window's top edge, where a badge outside would be cut.
-        .part_inside("Details Panel", Corner::TopTrailing, a, cx)
+}
+
+fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
+    let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
+    if s.title != s.command {
+        text = text.child(label(&s.title, TypeRole::Meta, Ink::Text, a));
+    }
+    div()
+        .flex()
+        .items_start()
+        .gap(px(7.0))
+        .child(mark_box(s.mark, &format!("shell-{index}"), a))
+        .child(
+            text.child(label(&s.command, TypeRole::Mono, Ink::TextMuted, a))
+                .child(label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)),
+        )
+}
+
+/// "Show N more" / "Show less" under the subagents: a small accent row.
+fn fold_row(window: WindowId, key: &'static str, text: &str, expand: bool, a: Appearance) -> Div {
+    div().child(
+        div()
+            .id(key)
+            .cursor_pointer()
+            .child(label(text, TypeRole::Meta, Ink::AccentText, a))
+            .on_click(move |_, window_ref, cx| {
+                let folds = cx.default_global::<Folds>();
+                if expand {
+                    folds.all_subagents.insert(window);
+                } else {
+                    folds.all_subagents.remove(&window);
+                }
+                window_ref.refresh();
+            }),
+    )
 }

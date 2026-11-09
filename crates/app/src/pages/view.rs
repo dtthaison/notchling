@@ -15,7 +15,8 @@ use gpui::{
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{row_look, ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, field, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+    button, card, field, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
+    TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -226,7 +227,6 @@ impl PagesView {
         let shown = self.model.shown();
         let mut rows = div()
             .id("pages-list")
-            .track_scroll(&self.scroll)
             .flex_1()
             .min_h(px(0.0))
             .overflow_y_scroll()
@@ -273,7 +273,7 @@ impl PagesView {
                 ),
             )
             .child(hairline(a))
-            .child(rows)
+            .child(scrollable(rows).tracking(&self.scroll))
             .child(hairline(a))
             .child(div().p(px(8.0)).flex_shrink_0().child(label(
                 &self.model.count_text(),

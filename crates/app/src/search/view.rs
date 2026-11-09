@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, AnyView, ClipboardItem, Context, Div, FocusHandle, FontWeight,
-    KeyDownEvent, Render, ScrollHandle, SharedString, Stateful, Subscription, Window,
+    KeyDownEvent, Render, ScrollHandle, SharedString, Subscription, Window,
 };
 use notchling_kit::metric::RADIUS_CARD;
-use notchling_kit::ui::{hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{hsla, label, scrollable, window_appearance, KitStyled, Scrollable};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -307,12 +307,11 @@ impl SearchPanelView {
         }
     }
 
-    fn results(&self, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn results(&self, a: Appearance, cx: &mut Context<Self>) -> Scrollable {
         let now_secs = self.now_secs();
         let home = notchling_platform::paths::home().unwrap_or_default();
         let mut list = div()
             .id("search-results")
-            .track_scroll(&self.scroll)
             .h(px(self.model.list_height() + 2.0 * layout::LIST_PADDING))
             .flex_shrink_0()
             .overflow_y_scroll()
@@ -347,7 +346,7 @@ impl SearchPanelView {
                         .child(row),
                 );
         }
-        list
+        scrollable(list).tracking(&self.scroll)
     }
 
     fn footer(&self, now: i64, a: Appearance) -> Div {

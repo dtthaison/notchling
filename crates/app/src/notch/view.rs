@@ -12,7 +12,7 @@ use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, status_pill, KitPart, KitStyled};
+use notchling_kit::ui::{button, hsla, scrollable, status_pill, KitPart, KitStyled};
 use notchling_kit::{Color, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -262,18 +262,20 @@ impl NotchView {
                 .child(text(empty_text(m), TypeRole::Meta, Ink::TextMuted))
                 .into_any_element()
         } else {
-            div()
-                .id("notch-rows")
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .pl(px(6.0))
-                .pr(px(12.0))
-                .pt(px(2.0))
-                .pb(px(6.0))
-                .children(rows.into_iter().map(|a| self.row(a, cx)))
-                .into_any_element()
+            scrollable(
+                div()
+                    .id("notch-rows")
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .pl(px(6.0))
+                    .pr(px(12.0))
+                    .pt(px(2.0))
+                    .pb(px(6.0))
+                    .children(rows.into_iter().map(|a| self.row(a, cx))),
+            )
+            .into_any_element()
         };
         div()
             .flex()
@@ -475,20 +477,22 @@ impl NotchView {
             .as_deref()
             .filter(|d| card.is_none() && agent.group == AgentGroup::NeedsInput && !d.is_empty())
             .map(needs_box);
-        let conversation = div()
-            .id("notch-conversation")
-            .track_scroll(&self.scroll)
-            .overflow_y_scroll()
-            .flex_1()
-            .min_h(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .when(lines.is_empty(), |c| {
-                c.child(text("No messages yet", TypeRole::Meta, Ink::TextMuted))
-            })
-            .children(lines.iter().map(bubble))
-            .children(needs);
+        let conversation = scrollable(
+            div()
+                .id("notch-conversation")
+                .overflow_y_scroll()
+                .flex_1()
+                .min_h(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .when(lines.is_empty(), |c| {
+                    c.child(text("No messages yet", TypeRole::Meta, Ink::TextMuted))
+                })
+                .children(lines.iter().map(bubble))
+                .children(needs),
+        )
+        .tracking(&self.scroll);
         let footer = card.unwrap_or_else(|| {
             let note = if agent.label == "Exited" {
                 "This session has exited."

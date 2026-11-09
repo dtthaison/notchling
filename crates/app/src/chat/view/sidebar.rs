@@ -7,8 +7,8 @@ use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    account_line, button, hsla, label, parts_button, parts_on, parts_tip, session_row_marked,
-    toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
+    account_line, button, hsla, label, parts_button, parts_on, parts_tip, scrollable,
+    session_row_marked, toggle_parts, tool_icon, KitPart, KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -196,7 +196,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                         ),
                 ),
         )
-        .child(list)
+        .child(scrollable(list))
         .child(footer(a, view.daemon_note, cx))
         .part_inside("Sidebar", Corner::Trailing, a, cx)
 }

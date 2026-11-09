@@ -10,7 +10,7 @@ use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, Window};
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+    button, card, hsla, label, resize_edges, scrollable, window_appearance, KitStyled, TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -299,7 +299,7 @@ impl Render for HandoverView {
             .flex()
             .flex_col()
             .fill(Ink::Window, a)
-            .child(
+            .child(scrollable(
                 div()
                     .id("handover-body")
                     .flex_1()
@@ -312,7 +312,7 @@ impl Render for HandoverView {
                     .child(label(TITLE, TypeRole::Title, Ink::Text, a))
                     .child(label(INTRO, TypeRole::Body, Ink::TextMuted, a))
                     .children(cards),
-            )
+            ))
             .children(note.map(|n| {
                 label(&n, TypeRole::Meta, Ink::Needs, a)
                     .px(px(SIDE_PADDING + 8.0))

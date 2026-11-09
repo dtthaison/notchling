@@ -7,7 +7,7 @@
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, hsla, label, KitStyled};
+use notchling_kit::ui::{button, card, field, hsla, label, scrollable, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::forms::{
@@ -15,7 +15,7 @@ use super::forms::{
 };
 use super::model::Sheet;
 use super::pieces::FixPrompt;
-use super::view::{mono_box, state_mark, text_line, MachinesView};
+use super::view::{mono_lines, state_mark, text_line, MachinesView};
 
 fn state(enabled: bool) -> PartState {
     if enabled {
@@ -125,7 +125,9 @@ impl MachinesView {
             .gap(px(12.0))
             .child(label(prompt.title(), TypeRole::Title, Ink::Text, a))
             .child(label(&prompt.intro(), TypeRole::Body, Ink::TextMuted, a))
-            .child(mono_box("fix-commands", &prompt.text(), 300.0, a).min_h(px(80.0)));
+            .child(scrollable(
+                mono_lines("fix-commands", &prompt.text(), 300.0, a).min_h(px(80.0)),
+            ));
         if let Some(blocked) = prompt.blocked() {
             column = column.child(text_line(
                 &format!("⛔ {blocked}"),
@@ -450,7 +452,7 @@ impl MachinesView {
                 Ink::TextMuted,
                 a,
             ))
-            .child(body);
+            .child(scrollable(body));
         for problem in form.problems() {
             column = column.child(label(&problem, TypeRole::Meta, Ink::Expired, a));
         }

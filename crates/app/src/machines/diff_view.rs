@@ -4,7 +4,7 @@
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::metric::RADIUS_CARD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, label};
+use notchling_kit::ui::{button, card, label, scrollable};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::view::MachinesView;
@@ -37,7 +37,8 @@ impl MachinesView {
                     TypeRole::Body,
                     Ink::TextMuted,
                     a,
-                )),
+                ))
+                .into_any_element(),
             Some(text) => {
                 let mut lines = div()
                     .id("diff-lines")
@@ -73,7 +74,7 @@ impl MachinesView {
                         a,
                     ));
                 }
-                lines
+                scrollable(lines).into_any_element()
             }
         };
         Some(

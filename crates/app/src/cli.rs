@@ -105,7 +105,8 @@ pub fn usage() -> String {
          sessions from a fixture root laid out as <dir>/claude, <dir>/notchling and <dir>/codex, \
          never the real folders. A render without one reads the fixture this build carries. \
          NOTCHLING_RENDER_APPEARANCE=light|dark renders in that appearance instead of the \
-         system's.\n\nviews:\n",
+         system's. NOTCHLING_RENDER_SCROLLBARS=1 draws the overlay scroll bars, which a still \
+         frame would otherwise hide.\n\nviews:\n",
     );
     for spec in views::every() {
         text.push_str(&format!("  {:<20} {}\n", spec.name, spec.about));

@@ -10,7 +10,7 @@ use gpui::{
 use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{button, card, hsla, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 use serde_json::{Map, Value};
 
@@ -213,7 +213,7 @@ impl Render for SettingsView {
             .overflow_hidden()
             .fill(Ink::Window, a)
             .child(sheet_header(Icon::Settings, "Settings", done, a))
-            .child(list)
+            .child(scrollable(list))
             .children(self.error.as_deref().map(|e| {
                 label(e, TypeRole::Meta, Ink::Needs, a)
                     .px(px(SIDE_PADDING))

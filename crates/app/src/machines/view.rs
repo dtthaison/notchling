@@ -17,7 +17,9 @@ use notchling_engine::machines::morning::MorningItem;
 use notchling_engine::machines::poller::INTERVAL_SECS;
 use notchling_engine::machines::step::StepId;
 use notchling_kit::metric::SIDE_PADDING;
-use notchling_kit::ui::{label, resize_edges, window_appearance, KitStyled, TopBorder};
+use notchling_kit::ui::{
+    label, resize_edges, scrollable, window_appearance, KitStyled, Scrollable, TopBorder,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::AddForm;
@@ -502,7 +504,7 @@ impl Render for MachinesView {
             .flex_col()
             .fill(Ink::Window, a)
             .child(self.top_bar(a, cx))
-            .child(
+            .child(scrollable(
                 div()
                     .id("machines-scroll")
                     .flex_1()
@@ -510,7 +512,7 @@ impl Render for MachinesView {
                     .overflow_y_scroll()
                     .p(px(24.0))
                     .child(body),
-            )
+            ))
             .children(self.sheet_overlay(a, cx))
             .children(self.confirm_overlay(a, cx))
             .children(self.diff_overlay(a, cx))
@@ -539,8 +541,18 @@ pub(super) fn state_mark(
     }
 }
 
-/// A box of monospaced lines on the sidebar's fill.
+/// A box of monospaced lines on the sidebar's fill, scrolling past `max_h`.
 pub(super) fn mono_box(
+    id: impl Into<SharedString>,
+    text: &str,
+    max_h: f32,
+    a: Appearance,
+) -> Scrollable {
+    scrollable(mono_lines(id, text, max_h, a))
+}
+
+/// The same box, for a caller that sizes it further before it is made scrollable.
+pub(super) fn mono_lines(
     id: impl Into<SharedString>,
     text: &str,
     max_h: f32,

@@ -9,15 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, AnyView, Context, Div, EventEmitter, FocusHandle, Focusable, KeyDownEvent,
-    Render, Stateful, Window,
+    div, prelude::*, px, AnyElement, AnyView, Context, Div, EventEmitter, FocusHandle, Focusable,
+    KeyDownEvent, Render, Stateful, Window,
 };
 use notchling_engine::vault::entry::VaultEntry;
 use notchling_engine::vault::expiry::today_local;
 use notchling_engine::vault::url::renew_url;
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, label, window_appearance, KitStyled};
+use notchling_kit::ui::{button, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::form::{Form, Typed};
@@ -331,14 +331,14 @@ impl Render for VaultSheetView {
         let switches = self.switches();
         let snapshot = self.vault.snapshot();
         let today = self.today();
-        let (title, body, footer): (&str, Stateful<Div>, Option<Div>) = match &self.form {
+        let (title, body, footer): (&str, AnyElement, Option<Div>) = match &self.form {
             Some(form) => {
                 let on: Handler<Self, FormEvent> =
                     Rc::new(|this, event, cx| this.pending_form_event(event, cx));
                 let footer_on = on.clone();
                 (
                     form.title(),
-                    form_body(form, today, a, cx, on),
+                    scrollable(form_body(form, today, a, cx, on)).into_any_element(),
                     Some(form_footer(
                         form,
                         self.busy,
@@ -351,7 +351,11 @@ impl Render for VaultSheetView {
             }
             None => {
                 let l = list(&snapshot.entries, &switches, today, snapshot.error.clone());
-                (TITLE, self.list_body(&l, a, cx), None)
+                (
+                    TITLE,
+                    scrollable(self.list_body(&l, a, cx)).into_any_element(),
+                    None,
+                )
             }
         };
         let l = list(&snapshot.entries, &switches, today, None);
