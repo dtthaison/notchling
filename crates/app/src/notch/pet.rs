@@ -390,6 +390,52 @@ mod tests {
         assert!((b.x - want.x).abs() < 1e-6 && (b.y - want.y).abs() < 1e-6);
     }
 
+    /// The canvas gives the pet [`PET_REACH`] past the collapsed shape on each side and below;
+    /// wherever it is along the path, resting or turning, it and its badge stay inside that.
+    #[test]
+    fn reach_stays_within_the_canvas_margin() {
+        use super::super::layout::PET_REACH;
+        let (badge_w, badge_h) = (30.0, 16.0);
+        let inside = |p: Point, half_w: f64, half_h: f64| {
+            p.x - half_w >= -PET_REACH
+                && p.x + half_w <= SHAPE.w + PET_REACH
+                && p.y + half_h <= SHAPE.h + PET_REACH
+                && p.y - half_h >= 0.0
+        };
+        let track = Track::new(SHAPE);
+        let (lo, hi) = track.bounds();
+        let mut d = lo;
+        while d <= hi {
+            for heading in [1.0, -1.0] {
+                let rolling = Motion {
+                    d,
+                    heading,
+                    turn: None,
+                };
+                assert!(inside(track.point(d), RADIUS, RADIUS), "pet at {d}");
+                assert!(
+                    inside(badge(&rolling, SHAPE), badge_w / 2.0, badge_h / 2.0),
+                    "badge at {d} heading {heading}"
+                );
+                for step in 0..=10 {
+                    let turning = Motion {
+                        turn: Some(Turn {
+                            progress: f64::from(step) / 10.0,
+                            from: -heading,
+                        }),
+                        ..rolling
+                    };
+                    assert!(
+                        inside(badge(&turning, SHAPE), badge_w / 2.0, badge_h / 2.0),
+                        "badge turning at {d}, step {step}: {:?}",
+                        badge(&turning, SHAPE)
+                    );
+                }
+            }
+            d += 0.5;
+        }
+    }
+
     #[test]
     fn it_spins_like_a_wheel() {
         let m = Motion {

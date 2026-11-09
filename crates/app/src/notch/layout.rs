@@ -68,8 +68,15 @@ pub const TAB_BAR: f64 = 34.0;
 pub const MAX_LIST: f64 = 300.0;
 /// The camera housing of a 14" MacBook Pro, the model's default before a screen is read.
 pub const DEFAULT_NOTCH: Size = Size::new(185.0, 32.0);
-/// The least the canvas covers, enough for the largest state.
-pub const CANVAS: Size = Size::new(560.0, 640.0);
+/// The canvas's width: the widest shape (the Large panel) with room either side; the renders'
+/// width too.
+pub const CANVAS_WIDTH: f64 = 560.0;
+/// Room below the tallest shape, so nothing drawn at its bottom edge is cut.
+pub const CANVAS_SLACK: f64 = 16.0;
+/// How far the walking pet reaches past the collapsed shape: its centre rolls `RADIUS + 2` out,
+/// the badge swings a rope's length round it at each end, and the badge is 30 × 16
+/// (`pet::reach_stays_within_the_canvas_margin` holds the pet to it).
+pub const PET_REACH: f64 = 48.0;
 /// Slack below the collapsed strip, so it's easier to hit.
 pub const COLLAPSED_SLACK: f64 = 4.0;
 
@@ -244,18 +251,36 @@ pub fn geometry(s: &ScreenInfo) -> Geometry {
     }
 }
 
-/// The transparent canvas: as wide as the screen on both sides of the camera (so the pet can roam
-/// the whole bar), at least [`CANVAS`], centred on the camera and hanging from the top of the screen.
-/// It changes only with the display; the black shape inside it is what animates.
-pub fn canvas_frame(g: &Geometry) -> Rect {
-    let span = (g.center_x - g.screen.x).max(g.screen.max_x() - g.center_x);
-    let w = CANVAS.w.max(2.0 * span);
-    Rect::new(
-        g.center_x - w / 2.0,
-        g.screen.max_y() - CANVAS.h,
-        w,
-        CANVAS.h,
+/// The transparent canvas's size: the largest shape the model can take for a housing, whatever the
+/// width setting (the tallest peek card, the conversation with a card, the list at its cap) or the
+/// collapsed shape with the walking pet round it, plus [`CANVAS_SLACK`]. GPUI backs the whole
+/// canvas with Metal drawables (three, plus the path textures, at Retina scale), so a screen-wide
+/// canvas cost the app most of its memory; this one is as small as the shapes allow. A pet perching
+/// on another window (the Swift app's Tab Perch) would need a canvas of its own, not a wider one.
+pub fn canvas_size(notch: Size) -> Size {
+    let closed = collapsed_size(notch);
+    let largest = NotchWidth::Large;
+    let card = PeekContent::Card { height: MAX_CARD };
+    let tallest = [
+        peek_size(notch, largest, card, None).h,
+        detail_size(notch, largest, true).h,
+        // More rows than the cap holds.
+        list_size(notch, largest, &[44.0; 16], true).h,
+        closed.h + PET_REACH,
+    ]
+    .into_iter()
+    .fold(0.0, f64::max);
+    Size::new(
+        CANVAS_WIDTH.max(closed.w + 2.0 * PET_REACH),
+        tallest + CANVAS_SLACK,
     )
+}
+
+/// The transparent canvas on screen: [`canvas_size`] centred on the camera and hanging from the
+/// top of the screen. It changes only with the display; the black shape inside it is what animates.
+pub fn canvas_frame(g: &Geometry) -> Rect {
+    let c = canvas_size(g.notch);
+    Rect::new(g.center_x - c.w / 2.0, g.screen.max_y() - c.h, c.w, c.h)
 }
 
 /// The black shape's area on screen for a size, with a little slack below the collapsed strip.
@@ -453,28 +478,71 @@ mod tests {
     }
 
     #[test]
-    fn the_canvas_is_screen_wide_centred_on_the_camera_and_hangs_from_the_top() {
+    fn the_canvas_fits_the_largest_shape_whatever_the_width_setting() {
+        let c = canvas_size(NOTCH);
+        // The tallest shape is a peek with a card at the cap: chrome + 520 + 16.
+        assert_eq!(c, Size::new(560.0, CHROME + MAX_CARD + 16.0 + CANVAS_SLACK));
+        for width in [NotchWidth::Small, NotchWidth::Medium, NotchWidth::Large] {
+            let shapes = [
+                collapsed_size(NOTCH),
+                peek_size(NOTCH, width, PeekContent::Card { height: 9999.0 }, None),
+                peek_size(NOTCH, width, PeekContent::Notice { long: true }, None),
+                peek_size(NOTCH, width, PeekContent::Plain { has_text: true }, None),
+                list_size(NOTCH, width, &[58.0; 40], true),
+                detail_size(NOTCH, width, true),
+            ];
+            for s in shapes {
+                assert!(
+                    s.w + 2.0 * FLARE <= c.w && s.h < c.h,
+                    "{width:?}: {s:?} in {c:?}"
+                );
+            }
+        }
+        // The walking pet's reach round the collapsed shape fits too.
+        let closed = collapsed_size(NOTCH);
+        assert!(closed.w + 2.0 * PET_REACH <= c.w && closed.h + PET_REACH < c.h);
+        // A taller housing makes a taller canvas; no housing (a plain display) a shorter one.
+        assert_eq!(canvas_size(Size::new(200.0, 40.0)).h, c.h + 8.0);
+        assert_eq!(canvas_size(Size::new(0.0, 24.0)).h, c.h - 8.0);
+        // A housing wide enough for the pet to need more room gets it.
+        assert_eq!(
+            canvas_size(Size::new(600.0, 32.0)).w,
+            616.0 + 2.0 * PET_REACH
+        );
+    }
+
+    #[test]
+    fn the_canvas_is_centred_on_the_camera_and_hangs_from_the_top() {
         let g = geometry(&macbook());
         assert_eq!(g.notch, Size::new(188.0, 32.0));
         assert_eq!(g.center_x, 756.0);
         let c = canvas_frame(&g);
-        assert_eq!(c, Rect::new(0.0, 982.0 - 640.0, 1512.0, 640.0));
+        let size = canvas_size(g.notch);
+        assert_eq!(
+            c,
+            Rect::new(756.0 - size.w / 2.0, 982.0 - size.h, size.w, size.h)
+        );
         assert_eq!(c.mid_x(), g.center_x);
-        // A small screen still gets the least canvas.
-        let tiny = Geometry {
-            screen: Rect::new(0.0, 0.0, 400.0, 700.0),
-            notch: Size::new(0.0, 24.0),
-            center_x: 200.0,
+        assert_eq!(c.max_y(), g.screen.max_y());
+        // It never follows the screen's width: a wide screen gets the same canvas.
+        let wide = Geometry {
+            screen: Rect::new(0.0, 0.0, 5120.0, 2880.0),
+            notch: g.notch,
+            center_x: 2560.0,
         };
-        assert_eq!(canvas_frame(&tiny).w, CANVAS.w);
-        // A camera off centre (a second display to the right): the canvas covers the far side.
+        assert_eq!(canvas_frame(&wide).w, size.w);
+        // A camera off centre (a second display to the right) keeps it centred on the camera.
         let off = Geometry {
             screen: Rect::new(1512.0, 0.0, 1000.0, 800.0),
             notch: Size::new(0.0, 24.0),
             center_x: 1812.0,
         };
         let c = canvas_frame(&off);
-        assert_eq!((c.w, c.mid_x()), (1400.0, 1812.0));
+        assert_eq!((c.w, c.mid_x(), c.max_y()), (CANVAS_WIDTH, 1812.0, 800.0));
+        // Every shape hangs inside it.
+        let open = shape_rect(&g, Size::new(520.0, 584.0), false);
+        let canvas = canvas_frame(&g);
+        assert!(open.x >= canvas.x && open.max_x() <= canvas.max_x() && open.y >= canvas.y);
     }
 
     #[test]
