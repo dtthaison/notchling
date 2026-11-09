@@ -22,6 +22,7 @@ pub mod metric;
 pub mod motion;
 mod palette;
 pub mod part;
+pub mod resize;
 pub mod typescale;
 #[cfg(target_os = "macos")]
 pub mod ui;

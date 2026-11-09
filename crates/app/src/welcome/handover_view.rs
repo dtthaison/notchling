@@ -9,7 +9,9 @@ use std::time::Duration;
 use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, Window};
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, card, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::facts::{SwiftApp, SwiftProbe};
@@ -319,6 +321,7 @@ impl Render for HandoverView {
                     .border_color(hsla(Ink::Hairline.color(a)))
             }))
             .children(dialog)
+            .child(resize_edges(window, TopBorder::InTitleBar))
     }
 }
 

@@ -17,7 +17,7 @@ use notchling_engine::machines::morning::MorningItem;
 use notchling_engine::machines::poller::INTERVAL_SECS;
 use notchling_engine::machines::step::StepId;
 use notchling_kit::metric::SIDE_PADDING;
-use notchling_kit::ui::{label, window_appearance, KitStyled};
+use notchling_kit::ui::{label, resize_edges, window_appearance, KitStyled, TopBorder};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::AddForm;
@@ -514,6 +514,7 @@ impl Render for MachinesView {
             .children(self.sheet_overlay(a, cx))
             .children(self.confirm_overlay(a, cx))
             .children(self.diff_overlay(a, cx))
+            .child(resize_edges(window, TopBorder::InTitleBar))
     }
 }
 

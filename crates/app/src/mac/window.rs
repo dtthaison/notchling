@@ -7,7 +7,9 @@ use gpui::{
 };
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, claude_mark, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, claude_mark, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 /// The empty shell: the kit's surfaces in their places, no data.
@@ -108,6 +110,7 @@ impl Render for ShellView {
                         a,
                     )),
             )
+            .child(resize_edges(window, TopBorder::InContent))
     }
 }
 

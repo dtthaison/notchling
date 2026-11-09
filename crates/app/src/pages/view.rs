@@ -14,7 +14,9 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{row_look, ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, card, field, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::model::{Outcome, PagesModel};
@@ -402,6 +404,7 @@ impl Render for PagesView {
             .fill(Ink::Window, a)
             .child(self.list(focused, a, cx))
             .child(right)
+            .child(resize_edges(window, TopBorder::InTitleBar))
     }
 }
 

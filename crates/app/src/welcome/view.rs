@@ -8,7 +8,9 @@ use std::sync::Arc;
 use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Window};
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, claude_mark, hsla, label, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, card, claude_mark, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+};
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
 use super::about::{current, About};
@@ -345,6 +347,7 @@ impl Render for FirstRunView {
                     .border_color(hsla(Ink::Hairline.color(a)))
                     .child(done),
             )
+            .child(resize_edges(window, TopBorder::InTitleBar))
     }
 }
 
@@ -505,6 +508,7 @@ impl Render for AboutView {
                     .gap(px(4.0))
                     .children(links),
             )
+            .child(resize_edges(window, TopBorder::InTitleBar))
     }
 }
 
