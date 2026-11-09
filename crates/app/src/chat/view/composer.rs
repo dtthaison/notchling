@@ -1,12 +1,17 @@
-//! The reply box (`ReplyEditor`, one line here): what is typed goes to the row's tool on Return,
-//! with Stop while its turn runs and the model or options picker at the left. Above it, an
-//! Antigravity permission card when the daemon holds one for the row, and the picker's pop-up.
-//! Disabled, with the reason on hover, while acting isn't on.
+//! The reply box, after the Swift app's `Composer`: one rounded card (fill card, radius composer,
+//! hairline that turns accent while focused, soft shadow) holding the text and the send disc, with
+//! nothing drawn inside it but the text itself. The text grows from one line to [`MAX_LINES`],
+//! then scrolls. Return sends, Shift or Option Return adds a line. Under the card, one row: the
+//! model or options picker at the left, the status line (the error, "Sending…", what waits, or why
+//! the box is off) and Stop while the turn runs. Above it, an Antigravity permission card when the
+//! daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the
+//! reason is the status line, and only there.
 
-use gpui::{div, prelude::*, px, Context, Div, Window};
+use gpui::{div, point, prelude::*, px, relative, BoxShadow, Context, Div, Stateful, Window};
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, label, KitStyled};
+use notchling_kit::typescale::sentence;
+use notchling_kit::ui::{button, button_with, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::tools::Picker;
@@ -17,6 +22,45 @@ use crate::notch::answer::{type_key, Typed};
 use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
 use crate::tools::view::{agy_card, agy_options_card, codex_picker_card, PickerAction};
+
+/// The text grows to this many lines, then scrolls (the Swift `ReplyMeasurer.maxLines`).
+pub const MAX_LINES: usize = 8;
+/// One line of body text in the box, in points: the system font at 13 lays out at 16.
+pub const LINE_HEIGHT: f32 = 16.0;
+/// The card's edge: 1 pt hairline at rest, 1.5 pt accent while focused (the spec's Composer).
+const EDGE_REST: f32 = 1.0;
+const EDGE_FOCUSED: f32 = 1.5;
+/// Inside the card: 14 before the text, 8 after the disc, 8 above and below (the Swift paddings),
+/// plus the text's own 6 above and below so one line centres on the 30 pt disc.
+const PAD_LEADING: f32 = 14.0;
+const PAD_TRAILING: f32 = 8.0;
+const PAD_VERTICAL: f32 = 8.0;
+const TEXT_PAD_VERTICAL: f32 = 6.0;
+
+/// The text area's height for `lines` lines of text: one at least, [`MAX_LINES`] at most.
+pub fn text_height(lines: usize) -> f32 {
+    LINE_HEIGHT * lines.clamp(1, MAX_LINES) as f32
+}
+
+/// What Return does in the box: with Shift or Option it adds a line, bare it sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReturnKey {
+    Newline,
+    Send,
+}
+
+pub fn return_key(key: &str, shift: bool, alt: bool) -> Option<ReturnKey> {
+    (key == "enter").then_some(if shift || alt {
+        ReturnKey::Newline
+    } else {
+        ReturnKey::Send
+    })
+}
+
+/// The card's padding at an edge width, so focusing (a thicker edge) moves nothing inside.
+fn inset(base: f32, edge: f32) -> f32 {
+    base - (edge - EDGE_REST)
+}
 
 fn placeholder(view: &ChatView) -> &'static str {
     match view.selected_session() {
@@ -53,7 +97,7 @@ fn picker_label(view: &ChatView) -> Option<String> {
     }
 }
 
-/// The pop-up over the box, when open.
+/// The pop-up over the composer, when open: its bottom edge on the composer's top.
 fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let gate = view.acting(cx).control();
     let card = match &view.tools.picker {
@@ -81,7 +125,7 @@ fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
     Some(
         div()
             .absolute()
-            .bottom(px(72.0))
+            .bottom(relative(1.0))
             .left(px(SIDE_PADDING))
             .child(card),
     )
@@ -108,7 +152,8 @@ fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     )
 }
 
-/// The line under the box: the error, "Sending…", what waits, or why the box is off.
+/// The status line under the card: the error, "Sending…", what waits, or why the box is off.
+/// Shown once, here, as a sentence; the box itself carries no tooltip for it.
 fn status(view: &ChatView, control: crate::acting::Control, a: Appearance) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
         (error.clone(), Ink::Needs)
@@ -131,107 +176,190 @@ fn status(view: &ChatView, control: crate::acting::Control, a: Appearance) -> Op
     } else {
         (control.tooltip?.to_owned(), Ink::TextFaint)
     };
-    Some(
-        label(&text, TypeRole::Meta, ink, a)
-            .px(px(SIDE_PADDING))
-            .line_clamp(2),
-    )
+    Some(label(&sentence(&text), TypeRole::Meta, ink, a).line_clamp(2))
+}
+
+/// The picker button under the card, for a Codex or Antigravity session.
+fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<impl IntoElement> {
+    let title = picker_label(view)?;
+    let has_options = matches!(
+        view.selected_session().map(|s| s.tool),
+        Some(Tool::Codex) | Some(Tool::Antigravity)
+    ) && !(view.tools.agy_config.is_empty()
+        && view
+            .selected_session()
+            .is_some_and(|s| s.tool == Tool::Antigravity));
+    let state = if has_options {
+        PartState::Rest
+    } else {
+        PartState::Disabled
+    };
+    let kind = if view.tools.picker.is_some() {
+        ButtonKind::Secondary
+    } else {
+        ButtonKind::Ghost
+    };
+    let tip = view
+        .selected_session()
+        .filter(|s| s.tool == Tool::Antigravity)
+        .map(|s| agy_options::tip(!is_draft(&s.agent.id)));
+    // Meta type in the muted ink with a chevron, as the Swift pickers under its composer.
+    let ink = if has_options {
+        Ink::TextMuted
+    } else {
+        Ink::TextFaint
+    };
+    let title = label(&format!("{title} ▾"), TypeRole::Meta, ink, a);
+    let b = button_with("picker", title, kind, state, a)
+        .h(px(20.0))
+        .px(px(6.0));
+    let b = gate::tip(
+        b,
+        crate::acting::Control {
+            enabled: true,
+            tooltip: tip,
+        },
+        a,
+    );
+    Some(b.when(has_options, |b| {
+        b.on_click(cx.listener(|this, _, _, cx| this.toggle_picker(cx)))
+    }))
+}
+
+/// The send disc: 30 pt, accent with the arrow in onAccent; raised and faint while there is
+/// nothing to send, when it also takes no click (the Swift button is disabled then).
+fn send_disc(
+    enabled: bool,
+    empty: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Stateful<Div> {
+    let live = enabled && !empty;
+    let (fill, glyph) = if live {
+        (Ink::Accent, Ink::OnAccent)
+    } else {
+        (Ink::Raised, Ink::TextFaint)
+    };
+    div()
+        .id("send")
+        .size(px(SEND_DISC))
+        .flex_shrink_0()
+        .rounded_full()
+        .fill(fill, a)
+        .flex()
+        .items_center()
+        .justify_center()
+        .kit_type(TypeRole::Heading)
+        .ink(glyph, a)
+        .child(Icon::Send.glyph())
+        .when(live, |d| {
+            d.cursor_pointer()
+                .on_click(cx.listener(|this, _, _, cx| this.send_text(cx)))
+        })
 }
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
     let control = view.composer_control(cx);
     let id = view.selected.clone().unwrap_or_default();
     let text = view.tools.draft(&id).to_owned();
-    let focused = view.tools.focus.is_focused(window);
-    let box_element = div()
-        .id("composer-field")
+    let empty = text.trim().is_empty();
+    let focused = control.enabled && view.tools.focus.is_focused(window);
+    let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
+    let edge_color = if focused {
+        Ink::Accent.color(a).with_alpha(0.6)
+    } else {
+        Ink::Hairline.color(a)
+    };
+    // The text itself, wrapping at the card's width: one line to MAX_LINES, then it scrolls.
+    let text_area = div()
+        .id("composer-text")
         .flex_1()
         .min_w(px(0.0))
-        .child(field(&text, placeholder(view), focused, a).w_full())
-        .when(!control.enabled, |b| b.opacity(0.5));
-    let box_element = gate::tip(box_element, control, a).when(control.enabled, |b| {
-        b.track_focus(&view.tools.focus)
-            .cursor_text()
-            .on_click(cx.listener(|this, _, window, cx| {
-                window.focus(&this.tools.focus);
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                let k = &event.keystroke;
-                let modified = k.modifiers.platform || k.modifiers.control;
-                let Some(id) = this.selected.clone() else {
-                    return;
-                };
-                let draft = this.tools.drafts.entry(id).or_default();
-                match type_key(draft, &k.key, k.key_char.as_deref(), modified) {
-                    Typed::Submit => this.send_text(cx),
-                    Typed::Changed => {}
-                    Typed::Ignored => return,
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }))
-    });
-    let picker = picker_label(view).map(|title| {
-        let has_options = matches!(
-            view.selected_session().map(|s| s.tool),
-            Some(Tool::Codex) | Some(Tool::Antigravity)
-        ) && !(view.tools.agy_config.is_empty()
-            && view
-                .selected_session()
-                .is_some_and(|s| s.tool == Tool::Antigravity));
-        let state = if has_options {
-            PartState::Rest
+        .py(px(TEXT_PAD_VERTICAL))
+        .min_h(px(text_height(1) + 2.0 * TEXT_PAD_VERTICAL))
+        .max_h(px(text_height(MAX_LINES) + 2.0 * TEXT_PAD_VERTICAL))
+        .overflow_y_scroll()
+        .track_scroll(&view.tools.scroll)
+        .kit_type(TypeRole::Body)
+        .line_height(px(LINE_HEIGHT))
+        .ink(if empty { Ink::TextFaint } else { Ink::Text }, a)
+        .when(!control.enabled, |t| t.opacity(0.5))
+        .child(if text.is_empty() {
+            placeholder(view).to_owned()
         } else {
-            PartState::Disabled
-        };
-        let kind = if view.tools.picker.is_some() {
-            ButtonKind::Secondary
-        } else {
-            ButtonKind::Ghost
-        };
-        let tip = view
-            .selected_session()
-            .filter(|s| s.tool == Tool::Antigravity)
-            .map(|s| agy_options::tip(!is_draft(&s.agent.id)));
-        let b = button("picker", &title, kind, state, a);
-        let b = gate::tip(
-            b,
-            crate::acting::Control {
-                enabled: true,
-                tooltip: tip,
-            },
-            a,
-        );
-        b.when(has_options, |b| {
-            b.on_click(cx.listener(|this, _, _, cx| this.toggle_picker(cx)))
-        })
-    });
+            text.clone()
+        });
+    let card = div()
+        .id("composer")
+        .mx(px(SIDE_PADDING))
+        .pl(px(inset(PAD_LEADING, edge)))
+        .pr(px(inset(PAD_TRAILING, edge)))
+        .py(px(inset(PAD_VERTICAL, edge)))
+        .flex()
+        .items_end()
+        .gap(px(10.0))
+        .rounded(px(RADIUS_COMPOSER))
+        .fill(Ink::Card, a)
+        .border(px(edge))
+        .border_color(hsla(edge_color))
+        .shadow(vec![BoxShadow {
+            color: hsla(Ink::Shadow.color(a)),
+            offset: point(px(0.0), px(6.0)),
+            blur_radius: px(14.0),
+            spread_radius: px(0.0),
+        }])
+        .child(text_area)
+        .child(send_disc(control.enabled, empty, a, cx))
+        .when(control.enabled, |c| {
+            c.track_focus(&view.tools.focus)
+                .cursor_text()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    window.focus(&this.tools.focus);
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                    let k = &event.keystroke;
+                    let modified = k.modifiers.platform || k.modifiers.control;
+                    let Some(id) = this.selected.clone() else {
+                        return;
+                    };
+                    let draft = this.tools.drafts.entry(id).or_default();
+                    match return_key(&k.key, k.modifiers.shift, k.modifiers.alt) {
+                        Some(ReturnKey::Newline) if !modified => draft.push('\n'),
+                        Some(ReturnKey::Send) if !modified => this.send_text(cx),
+                        _ => match type_key(draft, &k.key, k.key_char.as_deref(), modified) {
+                            Typed::Submit => this.send_text(cx),
+                            Typed::Changed => {}
+                            Typed::Ignored => return,
+                        },
+                    }
+                    // Past the last line the box scrolls, and what was just typed stays in view.
+                    this.tools.scroll.scroll_to_bottom();
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+        });
     let stop = view.selected_working().then(|| {
         let gate = view.acting(cx).control();
-        let b = button("stop", "Stop", ButtonKind::Secondary, gate::state(gate), a);
+        let b = button("stop", "Stop", ButtonKind::Ghost, gate::state(gate), a);
         gate::tip(b, gate, a).when(gate.enabled, |b| {
             b.on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
         })
     });
-    let send = div()
-        .id("send")
-        .size(px(SEND_DISC))
-        .flex_shrink_0()
-        .rounded_full()
-        .fill(Ink::Accent, a)
+    let footer = div()
+        .mx(px(SIDE_PADDING))
+        .pt(px(6.0))
         .flex()
         .items_center()
-        .justify_center()
-        .ink(Ink::OnAccent, a)
-        .child(Icon::Send.glyph())
-        .when(!control.enabled || text.trim().is_empty(), |d| {
-            d.opacity(0.45)
-        })
-        .when(control.enabled, |d| {
-            d.cursor_pointer()
-                .on_click(cx.listener(|this, _, _, cx| this.send_text(cx)))
-        });
+        .gap(px(8.0))
+        .children(picker(view, a, cx))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .children(status(view, control, a)),
+        )
+        .children(stop);
     div()
         .relative()
         .flex_shrink_0()
@@ -240,25 +368,45 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .pt(px(8.0))
         .pb(px(SIDE_PADDING))
         .children(permission(view, a, cx))
-        .child(
-            div()
-                .mx(px(SIDE_PADDING))
-                .min_h(px(44.0))
-                .pl(px(8.0))
-                .pr(px(8.0))
-                .py(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .rounded(px(RADIUS_COMPOSER))
-                .fill(Ink::Card, a)
-                .border(px(1.0))
-                .border_color(hsla(Ink::Hairline.color(a)))
-                .children(picker)
-                .child(box_element)
-                .children(stop)
-                .child(send),
-        )
-        .children(status(view, control, a).map(|s| s.pt(px(6.0))))
+        .child(card)
+        .child(footer)
         .children(pop_up(view, a, cx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_grows_one_line_to_eight_then_stops() {
+        assert_eq!(text_height(0), LINE_HEIGHT);
+        assert_eq!(text_height(1), LINE_HEIGHT);
+        assert_eq!(text_height(3), 3.0 * LINE_HEIGHT);
+        assert_eq!(text_height(8), 8.0 * LINE_HEIGHT);
+        assert_eq!(text_height(9), 8.0 * LINE_HEIGHT);
+        assert_eq!(text_height(100), text_height(MAX_LINES));
+    }
+
+    #[test]
+    fn return_sends_and_shift_or_option_return_adds_a_line() {
+        assert_eq!(return_key("enter", false, false), Some(ReturnKey::Send));
+        assert_eq!(return_key("enter", true, false), Some(ReturnKey::Newline));
+        assert_eq!(return_key("enter", false, true), Some(ReturnKey::Newline));
+        assert_eq!(return_key("enter", true, true), Some(ReturnKey::Newline));
+        assert_eq!(return_key("a", true, false), None);
+        assert_eq!(return_key("backspace", false, false), None);
+    }
+
+    #[test]
+    fn a_thicker_focused_edge_moves_nothing_inside() {
+        assert_eq!(inset(PAD_LEADING, EDGE_REST) + EDGE_REST, PAD_LEADING + 1.0);
+        assert_eq!(
+            inset(PAD_LEADING, EDGE_FOCUSED) + EDGE_FOCUSED,
+            PAD_LEADING + 1.0
+        );
+        assert_eq!(
+            inset(PAD_VERTICAL, EDGE_FOCUSED) + EDGE_FOCUSED,
+            inset(PAD_VERTICAL, EDGE_REST) + EDGE_REST
+        );
+    }
 }
