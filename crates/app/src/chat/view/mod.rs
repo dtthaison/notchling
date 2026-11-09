@@ -14,6 +14,7 @@ mod drop;
 mod header;
 mod inspector;
 mod markdown;
+mod message_actions;
 mod opinions;
 mod phone;
 mod sheets;
@@ -40,6 +41,7 @@ use notchling_platform::watch::{Batch, Watcher};
 use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::follow::{self, Scroll};
+use crate::chat::message_meta;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingSession};
 use crate::phone::bridge::Bridge;
@@ -60,6 +62,8 @@ pub const LATEST_ENV: &str = "NOTCHLING_RENDER_LATEST";
 pub const SIDEBAR_HIDDEN_ENV: &str = "NOTCHLING_RENDER_SIDEBAR_HIDDEN";
 /// Set to `1`, a render draws the Details panel hidden.
 pub const DETAILS_HIDDEN_ENV: &str = "NOTCHLING_RENDER_DETAILS_HIDDEN";
+/// Set to `1`, a render draws every message's row of actions, as if the pointer were over each.
+pub const ACTIONS_ENV: &str = "NOTCHLING_RENDER_ACTIONS";
 /// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
 pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 
@@ -104,6 +108,16 @@ pub struct ChatView {
     drop_preview: bool,
     /// The "Latest" pill drawn as if scrolled up (`NOTCHLING_RENDER_LATEST=1`).
     latest_preview: bool,
+    /// Every message's row of actions drawn, as if hovered (`NOTCHLING_RENDER_ACTIONS=1`).
+    actions_preview: bool,
+    /// The message whose Copy was clicked and when (ms), for its check.
+    copied: Option<(String, i64)>,
+    /// The message the pointer is over. Set without a redraw: the row shows by a group hover, and
+    /// this only says whether its time needs keeping fresh.
+    hovered_message: Option<String>,
+    /// When the conversation was last drawn (ms), so a hovered row's relative time is redrawn
+    /// once it is stale.
+    drawn_ms: i64,
     /// A message was sent and hasn't shown up in a reload yet: that reload goes to the end.
     follow_sent: bool,
     /// The wall-clock second the live line was last redrawn for (its clock ticks once a second).
@@ -158,6 +172,7 @@ impl ChatView {
         view.expand_all = switch(EXPAND_ENV);
         view.drop_preview = switch(DROP_ENV);
         view.latest_preview = switch(LATEST_ENV);
+        view.actions_preview = switch(ACTIONS_ENV);
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         if switch(PARTS_ENV) {
@@ -176,6 +191,19 @@ impl ChatView {
     pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
         self.details_hidden = !self.details_hidden;
         cx.notify();
+    }
+
+    /// The pointer entered or left message `id` (its row of actions shows by a group hover). The
+    /// times it shows are as old as the last draw, so entering after a while redraws once.
+    pub(super) fn message_hover(&mut self, id: &str, hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            self.hovered_message = Some(id.to_owned());
+            if message_meta::stale(self.drawn_ms, now_ms()) {
+                cx.notify();
+            }
+        } else if self.hovered_message.as_deref() == Some(id) {
+            self.hovered_message = None;
+        }
     }
 
     /// Whether the group, step or thought `id` is drawn open.
@@ -255,6 +283,10 @@ impl ChatView {
             expand_all: false,
             drop_preview: false,
             latest_preview: false,
+            actions_preview: false,
+            copied: None,
+            hovered_message: None,
+            drawn_ms: 0,
             sidebar_hidden: false,
             details_hidden: false,
             follow_sent: false,
@@ -484,6 +516,16 @@ impl ChatView {
             self.clock_second = clock;
             cx.notify();
         }
+        // The check on Copy goes after a moment; a hovered row's time is kept fresh.
+        if let Some((_, at)) = &self.copied {
+            if !message_meta::copied_shows(*at, now_ms()) {
+                self.copied = None;
+                cx.notify();
+            }
+        }
+        if self.hovered_message.is_some() && message_meta::stale(self.drawn_ms, now_ms()) {
+            cx.notify();
+        }
         // A second opinion's card changes when its command ends, which nothing else signals.
         if opinions::any_running(self, cx) {
             cx.notify();
@@ -504,6 +546,7 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
+        self.drawn_ms = now_ms();
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.phone.is_some()

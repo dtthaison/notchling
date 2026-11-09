@@ -20,6 +20,7 @@ pub mod header;
 pub mod inspector;
 pub mod loader;
 pub mod markdown;
+pub mod message_meta;
 pub mod reload;
 pub mod rows;
 pub mod sidebar;
