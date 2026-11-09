@@ -1,172 +1,486 @@
-//! The conversation column: the rows of `chat::rows`, drawn with the kit.
+//! The conversation column: the rows of `chat::rows`, drawn with the kit the way the Swift app's
+//! `ChatParts` draws them. A run of tool calls is one chip ("Ran 4 commands, read 1 file", the
+//! kinds' icons, a red failure count, a spinner while one runs, a chevron) that opens to a line
+//! per call, each opening to its command, output or diff; a thought is one faint line that opens
+//! to its text; a reply is Markdown; a turn ends in "Worked for 48s · Opus 5.5" between hairlines.
+//! What is open is `ChatView::expanded`; the newest group of a working session is always open.
 
-use gpui::{div, prelude::*, px, relative, Context, Div, FontWeight, Stateful};
+use std::path::Path;
+use std::time::Duration;
+
+use gpui::{
+    div, prelude::*, px, relative, Animation, AnimationExt, Context, Div, FontWeight, SharedString,
+    Stateful,
+};
+use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_SM, SIDE_PADDING};
-use notchling_kit::ui::{claude_mark, hsla, label, KitStyled};
+use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::ui::{button, claude_mark, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::{opinions, ChatView};
+use super::{markdown, opinions, ChatView};
 use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
+use crate::chat::steps::{self, Detail};
 
 /// Thinking, tools and their buttons sit a little in from the reply's left edge.
 const INDENT: f32 = 12.0;
+/// The chevron that opens and closes a row: right when folded, down when open.
+const CHEVRON_CLOSED: &str = "›";
+const CHEVRON_OPEN: &str = "⌄";
 
-fn glyph(icon: Icon, ink: Ink, a: Appearance) -> Div {
+fn glyph(icon: Icon, size: f32, ink: Ink, a: Appearance) -> Div {
     div()
         .flex_shrink_0()
-        .text_size(px(11.0))
+        .text_size(px(size))
         .font_weight(FontWeight::MEDIUM)
         .ink(ink, a)
         .child(icon.glyph())
 }
 
-fn mono_box(text: &str, ink: Ink, a: Appearance) -> Div {
+fn chevron(open: bool, a: Appearance) -> Div {
     div()
-        .w_full()
-        .p(px(8.0))
-        .rounded(px(RADIUS_SM))
-        .fill(Ink::Raised, a)
-        .kit_type(TypeRole::Mono)
-        .ink(ink, a)
-        .child(text.to_owned())
+        .flex_shrink_0()
+        .w(px(10.0))
+        .flex()
+        .justify_center()
+        .text_size(px(12.0))
+        .font_weight(FontWeight::BOLD)
+        .ink(Ink::TextFaint, a)
+        .child(if open { CHEVRON_OPEN } else { CHEVRON_CLOSED })
+}
+
+/// A small spinner: the working glyph, breathing.
+fn spinner(key: &str, a: Appearance) -> impl IntoElement {
+    glyph(Icon::Working, 11.0, Ink::Working, a).with_animation(
+        SharedString::from(format!("spin-{key}")),
+        Animation::new(Duration::from_millis(1000)).repeat(),
+        |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
+    )
+}
+
+fn hairline(a: Appearance) -> Div {
+    div().flex_1().h(px(1.0)).fill(Ink::Hairline, a)
 }
 
 fn diff_line(line: &DiffLine, a: Appearance) -> Div {
+    if line.kind == DiffKind::Hunk {
+        return div().px(px(10.0)).py(px(3.0)).child(label(
+            &line.text,
+            TypeRole::Meta,
+            Ink::TextFaint,
+            a,
+        ));
+    }
     let (ink, sign) = match line.kind {
         DiffKind::Add => (Ink::Done, "+"),
         DiffKind::Remove => (Ink::Expired, "−"),
-        DiffKind::Context => (Ink::TextMuted, " "),
-        DiffKind::Hunk => (Ink::TextFaint, "@"),
+        _ => (Ink::TextFaint, " "),
     };
     let wash = matches!(line.kind, DiffKind::Add | DiffKind::Remove);
     div()
         .w_full()
         .flex()
-        .gap(px(8.0))
-        .px(px(8.0))
+        .py(px(1.0))
         .kit_type(TypeRole::Mono)
-        .ink(ink, a)
         .when(wash, |d| d.bg(hsla(ink.color(a).with_alpha(0.12))))
         .child(
             div()
-                .w(px(28.0))
+                .w(px(40.0))
                 .flex_shrink_0()
+                .flex()
+                .justify_end()
                 .ink(Ink::TextFaint, a)
                 .child(line.number.map(|n| n.to_string()).unwrap_or_default()),
         )
-        .child(div().w(px(10.0)).flex_shrink_0().child(sign))
-        .child(div().flex_1().min_w(px(0.0)).child(line.text.clone()))
+        .child(
+            div()
+                .w(px(20.0))
+                .flex_shrink_0()
+                .flex()
+                .justify_center()
+                .font_weight(FontWeight::BOLD)
+                .ink(ink, a)
+                .child(sign),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .pr(px(10.0))
+                .ink(Ink::Text, a)
+                .child(if line.text.is_empty() {
+                    " ".to_owned()
+                } else {
+                    line.text.clone()
+                }),
+        )
 }
 
-fn tool(row: &ToolRow, a: Appearance) -> Div {
-    let title_ink = if row.is_error {
+/// A file change (`DiffView`): the file and its folder, Show in Finder, then the lines.
+fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+    let path = Path::new(&step.input);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| step.input.clone());
+    let folder = path
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let reveal = step.input.clone();
+    div()
+        .w_full()
+        .rounded(px(RADIUS_MD))
+        .fill(Ink::Card, a)
+        .border(px(1.0))
+        .border_color(hsla(Ink::Hairline.color(a)))
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(px(28.0))
+                .pl(px(10.0))
+                .pr(px(4.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .border_b(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .child(glyph(Icon::File, 10.0, Ink::Text, a))
+                .child(label(&name, TypeRole::Label, Ink::Text, a))
+                .child(
+                    label(&folder, TypeRole::Meta, Ink::TextFaint, a)
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .elide(),
+                )
+                .child(
+                    button(
+                        SharedString::from(format!("reveal-{}", step.id)),
+                        "Show in Finder",
+                        ButtonKind::Ghost,
+                        PartState::Rest,
+                        a,
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.reveal_path(Path::new(&reveal));
+                    })),
+                ),
+        )
+        .child(
+            div()
+                .py(px(4.0))
+                .flex()
+                .flex_col()
+                .children(step.diff.iter().map(|line| diff_line(line, a))),
+        )
+}
+
+/// What opens under a step: its diff, or its command or input and its output.
+fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let mut detail = div().pl(px(24.0)).flex().flex_col().gap(px(6.0));
+    match steps::detail(step) {
+        Detail::None => return None,
+        Detail::Diff => detail = detail.child(diff_view(step, a, cx)),
+        Detail::Text {
+            input_title,
+            has_output,
+        } => {
+            if let Some(title) = input_title {
+                detail = detail.child(markdown::mono_box(
+                    &format!("{}-in", step.id),
+                    title,
+                    &step.input,
+                    false,
+                    a,
+                ));
+            }
+            if has_output {
+                if let Some(output) = &step.output {
+                    let text = if output.more > 0 {
+                        format!("{}\n… +{} lines", output.text, output.more)
+                    } else {
+                        output.text.clone()
+                    };
+                    let title = if step.is_error { "Error" } else { "Output" };
+                    detail = detail.child(markdown::mono_box(
+                        &format!("{}-out", step.id),
+                        title,
+                        &text,
+                        step.is_error,
+                        a,
+                    ));
+                }
+            }
+        }
+    }
+    Some(detail)
+}
+
+/// One call (`ToolCallRow`): icon, title, diff counts, its state, a chevron when something opens.
+fn step_row(
+    view: &ChatView,
+    step: &ToolRow,
+    live: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let has_detail = steps::detail(step) != Detail::None;
+    let open = has_detail && view.is_open(&step.id);
+    let running = live && !step.finished;
+    let icon_ink = if step.is_error {
         Ink::Expired
     } else {
-        Ink::Text
+        Ink::TextMuted
     };
-    let mut element = div().flex().flex_col().gap(px(4.0)).child(
+    let id = step.id.clone();
+    let line = div()
+        .id(SharedString::from(format!("step-{}", step.id)))
+        .w_full()
+        .min_h(px(28.0))
+        .px(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded(px(RADIUS_SM))
+        .when(has_detail, |d| {
+            d.cursor_pointer()
+                .hover(|s| s.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
+                .on_click(cx.listener(move |this, _, _, cx| this.toggle(&id, cx)))
+        })
+        .child(
+            div()
+                .w(px(16.0))
+                .flex_shrink_0()
+                .flex()
+                .justify_center()
+                .child(glyph(step.icon, 11.0, icon_ink, a)),
+        )
+        .child(
+            label(&step.title, TypeRole::Body, Ink::Text, a)
+                .flex_1()
+                .min_w(px(0.0))
+                .elide(),
+        )
+        .when(step.added + step.removed > 0, |d| {
+            d.child(label(
+                &format!("+{}", step.added),
+                TypeRole::Mono,
+                Ink::Done,
+                a,
+            ))
+            .child(label(
+                &format!("−{}", step.removed),
+                TypeRole::Mono,
+                Ink::Expired,
+                a,
+            ))
+        })
+        .when(running, |d| d.child(spinner(&step.id, a)))
+        .when(!running && step.is_error, |d| {
+            d.child(glyph(Icon::Needs, 11.0, Ink::Expired, a))
+        })
+        .when(has_detail, |d| d.child(chevron(open, a)));
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(line)
+        .when(open, |d| d.children(step_detail(step, a, cx)))
+}
+
+/// The chip over a run of calls (`ToolStepView`): the kinds' icons stacked, the summary, how many
+/// failed, a spinner while live, the chevron. Click to open.
+fn step_chip(
+    id: &str,
+    steps: &[ToolRow],
+    open: bool,
+    live: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Stateful<Div> {
+    let icons =
         div()
             .flex()
             .items_center()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .h(px(22.0))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .rounded_full()
-                    .fill(Ink::Raised, a)
-                    .child(glyph(row.icon, Ink::TextMuted, a))
-                    .child(label(&row.title, TypeRole::Label, title_ink, a)),
-            )
-            .when(!row.finished, |d| {
-                d.child(label("running", TypeRole::Meta, Ink::Working, a))
-            })
-            .when(row.added + row.removed > 0, |d| {
-                d.child(label(
-                    &format!("+{} −{}", row.added, row.removed),
-                    TypeRole::Meta,
-                    Ink::TextMuted,
-                    a,
-                ))
-            }),
-    );
-    if !row.input.is_empty() {
-        element = element.child(
-            div()
-                .kit_type(TypeRole::Mono)
-                .ink(Ink::TextMuted, a)
-                .line_clamp(3)
-                .child(row.input.clone()),
-        );
-    }
-    if let Some(output) = &row.output {
-        let ink = if row.is_error {
-            Ink::Expired
-        } else {
-            Ink::TextFaint
-        };
-        let text = if output.more > 0 {
-            format!("{}\n… +{} lines", output.text, output.more)
-        } else {
-            output.text.clone()
-        };
-        element = element.child(mono_box(&text, ink, a));
-    }
-    if !row.diff.is_empty() {
-        element = element.child(
-            div()
-                .w_full()
-                .py(px(4.0))
-                .rounded(px(RADIUS_SM))
-                .fill(Ink::Raised, a)
-                .flex()
-                .flex_col()
-                .children(row.diff.iter().map(|line| diff_line(line, a))),
-        );
-    }
-    element
+            .children(
+                steps::icons(steps)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(n, icon)| {
+                        div()
+                            .when(n > 0, |d| d.ml(px(-4.0)))
+                            .size(px(20.0))
+                            .rounded_full()
+                            .fill(Ink::Card, a)
+                            .border(px(1.0))
+                            .border_color(hsla(Ink::Hairline.color(a)))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(9.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .ink(Ink::TextMuted, a)
+                            .child(icon.glyph())
+                    }),
+            );
+    let key = id.to_owned();
+    div()
+        .id(SharedString::from(format!("chip-{id}")))
+        .h(px(28.0))
+        .pl(px(4.0))
+        .pr(px(10.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded_full()
+        .bg(hsla(Ink::Raised.color(a).with_alpha(0.7)))
+        .cursor_pointer()
+        .hover(|s| s.bg(hsla(Ink::Raised.color(a))))
+        .on_click(cx.listener(move |this, _, _, cx| this.toggle(&key, cx)))
+        .child(icons)
+        .child(label(
+            &steps::summary(steps),
+            TypeRole::Label,
+            Ink::TextMuted,
+            a,
+        ))
+        .children(steps::failed_text(steps).map(|t| label(&t, TypeRole::Label, Ink::Expired, a)))
+        .when(live, |d| d.child(spinner(id, a)))
+        .child(chevron(open, a))
 }
 
-fn row_element(row: &Row, a: Appearance) -> Div {
+/// A run of calls: the chip, and when open each call on its own line beside a hairline.
+fn step_group(
+    view: &ChatView,
+    id: &str,
+    steps: &[ToolRow],
+    live: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let open = live || view.is_open(id);
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .child(step_chip(id, steps, open, live, a, cx))
+        .when(open, |d| {
+            d.child(
+                div()
+                    .w_full()
+                    .mt(px(8.0))
+                    .pl(px(12.0))
+                    .border_l(px(1.0))
+                    .border_color(hsla(Ink::Hairline.color(a)))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .children(steps.iter().map(|step| step_row(view, step, live, a, cx))),
+            )
+        })
+}
+
+/// "Thought for 16s" (`ThinkingRow`): faint, with the text under it when opened. Claude Code keeps
+/// the text only sometimes; without it there is nothing to open.
+fn thinking(
+    view: &ChatView,
+    id: &str,
+    title: &str,
+    text: &str,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let has_text = !text.is_empty();
+    let open = has_text && view.is_open(id);
+    let key = id.to_owned();
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(6.0))
+        .child(
+            div()
+                .id(SharedString::from(format!("think-{id}")))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .when(has_text, |d| {
+                    d.cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle(&key, cx)))
+                })
+                .child(glyph(Icon::Thinking, 10.0, Ink::TextFaint, a))
+                .child(label(title, TypeRole::Label, Ink::TextFaint, a))
+                .when(has_text, |d| d.child(chevron(open, a))),
+        )
+        .when(open, |d| {
+            d.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .gap(px(10.0))
+                    .child(div().flex_shrink_0().w(px(2.0)).fill(Ink::Hairline, a))
+                    .child(
+                        label(text, TypeRole::Meta, Ink::TextMuted, a)
+                            .flex_1()
+                            .min_w(px(0.0)),
+                    ),
+            )
+        })
+}
+
+fn user_row(text: &str, images: usize, queued: bool, a: Appearance) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_end()
+        .gap(px(2.0))
+        .when(queued, |d| {
+            d.child(label("Queued", TypeRole::Meta, Ink::TextFaint, a))
+        })
+        .child(
+            div()
+                .max_w(relative(0.75))
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(px(RADIUS_CARD))
+                .fill(Ink::AccentWash, a)
+                .kit_type(TypeRole::Body)
+                .ink(Ink::Text, a)
+                .when(queued, |d| d.opacity(0.6))
+                .child(text.to_owned()),
+        )
+        .when(images > 0, |d| {
+            d.child(label(
+                &format!("{images} image{}", if images == 1 { "" } else { "s" }),
+                TypeRole::Meta,
+                Ink::TextFaint,
+                a,
+            ))
+        })
+}
+
+/// A row, drawn. `id` is the item's (the queued bubbles at the end have none), `live` whether this
+/// is the newest step group of a working session.
+fn row_element(
+    view: &ChatView,
+    row: &Row,
+    id: &str,
+    live: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
     match row {
         Row::User {
             text,
             images,
             queued,
-        } => div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .items_end()
-            .gap(px(2.0))
-            .when(*queued, |d| {
-                d.child(label("Queued", TypeRole::Meta, Ink::TextFaint, a))
-            })
-            .child(
-                div()
-                    .max_w(relative(0.75))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(px(RADIUS_CARD))
-                    .fill(Ink::AccentWash, a)
-                    .kit_type(TypeRole::Body)
-                    .ink(Ink::Text, a)
-                    .when(*queued, |d| d.opacity(0.6))
-                    .child(text.clone()),
-            )
-            .when(*images > 0, |d| {
-                d.child(label(
-                    &format!("{images} image{}", if *images == 1 { "" } else { "s" }),
-                    TypeRole::Meta,
-                    Ink::TextFaint,
-                    a,
-                ))
-            }),
+        } => user_row(text, *images, *queued, a),
         // No mark before each reply: the bubble alone says who wrote it.
         Row::Assistant { text } => div().w_full().flex().items_start().child(
             div()
@@ -177,50 +491,46 @@ fn row_element(row: &Row, a: Appearance) -> Div {
                 .fill(Ink::Card, a)
                 .border(px(1.0))
                 .border_color(hsla(Ink::Hairline.color(a)))
-                .kit_type(TypeRole::Body)
-                .ink(Ink::Text, a)
-                .child(text.clone()),
+                .child(markdown::render(id, text, a)),
         ),
         Row::Thinking { title, text } => div()
             .pl(px(INDENT))
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .child(label(title, TypeRole::Meta, Ink::TextMuted, a))
-            .when(!text.is_empty(), |d| {
-                d.child(
-                    div()
-                        .kit_type(TypeRole::Meta)
-                        .ink(Ink::TextFaint, a)
-                        .italic()
-                        .child(text.clone()),
-                )
-            }),
+            .child(thinking(view, id, title, text, a, cx)),
         Row::Tools(tools) => div()
             .pl(px(INDENT))
+            .child(step_group(view, id, tools, live, a, cx)),
+        Row::TurnEnd { text } => div()
+            .w_full()
+            .py(px(2.0))
             .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .children(tools.iter().map(|t| tool(t, a))),
-        Row::TurnEnd { text } => div().w_full().flex().justify_center().child(label(
-            text,
-            TypeRole::Meta,
-            Ink::TextFaint,
-            a,
-        )),
+            .items_center()
+            .gap(px(10.0))
+            .child(hairline(a))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .child(glyph(Icon::Clock, 9.0, Ink::TextFaint, a))
+                    .child(label(text, TypeRole::Meta, Ink::TextFaint, a)),
+            )
+            .child(hairline(a)),
         Row::Notice { text, icon } => div()
             .w_full()
             .flex()
             .justify_center()
             .items_center()
             .gap(px(6.0))
-            .child(glyph(*icon, Ink::TextMuted, a))
+            .child(glyph(*icon, 11.0, Ink::TextMuted, a))
             .child(label(text, TypeRole::Meta, Ink::TextMuted, a)),
-        Row::CommandOutput { text } => {
-            div()
-                .pl(px(INDENT))
-                .child(mono_box(text, Ink::TextMuted, a))
-        }
+        Row::CommandOutput { text } => div().pl(px(INDENT)).child(markdown::mono_box(
+            &format!("{id}-cmd"),
+            "Output",
+            text,
+            false,
+            a,
+        )),
     }
 }
 
@@ -230,11 +540,14 @@ fn row_with_opinions(
     view: &ChatView,
     i: usize,
     row: &Row,
+    live: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
-    let element = row_element(row, a);
-    let Some(item) = view.conversation.items.get(i) else {
+    let item = view.conversation.items.get(i);
+    let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
+    let element = row_element(view, row, id, live, a, cx);
+    let Some(item) = item else {
         return element;
     };
     let subjects = opinions::subjects(item);
@@ -304,9 +617,21 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         };
         return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
+    // The newest step group of a working session stays open with its running call spinning (the
+    // Swift app's `liveTools`): the session works, and the last item is that group.
+    let working = view
+        .selected_session()
+        .is_some_and(|s| s.agent.group == AgentGroup::Working);
+    let last_tools = view.conversation.items.len().checked_sub(1).filter(|_| {
+        working
+            && matches!(
+                rows.get(view.conversation.items.len() - 1),
+                Some(Row::Tools(_))
+            )
+    });
     column.children(
         rows.iter()
             .enumerate()
-            .map(|(i, row)| row_with_opinions(view, i, row, a, cx)),
+            .map(|(i, row)| row_with_opinions(view, i, row, last_tools == Some(i), a, cx)),
     )
 }
