@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use gpui::{
-    div, point, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, SharedString,
-    Stateful,
+    div, point, prelude::*, px, relative, AnyElement, BoxShadow, Context, Div, FontWeight,
+    SharedString, Stateful,
 };
 use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
@@ -22,7 +22,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::{markdown, opinions, ChatView};
+use super::{markdown, message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
 use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
@@ -602,10 +602,12 @@ fn row_with_opinions(
     live: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
-) -> Div {
+) -> AnyElement {
     let item = view.conversation.items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
     let element = row_element(view, row, id, live, a, cx);
+    // Your messages and Claude's replies get their row of actions beneath.
+    let element = message_actions::with_actions(view, row, item, element, a, cx);
     let Some(item) = item else {
         return element;
     };
@@ -630,6 +632,7 @@ fn row_with_opinions(
         .child(element)
         .child(buttons)
         .children(cards)
+        .into_any_element()
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
