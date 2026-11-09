@@ -601,7 +601,6 @@ impl Render for ChatView {
             .h_full()
             .flex()
             .flex_col()
-            .child(header::render(self, a, cx))
             .child(conversation)
             .child(composer::render(self, a, window, cx))
             .when(takes_drops, |column| {
@@ -622,8 +621,21 @@ impl Render for ChatView {
             .flex()
             .fill(Ink::Window, a)
             .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
-            .child(column)
-            .children((!self.details_hidden).then(|| inspector::render(self, a, cx)))
+            // The header runs across the conversation and the Details Panel, so both start under it.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(header::render(self, a, cx))
+                    .child(
+                        div().flex_1().min_h(px(0.0)).flex().child(column).children(
+                            (!self.details_hidden).then(|| inspector::render(self, a, cx)),
+                        ),
+                    ),
+            )
             // Beside the traffic lights, over the sidebar's top or the header's start.
             .child(sidebar::toggle_button(self, a, cx))
             .child(sidebar::new_session_button(self, a, cx))

@@ -9,7 +9,7 @@ use std::path::Path;
 use gpui::{div, prelude::*, px, relative, App, Div, Global, SharedString, Window, WindowId};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
-use notchling_kit::metric::{METER_BAR, SIDE_PADDING, TITLE_BAR};
+use notchling_kit::metric::{METER_BAR, SIDE_PADDING};
 use notchling_kit::ui::{
     hsla, icon, label, scrollable, spinner as kit_spinner, KitPart, KitStyled,
 };
@@ -174,9 +174,9 @@ impl RenderOnce for Panel {
             .border_color(hsla(Ink::Hairline.color(a)))
             .flex()
             .flex_col()
-            .child(div().h(px(TITLE_BAR)).flex_shrink_0())
+            // The header runs over the panel too, so the panel starts under it, level with the
+            // conversation.
             .child(scrollable(column))
-            // Inside: the panel reaches the window's top edge, where a badge outside would be cut.
             .part_inside("Details Panel", Corner::TopTrailing, a, cx)
     }
 }
