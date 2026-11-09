@@ -6,9 +6,11 @@
 //! uppercase but not tracked), no press scale.
 
 mod gallery;
+mod resize;
 mod widgets;
 
 pub use gallery::KitGallery;
+pub use resize::{resize_edges, TopBorder};
 pub use widgets::{
     avatar, button, button_with, card, claude_mark, field, label, option_row, phone_mark,
     session_row, status_pill,

@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use gpui::{div, prelude::*, px, Context, Entity, Render, ScrollHandle, Subscription, Window};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
-use notchling_kit::ui::{window_appearance, KitStyled};
+use notchling_kit::ui::{resize_edges, window_appearance, KitStyled, TopBorder};
 use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
 
@@ -341,5 +341,6 @@ impl Render for ChatView {
             .children(accounts::render_menu(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
+            .child(resize_edges(window, TopBorder::InContent))
     }
 }

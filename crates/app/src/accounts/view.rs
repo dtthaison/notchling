@@ -12,7 +12,7 @@ use gpui::{
     div, prelude::*, px, ClipboardItem, Context, EventEmitter, Render, SharedString, Window,
 };
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
-use notchling_kit::ui::{label, window_appearance, KitStyled};
+use notchling_kit::ui::{label, resize_edges, window_appearance, KitStyled, TopBorder};
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
 use super::cost::Range;
@@ -558,6 +558,8 @@ impl Render for AccountsView {
                 Rc::new(|this, yes, cx| this.alert_answered(yes, cx));
             alert_overlay(alert, self.busy, a, cx, on)
         });
+        // In Chat's sheet the window's border isn't this view's.
+        let edges = (!self.in_sheet).then(|| resize_edges(window, TopBorder::InContent));
         div()
             .id(SharedString::from("accounts-view"))
             .relative()
@@ -570,5 +572,6 @@ impl Render for AccountsView {
             .child(self.header(a, cx))
             .child(body)
             .children(alert)
+            .children(edges)
     }
 }
