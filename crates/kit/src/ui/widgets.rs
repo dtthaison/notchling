@@ -11,7 +11,7 @@ use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::ink::{avatar as avatar_colors, claude_mark_top};
 use crate::metric::{
     AVATAR, BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
-    SESSION_ROW, SESSION_ROW_ACCOUNT,
+    SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
 };
 use crate::part::{
     button_look, field_look, initials, option_look, row_look, ButtonKind, Look, PartState,
@@ -216,6 +216,26 @@ pub fn session_row(
     )
 }
 
+/// `text` with `mark` in a margin `indent` wide, cut with an ellipsis. The mark is placed over the
+/// text's own box, not laid out beside it: `elide` needs the text to be a direct child of the
+/// lines column, which gives it a definite width. Wrapped in another box (a row, or a column of
+/// its own) the text is measured narrow and shows only its first word.
+fn marked_line(mark: impl IntoElement, indent: f32, text: Div) -> Div {
+    text.relative()
+        .pl(px(indent))
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .child(mark),
+        )
+        .elide()
+}
+
 /// Which tool runs a session, for [`tool_icon`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolMark {
@@ -263,23 +283,16 @@ pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
 /// Spec: a session row's account line: a 9 pt person (the main login) or branch (a lane) and the
 /// email, meta type in faint ink, clipped with an ellipsis.
 pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .min_w(px(0.0))
-        .child(icon(
+    marked_line(
+        icon(
             if lane { Icon::Lane } else { Icon::Account },
             9.0,
             Ink::TextFaint,
             appearance,
-        ))
-        .child(
-            label(text, TypeRole::Meta, Ink::TextFaint, appearance)
-                .flex_1()
-                .min_w(px(0.0))
-                .elide(),
-        )
+        ),
+        15.0,
+        label(text, TypeRole::Meta, Ink::TextFaint, appearance),
+    )
 }
 
 /// Spec: Session row, the sidebar's: three lines, who (the tool icon and the name), on which
@@ -304,18 +317,11 @@ pub fn session_row_marked(
     } else {
         Ink::TextMuted
     };
-    let who = div()
-        .flex()
-        .items_center()
-        .gap(px(5.0))
-        .min_w(px(0.0))
-        .child(tool)
-        .child(
-            label(name, TypeRole::Heading, Ink::Text, appearance)
-                .flex_1()
-                .min_w(px(0.0))
-                .elide(),
-        );
+    let who = marked_line(
+        tool,
+        TOOL_ICON + 5.0,
+        label(name, TypeRole::Heading, Ink::Text, appearance),
+    );
     let lines = div()
         .flex()
         .flex_col()
