@@ -13,10 +13,12 @@ use crate::chat::sidebar::sections;
 /// The footer, with what there is to say about the daemon (down, or not trusted).
 fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>) -> Div {
     div()
-        .h(px(44.0))
+        .min_h(px(44.0))
         .flex_shrink_0()
         .px(px(12.0))
+        .py(px(6.0))
         .flex()
+        .flex_wrap()
         .items_center()
         .gap(px(8.0))
         .child(
@@ -42,6 +44,19 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         .child(
             button("vault", "Vault", ButtonKind::Ghost, PartState::Rest, a)
                 .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
+        )
+        // Here as well as in the menu bar, whose item a full menu bar hides behind the notch.
+        .child(
+            button(
+                "handover",
+                "Handover",
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            )
+            .on_click(|_, _, cx| {
+                crate::welcome::window::open(cx, crate::welcome::window::Which::Handover)
+            }),
         )
         .child(button(
             "parts",
