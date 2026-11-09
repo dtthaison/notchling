@@ -1,5 +1,10 @@
-//! Icons (`KitIcon`) as data: the SF Symbol name, and a text stand-in for where symbols can't be
-//! drawn (GPUI has no SF Symbols). One weight (medium), one size per place.
+//! Icons (`KitIcon`) as data: the SF Symbol name the Swift app draws, the Lucide icon GPUI draws in
+//! its place, and a text stand-in for an icon with no Lucide match. One weight (medium), one size
+//! per place.
+//!
+//! SF Symbols may only ship in apps for Apple's systems, and this app builds for Windows and Linux
+//! too, so the line icons are Lucide's (ISC; `assets/icons/LICENSE`), the closest match to each
+//! symbol, vendored as only the SVGs used and embedded here.
 
 use crate::ink::Status;
 use crate::typescale::Weight;
@@ -40,6 +45,22 @@ pub enum Icon {
     Agent,
     /// A task list.
     Task,
+    /// Copy to the clipboard.
+    Copy,
+    /// A folded row's chevron.
+    ChevronRight,
+    /// An open row's chevron.
+    ChevronDown,
+    /// A file edit.
+    Edit,
+    /// A new file written.
+    Write,
+    /// A skill used.
+    Skill,
+    /// Any other tool (MCP, plugins).
+    Plugin,
+    /// A tool call that failed.
+    Failed,
 }
 
 /// Where an icon sits decides its size.
@@ -64,7 +85,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 25] = [
+    pub const ALL: [Icon; 33] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -90,6 +111,14 @@ impl Icon {
         Icon::Web,
         Icon::Agent,
         Icon::Task,
+        Icon::Copy,
+        Icon::ChevronRight,
+        Icon::ChevronDown,
+        Icon::Edit,
+        Icon::Write,
+        Icon::Skill,
+        Icon::Plugin,
+        Icon::Failed,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -120,6 +149,15 @@ impl Icon {
             Icon::Web => "globe",
             Icon::Agent => "person.2",
             Icon::Task => "checklist",
+            Icon::Copy => "doc.on.doc",
+            Icon::ChevronRight => "chevron.right",
+            Icon::ChevronDown => "chevron.down",
+            Icon::Edit => "pencil",
+            Icon::Write => "doc.badge.plus",
+            Icon::Skill => "sparkles",
+            Icon::Plugin => "puzzlepiece.extension",
+            // The Swift app's is filled; filled forms stay for status badges.
+            Icon::Failed => "xmark.octagon",
         }
     }
 
@@ -154,7 +192,55 @@ impl Icon {
             Icon::Web => "◎",
             Icon::Agent => "⚇",
             Icon::Task => "☑",
+            Icon::Copy => "⧉",
+            Icon::ChevronRight => "›",
+            Icon::ChevronDown => "⌄",
+            Icon::Edit => "✎",
+            Icon::Write => "+",
+            Icon::Skill => "✧",
+            Icon::Plugin => "◇",
+            Icon::Failed => "✕",
         }
+    }
+
+    /// The Lucide icon drawn for the symbol, as an asset path ([`asset`]); `None` keeps the glyph
+    /// (Claude's mark and the phone have drawn marks of their own).
+    pub fn svg(self) -> Option<&'static str> {
+        Some(match self {
+            Icon::Needs => "icons/circle-alert.svg",
+            Icon::Working => "icons/circle-dashed.svg",
+            Icon::Done => "icons/circle-check.svg",
+            Icon::Terminal => "icons/square-terminal.svg",
+            Icon::Tools => "icons/wrench.svg",
+            Icon::Question => "icons/message-circle-question.svg",
+            Icon::Search => "icons/search.svg",
+            Icon::Info => "icons/info.svg",
+            Icon::Check => "icons/check.svg",
+            Icon::Clock => "icons/clock.svg",
+            Icon::Thinking => "icons/brain.svg",
+            Icon::File => "icons/file-text.svg",
+            Icon::Web => "icons/globe.svg",
+            Icon::Agent => "icons/bot.svg",
+            Icon::Task => "icons/list-checks.svg",
+            Icon::Copy => "icons/copy.svg",
+            Icon::ChevronRight => "icons/chevron-right.svg",
+            Icon::ChevronDown => "icons/chevron-down.svg",
+            Icon::Edit => "icons/pencil.svg",
+            Icon::Write => "icons/file-plus.svg",
+            Icon::Skill => "icons/sparkles.svg",
+            Icon::Plugin => "icons/puzzle.svg",
+            Icon::Failed => "icons/octagon-x.svg",
+            Icon::Resume
+            | Icon::Send
+            | Icon::Permission
+            | Icon::Claude
+            | Icon::Back
+            | Icon::Sessions
+            | Icon::Phone
+            | Icon::More
+            | Icon::Page
+            | Icon::Settings => return None,
+        })
     }
 
     /// Filled forms are only for status badges.
@@ -169,6 +255,67 @@ impl Icon {
             Status::Done => Icon::Done,
         }
     }
+}
+
+/// A Lucide icon fills its 24-unit box less fully than an SF Symbol fills its font size (2 units
+/// spare on each side), so its box is this much larger than the symbol's point size to look the
+/// same size beside it.
+pub const SVG_SCALE: f32 = 1.25;
+
+/// The box a Lucide icon is drawn in to match an SF Symbol of `points`.
+pub fn svg_box(points: f32) -> f32 {
+    points * SVG_SCALE
+}
+
+/// `(asset path, SVG)` for each vendored icon, by its Lucide name.
+macro_rules! icons {
+    ($($name:literal),* $(,)?) => {
+        [$((
+            concat!("icons/", $name, ".svg"),
+            include_bytes!(concat!("../assets/icons/", $name, ".svg")) as &[u8],
+        )),*]
+    };
+}
+
+/// The vendored SVGs (lucide-static 0.460.0), by asset path.
+const SVGS: [(&str, &[u8]); 23] = icons![
+    "brain",
+    "bot",
+    "check",
+    "chevron-down",
+    "chevron-right",
+    "circle-alert",
+    "circle-check",
+    "circle-dashed",
+    "clock",
+    "copy",
+    "file-plus",
+    "file-text",
+    "globe",
+    "info",
+    "list-checks",
+    "message-circle-question",
+    "octagon-x",
+    "pencil",
+    "puzzle",
+    "search",
+    "sparkles",
+    "square-terminal",
+    "wrench",
+];
+
+/// An embedded icon's SVG by its asset path (the GPUI asset source serves these).
+pub fn asset(path: &str) -> Option<&'static [u8]> {
+    SVGS.iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| *bytes)
+}
+
+/// Every embedded asset path under `prefix`.
+pub fn assets(prefix: &str) -> impl Iterator<Item = &'static str> + '_ {
+    SVGS.iter()
+        .map(|(name, _)| *name)
+        .filter(move |name| name.starts_with(prefix))
 }
 
 #[cfg(test)]
@@ -199,5 +346,33 @@ mod tests {
         assert_eq!(IconSize::Row.points(), 12.0);
         assert_eq!(IconSize::Button.points(), 13.0);
         assert_eq!(WEIGHT, Weight::Medium);
+    }
+
+    #[test]
+    fn every_svg_is_embedded_and_used() {
+        let used: Vec<&str> = Icon::ALL.iter().filter_map(|i| i.svg()).collect();
+        for path in &used {
+            let bytes = asset(path).unwrap_or_else(|| panic!("{path} is not embedded"));
+            let text = std::str::from_utf8(bytes).expect("utf-8");
+            assert!(
+                text.contains("<svg") && text.contains("viewBox=\"0 0 24 24\""),
+                "{path}"
+            );
+            assert!(
+                text.contains("lucide-static") && text.contains("ISC"),
+                "{path}"
+            );
+        }
+        for path in assets("icons/") {
+            assert!(
+                used.contains(&path),
+                "{path} is embedded but nothing draws it"
+            );
+        }
+        assert_eq!(assets("icons/").count(), SVGS.len());
+        assert_eq!(asset("icons/none.svg"), None);
+        assert_eq!(Icon::Terminal.svg(), Some("icons/square-terminal.svg"));
+        assert_eq!(Icon::Claude.svg(), None, "Claude's mark is drawn");
+        assert_eq!(svg_box(12.0), 15.0);
     }
 }

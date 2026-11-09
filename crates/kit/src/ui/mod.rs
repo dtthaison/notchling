@@ -4,17 +4,19 @@
 //! functions in `widgets`, never with a raw color or size. [`TextEditor`] is the text box with a
 //! caret, a selection and the input method (the reply box). [`KitPart`] names an element for the
 //! ? button (`part`, `part_at`, `part_inside`), whose state is the [`crate::labels::Labels`]
-//! global (`parts_on`, `toggle_parts`). What GPUI can't do yet is noted where it matters: no SF
-//! Symbols (icons draw their text glyph), no letter spacing (section headers are uppercase but
-//! not tracked), no press scale.
+//! global (`parts_on`, `toggle_parts`). [`icon`] draws an icon's Lucide SVG (served by
+//! [`KitAssets`]) where the Swift app draws an SF Symbol. What GPUI can't do yet is noted where it
+//! matters: no letter spacing (section headers are uppercase but not tracked), no press scale.
 
 mod gallery;
+mod icons;
 mod parts;
 mod resize;
 mod text_editor;
 mod widgets;
 
 pub use gallery::KitGallery;
+pub use icons::{icon, KitAssets};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart};
 pub use resize::{resize_edges, TopBorder};
 pub use text_editor::{TextEditor, TextEditorEvent};

@@ -7,8 +7,8 @@ use gpui::{
 };
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, KitStyled, MONO_FONT, SYSTEM_FONT};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SYSTEM_FONT};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use crate::chat::markdown::{blocks, spans, Block, ListItem, Span};
 
@@ -79,9 +79,17 @@ fn run(span: &Span, weight: FontWeight, ink: Ink, a: Appearance) -> TextRun {
 /// Copies `text`; the small ghost button on code boxes.
 pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
     let text = text.to_owned();
-    button(
+    // The Swift app's `CopyButton`: the copy icon (10 pt) and the word, 4 apart, in the ghost
+    // button's text ink.
+    let content = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(icon(Icon::Copy, 10.0, Ink::Text, a))
+        .child("Copy");
+    button_with(
         SharedString::from(format!("copy-{key}")),
-        "Copy",
+        content,
         ButtonKind::Ghost,
         PartState::Rest,
         a,

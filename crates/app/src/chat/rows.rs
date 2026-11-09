@@ -74,11 +74,13 @@ pub fn tool_icon(kind: ToolKind) -> Icon {
         ToolKind::Read => Icon::File,
         ToolKind::Search => Icon::Search,
         ToolKind::Web => Icon::Web,
-        ToolKind::Edit | ToolKind::Write | ToolKind::Other => Icon::Tools,
+        ToolKind::Edit => Icon::Edit,
+        ToolKind::Write => Icon::Write,
+        ToolKind::Other => Icon::Plugin,
         ToolKind::Agent => Icon::Agent,
         ToolKind::Task => Icon::Task,
         ToolKind::Ask => Icon::Question,
-        ToolKind::Skill => Icon::Claude,
+        ToolKind::Skill => Icon::Skill,
     }
 }
 
@@ -488,7 +490,7 @@ mod tests {
         let row = tool_row(&call);
         assert_eq!((row.added, row.removed), (1, 1));
         assert_eq!(row.output, None, "blank output is no output");
-        assert_eq!(row.icon, Icon::Tools);
+        assert_eq!(row.icon, Icon::Edit);
     }
 
     #[test]
@@ -497,6 +499,10 @@ mod tests {
         assert_eq!(tool_icon(ToolKind::Ask), Icon::Question);
         assert_eq!(tool_icon(ToolKind::Read), Icon::File);
         assert_eq!(tool_icon(ToolKind::Web), Icon::Web);
+        // The Swift app's symbols: pencil, doc.badge.plus, sparkles, puzzlepiece.extension.
+        assert_eq!(tool_icon(ToolKind::Write), Icon::Write);
+        assert_eq!(tool_icon(ToolKind::Skill), Icon::Skill);
+        assert_eq!(tool_icon(ToolKind::Other), Icon::Plugin);
         assert_eq!(notice_icon("rectangle.compress.vertical"), Icon::Info);
         assert_eq!(notice_icon("exclamationmark.triangle"), Icon::Needs);
         assert_eq!(notice_icon("checkmark.circle"), Icon::Check);

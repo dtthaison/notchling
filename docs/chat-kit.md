@@ -87,6 +87,8 @@ All of them become `nil` (no animation) under Reduce Motion.
 
 SF Symbols at one weight (medium), one size per place: 12 in rows and pills, 13 in buttons. Filled forms only for status badges. Claude's mark is `sparkle` on an orange disc.
 
+The Rust app (`crates/kit`) draws the closest Lucide icon (ISC) in place of each symbol, since SF Symbols may ship only in apps for Apple's systems and that app also builds for Windows and Linux. Only the SVGs in use are vendored, in `crates/kit/assets/icons/` with Lucide's license; `Icon::svg` maps each icon to one, and an icon without one keeps its text glyph. An icon's box is 1.25 times the symbol's point size (`icon::SVG_SCALE`), so it looks the same size.
+
 ## Window
 
 Title bar hidden and transparent, full-size content. Traffic lights stay where AppKit puts them, over the sidebar's top 38 pt, which holds nothing else. Default size 1040 × 720, min 720 × 460. Sidebar is kit rows, not `List`: arrow keys move the selection, VoiceOver gets `isSelected`.
