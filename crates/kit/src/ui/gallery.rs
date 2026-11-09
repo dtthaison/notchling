@@ -5,10 +5,11 @@ use gpui::{div, prelude::*, px, Context, Div, Entity, Render, SharedString, Subs
 
 use super::text_editor::TextEditor;
 use super::widgets::{
-    avatar, button, claude_mark, field, label, option_row, session_row, status_pill,
+    account_line, avatar, button, claude_mark, field, label, option_row, session_row,
+    session_row_marked, status_pill, tool_icon, ToolMark,
 };
 use super::{hsla, window_appearance, KitStyled};
-use crate::metric::RADIUS_MD;
+use crate::metric::{RADIUS_MD, TOOL_ICON};
 use crate::part::{ButtonKind, PartState};
 use crate::{Appearance, Ink, Status, TypeRole};
 
@@ -172,6 +173,28 @@ fn rows(a: Appearance) -> Div {
             true,
             a,
         ))
+        // The sidebar's: the tool icon, the account (a lane's has a branch), no account.
+        .children(
+            [
+                (ToolMark::Claude, Some(("me@example.com", false))),
+                (ToolMark::Codex, Some(("ops@example.com", true))),
+                (ToolMark::Antigravity, None),
+            ]
+            .map(|(tool, account)| {
+                session_row_marked(
+                    id("marked-row", tool.name()),
+                    "design system",
+                    tool_icon(tool, TOOL_ICON, a),
+                    account.map(|(text, lane)| account_line(text, lane, a)),
+                    "Asking you a question",
+                    "2m",
+                    Status::Needs,
+                    PartState::Rest,
+                    false,
+                    a,
+                )
+            }),
+        )
 }
 
 fn options(a: Appearance) -> Div {
