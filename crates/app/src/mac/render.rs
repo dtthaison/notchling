@@ -2,6 +2,8 @@
 //! window tucked at the bottom left of the main display (on screen, since a capture needs the
 //! window drawn, but never key and never taking clicks), captures it after it has drawn, writes
 //! the PNG and exits. Prints `wrote <path> (<w>x<h>, <bytes> bytes)` on success.
+//! `NOTCHLING_RENDER_APPEARANCE=light|dark` draws the view in that appearance instead of the
+//! system's, for checking both without changing the Mac's setting.
 
 use std::path::Path;
 use std::time::Duration;
@@ -10,7 +12,11 @@ use gpui::{
     point, prelude::*, px, size, AnyView, App, Application, Bounds, Context, Render, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
-use objc2_app_kit::NSWindowStyleMask;
+use notchling_kit::Appearance;
+use objc2::MainThreadMarker;
+use objc2_app_kit::{
+    NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSWindowStyleMask,
+};
 
 use super::{capture, dock, views};
 use crate::dock::Policy;
@@ -18,6 +24,22 @@ use crate::dock::Policy;
 /// How long the view gets to draw before the capture. GPUI compiles its shaders at launch
 /// (`runtime_shaders`), so the first frame takes a moment.
 const SETTLE: Duration = Duration::from_millis(900);
+
+/// The environment's name for the appearance to render in.
+pub const APPEARANCE_ENV: &str = "NOTCHLING_RENDER_APPEARANCE";
+
+/// Forces the app's appearance, so every window (and `window_appearance`) follows it.
+fn force_appearance(appearance: Appearance) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let name = match appearance {
+        Appearance::Light => unsafe { NSAppearanceNameAqua },
+        Appearance::Dark => unsafe { NSAppearanceNameDarkAqua },
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    app.setAppearance(NSAppearance::appearanceNamed(name).as_deref());
+}
 
 /// Holds the named view, whatever its type.
 struct Root {
@@ -40,9 +62,15 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
     let name = view.to_owned();
     let out = out.to_path_buf();
     let data_root = data_root.map(Path::to_path_buf);
+    let forced = std::env::var(APPEARANCE_ENV)
+        .ok()
+        .and_then(|v| Appearance::parse(&v));
     Application::new().run(move |cx: &mut App| {
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
+        if let Some(appearance) = forced {
+            force_appearance(appearance);
+        }
         let origin = cx
             .primary_display()
             .map(|display| {
