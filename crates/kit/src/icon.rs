@@ -61,6 +61,10 @@ pub enum Icon {
     Plugin,
     /// A tool call that failed.
     Failed,
+    /// The Latest button: jump to the newest message.
+    ArrowDown,
+    /// The Stop button.
+    Stop,
 }
 
 /// Where an icon sits decides its size.
@@ -85,7 +89,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 33] = [
+    pub const ALL: [Icon; 35] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -119,6 +123,8 @@ impl Icon {
         Icon::Skill,
         Icon::Plugin,
         Icon::Failed,
+        Icon::ArrowDown,
+        Icon::Stop,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -158,6 +164,8 @@ impl Icon {
             Icon::Plugin => "puzzlepiece.extension",
             // The Swift app's is filled; filled forms stay for status badges.
             Icon::Failed => "xmark.octagon",
+            Icon::ArrowDown => "arrow.down",
+            Icon::Stop => "stop.fill",
         }
     }
 
@@ -200,6 +208,8 @@ impl Icon {
             Icon::Skill => "✧",
             Icon::Plugin => "◇",
             Icon::Failed => "✕",
+            Icon::ArrowDown => "↓",
+            Icon::Stop => "■",
         }
     }
 
@@ -230,6 +240,9 @@ impl Icon {
             Icon::Skill => "icons/sparkles.svg",
             Icon::Plugin => "icons/puzzle.svg",
             Icon::Failed => "icons/octagon-x.svg",
+            Icon::ArrowDown => "icons/arrow-down.svg",
+            // The Swift app's stop.fill is a solid square; Lucide's is its outline.
+            Icon::Stop => "icons/square.svg",
             Icon::Resume
             | Icon::Send
             | Icon::Permission
@@ -278,7 +291,8 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 23] = icons![
+const SVGS: [(&str, &[u8]); 25] = icons![
+    "arrow-down",
     "brain",
     "bot",
     "check",
@@ -300,6 +314,7 @@ const SVGS: [(&str, &[u8]); 23] = icons![
     "puzzle",
     "search",
     "sparkles",
+    "square",
     "square-terminal",
     "wrench",
 ];
@@ -373,6 +388,8 @@ mod tests {
         assert_eq!(asset("icons/none.svg"), None);
         assert_eq!(Icon::Terminal.svg(), Some("icons/square-terminal.svg"));
         assert_eq!(Icon::Claude.svg(), None, "Claude's mark is drawn");
+        assert_eq!(Icon::Stop.svg(), Some("icons/square.svg"));
+        assert_eq!(Icon::ArrowDown.svg(), Some("icons/arrow-down.svg"));
         assert_eq!(svg_box(12.0), 15.0);
     }
 }

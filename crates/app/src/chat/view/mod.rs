@@ -37,7 +37,9 @@ use notchling_kit::ui::{
 use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
 
+use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
+use crate::chat::follow::{self, Scroll};
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingSession};
 use crate::phone::bridge::Bridge;
@@ -52,6 +54,8 @@ const TICK: Duration = Duration::from_millis(500);
 pub const EXPAND_ENV: &str = "NOTCHLING_RENDER_EXPAND";
 /// Set to `1`, a render draws the part names, as the ? button shows them.
 pub const PARTS_ENV: &str = "NOTCHLING_RENDER_PARTS";
+/// Set to `1`, a render draws the "Latest" pill, as if the conversation were scrolled up.
+pub const LATEST_ENV: &str = "NOTCHLING_RENDER_LATEST";
 /// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
 pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 
@@ -94,6 +98,15 @@ pub struct ChatView {
     /// The drop hint drawn as if a file were over the column (`NOTCHLING_RENDER_DROP=1`), since
     /// nothing drags in a picture.
     drop_preview: bool,
+    /// The "Latest" pill drawn as if scrolled up (`NOTCHLING_RENDER_LATEST=1`).
+    latest_preview: bool,
+    /// A message was sent and hasn't shown up in a reload yet: that reload goes to the end.
+    follow_sent: bool,
+    /// The wall-clock second the live line was last redrawn for (its clock ticks once a second).
+    clock_second: i64,
+    /// Whether a sheet, menu, panel or the part names were up when last drawn: Esc then belongs
+    /// to them, not to Stop.
+    overlay_open: bool,
     /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
     tools: tools::ChatTools,
     /// New Session or Settings, over the window.
@@ -134,6 +147,7 @@ impl ChatView {
         let mut view = ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx);
         view.expand_all = switch(EXPAND_ENV);
         view.drop_preview = switch(DROP_ENV);
+        view.latest_preview = switch(LATEST_ENV);
         if switch(PARTS_ENV) {
             set_parts(cx, true);
         }
@@ -167,9 +181,16 @@ impl ChatView {
         });
         let watch = Watcher::start(root.watch_folders(), watch_config()).ok();
         // Esc turns the part names off from any window; the editor lets Esc through.
-        let parts_escape = cx.observe_keystrokes(|_, event, _, cx| {
-            if event.keystroke.key == "escape" && parts_on(cx) {
+        // Otherwise Esc stops a working session's turn, as in the terminal, unless something was
+        // up that Esc closes (observers run after the handlers, so it is read as last drawn).
+        let parts_escape = cx.observe_keystrokes(|this, event, _, cx| {
+            if event.keystroke.key != "escape" {
+                return;
+            }
+            if parts_on(cx) {
                 set_parts(cx, false);
+            } else if !this.overlay_open && this.selected_working() {
+                this.stop(cx);
             }
         });
         let (accounts, switches) = crate::accounts::window::app_stores(cx);
@@ -199,6 +220,10 @@ impl ChatView {
             expanded: HashSet::new(),
             expand_all: false,
             drop_preview: false,
+            latest_preview: false,
+            follow_sent: false,
+            clock_second: 0,
+            overlay_open: false,
             tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
@@ -301,14 +326,15 @@ impl ChatView {
             // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
             // files have none to put in its place.
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
+            let session_changed = std::mem::take(&mut self.scroll_to_end);
             if !agy {
+                self.follow_content(session_changed);
                 self.conversation = loaded.conversation;
                 self.loading = false;
-            }
-            self.subagents = loaded.subagents;
-            if std::mem::take(&mut self.scroll_to_end) {
+            } else if session_changed {
                 self.conversation_scroll.scroll_to_bottom();
             }
+            self.subagents = loaded.subagents;
         } else {
             self.load_again = true;
         }
@@ -316,6 +342,55 @@ impl ChatView {
             self.start_load(cx);
         }
         self.sync_tools(cx);
+        cx.notify();
+    }
+
+    /// Before new content replaces the conversation: stay on the newest message when the view is
+    /// at the bottom (or a message was just sent, or another session was picked), else leave it
+    /// where it is (`chat::follow`). The numbers are those of the last frame, so a reply that
+    /// grew since is measured by the next one, which the scroll handle then pins to the end.
+    pub(super) fn follow_content(&mut self, session_changed: bool) {
+        let handle = &self.conversation_scroll;
+        let prev = Scroll {
+            offset_y: f32::from(handle.offset().y),
+            max_y: f32::from(handle.max_offset().height),
+        };
+        let sent = std::mem::take(&mut self.follow_sent);
+        if follow::decide(prev, prev.max_y, sent, session_changed).scroll {
+            handle.scroll_to_bottom();
+        }
+    }
+
+    /// The live line for the selected session: what it is doing, or none while it is idle.
+    pub(super) fn activity_line(&self) -> Option<Activity> {
+        if self.loading {
+            return None;
+        }
+        activity::line(
+            &self.conversation,
+            self.selected_working(),
+            now_ms() as f64 / 1000.0,
+        )
+    }
+
+    /// Whether the "Latest" pill shows: the conversation is scrolled up from its newest message.
+    fn latest_pill(&self) -> bool {
+        if self.loading {
+            return false;
+        }
+        let handle = &self.conversation_scroll;
+        self.latest_preview
+            || !Scroll {
+                offset_y: f32::from(handle.offset().y),
+                max_y: f32::from(handle.max_offset().height),
+            }
+            .at_bottom()
+    }
+
+    /// The pill's click: to the newest message, and following again.
+    fn jump_to_latest(&mut self, cx: &mut Context<Self>) {
+        self.latest_preview = false;
+        self.conversation_scroll.scroll_to_bottom();
         cx.notify();
     }
 
@@ -367,6 +442,12 @@ impl ChatView {
                 self.gate.changed();
             }
         }
+        // The live line's clock: a redraw each second while it shows, none while nothing runs.
+        let clock = now_ms() / 1000;
+        if clock != self.clock_second && self.activity_line().is_some() {
+            self.clock_second = clock;
+            cx.notify();
+        }
         // A second opinion's card changes when its command ends, which nothing else signals.
         if opinions::any_running(self, cx) {
             cx.notify();
@@ -387,14 +468,21 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
+        self.overlay_open = self.sheet.is_some()
+            || self.account_menu
+            || self.phone.is_some()
+            || self.tools.picker.is_some()
+            || parts_on(cx);
         // Files from Finder land anywhere on the middle column while the box can take them.
         let takes_drops = self.composer_control(cx).enabled;
         let conversation = div()
+            .relative()
             .flex_1()
             .min_h(px(0.0))
             .flex()
             .flex_col()
             .child(conversation::render(self, a, cx))
+            .children(conversation::latest_pill(self, a, cx))
             .part_at("Conversation", Corner::Bottom, a, cx);
         let column = div()
             .id("chat-column")
