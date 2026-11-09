@@ -100,9 +100,12 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         ),
     )
     .child(
+        // Clipped: when the header is narrow the project line elides first, and the account button
+        // never spills over the limit meters beside it.
         div()
             .flex_1()
             .min_w(px(0.0))
+            .overflow_hidden()
             .flex()
             .flex_col()
             .gap(px(2.0))

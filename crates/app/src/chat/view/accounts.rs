@@ -9,7 +9,7 @@ use std::time::Duration;
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, KitStyled};
+use notchling_kit::ui::{button_with, card, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
@@ -243,15 +243,18 @@ pub(super) fn account_control(
     } else {
         ButtonKind::Ghost
     };
-    let b = button(
+    // The email shrinks to "…" in a narrow header rather than spilling over what's beside it.
+    let b = button_with(
         "account-button",
-        &format!("{text} ▾"),
+        div().min_w(px(0.0)).child(format!("{text} ▾")).elide(),
         kind,
         PartState::Rest,
         a,
     )
     .h(px(20.0))
-    .px(px(6.0));
+    .px(px(6.0))
+    .min_w(px(0.0))
+    .flex_shrink();
     let b = gate::tip_text(b, tip.into(), a);
     Some(match session.tool {
         Tool::Claude => b.on_click(cx.listener(|this, _, _, cx| this.toggle_account_menu(cx))),
