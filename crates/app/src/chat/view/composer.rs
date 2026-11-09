@@ -268,6 +268,12 @@ pub struct State {
     add_menu: bool,
 }
 
+impl Preview {
+    fn any(self) -> bool {
+        self.typed || self.working || self.menu
+    }
+}
+
 impl State {
     pub fn preview(preview: Preview) -> State {
         State {
@@ -512,9 +518,13 @@ fn add_button(
 }
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
-    let control = view.composer_control(cx);
+    let mut control = view.composer_control(cx);
+    // A render forcing a state has no acting; the box is drawn as if it could take input.
+    if view.composer.preview.any() {
+        control.enabled = true;
+    }
     let id = view.selected.clone().unwrap_or_default();
-    let empty = view.tools.draft(&id).trim().is_empty();
+    let empty = !view.composer.preview.typed && view.tools.draft(&id).trim().is_empty();
     let focused = control.enabled && view.tools.focus.is_focused(window);
     let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
     let edge_color = if focused {
@@ -524,9 +534,14 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     };
     // The editor follows the row and the gate (both no-ops when nothing changed).
     let hint = placeholder(view);
+    let typed = view.composer.preview.typed;
     view.tools.editor.update(cx, |editor, cx| {
         editor.set_enabled(control.enabled, cx);
         editor.set_placeholder(hint, cx);
+        // A typed render keeps its sample through the loads that reset the box.
+        if typed && editor.text() != SAMPLE {
+            editor.set_text(SAMPLE, cx);
+        }
     });
     // The text itself, the card's full width, wrapping there: one line to MAX_LINES, then it
     // scrolls (the editor's own height and scroll); the type and the ink come from here.
@@ -544,15 +559,13 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     // Under the text, inside the card: + at the left, send or stop at the right.
     let working = view.selected_working() || view.composer.preview.working;
     let act = action(!empty, working, view.stopping(), view.tools.sending);
-    // A forced render has no acting, so its Stop is drawn live.
-    let live = control.enabled || view.composer.preview.working;
     let bottom = div()
         .h(px(CONTROL))
         .flex()
         .items_center()
         .justify_between()
         .child(add_button(view, control.enabled, a, cx).unwrap_or_else(div))
-        .children(action_button(act, live, a, cx));
+        .children(action_button(act, control.enabled, a, cx));
     let accent_edge = hsla(Ink::Accent.color(a));
     let card = div()
         .id("composer")
