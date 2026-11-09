@@ -122,7 +122,7 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
 /// Where the sidebar button sits: just right of the traffic lights (which end near 64), on their
 /// row, the button 24 tall about the lights' centre.
 const TOGGLE_LEFT: f32 = 76.0;
-const TOGGLE_TOP: f32 = 6.0;
+const TOGGLE_TOP: f32 = 8.0;
 const TOGGLE_HEIGHT: f32 = 24.0;
 const TOGGLE_WIDTH: f32 = 28.0;
 /// How far a header starts from the window's left edge while the sidebar is hidden: past the

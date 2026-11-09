@@ -380,7 +380,7 @@ impl Icon {
             Icon::Warning => "icons/triangle-alert.svg",
             Icon::PanelLeft => "icons/panel-left.svg",
             Icon::PanelRight => "icons/panel-right.svg",
-            Icon::Spinner => "icons/loader.svg",
+            Icon::Spinner => "icons/loader-circle.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -462,7 +462,7 @@ const SVGS: [(&str, &[u8]); 55] = icons![
     "info",
     "key-round",
     "list-checks",
-    "loader",
+    "loader-circle",
     "message-circle-question",
     "messages-square",
     "minus",
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(Icon::Resume.svg(), Some("icons/rotate-cw.svg"));
         assert_eq!(Icon::PanelLeft.svg(), Some("icons/panel-left.svg"));
         assert_eq!(Icon::PanelRight.svg(), Some("icons/panel-right.svg"));
-        assert_eq!(Icon::Spinner.svg(), Some("icons/loader.svg"));
+        assert_eq!(Icon::Spinner.svg(), Some("icons/loader-circle.svg"));
         assert_eq!(Icon::Stop.svg(), Some("icons/square.svg"));
         assert_eq!(Icon::ArrowDown.svg(), Some("icons/arrow-down.svg"));
         assert_eq!(svg_box(12.0), 15.0);

@@ -51,30 +51,27 @@ pub fn icon_in(icon: Icon, points: f32, color: Color) -> Div {
     }
 }
 
-/// How long a spinner takes to turn once.
-const SPIN: Duration = Duration::from_millis(1000);
-/// The turn is stepped in this many parts, so it ticks like the macOS spinner.
-const SPIN_STEPS: f32 = 8.0;
-/// Lucide's `loader` fills 20 of its 24 units, so its box is this much bigger than the spinner.
+/// How long a spinner takes to turn once (the macOS ring turns about once a second).
+const SPIN: Duration = Duration::from_millis(900);
+/// Lucide's `loader-circle` fills 21 of its 24 units, so its box is this much bigger than the
+/// spinner.
 const SPIN_BOX: f32 = 1.2;
 
-/// How far round a spinner is `t` (0 to 1) of the way through its turn, in turns: the nearest
-/// step at or below, so it ticks in 45 degree steps.
+/// How far round a spinner is `t` (0 to 1) of the way through its turn, in turns. Smooth, not
+/// stepped: a ring turned in fixed steps looks like it jumps, and the old eight-spoke loader
+/// turned in 45 degree steps looked the same on every frame, so it never seemed to move.
 fn spin_turns(t: f32) -> f32 {
-    (t.clamp(0.0, 1.0) * SPIN_STEPS)
-        .floor()
-        .min(SPIN_STEPS - 1.0)
-        / SPIN_STEPS
+    t.clamp(0.0, 1.0) % 1.0
 }
 
 /// The loading spinner (the Swift `ProgressView().controlSize(...)`: 10 pt mini, 16 pt small):
-/// Lucide's eight-spoke `loader`, turning once a second in eight steps of 45 degrees. `id` names
-/// its animation, so two spinners in one place need two ids. GPUI draws frames only for what is
-/// on screen, so nothing animates while no spinner is drawn.
+/// Lucide's `loader-circle`, an open ring in `ink` turning once every 0.9 s. `id` names its
+/// animation, so two spinners in one place need two ids. GPUI draws frames only for what is on
+/// screen, so nothing animates while no spinner is drawn.
 pub fn spinner(id: impl Into<ElementId>, diameter: f32, ink: Ink, a: Appearance) -> Div {
     let size = px(diameter * SPIN_BOX);
     let turning = svg()
-        .path(Icon::Spinner.svg().unwrap_or("icons/loader.svg"))
+        .path(Icon::Spinner.svg().unwrap_or("icons/loader-circle.svg"))
         .size(size)
         .text_color(hsla(ink.color(a)))
         .with_animation(id, Animation::new(SPIN).repeat(), |svg, t| {
@@ -94,16 +91,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_spinner_turns_in_eight_steps_of_45_degrees() {
+    fn a_spinner_turns_smoothly_and_ends_where_it_began() {
         assert_eq!(spin_turns(0.0), 0.0);
-        assert_eq!(spin_turns(0.124), 0.0);
         assert_eq!(spin_turns(0.125), 0.125);
+        assert!(spin_turns(0.13) > spin_turns(0.125), "no 45 degree steps");
         assert_eq!(spin_turns(0.5), 0.5);
-        assert_eq!(spin_turns(0.999), 0.875);
-        assert_eq!(
-            spin_turns(1.0),
-            0.875,
-            "the turn ends where the next begins"
-        );
+        assert_eq!(spin_turns(1.0), 0.0, "the turn ends where the next begins");
     }
 }
