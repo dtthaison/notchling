@@ -269,12 +269,20 @@ impl Render for SecondOpinionView {
                     cx,
                     |m, v| m.pick_effort(v),
                 ))
-                .child(label(
-                    &format!("Prompt · {}", self.model.subject_title()),
-                    TypeRole::Section,
-                    Ink::TextFaint,
-                    a,
-                ))
+                // The section role draws uppercase; the file name keeps its own case.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(label("Prompt", TypeRole::Section, Ink::TextFaint, a))
+                        .child(label(
+                            &format!("· {}", self.model.subject_title()),
+                            TypeRole::Meta,
+                            Ink::TextFaint,
+                            a,
+                        )),
+                )
                 .child(self.prompt_box(a, window, cx))
         };
         div()

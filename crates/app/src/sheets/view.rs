@@ -80,8 +80,8 @@ pub fn choice_row(
         .when(!picked, |r| {
             r.hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
         })
-        .child(label(title, TypeRole::Label, Ink::Text, a).truncate())
-        .child(label(detail, TypeRole::Meta, Ink::TextFaint, a).truncate())
+        .child(label(title, TypeRole::Label, Ink::Text, a).elide())
+        .child(label(detail, TypeRole::Meta, Ink::TextFaint, a).elide())
 }
 
 fn column_title(text: &str, a: Appearance) -> Div {
@@ -222,11 +222,7 @@ impl NewSessionView {
         let rows = folders.iter().enumerate().map(|(i, path)| {
             choice_row(
                 format!("folder-{i}"),
-                &format!(
-                    "{}  {}",
-                    Icon::Sessions.glyph(),
-                    folder_title(path, folders)
-                ),
+                &folder_title(path, folders),
                 &parent_line(path, &self.model.home),
                 self.model.folder == Some(i),
                 a,

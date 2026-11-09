@@ -20,7 +20,7 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
         .child(label(&row.name, TypeRole::Heading, Ink::Text, a))
         .child(label(row.kind, TypeRole::Meta, Ink::TextFaint, a));
     if row.asks_first {
-        tags = tags.child(label("✋ Asks First", TypeRole::Meta, Ink::TextMuted, a));
+        tags = tags.child(label("Asks first", TypeRole::Meta, Ink::AccentText, a));
     }
     let mut details = div()
         .flex_1()
@@ -30,7 +30,7 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
         .gap(px(3.0))
         .child(tags);
     if let Some(url) = &row.url {
-        details = details.child(label(url, TypeRole::Meta, Ink::TextMuted, a).truncate());
+        details = details.child(label(url, TypeRole::Meta, Ink::TextMuted, a).elide());
     }
     details = details.child(
         div()
@@ -103,7 +103,7 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
     };
     let remove = button(
         SharedString::from(format!("remove-{name}")),
-        "🗑",
+        "Remove",
         ButtonKind::Ghost,
         gate::state(remove_control),
         a,
@@ -124,12 +124,6 @@ pub(super) fn list_row(row: &Row, a: Appearance, cx: &mut Context<VaultSheetView
         .flex()
         .items_start()
         .gap(px(10.0))
-        .child(label(
-            if row.kind == "Login" { "👤" } else { "🔑" },
-            TypeRole::Heading,
-            Ink::TextMuted,
-            a,
-        ))
         .child(details)
         .child(buttons)
 }

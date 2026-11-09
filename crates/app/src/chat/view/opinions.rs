@@ -10,8 +10,8 @@ use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 use notchling_engine::transcript::model::{ChatItem, ItemKind, ToolKind};
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{button, card, hsla, label, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::acting::Control;
@@ -79,7 +79,7 @@ pub fn opinion_button(
     let anchor = anchor.to_owned();
     let b = button(
         SharedString::from(format!("opinion-{anchor}")),
-        Icon::Check.glyph(),
+        "Second Opinion",
         ButtonKind::Ghost,
         gate::state(control),
         a,
@@ -148,7 +148,7 @@ fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ChatView>) -> D
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(label(&title, TypeRole::Label, Ink::Text, a).truncate())
+        .child(label(&title, TypeRole::Label, Ink::Text, a).elide())
         .when(!pick.is_empty(), |h| {
             h.child(label(&pick, TypeRole::Meta, Ink::TextFaint, a))
         })
