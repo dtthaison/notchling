@@ -16,8 +16,9 @@ pub const MIN_GAP_MS: i64 = 2_000;
 /// A reload with no change at all, for ages and the Done window.
 pub const FULL_EVERY_MS: i64 = 30_000;
 
-/// How Chat's watcher looks: every second, a batch after half a second of quiet or one second after
-/// the first change, whichever comes first, so steady writes still get through.
+/// How Chat's watcher batches: after half a second of quiet or one second after the first change,
+/// whichever comes first, so steady writes still get through. The poll applies only where the
+/// watcher has to poll (not on a Mac, where FSEvents says what changed).
 pub fn watch_config() -> WatchConfig {
     WatchConfig {
         poll: Duration::from_secs(1),
@@ -117,7 +118,7 @@ mod tests {
     fn steady_writes_still_make_the_watcher_report() {
         let scratch = crate::testutil::Scratch::new("steady-writes");
         let file = scratch.write("transcript.jsonl", "x");
-        // The production config as it is: a poll a second, so the test takes a few seconds.
+        // The production config as it is, so the test takes a few seconds.
         let config = watch_config();
         assert!(
             config.max_latency > config.debounce,
