@@ -1,17 +1,44 @@
-//! The sidebar: sessions in their groups, the selected one highlighted; a click selects.
+//! The sidebar: sessions in their groups, the selected one highlighted; a click selects. Its
+//! footer holds the ? button, which names every part on screen (`notchling_kit::ui::KitPart`).
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, session_row, KitStyled};
+use notchling_kit::ui::{
+    button, hsla, label, parts_button, parts_on, parts_tip, session_row, toggle_parts, KitPart,
+    KitStyled,
+};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::data::Tool;
 use crate::chat::sidebar::sections;
+use crate::mac::gate;
+
+/// A footer button, named "<Title> Button" for the ? button as in the Swift sidebar.
+fn footer_button(
+    id: &'static str,
+    title: &str,
+    a: Appearance,
+    cx: &Context<ChatView>,
+) -> gpui::Stateful<Div> {
+    button(id, title, ButtonKind::Ghost, PartState::Rest, a).part_at(
+        &format!("{title} Button"),
+        Corner::TopLeading,
+        a,
+        cx,
+    )
+}
 
 /// The footer, with what there is to say about the daemon (down, or not trusted).
 fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>) -> Div {
+    let on = parts_on(cx);
+    let parts = gate::tip_text(parts_button("parts", a, cx), parts_tip(on).into(), a)
+        .on_click(|_, _, cx| {
+            toggle_parts(cx);
+        })
+        .part_at("Parts Button", Corner::TopLeading, a, cx);
     div()
         .min_h(px(44.0))
         .flex_shrink_0()
@@ -22,50 +49,32 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         .items_center()
         .gap(px(8.0))
         .child(
-            button(
-                "settings",
-                "Settings",
-                ButtonKind::Ghost,
-                PartState::Rest,
-                a,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
+            footer_button("settings", "Settings", a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
         )
         .child(
-            button(
-                "accounts",
-                "Accounts",
-                ButtonKind::Ghost,
-                PartState::Rest,
-                a,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
+            footer_button("accounts", "Accounts", a, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
         )
         .child(
-            button("vault", "Vault", ButtonKind::Ghost, PartState::Rest, a)
+            footer_button("vault", "Vault", a, cx)
                 .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
         )
         // Here as well as in the menu bar, whose item a full menu bar hides behind the notch.
         .child(
-            button(
-                "handover",
-                "Handover",
-                ButtonKind::Ghost,
-                PartState::Rest,
-                a,
-            )
-            .on_click(|_, _, cx| {
+            footer_button("handover", "Handover", a, cx).on_click(|_, _, cx| {
                 crate::welcome::window::open(cx, crate::welcome::window::Which::Handover)
             }),
         )
-        .child(button(
-            "parts",
-            "?",
-            ButtonKind::Ghost,
-            PartState::Disabled,
-            a,
-        ))
-        .children(note.map(|note| label(note, TypeRole::Meta, Ink::TextFaint, a)))
+        .child(parts)
+        .children(note.map(|note| {
+            label(note, TypeRole::Meta, Ink::TextFaint, a).part_at(
+                "Daemon Note",
+                Corner::TopLeading,
+                a,
+                cx,
+            )
+        }))
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
@@ -89,12 +98,14 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         )));
     }
     for section in sections {
-        list = list.child(div().px(px(8.0)).pt(px(12.0)).pb(px(4.0)).child(label(
-            section.title,
-            TypeRole::Section,
-            Ink::TextFaint,
-            a,
-        )));
+        list = list.child(
+            div()
+                .px(px(8.0))
+                .pt(px(12.0))
+                .pb(px(4.0))
+                .child(label(section.title, TypeRole::Section, Ink::TextFaint, a))
+                .part_at("Group Heading", Corner::Trailing, a, cx),
+        );
         for row in section.rows {
             let id = row.id.clone();
             let state = if view.selected.as_deref() == Some(row.id.as_str()) {
@@ -117,7 +128,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                     false,
                     a,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx))),
+                .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)))
+                .part_at("Session Row", Corner::Trailing, a, cx),
             );
         }
     }
@@ -145,13 +157,22 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a))
+                        .child(
+                            label(&count.to_string(), TypeRole::Meta, Ink::TextFaint, a).part_at(
+                                "Session Count",
+                                Corner::Bottom,
+                                a,
+                                cx,
+                            ),
+                        )
                         .child(
                             button("new-session", "+", ButtonKind::Ghost, PartState::Rest, a)
-                                .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx))),
+                                .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx)))
+                                .part_at("New Session Button", Corner::Bottom, a, cx),
                         ),
                 ),
         )
         .child(list)
         .child(footer(a, view.daemon_note, cx))
+        .part_inside("Sidebar", Corner::Trailing, a, cx)
 }

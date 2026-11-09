@@ -5,8 +5,9 @@
 //!
 //! - **Tokens**, pure data with no dependencies, tested on every system: [`Ink`] (colors by meaning,
 //!   light and dark), [`TypeRole`] (the type scale), [`metric`], [`Motion`], [`Icon`] (SF Symbol names
-//!   as data), [`part`] (what each part looks like in each state) and [`text_edit`] (the reply
-//!   box's editing model: selection, marked text, undo). Only `ink` reads the palette.
+//!   as data), [`part`] (what each part looks like in each state), [`labels`] (the ? button's part
+//!   names: the state, where a badge sits) and [`text_edit`] (the reply box's editing model:
+//!   selection, marked text, undo). Only `ink` reads the palette.
 //! - **Widgets** over GPUI in [`ui`], macOS only for now (`LINT-GPUI-MACOS-ONLY`): buttons in the
 //!   kit's styles, session rows, options, pills, avatars, a field, a label, and [`ui::KitGallery`],
 //!   every part in every state for a render.
@@ -19,6 +20,7 @@ pub mod appearance;
 pub mod color;
 pub mod icon;
 pub mod ink;
+pub mod labels;
 pub mod metric;
 pub mod motion;
 mod palette;

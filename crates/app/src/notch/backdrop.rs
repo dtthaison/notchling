@@ -18,6 +18,10 @@ use crate::actions::Actions;
 /// scene sets: acting, the pet, picks already made.
 pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
     let shown = renders::shown(name)?;
+    // The part names, as Chat's render switch draws them (`chat::view::PARTS_ENV`).
+    if std::env::var_os(crate::chat::view::PARTS_ENV).is_some_and(|v| v == "1") {
+        notchling_kit::ui::set_parts(cx, true);
+    }
     Some(build_scene(renders::scene(shown), cx))
 }
 
