@@ -9,9 +9,10 @@ use gpui::{
     Stateful, Window,
 };
 use notchling_engine::sessions::{Agent, AgentGroup};
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, status_pill, KitStyled};
+use notchling_kit::ui::{button, hsla, status_pill, KitPart, KitStyled};
 use notchling_kit::{Color, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -205,7 +206,7 @@ impl NotchView {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .child(self.top_bar())
+            .child(self.top_bar(cx))
             .children(content.map(|c| c.flex_1().min_h(px(0.0))));
         let pet = self.pet_layer(size);
         div()
@@ -220,7 +221,7 @@ impl NotchView {
 
     /// The housing's own height. Active sessions are counted at its right while the shape is open
     /// on something else; the list says it in its tabs.
-    fn top_bar(&self) -> Div {
+    fn top_bar(&self, cx: &gpui::App) -> Div {
         let m = &self.model;
         let active = m.count(AgentGroup::NeedsInput) + m.count(AgentGroup::Working);
         let counted = matches!(m.state, NotchState::Peek(_) | NotchState::Detail(_)) && active > 0;
@@ -245,6 +246,8 @@ impl NotchView {
                 ),
             )
             .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))
+            // Inside: the housing's top is the screen's edge.
+            .part_inside("Notch Bar", Corner::TopTrailing, A, cx)
     }
 
     fn list(&self, cx: &mut Context<Self>) -> Div {
@@ -272,7 +275,13 @@ impl NotchView {
                 .children(rows.into_iter().map(|a| self.row(a, cx)))
                 .into_any_element()
         };
-        div().flex().flex_col().child(self.tabs(cx)).child(body)
+        div()
+            .flex()
+            .flex_col()
+            .child(self.tabs(cx))
+            .child(body)
+            // Inside: the shape's rounded bottom clips the edge.
+            .part_inside("Notch List", Corner::BottomTrailing, A, cx)
     }
 
     /// The three tabs under the camera, each with its count.
@@ -316,6 +325,7 @@ impl NotchView {
                         cx.notify();
                     }))
             }))
+            .part_at("Notch Tabs", Corner::TopTrailing, A, cx)
     }
 
     /// A row: name, status pill, host and age; then the last reply (done) or the last prompt and
@@ -388,6 +398,7 @@ impl NotchView {
                 this.model.open(&id);
                 cx.notify();
             }))
+            .part_at("Notch Session Row", Corner::TopTrailing, A, cx)
     }
 
     /// A peek: the card waiting on you, or who finished and what it last said.
@@ -438,7 +449,8 @@ impl NotchView {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.model.open(&open);
                         cx.notify();
-                    })),
+                    }))
+                    .part_at("Peek", Corner::Trailing, A, cx),
             ),
         )
     }
@@ -495,7 +507,9 @@ impl NotchView {
                 .gap(px(10.0))
                 .child(self.header(agent, cx))
                 .child(conversation)
-                .child(footer.flex_shrink_0()),
+                .child(footer.flex_shrink_0())
+                // Inside: the shape's rounded bottom clips the edge.
+                .part_inside("Notch Detail", Corner::BottomTrailing, A, cx),
         )
     }
 
@@ -532,13 +546,14 @@ impl NotchView {
             )
             .child(status_pill(group_status, group_status.word(), A))
             .child(
-                button("notch-close", "×", ButtonKind::Ghost, PartState::Rest, A).on_click(
-                    cx.listener(|this, _, _, cx| {
+                button("notch-close", "×", ButtonKind::Ghost, PartState::Rest, A)
+                    .on_click(cx.listener(|this, _, _, cx| {
                         this.model.go(NotchState::Collapsed);
                         cx.notify();
-                    }),
-                ),
+                    }))
+                    .part_at("Hide Button", Corner::BottomTrailing, A, cx),
             )
+            .part_at("Notch Detail Header", Corner::Bottom, A, cx)
     }
 }
 

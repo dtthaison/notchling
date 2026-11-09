@@ -14,9 +14,10 @@ use gpui::{
 };
 use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, claude_mark, hsla, label, KitStyled};
+use notchling_kit::ui::{button, claude_mark, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::{markdown, opinions, ChatView};
@@ -283,7 +284,8 @@ fn step_row(
         .when(!running && step.is_error, |d| {
             d.child(glyph(Icon::Needs, 11.0, Ink::Expired, a))
         })
-        .when(has_detail, |d| d.child(chevron(open, a)));
+        .when(has_detail, |d| d.child(chevron(open, a)))
+        .part_at("Step Row", Corner::Trailing, a, cx);
     div()
         .flex()
         .flex_col()
@@ -382,6 +384,7 @@ fn step_group(
                     .children(steps.iter().map(|step| step_row(view, step, live, a, cx))),
             )
         })
+        .part_at("Tool Steps", Corner::TopTrailing, a, cx)
 }
 
 /// "Thought for 16s" (`ThinkingRow`): faint, with the text under it when opened. Claude Code keeps
@@ -414,7 +417,8 @@ fn thinking(
                 })
                 .child(glyph(Icon::Thinking, 10.0, Ink::TextFaint, a))
                 .child(label(title, TypeRole::Label, Ink::TextFaint, a))
-                .when(has_text, |d| d.child(chevron(open, a))),
+                .when(has_text, |d| d.child(chevron(open, a)))
+                .part_at("Thinking Row", Corner::Trailing, a, cx),
         )
         .when(open, |d| {
             d.child(
@@ -433,7 +437,13 @@ fn thinking(
         })
 }
 
-fn user_row(text: &str, images: usize, queued: bool, a: Appearance) -> Div {
+fn user_row(text: &str, images: usize, queued: bool, a: Appearance, cx: &Context<ChatView>) -> Div {
+    // The Swift names: a sent message is "Your Message", one waiting for the turn "Queued Bubble".
+    let name = if queued {
+        "Queued Bubble"
+    } else {
+        "Your Message"
+    };
     div()
         .w_full()
         .flex()
@@ -453,7 +463,8 @@ fn user_row(text: &str, images: usize, queued: bool, a: Appearance) -> Div {
                 .kit_type(TypeRole::Body)
                 .ink(Ink::Text, a)
                 .when(queued, |d| d.opacity(0.6))
-                .child(text.to_owned()),
+                .child(text.to_owned())
+                .part_at(name, Corner::TopTrailing, a, cx),
         )
         .when(images > 0, |d| {
             d.child(label(
@@ -480,7 +491,7 @@ fn row_element(
             text,
             images,
             queued,
-        } => user_row(text, *images, *queued, a),
+        } => user_row(text, *images, *queued, a, cx),
         // No mark before each reply: the bubble alone says who wrote it.
         Row::Assistant { text } => div().w_full().flex().items_start().child(
             div()
@@ -491,7 +502,8 @@ fn row_element(
                 .fill(Ink::Card, a)
                 .border(px(1.0))
                 .border_color(hsla(Ink::Hairline.color(a)))
-                .child(markdown::render(id, text, a)),
+                .child(markdown::render(id, text, a))
+                .part("Claude's Reply", a, cx),
         ),
         Row::Thinking { title, text } => div()
             .pl(px(INDENT))
@@ -515,7 +527,8 @@ fn row_element(
                     .child(glyph(Icon::Clock, 9.0, Ink::TextFaint, a))
                     .child(label(text, TypeRole::Meta, Ink::TextFaint, a)),
             )
-            .child(hairline(a)),
+            .child(hairline(a))
+            .part_at("Turn Footer", Corner::Trailing, a, cx),
         Row::Notice { text, icon } => div()
             .w_full()
             .flex()
@@ -523,14 +536,18 @@ fn row_element(
             .items_center()
             .gap(px(6.0))
             .child(glyph(*icon, 11.0, Ink::TextMuted, a))
-            .child(label(text, TypeRole::Meta, Ink::TextMuted, a)),
-        Row::CommandOutput { text } => div().pl(px(INDENT)).child(markdown::mono_box(
-            &format!("{id}-cmd"),
-            "Output",
-            text,
-            false,
-            a,
-        )),
+            .child(label(text, TypeRole::Meta, Ink::TextMuted, a))
+            .part_at("Notice", Corner::Leading, a, cx),
+        Row::CommandOutput { text } => div()
+            .pl(px(INDENT))
+            .child(markdown::mono_box(
+                &format!("{id}-cmd"),
+                "Output",
+                text,
+                false,
+                a,
+            ))
+            .part_at("Command Output", Corner::TopTrailing, a, cx),
     }
 }
 

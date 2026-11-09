@@ -1,8 +1,9 @@
 //! The inspector: tasks, facts, subagents and background shells of the selected session.
 
-use gpui::{div, prelude::*, px, Div, FontWeight};
+use gpui::{div, prelude::*, px, App, Div, FontWeight};
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SIDE_PADDING, TITLE_BAR};
-use notchling_kit::ui::{hsla, label, status_pill, KitStyled};
+use notchling_kit::ui::{hsla, label, status_pill, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::ChatView;
@@ -10,13 +11,15 @@ use crate::chat::inspector::{inspector, no_writers};
 
 const WIDTH: f32 = 260.0;
 
-fn section(title: &str, a: Appearance, content: Div) -> Div {
+/// A section, named for the ? button with the Swift panel's name (`part`).
+fn section(title: &str, part: &str, a: Appearance, content: Div, cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(px(6.0))
         .child(label(title, TypeRole::Section, Ink::TextFaint, a))
         .child(content)
+        .part_at(part, Corner::TopTrailing, a, cx)
 }
 
 fn empty(text: &str, a: Appearance) -> Div {
@@ -44,7 +47,7 @@ fn two_lines(first: &str, second: &str, a: Appearance) -> Div {
         .child(label(second, TypeRole::Meta, Ink::TextMuted, a))
 }
 
-pub fn render(view: &ChatView, a: Appearance) -> Div {
+pub fn render(view: &ChatView, a: Appearance, cx: &App) -> Div {
     let i = inspector(
         &view.conversation,
         &view.subagents,
@@ -146,9 +149,11 @@ pub fn render(view: &ChatView, a: Appearance) -> Div {
                 .flex()
                 .flex_col()
                 .gap(px(16.0))
-                .child(section("Tasks", a, tasks))
-                .child(section("Facts", a, facts))
-                .child(section("Subagents", a, subagents))
-                .child(section("Shells", a, shells)),
+                .child(section("Tasks", "Task Panel", a, tasks, cx))
+                .child(section("Facts", "Session Facts", a, facts, cx))
+                .child(section("Subagents", "Subagents", a, subagents, cx))
+                .child(section("Shells", "Background Shells", a, shells, cx)),
         )
+        // Inside: the panel reaches the window's top edge, where a badge outside would be cut.
+        .part_inside("Details Panel", Corner::TopTrailing, a, cx)
 }

@@ -8,7 +8,8 @@ use gpui::{
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, claude_mark, hsla, label, resize_edges, window_appearance, KitStyled, TopBorder,
+    button, claude_mark, hsla, label, parts_button, resize_edges, toggle_parts, window_appearance,
+    KitStyled, TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -36,7 +37,9 @@ impl ShellView {
     }
 }
 
-fn sidebar(a: Appearance) -> impl IntoElement {
+/// The shell's sidebar: the surfaces in their places, with the ? button live so the part names
+/// still toggle here (there is nothing named in the shell itself).
+fn sidebar(a: Appearance, cx: &App) -> impl IntoElement {
     div()
         .w(px(SIDEBAR_WIDTH))
         .h_full()
@@ -75,18 +78,20 @@ fn sidebar(a: Appearance) -> impl IntoElement {
                     PartState::Rest,
                     a,
                 ))
-                .child(button("parts", "?", ButtonKind::Ghost, PartState::Rest, a)),
+                .child(parts_button("parts", a, cx).on_click(|_, _, cx| {
+                    toggle_parts(cx);
+                })),
         )
 }
 
 impl Render for ShellView {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = self.appearance.unwrap_or_else(|| window_appearance(window));
         div()
             .size_full()
             .flex()
             .fill(Ink::Window, a)
-            .child(sidebar(a))
+            .child(sidebar(a, cx))
             .child(
                 div()
                     .flex_1()

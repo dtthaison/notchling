@@ -8,9 +8,10 @@ use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_engine::delegate::second_opinion::{SecondOpinion, Status, Subject};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 use notchling_engine::transcript::model::{ChatItem, ItemKind, ToolKind};
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, KitStyled};
+use notchling_kit::ui::{button, card, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
@@ -84,13 +85,13 @@ pub fn opinion_button(
         gate::state(control),
         a,
     );
-    gate::tip(b, control, a).when(control.enabled, |b| {
-        b.on_click(
-            cx.listener(move |this, _, _, cx| {
+    gate::tip(b, control, a)
+        .when(control.enabled, |b| {
+            b.on_click(cx.listener(move |this, _, _, cx| {
                 this.open_second_opinion(subject.clone(), &anchor, cx)
-            }),
-        )
-    })
+            }))
+        })
+        .part_at("Second Opinion Button", Corner::TopTrailing, a, cx)
 }
 
 fn pick_line(run: &SecondOpinion) -> String {
@@ -199,6 +200,7 @@ fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ChatView>) -> D
         .flex_col()
         .child(header)
         .children(body)
+        .part_inside("Second Opinion Card", Corner::TopTrailing, a, cx)
 }
 
 /// The cards for the opinions asked under `anchors` in `session`.

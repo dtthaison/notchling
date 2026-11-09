@@ -3,25 +3,26 @@
 //! nothing drawn inside it but the text itself. The text is the kit's `TextEditor` (a caret,
 //! click and drag, the input method's marked text, ⌘Z); it grows from one line to [`MAX_LINES`],
 //! then scrolls. Return sends (the editor's `Submit`), Shift or Option Return adds a line. Files
-//! dropped on the card go in at the caret as paths (`chat::drops`). Under the card, one row: the
-//! model or options picker at the left, the status line (the error, "Sending…", what waits, or why
-//! the box is off) and Stop while the turn runs. Above it, an Antigravity permission card when the
-//! daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the
-//! reason is the status line, and only there.
+//! dropped anywhere on the middle column go in at the caret as paths (`chat::drops`, the drop
+//! target is the column in `view::mod`); the card's edge turns accent while one is over it. Under
+//! the card, one row: the model or options picker at the left, the status line (the error,
+//! "Sending…", what waits, or why the box is off) and Stop while the turn runs. Above it, an
+//! Antigravity permission card when the daemon holds one for the row, and the picker's pop-up.
+//! Disabled while acting isn't on; the reason is the status line, and only there.
 
 use gpui::{
     div, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths, Stateful, Window,
 };
+use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
-use notchling_kit::ui::{button, button_with, hsla, label, KitStyled};
+use notchling_kit::ui::{button, button_with, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::tools::Picker;
 use super::ChatView;
 use crate::chat::data::Tool;
-use crate::chat::drops;
 use crate::mac::gate;
 use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
@@ -111,7 +112,8 @@ fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
             .absolute()
             .bottom(relative(1.0))
             .left(px(SIDE_PADDING))
-            .child(card),
+            .child(card)
+            .part_at("Picker Menu", Corner::TopTrailing, a, cx),
     )
 }
 
@@ -132,13 +134,19 @@ fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
             .fill(Ink::Card, a)
             .border(px(1.0))
             .border_color(hsla(Ink::Accent.color(a).with_alpha(0.45)))
-            .child(card),
+            .child(card)
+            .part_at("Permission Card", Corner::TopTrailing, a, cx),
     )
 }
 
 /// The status line under the card: the error, "Sending…", what waits, or why the box is off.
 /// Shown once, here, as a sentence; the box itself carries no tooltip for it.
-fn status(view: &ChatView, control: crate::acting::Control, a: Appearance) -> Option<Div> {
+fn status(
+    view: &ChatView,
+    control: crate::acting::Control,
+    a: Appearance,
+    cx: &Context<ChatView>,
+) -> Option<Div> {
     let (text, ink) = if let Some(error) = &view.tools.error {
         (error.clone(), Ink::Needs)
     } else if view.tools.sending {
@@ -160,7 +168,11 @@ fn status(view: &ChatView, control: crate::acting::Control, a: Appearance) -> Op
     } else {
         (control.tooltip?.to_owned(), Ink::TextFaint)
     };
-    Some(label(&sentence(&text), TypeRole::Meta, ink, a).line_clamp(2))
+    Some(
+        label(&sentence(&text), TypeRole::Meta, ink, a)
+            .line_clamp(2)
+            .part_at("Composer Hint", Corner::Trailing, a, cx),
+    )
 }
 
 /// The picker button under the card, for a Codex or Antigravity session.
@@ -193,6 +205,11 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
     } else {
         Ink::TextFaint
     };
+    // The Swift names: Codex's picker and Antigravity's options are two parts there.
+    let part = match view.selected_session().map(|s| s.tool) {
+        Some(Tool::Antigravity) => "Antigravity Options",
+        _ => "Codex Model Picker",
+    };
     let title = label(&format!("{title} ▾"), TypeRole::Meta, ink, a);
     let b = button_with("picker", title, kind, state, a)
         .h(px(20.0))
@@ -205,9 +222,12 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
         },
         a,
     );
-    Some(b.when(has_options, |b| {
-        b.on_click(cx.listener(|this, _, _, cx| this.toggle_picker(cx)))
-    }))
+    Some(
+        b.when(has_options, |b| {
+            b.on_click(cx.listener(|this, _, _, cx| this.toggle_picker(cx)))
+        })
+        .part_at(part, Corner::Top, a, cx),
+    )
 }
 
 /// The send disc: 30 pt, accent with the arrow in onAccent; raised and faint while there is
@@ -240,6 +260,7 @@ fn send_disc(
             d.cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| this.send_text(cx)))
         })
+        .part_at("Send Button", Corner::Top, a, cx)
 }
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
@@ -269,7 +290,8 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .kit_type(TypeRole::Body)
         .line_height(px(LINE_HEIGHT))
         .ink(Ink::Text, a)
-        .child(view.tools.editor.clone());
+        .child(view.tools.editor.clone())
+        .part("Reply Box", a, cx);
     let accent_edge = hsla(Ink::Accent.color(a));
     let card = div()
         .id("composer")
@@ -299,25 +321,19 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                     window.focus(&this.tools.focus);
                     cx.notify();
                 }))
-                // Files from Finder: an accent edge while over the card, the paths at the caret
-                // on the drop, and the caret back in the box.
+                // Files from Finder: an accent edge while one is over the card. The drop itself
+                // lands on the whole middle column (`ChatView::render`), the card included.
                 .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
-                .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                    this.tools.editor.update(cx, |editor, cx| {
-                        let mut edit = editor.edit().clone();
-                        if drops::insert_paths(&mut edit, paths.paths()) {
-                            editor.set_edit(edit, cx);
-                        }
-                        editor.focus(window);
-                    });
-                }))
-        });
+        })
+        .part_at("Composer", Corner::BottomLeading, a, cx);
     let stop = view.selected_working().then(|| {
         let gate = view.acting(cx).control();
         let b = button("stop", "Stop", ButtonKind::Ghost, gate::state(gate), a);
-        gate::tip(b, gate, a).when(gate.enabled, |b| {
-            b.on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
-        })
+        gate::tip(b, gate, a)
+            .when(gate.enabled, |b| {
+                b.on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
+            })
+            .part_at("Stop Button", Corner::Top, a, cx)
     });
     let footer = div()
         .mx(px(SIDE_PADDING))
@@ -330,7 +346,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .children(status(view, control, a)),
+                .children(status(view, control, a, cx)),
         )
         .children(stop);
     div()

@@ -4,11 +4,13 @@
 //! (`chat::reload`). Every load runs on the background executor: the [`Loader`] is sent there and
 //! taken back with the result, so the window never waits on the disk. The session rows come from
 //! the daemon (`session_source`) while it answers, and so do the other tools' live state and an
-//! Antigravity row's conversation (`tools`).
+//! Antigravity row's conversation (`tools`). Files dropped anywhere on the middle column go into
+//! the reply box (`drop`), and the ? button names every part (`notchling_kit::ui::KitPart`).
 
 mod accounts;
 mod composer;
 mod conversation;
+mod drop;
 mod header;
 mod inspector;
 mod markdown;
@@ -23,10 +25,15 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui::{div, prelude::*, px, Context, Entity, Render, ScrollHandle, Subscription, Window};
+use gpui::{
+    div, prelude::*, px, Context, Entity, ExternalPaths, Render, ScrollHandle, Subscription, Window,
+};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
-use notchling_kit::ui::{resize_edges, window_appearance, KitStyled, TopBorder};
+use notchling_kit::labels::Corner;
+use notchling_kit::ui::{
+    parts_on, resize_edges, set_parts, window_appearance, KitPart, KitStyled, TopBorder,
+};
 use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
 
@@ -43,6 +50,15 @@ const TICK: Duration = Duration::from_millis(500);
 
 /// Set to `1`, a render draws every step group, step and thought open.
 pub const EXPAND_ENV: &str = "NOTCHLING_RENDER_EXPAND";
+/// Set to `1`, a render draws the part names, as the ? button shows them.
+pub const PARTS_ENV: &str = "NOTCHLING_RENDER_PARTS";
+/// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
+pub const DROP_ENV: &str = drop::PREVIEW_ENV;
+
+/// Whether a render switch is on.
+fn switch(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|v| v == "1")
+}
 
 pub struct ChatView {
     root: DataRoot,
@@ -75,6 +91,9 @@ pub struct ChatView {
     /// Every group, step and thought drawn open: a render over a fixture
     /// (`NOTCHLING_RENDER_EXPAND=1`), since nothing clicks in a picture.
     expand_all: bool,
+    /// The drop hint drawn as if a file were over the column (`NOTCHLING_RENDER_DROP=1`), since
+    /// nothing drags in a picture.
+    drop_preview: bool,
     /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
     tools: tools::ChatTools,
     /// New Session or Settings, over the window.
@@ -98,6 +117,8 @@ pub struct ChatView {
     /// accounts poll rather than on every render.
     codex_installed: bool,
     _appearance_changes: Subscription,
+    /// Esc hides the part names, wherever the keys go.
+    _parts_escape: Subscription,
 }
 
 fn now_ms() -> i64 {
@@ -111,7 +132,11 @@ impl ChatView {
     /// A Chat that reads the folders only (a render, a fixture root).
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx);
-        view.expand_all = std::env::var_os(EXPAND_ENV).is_some_and(|v| v == "1");
+        view.expand_all = switch(EXPAND_ENV);
+        view.drop_preview = switch(DROP_ENV);
+        if switch(PARTS_ENV) {
+            set_parts(cx, true);
+        }
         view
     }
 
@@ -141,6 +166,12 @@ impl ChatView {
             this.update(cx, |_, cx| cx.notify()).ok();
         });
         let watch = Watcher::start(root.watch_folders(), watch_config()).ok();
+        // Esc turns the part names off from any window; the editor lets Esc through.
+        let parts_escape = cx.observe_keystrokes(|_, event, _, cx| {
+            if event.keystroke.key == "escape" && parts_on(cx) {
+                set_parts(cx, false);
+            }
+        });
         let (accounts, switches) = crate::accounts::window::app_stores(cx);
         let mut view = ChatView {
             accounts,
@@ -167,6 +198,7 @@ impl ChatView {
             conversation_scroll: ScrollHandle::new(),
             expanded: HashSet::new(),
             expand_all: false,
+            drop_preview: false,
             tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
@@ -174,6 +206,7 @@ impl ChatView {
             phone_dot: false,
             pending_session: None,
             _appearance_changes: changes,
+            _parts_escape: parts_escape,
         };
         view.start_load(cx);
         cx.spawn(async move |this, cx| loop {
@@ -354,24 +387,47 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
+        // Files from Finder land anywhere on the middle column while the box can take them.
+        let takes_drops = self.composer_control(cx).enabled;
+        let conversation = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex()
+            .flex_col()
+            .child(conversation::render(self, a, cx))
+            .part_at("Conversation", Corner::Bottom, a, cx);
+        let column = div()
+            .id("chat-column")
+            .group(drop::GROUP)
+            .relative()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(header::render(self, a, cx))
+            .child(conversation)
+            .child(composer::render(self, a, window, cx))
+            .when(takes_drops, |column| {
+                column.on_drop::<ExternalPaths>(cx.listener(
+                    |this, paths: &ExternalPaths, w, cx| {
+                        this.drop_paths(paths.paths(), w, cx);
+                    },
+                ))
+            })
+            // The hint only where a drop would land; a render over a fixture has no acting, so
+            // its switch draws the hint anyway.
+            .when(takes_drops || self.drop_preview, |column| {
+                column.child(drop::hint(self.drop_preview, a))
+            });
         div()
             .relative()
             .size_full()
             .flex()
             .fill(Ink::Window, a)
             .child(sidebar::render(self, a, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(header::render(self, a, cx))
-                    .child(conversation::render(self, a, cx))
-                    .child(composer::render(self, a, window, cx)),
-            )
-            .child(inspector::render(self, a))
+            .child(column)
+            .child(inspector::render(self, a, cx))
             .children(accounts::render_menu(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
