@@ -10,6 +10,7 @@
 
 pub mod codex_list;
 pub mod data;
+pub mod drops;
 pub mod format;
 pub mod header;
 pub mod inspector;

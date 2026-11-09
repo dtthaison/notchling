@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::{Context, FocusHandle, ScrollHandle};
+use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Subscription};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use serde_json::Value;
@@ -27,6 +27,7 @@ use crate::tools::requests::{
     agy_set_option, agy_state, codex_send, codex_send_draft, codex_stop, is_draft,
     parse_conversation, sent_row, sent_state, AgyConversation, Pick, Sent,
 };
+use notchling_kit::ui::{TextEditor, TextEditorEvent};
 
 /// Why a Claude Code row that isn't a background job takes no reply.
 pub const READ_ONLY: &str = "Read only here. Reply where the session runs.";
@@ -44,7 +45,8 @@ pub enum Picker {
 pub struct ChatTools {
     /// What the `tools` topic last said, from the session source.
     pub live: ToolLive,
-    /// The reply box's text per row, so switching sessions keeps what was typed.
+    /// The reply box's text per row, so switching sessions keeps what was typed. The selected
+    /// row's is what [`ChatTools::editor`] shows, kept the same on every change.
     pub drafts: HashMap<String, String>,
     pub sending: bool,
     pub error: Option<String>,
@@ -68,13 +70,24 @@ pub struct ChatTools {
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
+    /// The reply box: the kit's editor (caret, selection, input method), one for every row.
+    pub editor: Entity<TextEditor>,
+    /// The editor's focus handle.
     pub focus: FocusHandle,
-    /// The reply box's text area, which scrolls once the text passes its last line.
-    pub scroll: ScrollHandle,
+    _editor_events: Subscription,
 }
 
 impl ChatTools {
     pub fn new(cx: &mut Context<ChatView>) -> ChatTools {
+        let editor = cx.new(|cx| TextEditor::new("Reply…", super::composer::MAX_LINES, cx));
+        let focus = editor.read(cx).focus_handle(cx);
+        let events = cx.subscribe(
+            &editor,
+            |this, _, event: &TextEditorEvent, cx| match event {
+                TextEditorEvent::Changed => this.draft_changed(cx),
+                TextEditorEvent::Submit => this.send_text(cx),
+            },
+        );
         ChatTools {
             live: ToolLive::default(),
             drafts: HashMap::new(),
@@ -90,8 +103,9 @@ impl ChatTools {
             starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
-            focus: cx.focus_handle(),
-            scroll: ScrollHandle::new(),
+            editor,
+            focus,
+            _editor_events: events,
         }
     }
 
@@ -104,6 +118,44 @@ impl ChatTools {
 impl ChatView {
     pub(super) fn acting(&self, cx: &mut Context<Self>) -> Acting {
         self.acts(cx).acting()
+    }
+
+    /// The editor's text changed: it is the selected row's draft.
+    fn draft_changed(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        let text = self.tools.editor.read(cx).text().to_owned();
+        if text.is_empty() {
+            self.tools.drafts.remove(&id);
+        } else {
+            self.tools.drafts.insert(id, text);
+        }
+        cx.notify();
+    }
+
+    /// Sets a row's draft; the editor follows when that row is the one on show.
+    pub(super) fn put_draft(&mut self, id: &str, text: String, cx: &mut Context<Self>) {
+        if text.is_empty() {
+            self.tools.drafts.remove(id);
+        } else {
+            self.tools.drafts.insert(id.to_owned(), text);
+        }
+        if self.selected.as_deref() == Some(id) {
+            self.show_draft(cx);
+        }
+    }
+
+    /// Puts the selected row's draft in the editor (after a switch of rows).
+    pub(super) fn show_draft(&mut self, cx: &mut Context<Self>) {
+        let text = self
+            .selected
+            .as_deref()
+            .map(|id| self.tools.draft(id).to_owned())
+            .unwrap_or_default();
+        self.tools
+            .editor
+            .update(cx, |editor, cx| editor.set_text(&text, cx));
     }
 
     /// The reply box's gate: acting, then what the row takes.
@@ -177,7 +229,8 @@ impl ChatView {
         if self.tools.starting.contains_key(&id) {
             return;
         }
-        let text = self.tools.draft(&id).trim().to_owned();
+        // The editor's text, which is this row's draft, read live rather than from the copy.
+        let text = self.tools.editor.read(cx).text().trim().to_owned();
         if text.is_empty() {
             return;
         }
@@ -200,7 +253,7 @@ impl ChatView {
                 }
             }
         };
-        self.tools.drafts.remove(&id);
+        self.put_draft(&id, String::new(), cx);
         let sent_text = text;
         self.spawn_send(
             request,
@@ -228,6 +281,7 @@ impl ChatView {
                         }
                         view.selected = Some(row);
                         view.loading = true;
+                        view.show_draft(cx);
                     }
                     view.reload_now(cx);
                 }
@@ -239,7 +293,7 @@ impl ChatView {
                     } else {
                         format!("{sent_text}\n\n{typed}")
                     };
-                    view.tools.drafts.insert(id.clone(), back);
+                    view.put_draft(&id, back, cx);
                     view.tools.error = Some(message);
                 }
             },
@@ -407,6 +461,7 @@ impl ChatView {
                     if self.selected.as_deref() == Some(draft.as_str()) {
                         self.selected = Some(row);
                         self.loading = true;
+                        self.show_draft(cx);
                         self.reload_now(cx);
                     }
                 }
@@ -420,7 +475,7 @@ impl ChatView {
                     } else {
                         format!("{sent}\n\n{typed}")
                     };
-                    self.tools.drafts.insert(draft.clone(), back);
+                    self.put_draft(&draft, back, cx);
                     if self.selected.as_deref() == Some(draft.as_str()) {
                         self.tools.error = Some(why);
                     }

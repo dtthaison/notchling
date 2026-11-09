@@ -231,7 +231,11 @@ impl ChatView {
             }
         }
         if self.selected == asked {
+            let was = self.selected.take();
             self.selected = loaded.selected;
+            if self.selected != was {
+                self.show_draft(cx);
+            }
             // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
             // files have none to put in its place.
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
@@ -273,6 +277,7 @@ impl ChatView {
         self.tools.agy = None;
         self.tools.agy_fetched = None;
         self.tools.agy_config.clear();
+        self.show_draft(cx);
         self.start_load(cx);
         cx.notify();
     }
