@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::{Context, FocusHandle};
+use gpui::{Context, FocusHandle, ScrollHandle};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use serde_json::Value;
@@ -69,6 +69,8 @@ pub struct ChatTools {
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
     pub focus: FocusHandle,
+    /// The reply box's text area, which scrolls once the text passes its last line.
+    pub scroll: ScrollHandle,
 }
 
 impl ChatTools {
@@ -89,6 +91,7 @@ impl ChatTools {
             answered: HashSet::new(),
             picker: None,
             focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
         }
     }
 
