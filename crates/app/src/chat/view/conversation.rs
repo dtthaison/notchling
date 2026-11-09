@@ -10,8 +10,8 @@ use super::{opinions, ChatView};
 use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
 
-/// Replies and tools sit in from the left, under Claude's mark.
-const INDENT: f32 = 34.0;
+/// Thinking, tools and their buttons sit a little in from the reply's left edge.
+const INDENT: f32 = 12.0;
 
 fn glyph(icon: Icon, ink: Ink, a: Appearance) -> Div {
     div()
@@ -167,25 +167,20 @@ fn row_element(row: &Row, a: Appearance) -> Div {
                     a,
                 ))
             }),
-        Row::Assistant { text } => div()
-            .w_full()
-            .flex()
-            .items_start()
-            .gap(px(10.0))
-            .child(claude_mark(24.0, a))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .p(px(12.0))
-                    .rounded(px(RADIUS_CARD))
-                    .fill(Ink::Card, a)
-                    .border(px(1.0))
-                    .border_color(hsla(Ink::Hairline.color(a)))
-                    .kit_type(TypeRole::Body)
-                    .ink(Ink::Text, a)
-                    .child(text.clone()),
-            ),
+        // No mark before each reply: the bubble alone says who wrote it.
+        Row::Assistant { text } => div().w_full().flex().items_start().child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .p(px(12.0))
+                .rounded(px(RADIUS_CARD))
+                .fill(Ink::Card, a)
+                .border(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .kit_type(TypeRole::Body)
+                .ink(Ink::Text, a)
+                .child(text.clone()),
+        ),
         Row::Thinking { title, text } => div()
             .pl(px(INDENT))
             .flex()
