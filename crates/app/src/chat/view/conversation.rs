@@ -9,18 +9,19 @@ use std::path::Path;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, relative, Animation, AnimationExt, Context, Div, FontWeight, SharedString,
-    Stateful,
+    div, point, prelude::*, px, relative, Animation, AnimationExt, BoxShadow, Context, Div,
+    FontWeight, SharedString, Stateful,
 };
 use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, claude_mark, hsla, icon, label, KitPart, KitStyled};
+use notchling_kit::ui::{button, button_with, claude_mark, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::{markdown, opinions, ChatView};
+use crate::chat::activity::Activity;
 use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
 use crate::chat::steps::{self, Detail};
@@ -47,6 +48,61 @@ fn spinner(key: &str, a: Appearance) -> impl IntoElement {
         SharedString::from(format!("spin-{key}")),
         Animation::new(Duration::from_millis(1000)).repeat(),
         |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
+    )
+}
+
+/// The live line after the last row (the Swift app's live row): a spinner, what the session is
+/// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. The
+/// view redraws it once a second while it shows (`ChatView::tick`).
+fn activity_row(activity: &Activity, a: Appearance, cx: &Context<ChatView>) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(spinner("activity", a))
+        .child(
+            label(&activity.text, TypeRole::Meta, Ink::TextMuted, a)
+                .min_w(px(0.0))
+                .elide(),
+        )
+        .children(activity.stats.as_ref().map(|stats| {
+            label(&format!("({stats})"), TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
+        }))
+        .children(activity.shells.as_ref().map(|shells| {
+            label(&format!("· {shells}"), TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
+        }))
+        .part_at("Activity Line", Corner::Trailing, a, cx)
+}
+
+/// The "↓ Latest" pill over the conversation's bottom right, while it is scrolled up (the Swift
+/// button: a secondary kit button with an arrow, 20 pt from the corner). It sits in the
+/// conversation, above the reply box. A click goes to the newest message and follows again.
+pub fn latest_pill(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    if !view.latest_pill() {
+        return None;
+    }
+    let content = div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(icon(Icon::ArrowDown, 11.0, Ink::Text, a))
+        .child(label("Latest", TypeRole::Label, Ink::Text, a));
+    let pill = button_with("latest", content, ButtonKind::Secondary, PartState::Rest, a)
+        .shadow(vec![BoxShadow {
+            color: hsla(Ink::Shadow.color(a)),
+            offset: point(px(0.0), px(3.0)),
+            blur_radius: px(8.0),
+            spread_radius: px(0.0),
+        }])
+        .on_click(cx.listener(|this, _, _, cx| this.jump_to_latest(cx)));
+    Some(
+        div()
+            .absolute()
+            .right(px(20.0))
+            .bottom(px(20.0))
+            .child(pill)
+            .part_at("Latest Button", Corner::Top, a, cx),
     )
 }
 
@@ -614,7 +670,12 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
             }
             _ => "No transcript yet for this session",
         };
-        return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
+        return column
+            .child(label(note, TypeRole::Meta, Ink::TextMuted, a))
+            .children(
+                view.activity_line()
+                    .map(|activity| activity_row(&activity, a, cx)),
+            );
     }
     // The newest step group of a working session stays open with its running call spinning (the
     // Swift app's `liveTools`): the session works, and the last item is that group.
@@ -628,9 +689,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
                 Some(Row::Tools(_))
             )
     });
-    column.children(
+    let column = column.children(
         rows.iter()
             .enumerate()
             .map(|(i, row)| row_with_opinions(view, i, row, last_tools == Some(i), a, cx)),
+    );
+    column.children(
+        view.activity_line()
+            .map(|activity| activity_row(&activity, a, cx)),
     )
 }

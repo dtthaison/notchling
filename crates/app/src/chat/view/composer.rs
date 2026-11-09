@@ -17,7 +17,7 @@ use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
-use notchling_kit::ui::{button, button_with, hsla, label, KitPart, KitStyled};
+use notchling_kit::ui::{button_with, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::tools::Picker;
@@ -263,6 +263,41 @@ fn send_disc(
         .part_at("Send Button", Corner::Top, a, cx)
 }
 
+/// Stop, small: a square, "Stop" and a faint "esc" in meta type (the Swift button), ghost. Esc
+/// does the same (`ChatView`'s keystroke observer). While the Stop is on its way it reads
+/// "Stopping…" and takes no click.
+fn stop_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
+    let gate = view.acting(cx).control();
+    let stopping = view.stopping();
+    let state = if gate.enabled && !stopping {
+        PartState::Rest
+    } else {
+        PartState::Disabled
+    };
+    let content = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(icon(Icon::Stop, 8.0, Ink::TextMuted, a))
+        .child(label(
+            if stopping { "Stopping…" } else { "Stop" },
+            TypeRole::Meta,
+            Ink::TextMuted,
+            a,
+        ))
+        .when(!stopping, |d| {
+            d.child(label("esc", TypeRole::Meta, Ink::TextFaint, a))
+        });
+    let b = button_with("stop", content, ButtonKind::Ghost, state, a)
+        .h(px(20.0))
+        .px(px(6.0));
+    gate::tip(b, gate, a)
+        .when(gate.enabled && !stopping, |b| {
+            b.on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
+        })
+        .part_at("Stop Button", Corner::Top, a, cx)
+}
+
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
     let control = view.composer_control(cx);
     let id = view.selected.clone().unwrap_or_default();
@@ -326,15 +361,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
         })
         .part_at("Composer", Corner::BottomLeading, a, cx);
-    let stop = view.selected_working().then(|| {
-        let gate = view.acting(cx).control();
-        let b = button("stop", "Stop", ButtonKind::Ghost, gate::state(gate), a);
-        gate::tip(b, gate, a)
-            .when(gate.enabled, |b| {
-                b.on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
-            })
-            .part_at("Stop Button", Corner::Top, a, cx)
-    });
+    let stop = view.selected_working().then(|| stop_button(view, a, cx));
     let footer = div()
         .mx(px(SIDE_PADDING))
         .pt(px(6.0))

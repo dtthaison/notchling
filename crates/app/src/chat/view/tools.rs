@@ -70,6 +70,8 @@ pub struct ChatTools {
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
+    /// The row a Stop was sent to and when (ms), until it stops working or 20 s pass.
+    pub stopping: Option<(String, i64)>,
     /// The reply box: the kit's editor (caret, selection, input method), one for every row.
     pub editor: Entity<TextEditor>,
     /// The editor's focus handle.
@@ -103,6 +105,7 @@ impl ChatTools {
             starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
+            stopping: None,
             editor,
             focus,
             _editor_events: events,
@@ -190,6 +193,16 @@ impl ChatView {
         })
     }
 
+    /// Whether a Stop sent to the selected row is still on its way (a second Esc to a session
+    /// that has just stopped would open the terminal's rewind menu).
+    pub(super) fn stopping(&self) -> bool {
+        let Some((row, at)) = &self.tools.stopping else {
+            return false;
+        };
+        self.selected.as_deref() == Some(row.as_str())
+            && crate::chat::activity::is_stopping(Some(*at), self.selected_working(), now_ms())
+    }
+
     /// Sends `request` off the UI thread; `done` takes the answer.
     fn spawn_send(
         &mut self,
@@ -254,6 +267,9 @@ impl ChatView {
             }
         };
         self.put_draft(&id, String::new(), cx);
+        // The next reload goes to the end, wherever you were reading.
+        self.follow_sent = true;
+        self.conversation_scroll.scroll_to_bottom();
         let sent_text = text;
         self.spawn_send(
             request,
@@ -310,15 +326,20 @@ impl ChatView {
             return;
         };
         let id = session.agent.id.clone();
+        if self.stopping() {
+            return;
+        }
         let request = match session.tool {
             Tool::Claude => Request::interrupt(&id),
             Tool::Codex => codex_stop(&id),
             Tool::Antigravity => agy_cancel(&id),
         };
+        self.tools.stopping = Some((id, now_ms()));
         self.spawn_send(
             request,
             |view, result, _| {
                 if let Err(message) = result {
+                    view.tools.stopping = None;
                     view.tools.error = Some(message);
                 }
             },
@@ -510,6 +531,7 @@ impl ChatView {
                 let done = view.tools.fetches.finished(&asked, number);
                 if done.apply && view.selected.as_deref() == Some(asked.as_str()) {
                     if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
+                        view.follow_content(false);
                         view.conversation = c.conversation.clone();
                         view.loading = false;
                         view.tools.agy = Some(c);
