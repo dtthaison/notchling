@@ -1,0 +1,98 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "reply-burst-negative",
+  "byteCount" : 8073,
+  "claudeCode" : "v2.1.319",
+  "cols" : 200,
+  "invisibleNoticeSeen" : true,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    },
+    {
+      "name" : "burst",
+      "offset" : 2819,
+      "tMs" : 1317
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:20:39Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.319",
+    "▝▜██████▀  Haiku 5.5 · Claude Team",
+    " ▝▝   ▝▝   \/private\/var\/folders\/sh\/6ghv6gg90355tmg7jdk5cs0c0000gn\/T\/notchling-record-1794187123",
+    "",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Brewed for 2s · done 8:19 AM",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Cooked for 2s · done 8:20 AM",
+    "",
+    "❯ stale draftReply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Baked for 3s · done 8:20 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 50.1k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "1b5b3230307e7374616c652064726166741b5b3230317e",
+      "label" : "bracketed paste (draft)",
+      "offset" : 2752,
+      "tMs" : 908
+    },
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05151b5b3230307e5265706c792077697468206a757374204f4b2e1b5b3230317e0d",
+      "label" : "one burst",
+      "offset" : 2819,
+      "tMs" : 1317
+    },
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f0515",
+      "label" : "clearInput (cleanup)",
+      "offset" : 8029,
+      "tMs" : 5991
+    }
+  ]
+}

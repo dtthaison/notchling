@@ -1,0 +1,56 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "attach-no-color-kept-negative",
+  "byteCount" : 7141,
+  "claudeCode" : "",
+  "cols" : 100,
+  "noColorEnv" : true,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:21:59Z",
+  "rows" : 30,
+  "screenAtEnd" : [
+    "  specific astronomical or geographic influence, and then combine them to forecast future tides.",
+    "  Tide tables published years in advance guide ships, dredging operations, and recreational boaters.",
+    "  Satellite altimetry now measures sea-surface height across the globe, allowing scientists to",
+    "  study how tides interact with ocean circulation and to refine models used in climate research.",
+    "  Tidal energy is also being developed as a renewable resource, with turbines placed in fast-flowing",
+    "  channels to extract power from the moving water, though the technology remains costly and its",
+    "  environmental effects are still being studied.",
+    "",
+    "  In the end, ocean tides reveal how closely the Earth is bound to its neighbors in space. The same",
+    "  gravity that holds the Moon in orbit lifts the oceans into bulges that sweep around the planet",
+    "  each day. Those tides slow the Earth's rotation very gradually and drive the Moon slowly outward,",
+    "  a process that has been unfolding for billions of years. Every rising and falling sea, from a",
+    "  quiet beach to a funnel-shaped bay, is a small expression of that vast interaction. Understanding",
+    "  tides therefore connects the mechanics of the solar system to the everyday experience of the",
+    "  shore, and it reminds us that the ocean is always responding to forces far beyond our sight.",
+    "",
+    "✻ Worked for 10s · done 8:21 AM",
+    "",
+    "❯ queued to take back",
+    "",
+    "⏺ I'm not sure what \"queued to take back\" means. Did you want me to stop, undo the essay, or do",
+    "  something else with it? The essay is above, unchanged.",
+    "",
+    "✻ Churned for 2s · done 8:21 AM",
+    "",
+    "─────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 57.7k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 4 agents"
+  ],
+  "steps" : [
+
+  ]
+}

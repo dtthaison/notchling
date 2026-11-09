@@ -1,0 +1,110 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "esc-working",
+  "byteCount" : 174183,
+  "claudeCode" : "",
+  "cols" : 200,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    },
+    {
+      "name" : "working",
+      "offset" : 3261,
+      "tMs" : 951
+    },
+    {
+      "name" : "esc",
+      "offset" : 155513,
+      "tMs" : 12592
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:21:03Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "  all of these influences at once. What appears simple from a beach is, in fact, the product of several interacting physical forces operating across the entire planet.",
+    "",
+    "  The primary cause of tides is the gravitational attraction between the Earth and the Moon. Gravity weakens with distance, so the side of the Earth facing the Moon is pulled slightly more strongly",
+    "  than the planet's center, and the far side is pulled slightly less. The result is a stretching of the Earth's oceans along the Earth-Moon axis. Water on the near side bulges toward the Moon, and",
+    "  water on the far side bulges away from it, producing two bulges that are roughly opposite each other. Because the Earth rotates beneath these bulges, a given coastline passes through one bulge and",
+    "  then the other in about 24 hours and 50 minutes, which is why most places experience two high tides and two low tides each lunar day. The extra fifty minutes comes from the Moon's own motion around",
+    "  the Earth, which means that the tide arrives later each day.",
+    "",
+    "  The Sun also produces tides, though its effect is smaller. Despite being about 27 million times more massive than the Moon, the Sun is roughly 390 times farther away, and tidal force depends on the",
+    "  difference in gravitational pull across the Earth's diameter rather than on the total pull. The Sun's tide-raising force is about 46 percent as strong as the Moon's. Even so, the Sun's influence is",
+    "  significant, because the two bodies combine their effects. When the Sun, Earth, and Moon align, at new moon and full moon, their tidal forces reinforce one another. These periods produce spring",
+    "  tides, which bring the highest high tides and the lowest low tides of the month. When the Sun and Moon sit at right angles to each other as seen from Earth, at the first and third quarter moons,",
+    "  their effects partly cancel, producing neap tides. These are the smallest tidal ranges, with less dramatic differences between high and low water. The cycle of spring and neap tides repeats roughly",
+    "  every two weeks, following the phases of the Moon.",
+    "",
+    "  The Moon's orbit adds further variation. The Moon does not travel in a perfect circle, and its distance from Earth changes over the course of a month. When the Moon is at perigee, its closest point",
+    "  to Earth, its tide-raising force is stronger, and perigean spring tides can be noticeably higher than average. The Earth's own orbit around the Sun also changes its distance from the Sun over the",
+    "  year, and the alignment of the Moon's orbital plane with the Earth's equator shifts over a period of about 18.6 years. These long cycles cause the highest and lowest tides to vary over years and",
+    "  decades, which is why coastal engineers and tide-table makers rely on long records of observations.",
+    "",
+    "  The shape of the ocean basins strongly modifies the basic tidal pattern. If the Earth were covered by a uniform, deep ocean, the tides would simply follow the gravitational bulges. In reality,",
+    "  continents block and redirect the water, and the basins have their own natural periods of oscillation, much like a bathtub or a pan of water that sloshes when tilted. A basin that is roughly the",
+    "  right size to resonate with the tidal forcing can amplify the tide dramatically. The Bay of Fundy, between New Brunswick and Nova Scotia, is the most famous example. Its tidal range can exceed",
+    "  sixteen meters in some locations during spring tides, among the largest in the world. The funnel shape of the bay and its dimensions combine to build up the water level with each incoming tide.",
+    "  Other regions, such as parts of the Mediterranean Sea and many enclosed seas, have very small tides because their size and connection to the open ocean do not allow the water to respond fully.",
+    "",
+    "  Coastal geography also determines how tides look and feel from the shore. A gently sloping beach experiences a wide horizontal shift in the shoreline as the tide rises and falls, exposing large",
+    "  areas of sand or mudflat at low water. A steep coast may show only a small change in the position of the water's edge, even when the vertical range is large. Estuaries and river mouths experience",
+    "  tidal influence far inland, sometimes many kilometers from the sea, because the incoming tide pushes saltwater upstream and changes the flow of freshwater. These effects matter for navigation, for",
+    "  the ecology of salt marshes and mangroves, and for the timing of fishing and harvesting activities that depend on exposed intertidal zones.",
+    "",
+    "  Tides also interact with wind, atmospheric pressure, and waves. Low atmospheric pressure allows the sea surface to rise slightly, while high pressure pushes it down, with roughly a centimeter of",
+    "  change for each millibar of pressure difference. Strong onshore winds can pile water against a coast, and when these winds coincide with a high spring tide, the result can be severe coastal",
+    "  flooding. Storm surges, which are temporary rises in sea level caused by storms, add to the tide, and the combination of a storm surge and a high tide is a major source of coastal hazard. For this",
+    "  reason, forecasters often calculate the astronomical tide separately and then add meteorological effects to predict the total water level.",
+    "",
+    "  Human activity has become a significant part of the tidal story. Dams, channels, harbors, and reclaimed land change the way tidal water moves in estuaries, sometimes increasing the range or altering",
+    "  the timing of high water. Sea-level rise, driven by the warming of the oceans and the melting of land ice, raises the baseline on which tides occur, so high tides reach farther inland and flooding",
+    "  becomes more frequent even without any change in the tidal cycle itself. Engineers designing seawalls, ports, and drainage systems must therefore account for both the predictable tidal range and the",
+    "  long-term rise in mean sea level.",
+    "",
+    "  Tides have shaped life and human culture for as long as people have lived near the coast. Many marine organisms have evolved behaviors and life cycles synchronized with the tides, from the spawning",
+    "  of certain fish and corals to the feeding rhythms of shorebirds and the daily movements of intertid",
+    "  ⎿  Interrupted · What should Claude do instead?",
+    "",
+    "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 50.1k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f0515",
+      "label" : "clearInput",
+      "offset" : 3084,
+      "tMs" : 639
+    },
+    {
+      "hex" : "1b5b3230307e577269746520612064657461696c6564203132303020776f72642065737361792061626f7574206f6365616e2074696465732e20446f206e6f742075736520616e7920746f6f6c732e1b5b3230317e",
+      "label" : "bracketed paste",
+      "offset" : 3084,
+      "tMs" : 792
+    },
+    {
+      "hex" : "0d",
+      "label" : "enter",
+      "offset" : 3261,
+      "tMs" : 950
+    },
+    {
+      "hex" : "1b",
+      "label" : "Esc",
+      "offset" : 155513,
+      "tMs" : 12592
+    }
+  ],
+  "workingAfterEsc" : false,
+  "workingMarkerSeen" : false
+}
