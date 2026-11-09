@@ -1,0 +1,102 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "reply-paced",
+  "byteCount" : 5402,
+  "claudeCode" : "v2.1.319",
+  "cols" : 200,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 2
+    },
+    {
+      "name" : "send",
+      "offset" : 2441,
+      "tMs" : 713
+    },
+    {
+      "name" : "turn",
+      "offset" : 2524,
+      "tMs" : 1023
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:20:30Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.319",
+    "▝▜██████▀  Haiku 5.5 · Claude Team",
+    " ▝▝   ▝▝   \/private\/var\/folders\/sh\/6ghv6gg90355tmg7jdk5cs0c0000gn\/T\/notchling-record-1794187123",
+    "",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Brewed for 2s · done 8:19 AM",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Cooked for 2s · done 8:20 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 50.0k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f0515",
+      "label" : "clearInput",
+      "offset" : 2441,
+      "tMs" : 713
+    },
+    {
+      "hex" : "1b5b3230307e5265706c792077697468206a757374204f4b2e1b5b3230317e",
+      "label" : "bracketed paste",
+      "offset" : 2441,
+      "tMs" : 866
+    },
+    {
+      "hex" : "0d",
+      "label" : "enter",
+      "offset" : 2524,
+      "tMs" : 1023
+    }
+  ]
+}

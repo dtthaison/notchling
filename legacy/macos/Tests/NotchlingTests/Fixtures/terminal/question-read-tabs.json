@@ -1,0 +1,129 @@
+{
+  "arguments" : [
+    "attach",
+    "3feac988"
+  ],
+  "backOnFirst" : true,
+  "behavior" : "question-read-tabs",
+  "byteCount" : 9647,
+  "claudeCode" : "v2.1.319",
+  "cols" : 200,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    },
+    {
+      "name" : "page 1",
+      "offset" : 6161,
+      "tMs" : 655
+    },
+    {
+      "name" : "right 1",
+      "offset" : 6410,
+      "tMs" : 966
+    },
+    {
+      "name" : "right 2",
+      "offset" : 7564,
+      "tMs" : 1279
+    },
+    {
+      "name" : "left 1",
+      "offset" : 9367,
+      "tMs" : 1438
+    },
+    {
+      "name" : "left 2",
+      "offset" : 9647,
+      "tMs" : 1594
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "questionOpen" : true,
+  "recordedAt" : "2026-11-09T01:22:12Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.319",
+    "▝▜██████▀  Haiku 5.5 · Claude Team",
+    " ▝▝   ▝▝   \/private\/var\/folders\/sh\/6ghv6gg90355tmg7jdk5cs0c0000gn\/T\/notchling-record-1794187123",
+    "",
+    "",
+    "❯ Call the AskUserQuestion tool exactly once with two questions: 'Favourite color?' (options Red, Blue) and 'Favourite fruit?' (options Apple, Pear). Then stop.",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "←  ☐ Color  ☐ Fruit  ✔ Submit  →",
+    "",
+    "Favourite color?",
+    "",
+    "❯ 1. Red",
+    "     Red",
+    "  2. Blue",
+    "     Blue",
+    "  3. Type something.",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  4. Chat about this",
+    "",
+    "Enter to select · Tab\/Arrow keys to navigate · Esc to cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── askprobe ─"
+  ],
+  "steps" : [
+    {
+      "hex" : "1b5b43",
+      "label" : "Right",
+      "offset" : 6161,
+      "tMs" : 656
+    },
+    {
+      "hex" : "1b5b43",
+      "label" : "Right",
+      "offset" : 6410,
+      "tMs" : 967
+    },
+    {
+      "hex" : "1b5b44",
+      "label" : "Left",
+      "offset" : 7564,
+      "tMs" : 1279
+    },
+    {
+      "hex" : "1b5b44",
+      "label" : "Left",
+      "offset" : 9367,
+      "tMs" : 1438
+    }
+  ],
+  "tabs" : [
+    "Color",
+    "Fruit"
+  ]
+}

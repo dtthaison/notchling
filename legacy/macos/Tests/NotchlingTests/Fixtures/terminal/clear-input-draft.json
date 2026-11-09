@@ -1,0 +1,97 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "clear-input-draft",
+  "boxEmptyAtEnd" : true,
+  "byteCount" : 2575,
+  "claudeCode" : "v2.1.319",
+  "cols" : 200,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 0
+    },
+    {
+      "name" : "draft",
+      "offset" : 2346,
+      "tMs" : 639
+    },
+    {
+      "name" : "cleared",
+      "offset" : 2420,
+      "tMs" : 1055
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:20:23Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.319",
+    "▝▜██████▀  Haiku 5.5 · Claude Team",
+    " ▝▝   ▝▝   \/private\/var\/folders\/sh\/6ghv6gg90355tmg7jdk5cs0c0000gn\/T\/notchling-record-1794187123",
+    "",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Brewed for 2s · done 8:19 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "                                                                                                                                                                          Ctrl+Y to paste deleted text",
+    "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 47.5k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "1b5b3230307e68616c662061206d6573736167651b5b3230317e",
+      "label" : "bracketed paste (draft)",
+      "offset" : 2346,
+      "tMs" : 639
+    },
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f0515",
+      "label" : "clearInput",
+      "offset" : 2420,
+      "tMs" : 1055
+    }
+  ]
+}
