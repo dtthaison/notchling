@@ -1,13 +1,17 @@
 //! The reply box, after the Swift app's `Composer`: one rounded card (fill card, radius composer,
 //! hairline that turns accent while focused, soft shadow) holding the text and the send disc, with
-//! nothing drawn inside it but the text itself. The text grows from one line to [`MAX_LINES`],
-//! then scrolls. Return sends, Shift or Option Return adds a line. Under the card, one row: the
+//! nothing drawn inside it but the text itself. The text is the kit's `TextEditor` (a caret,
+//! click and drag, the input method's marked text, ⌘Z); it grows from one line to [`MAX_LINES`],
+//! then scrolls. Return sends (the editor's `Submit`), Shift or Option Return adds a line. Files
+//! dropped on the card go in at the caret as paths (`chat::drops`). Under the card, one row: the
 //! model or options picker at the left, the status line (the error, "Sending…", what waits, or why
 //! the box is off) and Stop while the turn runs. Above it, an Antigravity permission card when the
 //! daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the
 //! reason is the status line, and only there.
 
-use gpui::{div, point, prelude::*, px, relative, BoxShadow, Context, Div, Stateful, Window};
+use gpui::{
+    div, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths, Stateful, Window,
+};
 use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
@@ -17,8 +21,8 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::tools::Picker;
 use super::ChatView;
 use crate::chat::data::Tool;
+use crate::chat::drops;
 use crate::mac::gate;
-use crate::notch::answer::{type_key, Typed};
 use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
 use crate::tools::view::{agy_card, agy_options_card, codex_picker_card, PickerAction};
@@ -36,26 +40,6 @@ const PAD_LEADING: f32 = 14.0;
 const PAD_TRAILING: f32 = 8.0;
 const PAD_VERTICAL: f32 = 8.0;
 const TEXT_PAD_VERTICAL: f32 = 6.0;
-
-/// The text area's height for `lines` lines of text: one at least, [`MAX_LINES`] at most.
-pub fn text_height(lines: usize) -> f32 {
-    LINE_HEIGHT * lines.clamp(1, MAX_LINES) as f32
-}
-
-/// What Return does in the box: with Shift or Option it adds a line, bare it sends.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReturnKey {
-    Newline,
-    Send,
-}
-
-pub fn return_key(key: &str, shift: bool, alt: bool) -> Option<ReturnKey> {
-    (key == "enter").then_some(if shift || alt {
-        ReturnKey::Newline
-    } else {
-        ReturnKey::Send
-    })
-}
 
 /// The card's padding at an edge width, so focusing (a thicker edge) moves nothing inside.
 fn inset(base: f32, edge: f32) -> f32 {
@@ -261,8 +245,7 @@ fn send_disc(
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
     let control = view.composer_control(cx);
     let id = view.selected.clone().unwrap_or_default();
-    let text = view.tools.draft(&id).to_owned();
-    let empty = text.trim().is_empty();
+    let empty = view.tools.draft(&id).trim().is_empty();
     let focused = control.enabled && view.tools.focus.is_focused(window);
     let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
     let edge_color = if focused {
@@ -270,25 +253,24 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
     } else {
         Ink::Hairline.color(a)
     };
-    // The text itself, wrapping at the card's width: one line to MAX_LINES, then it scrolls.
+    // The editor follows the row and the gate (both no-ops when nothing changed).
+    let hint = placeholder(view);
+    view.tools.editor.update(cx, |editor, cx| {
+        editor.set_enabled(control.enabled, cx);
+        editor.set_placeholder(hint, cx);
+    });
+    // The text itself, wrapping at the card's width: one line to MAX_LINES, then it scrolls
+    // (the editor's own height and scroll); the type and the ink come from here.
     let text_area = div()
         .id("composer-text")
         .flex_1()
         .min_w(px(0.0))
         .py(px(TEXT_PAD_VERTICAL))
-        .min_h(px(text_height(1) + 2.0 * TEXT_PAD_VERTICAL))
-        .max_h(px(text_height(MAX_LINES) + 2.0 * TEXT_PAD_VERTICAL))
-        .overflow_y_scroll()
-        .track_scroll(&view.tools.scroll)
         .kit_type(TypeRole::Body)
         .line_height(px(LINE_HEIGHT))
-        .ink(if empty { Ink::TextFaint } else { Ink::Text }, a)
-        .when(!control.enabled, |t| t.opacity(0.5))
-        .child(if text.is_empty() {
-            placeholder(view).to_owned()
-        } else {
-            text.clone()
-        });
+        .ink(Ink::Text, a)
+        .child(view.tools.editor.clone());
+    let accent_edge = hsla(Ink::Accent.color(a));
     let card = div()
         .id("composer")
         .mx(px(SIDE_PADDING))
@@ -311,32 +293,23 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(text_area)
         .child(send_disc(control.enabled, empty, a, cx))
         .when(control.enabled, |c| {
-            c.track_focus(&view.tools.focus)
-                .cursor_text()
+            // A click anywhere on the card puts the caret in the box; keys are the editor's.
+            c.cursor_text()
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.focus(&this.tools.focus);
                     cx.notify();
                 }))
-                .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                    let k = &event.keystroke;
-                    let modified = k.modifiers.platform || k.modifiers.control;
-                    let Some(id) = this.selected.clone() else {
-                        return;
-                    };
-                    let draft = this.tools.drafts.entry(id).or_default();
-                    match return_key(&k.key, k.modifiers.shift, k.modifiers.alt) {
-                        Some(ReturnKey::Newline) if !modified => draft.push('\n'),
-                        Some(ReturnKey::Send) if !modified => this.send_text(cx),
-                        _ => match type_key(draft, &k.key, k.key_char.as_deref(), modified) {
-                            Typed::Submit => this.send_text(cx),
-                            Typed::Changed => {}
-                            Typed::Ignored => return,
-                        },
-                    }
-                    // Past the last line the box scrolls, and what was just typed stays in view.
-                    this.tools.scroll.scroll_to_bottom();
-                    cx.stop_propagation();
-                    cx.notify();
+                // Files from Finder: an accent edge while over the card, the paths at the caret
+                // on the drop, and the caret back in the box.
+                .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent_edge))
+                .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                    this.tools.editor.update(cx, |editor, cx| {
+                        let mut edit = editor.edit().clone();
+                        if drops::insert_paths(&mut edit, paths.paths()) {
+                            editor.set_edit(edit, cx);
+                        }
+                        editor.focus(window);
+                    });
                 }))
         });
     let stop = view.selected_working().then(|| {
@@ -378,23 +351,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn text_grows_one_line_to_eight_then_stops() {
-        assert_eq!(text_height(0), LINE_HEIGHT);
-        assert_eq!(text_height(1), LINE_HEIGHT);
-        assert_eq!(text_height(3), 3.0 * LINE_HEIGHT);
-        assert_eq!(text_height(8), 8.0 * LINE_HEIGHT);
-        assert_eq!(text_height(9), 8.0 * LINE_HEIGHT);
-        assert_eq!(text_height(100), text_height(MAX_LINES));
-    }
-
-    #[test]
-    fn return_sends_and_shift_or_option_return_adds_a_line() {
-        assert_eq!(return_key("enter", false, false), Some(ReturnKey::Send));
-        assert_eq!(return_key("enter", true, false), Some(ReturnKey::Newline));
-        assert_eq!(return_key("enter", false, true), Some(ReturnKey::Newline));
-        assert_eq!(return_key("enter", true, true), Some(ReturnKey::Newline));
-        assert_eq!(return_key("a", true, false), None);
-        assert_eq!(return_key("backspace", false, false), None);
+    fn the_box_grows_to_eight_lines_of_body_text() {
+        assert_eq!(MAX_LINES, 8);
+        assert_eq!(LINE_HEIGHT, 16.0);
     }
 
     #[test]
