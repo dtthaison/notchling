@@ -258,7 +258,7 @@ fn cells(row: &str) -> Vec<String> {
 }
 
 /// The text's spans: `**bold**`, `*italics*` or `_italics_`, `` `code` ``, `~~struck~~`, and
-/// `[text](url)` links. A marker with no closing twin is kept as written. Adjacent spans in the
+/// `[text](url)` links, and bare `http(s)://` URLs. A marker with no closing twin is kept as written. Adjacent spans in the
 /// same style are one span.
 pub fn spans(text: &str) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new();
@@ -327,6 +327,21 @@ pub fn spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
+        // A bare http(s) URL starting a word is a link to itself.
+        let word_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if word_start && (rest.starts_with("https://") || rest.starts_with("http://")) {
+            if let Some(len) = bare_url(rest) {
+                push(&mut out, &mut current);
+                out.push(Span {
+                    text: rest[..len].to_owned(),
+                    link: Some(rest[..len].to_owned()),
+                    ..styled(bold, italic, strike)
+                });
+                current = styled(bold, italic, strike);
+                i += len;
+                continue;
+            }
+        }
         // Bold (`**` or `__`) and strikethrough (`~~`): opening needs a closing twin after it
         // (so the twin, when reached, closes).
         let double = [("**", true), ("__", true), ("~~", false)]
@@ -372,6 +387,29 @@ pub fn spans(text: &str) -> Vec<Span> {
     // Styles left open had no closing twin after all: their text stays, as written.
     push(&mut out, &mut current);
     out
+}
+
+/// How many bytes of `rest` (which starts with `http://` or `https://`) are the URL: up to the
+/// first space or `<>"`, less trailing sentence punctuation and a `)` that closes nothing in it.
+/// None when nothing follows the scheme.
+fn bare_url(rest: &str) -> Option<usize> {
+    let scheme = if rest.starts_with("https://") { 8 } else { 7 };
+    let mut end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`'))
+        .unwrap_or(rest.len());
+    loop {
+        let url = &rest[..end];
+        let Some(last) = url.chars().last() else {
+            break;
+        };
+        let unbalanced = last == ')' && url.matches(')').count() > url.matches('(').count();
+        if matches!(last, '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '*' | '_') || unbalanced {
+            end -= last.len_utf8();
+        } else {
+            break;
+        }
+    }
+    (end > scheme).then_some(end)
 }
 
 /// `[label](url)` at the start of `rest`: the label, the url, how many bytes it took.
@@ -645,5 +683,35 @@ mod tests {
                 plain(" ∿")
             ]
         );
+    }
+
+    #[test]
+    fn bare_urls_are_links_without_trailing_punctuation() {
+        let link = |text: &str| Span {
+            text: text.into(),
+            link: Some(text.into()),
+            ..Span::default()
+        };
+        assert_eq!(
+            spans("I published it: https://claude.ai/artifact/NWGv2pj2FF19bJjRwERhni"),
+            [
+                plain("I published it: "),
+                link("https://claude.ai/artifact/NWGv2pj2FF19bJjRwERhni")
+            ]
+        );
+        assert_eq!(
+            spans("See (http://a.b/c_d_e). Done"),
+            [plain("See ("), link("http://a.b/c_d_e"), plain("). Done")]
+        );
+        assert_eq!(
+            spans("https://en.wikipedia.org/wiki/Rust_(language), ok"),
+            [
+                link("https://en.wikipedia.org/wiki/Rust_(language)"),
+                plain(", ok")
+            ]
+        );
+        // Not a word's tail, and `https://` alone isn't a link.
+        assert_eq!(spans("xhttps://a.b"), [plain("xhttps://a.b")]);
+        assert_eq!(spans("https:// x"), [plain("https:// x")]);
     }
 }
