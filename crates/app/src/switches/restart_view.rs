@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, AnyView, Context, Render, Window};
+use gpui::{div, prelude::*, px, size, AnyView, Context, Render, Window};
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, label, window_appearance, KitStyled};
@@ -13,8 +13,21 @@ use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::restart::{turn_back_on, Area, Restart, RestartNotice, Said, TurnOn, NOTICE_BUTTON};
 
-/// The notice window's size in points.
-pub const NOTICE_SIZE: (f32, f32) = (460.0, 300.0);
+/// The notice window's size in points: the heading, one note and the buttons.
+pub const NOTICE_SIZE: (f32, f32) = (460.0, 168.0);
+/// The confirmation's: a title, a line per switch and the closing line, then the buttons.
+pub const CONFIRM_SIZE: (f32, f32) = (460.0, 300.0);
+/// What a failed Turn Back On adds under the notice: one line of `note`.
+const NOTE_HEIGHT: f32 = 28.0;
+
+/// The window's size for what it shows, so the buttons sit right under the text.
+pub fn window_size(confirming: bool, has_note: bool) -> (f32, f32) {
+    match (confirming, has_note) {
+        (true, _) => CONFIRM_SIZE,
+        (false, true) => (NOTICE_SIZE.0, NOTICE_SIZE.1 + NOTE_HEIGHT),
+        (false, false) => NOTICE_SIZE,
+    }
+}
 
 pub struct RestartNoticeView {
     notice: Arc<RestartNotice>,
@@ -54,15 +67,26 @@ impl RestartNoticeView {
         self.notice.state()
     }
 
-    fn ask(&mut self, cx: &mut Context<Self>) {
+    /// Resizes the window to what it now shows (a render's window is fixed by the harness).
+    fn fit(&self, window: &mut Window) {
+        if self.turn_on.is_none() {
+            return;
+        }
+        let (w, h) = window_size(self.confirming, self.note.is_some());
+        window.resize(size(px(w), px(h)));
+    }
+
+    fn ask(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.confirming = true;
         self.note = None;
+        self.fit(window);
         cx.notify();
     }
 
-    fn not_now(&mut self, cx: &mut Context<Self>) {
+    fn not_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.confirming {
             self.confirming = false;
+            self.fit(window);
         } else {
             self.notice.dismiss();
         }
@@ -70,7 +94,7 @@ impl RestartNoticeView {
     }
 
     /// The person confirmed: exactly the switches the confirmation named, each through its op.
-    fn confirmed(&mut self, cx: &mut Context<Self>) {
+    fn confirmed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(turn_on), Some(confirm)) = (self.turn_on.clone(), self.state().confirm()) else {
             return;
         };
@@ -78,15 +102,16 @@ impl RestartNoticeView {
             return;
         }
         self.busy = true;
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let failed = cx
                 .background_executor()
                 .spawn(async move { turn_back_on(&confirm.areas, turn_on.as_ref()) })
                 .await;
-            this.update(cx, |view, cx| {
+            this.update_in(cx, |view, window, cx| {
                 view.busy = false;
                 view.confirming = false;
                 view.note = (!failed.is_empty()).then(|| failed.join(" "));
+                view.fit(window);
                 cx.notify();
             })
             .ok();
@@ -119,13 +144,13 @@ impl Render for RestartNoticeView {
         let cancel_word = if self.confirming { "Cancel" } else { "Not Now" };
         let cancel = button("restart-not-now", cancel_word, ButtonKind::Ghost, rest, a)
             .when(!self.busy, |b| {
-                b.on_click(cx.listener(|this, _, _, cx| this.not_now(cx)))
+                b.on_click(cx.listener(|this, _, window, cx| this.not_now(window, cx)))
             });
         let body = match (self.confirming, state.confirm(), state.banner()) {
             (true, Some(confirm), _) => {
                 let ok = button("restart-confirm", confirm.ok, ButtonKind::Primary, rest, a)
                     .when(!self.busy, |b| {
-                        b.on_click(cx.listener(|this, _, _, cx| this.confirmed(cx)))
+                        b.on_click(cx.listener(|this, _, window, cx| this.confirmed(window, cx)))
                     });
                 div()
                     .flex_1()
@@ -158,7 +183,7 @@ impl Render for RestartNoticeView {
                     a,
                 )
                 .when(!self.busy, |b| {
-                    b.on_click(cx.listener(|this, _, _, cx| this.ask(cx)))
+                    b.on_click(cx.listener(|this, _, window, cx| this.ask(window, cx)))
                 });
                 div()
                     .flex_1()
@@ -221,4 +246,24 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
         cx.new(|_| RestartNoticeView::fixed(&areas, confirming))
             .into(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_variant_has_its_own_window_height() {
+        let notice = window_size(false, false);
+        let confirm = window_size(true, false);
+        assert_eq!((notice, confirm), (NOTICE_SIZE, CONFIRM_SIZE));
+        assert!(
+            notice.1 < confirm.1,
+            "the notice is not the confirmation's height"
+        );
+        // a failure line under the notice makes room for itself; the confirmation is unchanged
+        assert!(window_size(false, true).1 > notice.1);
+        assert_eq!(window_size(true, true), confirm);
+        assert_eq!(notice.0, confirm.0);
+    }
 }

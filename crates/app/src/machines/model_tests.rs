@@ -214,6 +214,33 @@ pub(super) fn fix_sheet(model: &MachinesModel) -> &super::pieces::FixPrompt {
 }
 
 #[test]
+fn an_off_tool_blocks_every_control_that_runs_something_and_says_why() {
+    let mut model = off_world(vec![mac("m1")]).model;
+    assert!(!model.can_act());
+    assert_eq!(model.off_reason(), Some(OFF));
+    // Add machine… is blocked by the tool being off, with the same reason
+    assert!(model.can_add());
+    assert_eq!(model.add_block().as_deref(), Some(OFF));
+
+    // handed over: everything is live
+    model.parts.off = None;
+    assert!(model.can_act());
+    assert_eq!(model.off_reason(), None);
+    assert_eq!(model.add_block(), None);
+}
+
+#[test]
+fn an_unreadable_registry_names_itself_before_the_tool_being_off() {
+    let w = off_world(vec![mac("m1")]);
+    *lock(&w.registry.unreadable) = Some("not JSON".into());
+    let mut model = w.model;
+    model.reload();
+    assert!(model.add_block().unwrap().contains("not JSON"));
+    model.parts.off = None;
+    assert!(model.add_block().unwrap().contains("not JSON"));
+}
+
+#[test]
 fn a_missing_file_lists_nothing_and_allows_add_an_unreadable_one_does_not() {
     let w = off_world(vec![]);
     assert!(w.model.machines.is_empty() && w.model.can_add());

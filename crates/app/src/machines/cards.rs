@@ -37,6 +37,24 @@ fn state(busy: bool) -> PartState {
     }
 }
 
+/// The state of a control that runs something: disabled while a Fix is in flight (`busy`) or the
+/// tool is off.
+fn acting_state(busy: bool, off: Option<&str>) -> PartState {
+    state(busy || off.is_some())
+}
+
+/// Puts the tool-off reason on a control as its tooltip; a live control is left as it is.
+fn off_tip(
+    element: gpui::Stateful<Div>,
+    off: Option<&'static str>,
+    a: Appearance,
+) -> gpui::Stateful<Div> {
+    match off {
+        Some(why) => gate::tip_text(element, SharedString::from(why), a),
+        None => element,
+    }
+}
+
 impl MachinesView {
     pub(super) fn machine_card(
         &self,
@@ -140,30 +158,34 @@ impl MachinesView {
             cx.notify();
         });
         let (for_check, for_all, for_remove) = (name.clone(), name.clone(), name);
+        let off = self.model.off_reason();
+        let live = !busy && off.is_none();
         let check = button(
             SharedString::from(format!("check-{}", machine.name)),
             "Check",
             ButtonKind::Secondary,
-            state(busy),
+            acting_state(busy, off),
             a,
         )
-        .when(!busy, |b| {
+        .when(live, |b| {
             b.on_click(cx.listener(move |this, _, _, cx| this.check(&for_check, cx)))
         });
+        let check = off_tip(check, off, a);
         let all = button(
             SharedString::from(format!("set-up-all-{}", machine.name)),
             "Set up all",
             ButtonKind::Primary,
-            state(busy),
+            acting_state(busy, off),
             a,
         )
-        .when(!busy, |b| {
+        .when(live, |b| {
             b.on_click(cx.listener(move |this, _, window, cx| {
                 this.model.request_set_up_all(&for_all);
                 window.focus(&this.focus);
                 cx.notify();
             }))
         });
+        let all = off_tip(all, off, a);
         let remove = button(
             SharedString::from(format!("remove-{}", machine.name)),
             "Remove…",
@@ -316,6 +338,8 @@ impl MachinesView {
         cx: &mut Context<Self>,
     ) -> Vec<gpui::Stateful<Div>> {
         let mut actions = Vec::new();
+        let off = self.model.off_reason();
+        let live = !busy && off.is_none();
         let failed = result.is_some_and(|r| r.state.is_fail());
         let (name, id) = (machine.name.clone(), step.id.clone());
         // Replace key: only on a click, and only while the key is ✓ or GitHub has no record of it
@@ -325,10 +349,10 @@ impl MachinesView {
                 SharedString::from(format!("replace-{}-{}", machine.name, step.id.raw())),
                 "Replace key…",
                 ButtonKind::Ghost,
-                state(busy),
+                acting_state(busy, off),
                 a,
             )
-            .when(!busy, |b| {
+            .when(live, |b| {
                 b.on_click(cx.listener(move |this, _, window, cx| {
                     this.model.request_replace_key(&i, &n);
                     window.focus(&this.focus);
@@ -337,8 +361,10 @@ impl MachinesView {
             });
             actions.push(gate::tip_text(
                 replace,
-                "Makes a new read-only deploy key, proves it works, then removes the old one"
-                    .into(),
+                off.unwrap_or(
+                    "Makes a new read-only deploy key, proves it works, then removes the old one",
+                )
+                .into(),
                 a,
             ));
         }
@@ -348,17 +374,17 @@ impl MachinesView {
                     SharedString::from(format!("set-up-{}-{}", machine.name, step.id.raw())),
                     "Set up",
                     ButtonKind::Secondary,
-                    state(busy),
+                    acting_state(busy, off),
                     a,
                 )
-                .when(!busy, |b| {
+                .when(live, |b| {
                     b.on_click(cx.listener(move |this, _, window, cx| {
                         this.model.request_set_up(&id, &name);
                         window.focus(&this.focus);
                         cx.notify();
                     }))
                 });
-                actions.push(set_up);
+                actions.push(off_tip(set_up, off, a));
             }
             StepFix::HowTo(_) if failed => {
                 let open = self.how_to.get(&machine.name) == Some(&step.id);
@@ -400,7 +426,8 @@ impl MachinesView {
         ));
         for row in rows {
             let usage = row.usage.clone();
-            let can_send = row.can_send && !busy;
+            let off = self.model.off_reason();
+            let can_send = row.can_send && !busy && off.is_none();
             let send = button(
                 SharedString::from(format!("send-{}-{}", machine.name, row.id())),
                 "Send again",
@@ -415,6 +442,7 @@ impl MachinesView {
                     cx.notify();
                 }))
             });
+            let send = off_tip(send, off, a);
             let name = row.usage.name.clone();
             let renew = button(
                 SharedString::from(format!("renew-{}-{}", machine.name, row.id())),

@@ -254,6 +254,23 @@ impl MachinesModel {
         !matches!(self.registry, RegistryState::Unreadable(_))
     }
 
+    /// Why nothing can act, while the tool is off (no `--live`): checks, fixes, sends and Add
+    /// would all be refused by the engine's runner, so the controls say so up front.
+    pub fn off_reason(&self) -> Option<&'static str> {
+        self.parts.off
+    }
+
+    /// Whether the controls that run something (Check, Set up, Refresh, Send again, Add) are live.
+    pub fn can_act(&self) -> bool {
+        self.parts.off.is_none()
+    }
+
+    /// Why Add machine… is disabled: the unreadable registry, else the tool being off.
+    pub fn add_block(&self) -> Option<String> {
+        self.unreadable_note()
+            .or_else(|| self.off_reason().map(str::to_owned))
+    }
+
     pub fn unreadable_note(&self) -> Option<String> {
         match &self.registry {
             RegistryState::Unreadable(reason) => Some(unreadable_note(reason)),
