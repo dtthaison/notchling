@@ -85,6 +85,14 @@ pub enum Icon {
     Tokens,
     /// The effort level.
     Gauge,
+    /// The reply box's + (Add menu).
+    Plus,
+    /// The reply box's send: a return arrow.
+    Return,
+    /// Add files or photos.
+    Paperclip,
+    /// Slash commands.
+    SlashBox,
 }
 
 /// Where an icon sits decides its size.
@@ -109,7 +117,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 45] = [
+    pub const ALL: [Icon; 49] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -155,6 +163,10 @@ impl Icon {
         Icon::Turns,
         Icon::Tokens,
         Icon::Gauge,
+        Icon::Plus,
+        Icon::Return,
+        Icon::Paperclip,
+        Icon::SlashBox,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -206,6 +218,10 @@ impl Icon {
             Icon::Turns => "arrow.left.arrow.right",
             Icon::Tokens => "text.word.spacing",
             Icon::Gauge => "gauge",
+            Icon::Plus => "plus",
+            Icon::Return => "return",
+            Icon::Paperclip => "paperclip",
+            Icon::SlashBox => "square.slash",
         }
     }
 
@@ -260,6 +276,10 @@ impl Icon {
             Icon::Turns => "⇄",
             Icon::Tokens => "≣",
             Icon::Gauge => "◔",
+            Icon::Plus => "+",
+            Icon::Return => "↵",
+            Icon::Paperclip => "⌁",
+            Icon::SlashBox => "/",
         }
     }
 
@@ -303,6 +323,10 @@ impl Icon {
             Icon::Turns => "icons/arrow-left-right.svg",
             Icon::Tokens => "icons/text.svg",
             Icon::Gauge => "icons/gauge.svg",
+            Icon::Plus => "icons/plus.svg",
+            Icon::Return => "icons/corner-down-left.svg",
+            Icon::Paperclip => "icons/paperclip.svg",
+            Icon::SlashBox => "icons/square-slash.svg",
             Icon::Resume
             | Icon::Send
             | Icon::Permission
@@ -351,7 +375,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 34] = icons![
+const SVGS: [(&str, &[u8]); 38] = icons![
     "arrow-down",
     "arrow-left-right",
     "brain",
@@ -366,6 +390,7 @@ const SVGS: [(&str, &[u8]); 34] = icons![
     "clock",
     "code-xml",
     "copy",
+    "corner-down-left",
     "cpu",
     "file-plus",
     "file-text",
@@ -377,12 +402,15 @@ const SVGS: [(&str, &[u8]); 34] = icons![
     "list-checks",
     "message-circle-question",
     "octagon-x",
+    "paperclip",
     "pencil",
+    "plus",
     "puzzle",
     "search",
     "send",
     "sparkles",
     "square",
+    "square-slash",
     "square-terminal",
     "text",
     "wrench",
