@@ -8,8 +8,7 @@ use notchling_kit::{Icon, Ink};
 
 use super::answering::badge;
 use super::cards::A;
-use super::layout::CANVAS;
-use super::layout::{NotchState, Size};
+use super::layout::{NotchState, Size, CANVAS_WIDTH};
 use super::perch::{self, PetMode};
 use super::pet::{self, Point, RADIUS};
 use super::view::NotchView;
@@ -93,7 +92,7 @@ impl NotchView {
                 // The screen either side of the camera; a render's canvas stands in for it.
                 let (left, right) = match self.geometry {
                     Some(g) => (g.center_x - g.screen.x, g.screen.max_x() - g.center_x),
-                    None => (CANVAS.w / 2.0, CANVAS.w / 2.0),
+                    None => (CANVAS_WIDTH / 2.0, CANVAS_WIDTH / 2.0),
                 };
                 let edge = perch::edge(left, right, self.model.notch.h);
                 let feet = perch::seat(self.perch, self.model.notch.w, edge);

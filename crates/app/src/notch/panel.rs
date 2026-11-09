@@ -1,9 +1,10 @@
 //! The live notch: a borderless, non-activating panel over the camera housing (`NotchController`,
-//! rebuilt from the GPUI spike's S1). The panel is a transparent canvas as wide as the screen,
-//! changing size only with the display; only the black shape inside it changes. Every 50 ms the
-//! mouse is tested against the shape: outside, the panel ignores the mouse so clicks fall through
-//! to whatever is underneath; inside, it takes them. Every 2 s the sessions are read again, off the
-//! main thread.
+//! rebuilt from the GPUI spike's S1). The panel is a transparent canvas centred on the camera, as
+//! big as the largest shape the notch can take (`layout::canvas_size`; the Swift app's was as wide
+//! as the screen, which under GPUI's Metal drawables cost most of the app's memory), changing size
+//! only with the display; only the black shape inside it changes. Every 50 ms the mouse is tested
+//! against the shape: outside, the panel ignores the mouse so clicks fall through to whatever is
+//! underneath; inside, it takes them. Every 2 s the sessions are read again, off the main thread.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +20,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::layout::{
-    canvas_frame, geometry, hit_test, shape_rect, Geometry, NotchState, Rect, ScreenInfo, CANVAS,
+    canvas_frame, geometry, hit_test, shape_rect, Geometry, NotchState, Rect, ScreenInfo,
 };
 use super::model::NotchModel;
 use super::source::{now_ms, Source};
@@ -65,12 +66,14 @@ pub fn open(
 ) -> Option<WindowHandle<NotchView>> {
     let mtm = MainThreadMarker::new()?;
     let geometry = geometry(&screen_info(mtm)?);
+    let canvas = canvas_frame(&geometry);
     let options = WindowOptions {
         // Placed for real on the first tick: AppKit keeps a new window below the menu bar, and
-        // GPUI sets the frame again after opening.
+        // GPUI sets the frame again after opening. The size is right from the start, so the
+        // drawables are never made at another.
         window_bounds: Some(WindowBounds::Windowed(Bounds {
             origin: point(px(0.0), px(0.0)),
-            size: size(px(CANVAS.w as f32), px(CANVAS.h as f32)),
+            size: size(px(canvas.w as f32), px(canvas.h as f32)),
         })),
         titlebar: None,
         window_background: WindowBackgroundAppearance::Transparent,
