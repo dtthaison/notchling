@@ -10,8 +10,10 @@ use std::time::Duration;
 use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Stateful, Window};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, window_appearance, KitStyled, MONO_FONT};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    button, card, hsla, label, phone_mark, window_appearance, KitStyled, MONO_FONT,
+};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::bridge::{now_ms, Bridge};
 use super::panel::{
@@ -231,16 +233,11 @@ impl PhonePanelView {
             .gap(px(8.0))
             .border_b(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
-            .child(label(
-                Icon::Phone.glyph(),
-                TypeRole::Heading,
-                Ink::TextMuted,
-                a,
-            ))
+            .child(phone_mark(16.0, Ink::TextMuted, a))
             .child(label("Phone", TypeRole::Title, Ink::Text, a))
             .child(div().flex_1())
             .child(dot(status.dot, a))
-            .child(label(&status.word, TypeRole::Meta, Ink::TextMuted, a).truncate())
+            .child(label(&status.word, TypeRole::Meta, Ink::TextMuted, a).elide())
     }
 
     fn switch_section(&self, panel: &Panel, a: Appearance, cx: &mut Context<Self>) -> Div {
@@ -393,12 +390,7 @@ impl PhonePanelView {
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(label(
-                    Icon::Phone.glyph(),
-                    TypeRole::Heading,
-                    Ink::TextMuted,
-                    a,
-                ))
+                .child(phone_mark(16.0, Ink::TextMuted, a))
                 .child(
                     div()
                         .flex_1()
@@ -406,7 +398,7 @@ impl PhonePanelView {
                         .flex()
                         .flex_col()
                         .gap(px(2.0))
-                        .child(label(&row.name, TypeRole::Heading, Ink::Text, a).truncate())
+                        .child(label(&row.name, TypeRole::Heading, Ink::Text, a).elide())
                         .child(label(&row.detail, TypeRole::Meta, Ink::TextMuted, a)),
                 )
                 .child(revoke)

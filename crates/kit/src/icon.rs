@@ -26,6 +26,8 @@ pub enum Icon {
     More,
     /// A saved Artifact page.
     Page,
+    /// The Settings sheet.
+    Settings,
 }
 
 /// Where an icon sits decides its size.
@@ -50,7 +52,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 18] = [
+    pub const ALL: [Icon; 19] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -69,6 +71,7 @@ impl Icon {
         Icon::Check,
         Icon::More,
         Icon::Page,
+        Icon::Settings,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -92,10 +95,14 @@ impl Icon {
             Icon::Check => "checkmark",
             Icon::More => "ellipsis",
             Icon::Page => "doc.richtext",
+            Icon::Settings => "gearshape",
         }
     }
 
-    /// A text stand-in for renderers without SF Symbols.
+    /// A text stand-in for renderers without SF Symbols. Each one was checked drawn by the system
+    /// font at 12 to 17 pt: a glyph the font lacks falls back to a thin or tiny form, so the
+    /// boxier Unicode shapes (▯, ◫, ⚒, ⎘) are avoided. The phone has a drawn mark too
+    /// (`ui::phone_mark`), which views prefer.
     pub fn glyph(self) -> &'static str {
         match self {
             Icon::Needs => "!",
@@ -104,18 +111,19 @@ impl Icon {
             Icon::Terminal => ">_",
             Icon::Resume => "↻",
             Icon::Send => "↑",
-            Icon::Tools => "⚒",
+            Icon::Tools => "✎",
             Icon::Question => "?",
             Icon::Permission => "⛨",
             Icon::Claude => "✦",
             Icon::Search => "⌕",
             Icon::Info => "i",
             Icon::Back => "↩",
-            Icon::Sessions => "◫",
-            Icon::Phone => "▯",
+            Icon::Sessions => "❏",
+            Icon::Phone => "⌷",
             Icon::Check => "✓",
             Icon::More => "…",
-            Icon::Page => "⎘",
+            Icon::Page => "▤",
+            Icon::Settings => "⚙",
         }
     }
 

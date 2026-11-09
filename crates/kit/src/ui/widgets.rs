@@ -60,6 +60,17 @@ pub fn button(
     state: PartState,
     appearance: Appearance,
 ) -> Stateful<Div> {
+    button_with(id, title.to_owned(), kind, state, appearance)
+}
+
+/// A button around any element (a drawn mark such as [`phone_mark`]) instead of a title.
+pub fn button_with(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    kind: ButtonKind,
+    state: PartState,
+    appearance: Appearance,
+) -> Stateful<Div> {
     let element = div()
         .id(id)
         .h(px(CONTROL))
@@ -70,7 +81,7 @@ pub fn button(
         .rounded(px(RADIUS_SM))
         .kit_type(TypeRole::Label)
         .look(&button_look(kind, state, appearance))
-        .child(title.to_owned());
+        .child(content);
     interactive(
         element,
         state,
@@ -144,6 +155,31 @@ pub fn claude_mark(size: f32, appearance: Appearance) -> Div {
         .child(Icon::Claude.glyph())
 }
 
+/// A phone, drawn (`Icon::Phone`, SF `iphone`): a rounded outline `size` tall and a dot for the
+/// home button, in an ink. The text glyphs for a phone come out thin or tiny in the system font.
+pub fn phone_mark(size: f32, ink: Ink, appearance: Appearance) -> Div {
+    let color = hsla(ink.color(appearance));
+    let stroke = (size / 9.0).max(1.0);
+    div()
+        .flex_shrink_0()
+        .relative()
+        .w(px((size * 0.58).round()))
+        .h(px(size))
+        .rounded(px(size * 0.2))
+        .border(px(stroke))
+        .border_color(color)
+        .child(
+            div()
+                .absolute()
+                .bottom(px(stroke * 1.5))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(div().size(px(stroke)).rounded_full().bg(color)),
+        )
+}
+
 /// Spec: Session row. Avatar 30 with a status badge, name, status line, age. Height 52, radius md.
 #[allow(clippy::too_many_arguments)]
 pub fn session_row(
@@ -176,8 +212,8 @@ pub fn session_row(
                 .gap(px(2.0))
                 .overflow_hidden()
                 // One line each, clipped with an ellipsis, so every row keeps the same height.
-                .child(label(name, TypeRole::Heading, Ink::Text, appearance).truncate())
-                .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).truncate()),
+                .child(label(name, TypeRole::Heading, Ink::Text, appearance).elide())
+                .child(label(status_line, TypeRole::Meta, Ink::TextMuted, appearance).elide()),
         )
         .child(label(age, TypeRole::Meta, Ink::TextFaint, appearance));
     interactive(

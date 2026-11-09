@@ -333,7 +333,7 @@ impl NotchView {
                 text(agent.name.clone(), TypeRole::Heading, Ink::Text)
                     .flex_1()
                     .min_w(px(0.0))
-                    .truncate(),
+                    .elide(),
             )
             .child(status_pill(group_status, group_status.word(), A).flex_shrink_0())
             .child(
@@ -382,8 +382,8 @@ impl NotchView {
             .cursor_pointer()
             .hover(|s| s.bg(hsla(Ink::Raised.color(A))))
             .child(first)
-            // One line each, cut at the edge (GPUI 0.2.2 draws no ellipsis here).
-            .children(lines.into_iter().map(|l| l.truncate()))
+            // One line each, cut with an ellipsis at the edge.
+            .children(lines.into_iter().map(|l| l.elide()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.model.open(&id);
                 cx.notify();
@@ -429,7 +429,7 @@ impl NotchView {
                                 text(agent.name.clone(), TypeRole::Heading, Ink::Text)
                                     .flex_1()
                                     .min_w(px(0.0))
-                                    .truncate(),
+                                    .elide(),
                             )
                             .child(tag(&agent.host))
                             .child(text("Open ›", TypeRole::Meta, Ink::TextMuted)),
@@ -527,8 +527,8 @@ impl NotchView {
                     .flex()
                     .flex_col()
                     .gap(px(1.0))
-                    .child(text(agent.name.clone(), TypeRole::Heading, Ink::Text).truncate())
-                    .child(text(sub, TypeRole::Meta, Ink::TextMuted).truncate()),
+                    .child(text(agent.name.clone(), TypeRole::Heading, Ink::Text).elide())
+                    .child(text(sub, TypeRole::Meta, Ink::TextMuted).elide()),
             )
             .child(status_pill(group_status, group_status.word(), A))
             .child(

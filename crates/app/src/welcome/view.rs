@@ -9,7 +9,7 @@ use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Win
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, claude_mark, hsla, label, window_appearance, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
 use super::about::{current, About};
 use super::defaults::{import_into, DefaultsSource};
@@ -174,7 +174,7 @@ impl FirstRunView {
                     body = body.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
                 }
                 if !install_on {
-                    let why = off_message.as_deref().unwrap_or("install is off");
+                    let why = sentence(off_message.as_deref().unwrap_or("install is off"));
                     body = body.child(label(
                         &format!(
                             "{why}. The button below only shows this plan; nothing is written."
@@ -199,7 +199,7 @@ impl FirstRunView {
                 body = body.child(say(head, Ink::Text));
                 body = body.child(mono_lines(changes, a));
                 if let Some(message) = message {
-                    body = body.child(label(message, TypeRole::Meta, Ink::Needs, a));
+                    body = body.child(label(&sentence(message), TypeRole::Meta, Ink::Needs, a));
                 }
                 if let Some(backup) = backup {
                     body = body.child(label(

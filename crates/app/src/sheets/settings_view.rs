@@ -11,7 +11,7 @@ use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, label, window_appearance, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 use serde_json::{Map, Value};
 
 use super::banner::Banners;
@@ -165,7 +165,7 @@ impl Render for SettingsView {
                 let note = match &row.field {
                     Field::ReadOnly {
                         note: Some(note), ..
-                    } => Some(label(note, TypeRole::Meta, Ink::TextFaint, a)),
+                    } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
                     _ => None,
                 };
                 rows = rows.child(
@@ -212,7 +212,7 @@ impl Render for SettingsView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::More, "Settings", done, a))
+            .child(sheet_header(Icon::Settings, "Settings", done, a))
             .child(list)
             .children(self.error.as_deref().map(|e| {
                 label(e, TypeRole::Meta, Ink::Needs, a)
@@ -258,7 +258,14 @@ impl Render for BannersView {
                 .fill(fill, a)
                 .border(px(1.0))
                 .border_color(hsla(Ink::Hairline.color(a)))
-                .child(label(b.icon().glyph(), TypeRole::Label, b.ink(), a))
+                // One width for every icon, so the text starts at the same place in each banner.
+                .child(
+                    label(b.icon().glyph(), TypeRole::Label, b.ink(), a)
+                        .w(px(16.0))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_center(),
+                )
                 .child(
                     div()
                         .flex_1()

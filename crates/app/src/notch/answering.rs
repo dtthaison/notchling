@@ -9,7 +9,7 @@ use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::metric::{CONTROL, OPTION_BADGE, RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, field, hsla, option_row, KitStyled};
-use notchling_kit::{Icon, Ink, TypeRole};
+use notchling_kit::{sentence, Icon, Ink, TypeRole};
 
 use super::answer::{type_key, QuestionDraft, Typed};
 use super::cards::{line, text, A};
@@ -115,9 +115,7 @@ fn header(icon: Icon, title: &str, ink: Ink, step: Option<String>, agent: Option
         .child(text(title.to_owned(), TypeRole::Heading, ink))
         .children(step.map(|s| text(s, TypeRole::Meta, Ink::TextMuted)))
         .child(div().flex_1())
-        .children(
-            agent.map(|name| text(name.to_owned(), TypeRole::Meta, Ink::TextMuted).truncate()),
-        )
+        .children(agent.map(|name| text(name.to_owned(), TypeRole::Meta, Ink::TextMuted).elide()))
 }
 
 impl NotchView {
@@ -129,7 +127,7 @@ impl NotchView {
             Ink::TextMuted
         };
         self.status_text(gate)
-            .map(|t| text(t.to_owned(), TypeRole::Meta, ink))
+            .map(|t| text(sentence(t), TypeRole::Meta, ink))
     }
 
     /// The status line's words, if it shows.
@@ -285,7 +283,7 @@ impl NotchView {
                     .rounded_full()
                     .cursor_pointer()
                     .when(tab.selected, |t| t.fill(Ink::Raised, A))
-                    .child(text(title, TypeRole::Label, ink).truncate())
+                    .child(text(title, TypeRole::Label, ink).elide())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.draft.select_tab(i);
                         cx.notify();

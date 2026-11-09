@@ -74,7 +74,7 @@ fn breakdown(b: &Breakdown, a: Appearance) -> Div {
                         .child(
                             label(&row.name, TypeRole::Body, Ink::Text, a)
                                 .flex_1()
-                                .truncate(),
+                                .elide(),
                         )
                         .child(label(&row.value, TypeRole::Label, Ink::Text, a)),
                 )

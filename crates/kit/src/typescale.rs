@@ -114,9 +114,32 @@ impl TypeRole {
     }
 }
 
+/// A line of user-facing text starting with a capital letter. The daemon's messages start
+/// lowercase ("acting is off: …") so they can follow a colon in a log line; shown on their own in
+/// a view they read as a sentence.
+pub fn sentence(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sentence_capitalizes_only_the_first_letter() {
+        assert_eq!(
+            sentence("acting is off: the Swift app owns sessions"),
+            "Acting is off: the Swift app owns sessions"
+        );
+        assert_eq!(sentence("Already fine"), "Already fine");
+        assert_eq!(sentence("éclair"), "Éclair");
+        assert_eq!(sentence(""), "");
+        assert_eq!(sentence("1 shell"), "1 shell");
+    }
 
     #[test]
     fn sizes_and_weights_follow_the_table() {

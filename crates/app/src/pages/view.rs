@@ -191,7 +191,7 @@ fn page_row(page: &Page, selected: bool, a: Appearance) -> Div {
         .rounded(px(RADIUS_MD))
         .look(&row_look(state, false, a))
         .when(!selected, |r| r.hover(move |s| s.look(&hover)))
-        .child(label(&page.title, TypeRole::Heading, Ink::Text, a).truncate())
+        .child(label(&page.title, TypeRole::Heading, Ink::Text, a).elide())
         .child(
             label(
                 &PagesModel::row_detail(page),
@@ -199,7 +199,7 @@ fn page_row(page: &Page, selected: bool, a: Appearance) -> Div {
                 Ink::TextMuted,
                 a,
             )
-            .truncate(),
+            .elide(),
         )
         .when(!page.account.is_empty(), |r| {
             r.child(
@@ -214,7 +214,7 @@ fn page_row(page: &Page, selected: bool, a: Appearance) -> Div {
                             .rounded_full()
                             .fill(Ink::TextFaint, a),
                     )
-                    .child(label(&page.account, TypeRole::Meta, Ink::TextMuted, a).truncate()),
+                    .child(label(&page.account, TypeRole::Meta, Ink::TextMuted, a).elide()),
             )
         })
 }
@@ -343,7 +343,7 @@ impl PagesView {
                             .flex()
                             .flex_col()
                             .gap(px(2.0))
-                            .child(label(&page.title, TypeRole::Title, Ink::Text, a).truncate())
+                            .child(label(&page.title, TypeRole::Title, Ink::Text, a).elide())
                             .child(
                                 label(
                                     &PagesModel::subtitle(page),
@@ -351,7 +351,7 @@ impl PagesView {
                                     Ink::TextMuted,
                                     a,
                                 )
-                                .truncate(),
+                                .elide(),
                             ),
                     )
                     .child(open)

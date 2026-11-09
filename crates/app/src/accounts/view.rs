@@ -13,7 +13,7 @@ use gpui::{
 };
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::ui::{label, window_appearance, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::{sentence, Appearance, Ink, TypeRole};
 
 use super::cost::Range;
 use super::flows::{
@@ -484,7 +484,7 @@ impl AccountsView {
             .flex_col()
             .gap(px(10.0));
         if let Some(off) = page.off {
-            list = list.child(label(off, TypeRole::Meta, Ink::TextMuted, a));
+            list = list.child(label(&sentence(off), TypeRole::Meta, Ink::TextMuted, a));
         }
         if let Some(empty) = page.empty {
             list = list.child(label(empty, TypeRole::Body, Ink::TextMuted, a).pt(px(20.0)));

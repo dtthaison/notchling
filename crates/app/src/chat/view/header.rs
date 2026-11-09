@@ -3,8 +3,8 @@
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::metric::{AVATAR, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{avatar, button, hsla, label, status_pill, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{avatar, button_with, hsla, label, phone_mark, status_pill, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::accounts;
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
@@ -34,10 +34,15 @@ fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
         ButtonKind::Ghost
     };
     let tip = if on { BUTTON_TIP_ON } else { BUTTON_TIP_OFF };
+    let ink = if view.phone.is_some() {
+        Ink::Text
+    } else {
+        Ink::TextMuted
+    };
     gate::tip(
-        button(
+        button_with(
             "phone-button",
-            Icon::Phone.glyph(),
+            phone_mark(14.0, ink, a),
             kind,
             PartState::Rest,
             a,
@@ -88,13 +93,17 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
-                .child(label(&h.title, TypeRole::Heading, Ink::Text, a).truncate())
+                .child(label(&h.title, TypeRole::Heading, Ink::Text, a).elide())
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .child(label(&subtitle, TypeRole::Meta, Ink::TextMuted, a).truncate())
+                        .child(
+                            label(&subtitle, TypeRole::Meta, Ink::TextMuted, a)
+                                .min_w(px(0.0))
+                                .elide(),
+                        )
                         .children(accounts::account_control(view, a, cx)),
                 ),
         )

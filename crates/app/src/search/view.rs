@@ -285,7 +285,7 @@ impl SearchPanelView {
                             a,
                         )
                         .font_weight(FontWeight::NORMAL)
-                        .truncate(),
+                        .elide(),
                     )
                     // The caret, after the text (the field takes every key while the panel is up).
                     .child(
@@ -373,7 +373,7 @@ impl SearchPanelView {
                     ))
                     .child(label(&text, TypeRole::Meta, Ink::AccentText, a))
             } else {
-                label(&text, TypeRole::Meta, Ink::TextFaint, a).truncate()
+                label(&text, TypeRole::Meta, Ink::TextFaint, a).elide()
             })
             .child(div().flex_1());
         for (key, what) in self.model.hints() {

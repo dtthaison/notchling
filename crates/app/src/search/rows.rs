@@ -104,8 +104,8 @@ pub(super) fn page_row(page: &Page, selected: bool, now_secs: f64, a: Appearance
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
-                .child(label(&page.title, TypeRole::Heading, Ink::Text, a).truncate())
-                .child(label(&subtitle.join(" · "), TypeRole::Meta, Ink::TextMuted, a).truncate()),
+                .child(label(&page.title, TypeRole::Heading, Ink::Text, a).elide())
+                .child(label(&subtitle.join(" · "), TypeRole::Meta, Ink::TextMuted, a).elide()),
         )
         .child(label(
             &age_text(page.updated_secs, now_secs),
@@ -120,7 +120,7 @@ fn session_detail(session: &SessionRow, home: &std::path::Path, a: Appearance) -
     let line = div()
         .kit_type(TypeRole::Meta)
         .ink(Ink::TextMuted, a)
-        .truncate();
+        .elide();
     match &session.snippet {
         Some(snippet) => {
             let bold = HighlightStyle {
@@ -167,9 +167,9 @@ pub(super) fn session_row(
                             label(&session.title, TypeRole::Heading, Ink::Text, a)
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .truncate(),
+                                .elide(),
                         )
-                        .child(label(&place, TypeRole::Meta, Ink::TextMuted, a).truncate())
+                        .child(label(&place, TypeRole::Meta, Ink::TextMuted, a).elide())
                         .child(label(
                             &age_text(session.updated_secs, now_secs),
                             TypeRole::Meta,

@@ -58,7 +58,7 @@ pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
         .child(
             label(&line.label, TypeRole::Meta, Ink::TextMuted, a)
                 .w(px(56.0))
-                .truncate(),
+                .elide(),
         )
         .child(bar(line.percent, line.fill, 6.0, a))
         .child(
@@ -75,7 +75,7 @@ pub fn limit_line(line: &LimitLine, a: Appearance) -> Div {
             )
             .w(px(118.0))
             .text_right()
-            .truncate(),
+            .elide(),
         )
 }
 
@@ -116,7 +116,7 @@ pub fn meter(id: impl Into<ElementId>, m: &Meter, a: Appearance) -> Stateful<Div
         .children(
             m.resets
                 .as_deref()
-                .map(|r| label(r, TypeRole::Meta, Ink::TextFaint, a).truncate()),
+                .map(|r| label(r, TypeRole::Meta, Ink::TextFaint, a).elide()),
         );
     gate::tip_text(element, tip, a)
 }
@@ -251,7 +251,7 @@ pub fn account_row<V: 'static>(
                         .flex()
                         .flex_col()
                         .gap(px(2.0))
-                        .child(label(&row.email, TypeRole::Heading, Ink::Text, a).truncate())
+                        .child(label(&row.email, TypeRole::Heading, Ink::Text, a).elide())
                         .when(!row.subtitle.is_empty(), |c| {
                             c.child(label(&row.subtitle, TypeRole::Meta, Ink::TextMuted, a))
                         }),
