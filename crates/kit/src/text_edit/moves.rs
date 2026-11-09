@@ -37,8 +37,8 @@ pub fn previous(text: &str, index: usize, unit: Unit) -> usize {
             .unwrap_or(0),
         Unit::Word => text
             .split_word_bound_indices()
-            .filter(|(start, word)| *start < index && is_word(word))
-            .last()
+            .rev()
+            .find(|(start, word)| *start < index && is_word(word))
             .map(|(start, _)| start)
             .unwrap_or(0),
         Unit::Line => line_start(text, index),

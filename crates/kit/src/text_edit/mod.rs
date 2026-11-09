@@ -48,6 +48,9 @@ pub struct TextEdit {
     head: usize,
     /// Text the input method is still composing, drawn underlined.
     marked: Option<Range<usize>>,
+    /// What was composing when the owner cleared the box (it sent the text): the input method
+    /// may still commit it afterwards, and that one commit is dropped.
+    stale_composition: Option<String>,
     history: History,
 }
 
@@ -59,6 +62,7 @@ impl TextEdit {
             anchor: text.len(),
             head: text.len(),
             marked: None,
+            stale_composition: None,
             history: History::default(),
         }
     }
@@ -71,9 +75,16 @@ impl TextEdit {
         self.text.is_empty()
     }
 
-    /// Another text altogether (another session's draft): the caret at its end, no history.
+    /// Another text altogether (another session's draft, or nothing after a send): the caret at
+    /// its end, no history. A composition in progress is remembered, so its commit, if the input
+    /// method still sends it, doesn't put the sent words back (see [`TextEdit::replace_text`]).
     pub fn set_text(&mut self, text: &str) {
+        let stale = self
+            .marked
+            .as_ref()
+            .map(|m| self.text[m.clone()].to_owned());
         *self = TextEdit::new(text);
+        self.stale_composition = stale;
     }
 
     pub fn caret(&self) -> usize {
@@ -111,6 +122,11 @@ impl TextEdit {
         self.anchor = state.anchor;
         self.head = state.head;
         self.marked = None;
+    }
+
+    /// `index` on a character boundary, at or before it, inside the text.
+    pub fn snap(&self, index: usize) -> usize {
+        moves::clamp(&self.text, index)
     }
 
     /// Selects from `anchor` to `head` (the caret); both snap to character boundaries. Closes the
@@ -188,6 +204,7 @@ impl TextEdit {
 
     /// Replaces `range` with `text`, records the step in `group`, and puts the caret after it.
     fn splice(&mut self, range: Range<usize>, text: &str, group: Option<Group>) {
+        self.stale_composition = None;
         self.history.record(self.state(), group);
         self.text.replace_range(range.clone(), text);
         let after = range.start + text.len();
@@ -312,8 +329,13 @@ impl TextEdit {
             .unwrap_or_else(|| self.selection())
     }
 
-    /// `insertText`: typed or committed text in `range_utf16` (see [`TextEdit::target`]).
+    /// `insertText`: typed or committed text in `range_utf16` (see [`TextEdit::target`]). The
+    /// commit of a composition the owner already cleared away is dropped, once.
     pub fn replace_text(&mut self, range_utf16: Option<Range<usize>>, text: &str) {
+        let stale = self.stale_composition.take();
+        if range_utf16.is_none() && self.marked.is_none() && stale.as_deref() == Some(text) {
+            return;
+        }
         let range = self.target(range_utf16);
         self.splice(range, text, Some(Group::Typing));
     }

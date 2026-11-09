@@ -381,3 +381,49 @@ fn history_keeps_a_bounded_number_of_steps() {
     }
     assert_eq!(undone, history::LIMIT);
 }
+
+/// The bug the old box had: Return sent and cleared the draft, then the input method committed
+/// the composition it was still holding, and the whole sentence came back. Here the owner's clear
+/// remembers what was composing, and that exact commit, arriving late, is dropped; anything else
+/// typed afterwards gets in.
+#[test]
+fn a_commit_that_lands_after_the_box_was_cleared_is_dropped() {
+    let mut e = edit("xin chào ");
+    e.replace_and_mark(None, "v", Some(1..1));
+    e.replace_and_mark(None, "việt", Some(4..4));
+    assert_eq!(e.text(), "xin chào việt");
+    // Return: the owner sent the text and emptied the box.
+    e.set_text("");
+    assert_eq!(e.marked(), None);
+    // The input method commits what it was composing, late.
+    e.replace_text(None, "việt");
+    assert_eq!(e.text(), "", "the late commit is dropped");
+    // Only once: the next thing typed is real.
+    e.replace_text(None, "việt");
+    assert_eq!(e.text(), "việt");
+    // A clear with no composition going drops nothing.
+    let mut plain = edit("sent");
+    plain.set_text("");
+    plain.replace_text(None, "s");
+    assert_eq!(plain.text(), "s");
+    // A different commit after the clear is kept, and the stale one is forgotten.
+    let mut other = edit("");
+    other.replace_and_mark(None, "ab", Some(2..2));
+    other.set_text("");
+    other.replace_text(None, "x");
+    other.replace_text(None, "ab");
+    assert_eq!(other.text(), "xab");
+    // Composing again after the clear starts fresh.
+    let mut again = edit("");
+    again.replace_and_mark(None, "ab", Some(2..2));
+    again.set_text("");
+    again.replace_and_mark(None, "c", Some(1..1));
+    assert_eq!(again.text(), "c");
+    assert_eq!(again.marked(), Some(0..1));
+    again.replace_text(None, "ab");
+    assert_eq!(
+        again.text(),
+        "ab",
+        "the commit replaces the live composition, as always"
+    );
+}

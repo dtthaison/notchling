@@ -49,11 +49,6 @@ impl History {
         self.open = None;
     }
 
-    /// Everything is forgotten (a new text was set).
-    pub fn clear(&mut self) {
-        *self = History::default();
-    }
-
     /// The state to put back for undo, given the current one (kept for redo).
     pub fn undo(&mut self, current: State) -> Option<State> {
         self.open = None;
