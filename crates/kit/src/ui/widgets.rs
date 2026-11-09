@@ -6,12 +6,13 @@ use gpui::{
     div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Stateful,
 };
 
-use super::icons::icon;
+use super::icons::{icon, icon_in};
+use super::tool_images::tool_image;
 use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::ink::{avatar as avatar_colors, claude_mark_top};
 use crate::metric::{
     AVATAR, BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
-    SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
+    SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
 };
 use crate::part::{
     button_look, field_look, initials, option_look, row_look, ButtonKind, Look, PartState,
@@ -89,6 +90,19 @@ pub fn button_with(
         button_look(kind, PartState::Hover, appearance),
         button_look(kind, PartState::Pressed, appearance),
     )
+}
+
+/// A button that holds an icon of `points` in its kind's text color: close, back, add.
+pub fn icon_button(
+    id: impl Into<ElementId>,
+    glyph: Icon,
+    points: f32,
+    kind: ButtonKind,
+    state: PartState,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    let color = button_look(kind, state, appearance).text;
+    button_with(id, icon_in(glyph, points, color), kind, state, appearance)
 }
 
 /// Spec: Avatar. Initials on the session's own gradient, with an optional status badge ringed in
@@ -237,7 +251,7 @@ fn marked_line(mark: impl IntoElement, indent: f32, text: Div) -> Div {
 }
 
 /// Which tool runs a session, for [`tool_icon`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToolMark {
     Claude,
     Codex,
@@ -254,6 +268,16 @@ impl ToolMark {
         }
     }
 
+    /// The installed apps whose icon stands for the tool, the first found wins (the CLIs have no
+    /// icon of their own): the Swift `SessionTool.bundleIDs`.
+    pub fn bundle_ids(self) -> &'static [&'static str] {
+        match self {
+            ToolMark::Claude => &["com.anthropic.claudefordesktop"],
+            ToolMark::Codex => &["com.openai.codex"],
+            ToolMark::Antigravity => &["com.google.antigravity", "com.google.antigravity-ide"],
+        }
+    }
+
     /// The Swift `SessionTool.symbol`: what it draws when the tool's app isn't installed.
     fn icon(self) -> Icon {
         match self {
@@ -264,10 +288,18 @@ impl ToolMark {
     }
 }
 
-/// Spec: Tool icon (the Swift `ToolIcon`), `size` square: Claude's mark, else the tool's symbol at
-/// three quarters of the box in muted ink, as the Swift app draws it with no app icon to hand.
+/// Spec: Tool icon (the Swift `ToolIcon`), `size` square: the tool's installed app icon, else
+/// Claude's mark, else the tool's symbol at three quarters of the box in muted ink, as the Swift
+/// app draws it with no app icon to hand.
 /// The OpenAI and Google marks are brand artwork and aren't copied here.
 pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
+    // The installed app's own icon when the app has handed it over (`tool_images`).
+    if let Some(image) = tool_image(tool) {
+        return div()
+            .flex_shrink_0()
+            .size(px(size))
+            .child(gpui::img(image).size(px(size)));
+    }
     match tool {
         ToolMark::Claude => claude_mark(size, appearance),
         other => div()
@@ -291,7 +323,7 @@ pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
             appearance,
         ),
         15.0,
-        label(text, TypeRole::Meta, Ink::TextFaint, appearance),
+        label(text, TypeRole::Meta, Ink::TextFaint, appearance).line_height(px(SESSION_LINE_META)),
     )
 }
 
@@ -320,7 +352,7 @@ pub fn session_row_marked(
     let who = marked_line(
         tool,
         TOOL_ICON + 5.0,
-        label(name, TypeRole::Heading, Ink::Text, appearance),
+        label(name, TypeRole::Heading, Ink::Text, appearance).line_height(px(SESSION_LINE_HEADING)),
     );
     let lines = div()
         .flex()
@@ -331,7 +363,11 @@ pub fn session_row_marked(
         .overflow_hidden()
         .child(who)
         .children(account)
-        .child(label(status_line, TypeRole::Meta, status_ink, appearance).elide());
+        .child(
+            label(status_line, TypeRole::Meta, status_ink, appearance)
+                .line_height(px(SESSION_LINE_META))
+                .elide(),
+        );
     session_row_shell(
         id,
         div().h(px(SESSION_ROW_ACCOUNT)),
@@ -391,9 +427,9 @@ pub fn option_row(
 ) -> Stateful<Div> {
     let look = option_look(state, selected, appearance);
     let badge_text = if selected {
-        Icon::Check.glyph().to_owned()
+        icon_in(Icon::Check, 10.0, look.badge_text).into_any_element()
     } else {
-        number.to_string()
+        number.to_string().into_any_element()
     };
     let badge = div()
         .flex_shrink_0()
@@ -450,12 +486,7 @@ pub fn status_pill(status: Status, text: &str, appearance: Appearance) -> Div {
         .rounded_full()
         .bg(hsla(color.with_alpha(0.16)))
         .text_color(hsla(text_color))
-        .child(
-            div()
-                .text_size(px(10.0))
-                .font_weight(FontWeight::MEDIUM)
-                .child(Icon::status(status).glyph()),
-        )
+        .child(icon_in(Icon::status(status), 10.0, text_color))
         .child(div().kit_type(TypeRole::Label).child(text.to_owned()))
 }
 

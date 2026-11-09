@@ -7,14 +7,15 @@
 
 use gpui::{div, prelude::*, px, App, Div, ElementId, FontWeight, Global, Position, Stateful};
 
-use super::widgets::{button_with, label};
+use super::icons::icon;
+use super::widgets::button_with;
 use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::labels::{
     badge_place, button_state, Anchor, Corner, Labels, BADGE_HEIGHT, BADGE_PADDING, BADGE_TEXT,
     OUTLINE_ALPHA, OUTLINE_RADIUS, OUTLINE_WIDTH,
 };
 use crate::part::ButtonKind;
-use crate::{Appearance, Ink, TypeRole};
+use crate::{Appearance, Icon, Ink};
 
 impl Global for Labels {}
 
@@ -52,7 +53,7 @@ pub fn parts_button(id: impl Into<ElementId>, appearance: Appearance, cx: &App) 
     let ink = if on { Ink::Guide } else { Ink::TextMuted };
     button_with(
         id,
-        label("?", TypeRole::Label, ink, appearance),
+        icon(Icon::Unsure, 14.0, ink, appearance),
         ButtonKind::Ghost,
         button_state(on),
         appearance,

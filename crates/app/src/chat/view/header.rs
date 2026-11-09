@@ -5,12 +5,13 @@ use notchling_kit::labels::Corner;
 use notchling_kit::metric::{AVATAR, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    avatar, button_with, hsla, label, phone_mark, status_pill, KitPart, KitStyled,
+    avatar, button_with, hsla, icon_button, label, phone_mark, status_pill, KitPart, KitStyled,
 };
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::accounts;
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
+use super::sidebar::HIDDEN_HEADER_START;
 use super::ChatView;
 use crate::chat::header::header;
 use crate::mac::gate;
@@ -69,6 +70,35 @@ fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
     .part_at("Phone Button", Corner::BottomTrailing, a, cx)
 }
 
+/// The Details button, the Swift header's `sidebar.right`: raised while the panel shows.
+fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
+    let shown = !view.details_hidden;
+    let kind = if shown {
+        ButtonKind::Secondary
+    } else {
+        ButtonKind::Ghost
+    };
+    let tip = if shown {
+        "Hide the session details"
+    } else {
+        "Show the session details: branch, model, tokens, tasks, files changed"
+    };
+    gate::tip_text(
+        icon_button(
+            "details-button",
+            Icon::PanelRight,
+            IconSize::Button.points(),
+            kind,
+            PartState::Rest,
+            a,
+        ),
+        tip.into(),
+        a,
+    )
+    .on_click(cx.listener(|this, _, _, cx| this.toggle_details(cx)))
+    .part_at("Details Button", Corner::BottomTrailing, a, cx)
+}
+
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let bar = div()
         .h(px(56.0))
@@ -78,10 +108,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         .items_center()
         .gap(px(12.0))
         .border_b(px(1.0))
-        .border_color(hsla(Ink::Hairline.color(a)));
+        .border_color(hsla(Ink::Hairline.color(a)))
+        // With the sidebar hidden the traffic lights and its button sit over this row's start.
+        .when(view.sidebar_hidden, |bar| bar.pl(px(HIDDEN_HEADER_START)));
     let Some(session) = view.selected_session() else {
         return bar
             .child(label("No session selected", TypeRole::Meta, Ink::TextMuted, a).flex_1())
+            .child(details_button(view, a, cx))
             .child(phone_button(view, a, cx))
             .part_at("Header", Corner::Bottom, a, cx);
     };
@@ -158,6 +191,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         bar.child(chip(&text, a).part_at("Shells Chip", Corner::Bottom, a, cx))
     })
     .child(status_pill(h.status, &h.status_word, a).part_at("Status Pill", Corner::Top, a, cx))
+    .child(details_button(view, a, cx))
     .child(phone_button(view, a, cx))
     .part_at("Header", Corner::Bottom, a, cx)
 }

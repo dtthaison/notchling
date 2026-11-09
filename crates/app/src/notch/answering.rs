@@ -8,7 +8,7 @@ use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::metric::{CONTROL, OPTION_BADGE, RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, option_row, KitStyled};
+use notchling_kit::ui::{button, field, hsla, icon as kit_icon, option_row, KitStyled};
 use notchling_kit::{sentence, Icon, Ink, TypeRole};
 
 use super::answer::{type_key, QuestionDraft, Typed};
@@ -111,7 +111,7 @@ fn header(icon: Icon, title: &str, ink: Ink, step: Option<String>, agent: Option
         .flex()
         .items_center()
         .gap(px(7.0))
-        .child(text(icon.glyph(), TypeRole::Heading, ink))
+        .child(kit_icon(icon, TypeRole::Heading.spec().size, ink, A))
         .child(text(title.to_owned(), TypeRole::Heading, ink))
         .children(step.map(|s| text(s, TypeRole::Meta, Ink::TextMuted)))
         .child(div().flex_1())
@@ -262,11 +262,8 @@ impl NotchView {
             .items_center()
             .gap(px(4.0))
             .children(self.draft.tabs(q).into_iter().enumerate().map(|(i, tab)| {
-                let title = if tab.answered {
-                    format!("{} {}", Icon::Check.glyph(), tab.title)
-                } else {
-                    tab.title
-                };
+                let answered = tab.answered;
+                let title = tab.title;
                 let ink = if tab.selected {
                     Ink::Text
                 } else if tab.answered {
@@ -280,9 +277,11 @@ impl NotchView {
                     .px(px(10.0))
                     .flex()
                     .items_center()
+                    .gap(px(4.0))
                     .rounded_full()
                     .cursor_pointer()
                     .when(tab.selected, |t| t.fill(Ink::Raised, A))
+                    .when(answered, |t| t.child(kit_icon(Icon::Check, 10.0, ink, A)))
                     .child(text(title, TypeRole::Label, ink).elide())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.draft.select_tab(i);

@@ -6,18 +6,20 @@
 //! What is open is `ChatView::expanded`; the newest group of a working session is always open.
 
 use std::path::Path;
-use std::time::Duration;
 
 use gpui::{
-    div, point, prelude::*, px, relative, Animation, AnimationExt, BoxShadow, Context, Div,
-    FontWeight, SharedString, Stateful,
+    div, point, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, SharedString,
+    Stateful,
 };
 use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::metric::{SPINNER_MINI as MINI, SPINNER_SMALL as SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, button_with, claude_mark, hsla, icon, label, KitPart, KitStyled};
+use notchling_kit::ui::{
+    button, button_with, claude_mark, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::{markdown, opinions, ChatView};
@@ -42,12 +44,13 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
     icon(shape, points, Ink::TextFaint, a)
 }
 
-/// A small spinner: the working icon, breathing.
+/// The mini spinner on a step group or step that is still running (Swift `controlSize(.mini)`).
 fn spinner(key: &str, a: Appearance) -> impl IntoElement {
-    icon(Icon::Working, 11.0, Ink::Working, a).with_animation(
+    kit_spinner(
         SharedString::from(format!("spin-{key}")),
-        Animation::new(Duration::from_millis(1000)).repeat(),
-        |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
+        MINI,
+        Ink::Working,
+        a,
     )
 }
 
@@ -60,7 +63,7 @@ fn activity_row(activity: &Activity, a: Appearance, cx: &Context<ChatView>) -> D
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(spinner("activity", a))
+        .child(kit_spinner("spin-activity", SMALL, Ink::Working, a))
         .child(
             label(&activity.text, TypeRole::Meta, Ink::TextMuted, a)
                 .min_w(px(0.0))

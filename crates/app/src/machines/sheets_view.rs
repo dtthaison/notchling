@@ -7,15 +7,15 @@
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, hsla, label, scrollable, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::ui::{button, card, field, hsla, icon, label, scrollable, KitStyled};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::{
     AddField, AddForm, JobField, JobForm, RepoField, ADD_INTRO, ALL_REPOS_NOTE, HEALTH_PLACEHOLDER,
 };
 use super::model::Sheet;
 use super::pieces::FixPrompt;
-use super::view::{mono_lines, state_mark, text_line, MachinesView};
+use super::view::{busy_line, marked, mono_lines, state_icon, state_mark, text_line, MachinesView};
 
 fn state(enabled: bool) -> PartState {
     if enabled {
@@ -53,9 +53,9 @@ fn checkbox<V: 'static>(
         .items_center()
         .justify_center()
         .when(on_now, |m| {
-            m.child(label(
-                notchling_kit::Icon::Check.glyph(),
-                TypeRole::Meta,
+            m.child(icon(
+                notchling_kit::Icon::Check,
+                TypeRole::Meta.spec().size,
                 Ink::OnAccent,
                 a,
             ))
@@ -136,8 +136,9 @@ impl MachinesView {
                 a,
             ));
         } else if let Some(warning) = prompt.warning() {
-            column = column.child(label(
-                &format!("⚠ {warning}"),
+            column = column.child(marked(
+                Icon::Warning,
+                &warning,
                 TypeRole::Label,
                 Ink::AccentText,
                 a,
@@ -222,13 +223,19 @@ impl MachinesView {
         if let Some(check) = &form.check {
             let mut result = div().flex().flex_col().gap(px(4.0));
             for line in &check.lines {
-                let (glyph, ink) = state_mark(Some(&line.state));
+                let (mark, ink) = state_mark(Some(&line.state));
                 result = result.child(
                     div()
                         .flex()
                         .items_start()
                         .gap(px(8.0))
-                        .child(label(glyph, TypeRole::Body, ink, a))
+                        .child(state_icon(
+                            SharedString::from(format!("add-check-{}", line.title)),
+                            mark,
+                            ink,
+                            TypeRole::Body,
+                            a,
+                        ))
                         .child(label(&line.title, TypeRole::Body, Ink::Text, a))
                         .child(
                             label(line.state.text(), TypeRole::Meta, Ink::TextMuted, a)
@@ -251,9 +258,15 @@ impl MachinesView {
         if let Some(error) = &form.error {
             column = column.child(text_line(error, TypeRole::Meta, Ink::Expired, a));
         }
-        let checking = form
-            .checking
-            .then(|| label("Checking…", TypeRole::Meta, Ink::TextMuted, a));
+        let checking = form.checking.then(|| {
+            busy_line(
+                "add-checking",
+                "Checking…",
+                TypeRole::Meta,
+                Ink::TextMuted,
+                a,
+            )
+        });
         let cancel = button(
             "add-cancel",
             "Cancel",

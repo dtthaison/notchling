@@ -4,7 +4,7 @@
 use gpui::{div, prelude::*, px, Div, SharedString};
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind};
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
-use notchling_kit::ui::{hsla, KitStyled};
+use notchling_kit::ui::{hsla, icon, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 /// The notch is dark in both appearances: it continues the camera housing.
@@ -74,7 +74,7 @@ pub fn needs_box(needs: &str) -> Div {
         .p(px(10.0))
         .rounded(px(RADIUS_MD))
         .bg(hsla(Ink::Needs.color(A).with_alpha(0.15)))
-        .child(text(Icon::Needs.glyph(), TypeRole::Body, Ink::Needs))
+        .child(icon(Icon::Needs, TypeRole::Body.spec().size, Ink::Needs, A))
         .child(
             text(needs.to_owned(), TypeRole::Body, Ink::Text)
                 .flex_1()

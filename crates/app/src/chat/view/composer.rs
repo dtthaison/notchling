@@ -14,11 +14,13 @@ use gpui::{
     div, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING};
+use notchling_kit::metric::{RADIUS_COMPOSER, SEND_DISC, SIDE_PADDING, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
-use notchling_kit::ui::{button_with, hsla, icon, label, KitPart, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    button_with, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
+};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::tools::Picker;
 use super::ChatView;
@@ -210,7 +212,12 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
         Some(Tool::Antigravity) => "Antigravity Options",
         _ => "Codex Model Picker",
     };
-    let title = label(&format!("{title} ▾"), TypeRole::Meta, ink, a);
+    let title = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(label(&title, TypeRole::Meta, ink, a))
+        .child(icon(Icon::ChevronDown, 7.0, ink, a));
     let b = button_with("picker", title, kind, state, a)
         .h(px(20.0))
         .px(px(6.0));
@@ -235,6 +242,7 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
 fn send_disc(
     enabled: bool,
     empty: bool,
+    sending: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
@@ -253,9 +261,12 @@ fn send_disc(
         .flex()
         .items_center()
         .justify_center()
-        .kit_type(TypeRole::Heading)
-        .ink(glyph, a)
-        .child(Icon::Send.glyph())
+        .child(if sending && empty {
+            // A message is going out: the small spinner where the arrow is, as the Swift disc.
+            kit_spinner("send-spin", SPINNER_SMALL, glyph, a)
+        } else {
+            icon(Icon::Send, IconSize::Button.points(), glyph, a)
+        })
         .when(live, |d| {
             d.cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| this.send_text(cx)))
@@ -348,7 +359,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
             spread_radius: px(0.0),
         }])
         .child(text_area)
-        .child(send_disc(control.enabled, empty, a, cx))
+        .child(send_disc(control.enabled, empty, view.tools.sending, a, cx))
         .when(control.enabled, |c| {
             // A click anywhere on the card puts the caret in the box; keys are the editor's.
             c.cursor_text()

@@ -12,11 +12,14 @@ use notchling_engine::machines::step::{CheckResult, SetupStep, StepFix};
 use notchling_engine::machines::steps_repo::offers_replace;
 use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, label, KitStyled};
-use notchling_kit::{Appearance, Ink, TypeRole};
+use notchling_kit::ui::{button, card, icon, label, KitStyled};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::pieces::{LogTail, Tone};
-use super::view::{mono_box, state_mark, text_line, Confirming, MachinesView, CARD_PADDING};
+use super::view::{
+    busy_line, marked, mono_box, state_icon, state_mark, text_line, Confirming, MachinesView,
+    CARD_PADDING,
+};
 use crate::accounts::view_rows::{segmented, Handler};
 use crate::mac::gate;
 
@@ -81,8 +84,9 @@ impl MachinesView {
             a,
         ));
         if machine.admin() == AdminAccess::RootSsh {
-            body = body.child(label(
-                &format!("⚠ Admin steps run as root over SSH on {}.", machine.host),
+            body = body.child(marked(
+                Icon::Warning,
+                &format!("Admin steps run as root over SSH on {}.", machine.host),
                 TypeRole::Label,
                 Ink::AccentText,
                 a,
@@ -106,7 +110,8 @@ impl MachinesView {
                 .into_iter()
                 .find(|s| s.id == id)
                 .map_or(id.raw().to_owned(), |s| s.title);
-            body = body.child(label(
+            body = body.child(busy_line(
+                SharedString::from(format!("running-{}", machine.name)),
                 &format!("Running {title}…"),
                 TypeRole::Label,
                 Ink::TextMuted,
@@ -114,19 +119,14 @@ impl MachinesView {
             ));
         }
         if let Some(line) = self.model.outcomes.get(&machine.name).filter(|_| !busy) {
-            let (glyph, ink) = if line.ok {
-                ("✓", Ink::Done)
+            let (mark, ink) = if line.ok {
+                (Icon::Done, Ink::Done)
             } else if line.guidance {
-                ("ⓘ", Ink::AccentText)
+                (Icon::Info, Ink::AccentText)
             } else {
-                ("✗", Ink::Expired)
+                (Icon::Fail, Ink::Expired)
             };
-            body = body.child(text_line(
-                &format!("{glyph} {}", line.text),
-                TypeRole::Label,
-                ink,
-                a,
-            ));
+            body = body.child(marked(mark, &line.text, TypeRole::Label, ink, a));
         }
         body.children(self.log(machine, a, cx))
     }
@@ -269,7 +269,7 @@ impl MachinesView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        let (glyph, ink) = state_mark(result.map(|r| &r.state));
+        let (mark, ink) = state_mark(result.map(|r| &r.state));
         let text = result.map_or("checking…".to_owned(), |r| r.state.text().to_owned());
         let mut column = div().flex().flex_col().gap(px(4.0)).child(
             div()
@@ -277,9 +277,15 @@ impl MachinesView {
                 .items_start()
                 .gap(px(8.0))
                 .child(
-                    label(glyph, TypeRole::Body, ink, a)
-                        .w(px(16.0))
-                        .flex_shrink_0(),
+                    state_icon(
+                        SharedString::from(format!("check-{}-{}", machine.name, step.title)),
+                        mark,
+                        ink,
+                        TypeRole::Body,
+                        a,
+                    )
+                    .w(px(16.0))
+                    .flex_shrink_0(),
                 )
                 .child(label(&step.title, TypeRole::Body, Ink::Text, a).flex_shrink_0())
                 .child(
@@ -297,9 +303,9 @@ impl MachinesView {
                         .pl(px(26.0))
                         .flex()
                         .gap(px(6.0))
-                        .child(label(
-                            if row.ok { "✓" } else { "✗" },
-                            TypeRole::Meta,
+                        .child(icon(
+                            if row.ok { Icon::Check } else { Icon::Close },
+                            TypeRole::Meta.spec().size,
                             if row.ok { Ink::Done } else { Ink::Expired },
                             a,
                         ))
@@ -487,9 +493,13 @@ impl MachinesView {
             .items_center()
             .gap(px(6.0))
             .cursor_pointer()
-            .child(label(
-                if open { "▾" } else { "▸" },
-                TypeRole::Meta,
+            .child(icon(
+                if open {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                },
+                TypeRole::Meta.spec().size,
                 Ink::TextMuted,
                 a,
             ))

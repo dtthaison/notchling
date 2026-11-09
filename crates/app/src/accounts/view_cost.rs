@@ -2,9 +2,9 @@
 //! bars and the breakdowns, drawn from the pure [`CostView`].
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
-use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
-use notchling_kit::ui::{card, hsla, label, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING, SPINNER_SMALL as SMALL};
+use notchling_kit::ui::{card, hsla, label, spinner as kit_spinner, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::cost::{Breakdown, CostView, Range, Tile, READING};
 use super::view_rows::{segmented, Handler};
@@ -163,9 +163,9 @@ pub fn cost_page<V: 'static>(
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(label(
-                    Icon::Working.glyph(),
-                    TypeRole::Heading,
+                .child(kit_spinner(
+                    "working-view_cost.rs-1",
+                    SMALL,
                     Ink::Working,
                     a,
                 ))

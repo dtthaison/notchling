@@ -10,8 +10,10 @@ use gpui::{
 use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, hsla, label, scrollable, window_appearance, KitStyled};
-use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitStyled,
+};
+use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::{Map, Value};
 
 use super::banner::Banners;
@@ -96,15 +98,27 @@ impl SettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .child(
-                        button(id("down"), "−", ButtonKind::Secondary, PartState::Rest, a)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.apply(&down, "-1", cx)),
-                            ),
+                        icon_button(
+                            id("down"),
+                            Icon::Minus,
+                            IconSize::Button.points(),
+                            ButtonKind::Secondary,
+                            PartState::Rest,
+                            a,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.apply(&down, "-1", cx))),
                     )
                     .child(label(&format!("{value}%"), TypeRole::Label, Ink::Text, a))
                     .child(
-                        button(id("up"), "+", ButtonKind::Secondary, PartState::Rest, a)
-                            .on_click(cx.listener(move |this, _, _, cx| this.apply(&up, "+1", cx))),
+                        icon_button(
+                            id("up"),
+                            Icon::Plus,
+                            IconSize::Button.points(),
+                            ButtonKind::Secondary,
+                            PartState::Rest,
+                            a,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.apply(&up, "+1", cx))),
                     )
             }
             Field::ReadOnly { value, .. } => div()
@@ -231,9 +245,10 @@ impl Render for BannersView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         let rows = self.banners.all().iter().enumerate().map(|(i, b)| {
-            let dismiss = button(
+            let dismiss = icon_button(
                 SharedString::from(format!("banner-dismiss-{i}")),
-                "×",
+                Icon::Close,
+                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,
@@ -260,7 +275,7 @@ impl Render for BannersView {
                 .border_color(hsla(Ink::Hairline.color(a)))
                 // One width for every icon, so the text starts at the same place in each banner.
                 .child(
-                    label(b.icon().glyph(), TypeRole::Label, b.ink(), a)
+                    icon(b.icon(), TypeRole::Label.spec().size, b.ink(), a)
                         .w(px(16.0))
                         .flex_shrink_0()
                         .flex()

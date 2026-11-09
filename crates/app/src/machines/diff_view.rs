@@ -2,9 +2,9 @@
 //! it, colored by line, fetched from the machine once the sheet opens.
 
 use gpui::{div, prelude::*, px, Context, Div};
-use notchling_kit::metric::RADIUS_CARD;
+use notchling_kit::metric::{RADIUS_CARD, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, label, scrollable};
+use notchling_kit::ui::{button, card, label, scrollable, spinner};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::view::MachinesView;
@@ -32,12 +32,19 @@ impl MachinesView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(label(
-                    "Fetching the branch…",
-                    TypeRole::Body,
-                    Ink::TextMuted,
-                    a,
-                ))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(spinner("diff-fetching", SPINNER_SMALL, Ink::Working, a))
+                        .child(label(
+                            "Fetching the branch…",
+                            TypeRole::Body,
+                            Ink::TextMuted,
+                            a,
+                        )),
+                )
                 .into_any_element(),
             Some(text) => {
                 let mut lines = div()

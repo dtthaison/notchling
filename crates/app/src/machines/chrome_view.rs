@@ -8,12 +8,12 @@ use std::rc::Rc;
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, KitStyled};
+use notchling_kit::ui::{button, hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::forms::AddForm;
 use super::model::{Sheet, Tab};
-use super::view::MachinesView;
+use super::view::{marked, MachinesView};
 use crate::accounts::view_rows::{segmented, Handler};
 use crate::mac::gate;
 
@@ -91,7 +91,7 @@ impl MachinesView {
     /// A banner: an icon, plain text (it may carry a reason that came from a file or a machine),
     /// and a button on the right.
     pub(super) fn banner(
-        icon: &str,
+        mark: Icon,
         message: &str,
         tint: Ink,
         trailing: Option<gpui::Stateful<Div>>,
@@ -107,7 +107,7 @@ impl MachinesView {
             .fill(Ink::AccentWash, a)
             .border(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
-            .child(label(icon, TypeRole::Body, tint, a))
+            .child(icon(mark, TypeRole::Body.spec().size, tint, a))
             .child(
                 label(message, TypeRole::Body, Ink::Text, a)
                     .flex_1()
@@ -128,7 +128,13 @@ impl MachinesView {
             )
             .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
             column = column
-                .child(Self::banner("⚠", &note, Ink::Expired, Some(again), a))
+                .child(Self::banner(
+                    Icon::Warning,
+                    &note,
+                    Ink::Expired,
+                    Some(again),
+                    a,
+                ))
                 .child(label(
                     &self.model.registry_path(),
                     TypeRole::Mono,
@@ -148,7 +154,13 @@ impl MachinesView {
                 this.model.dismiss_migration_note();
                 cx.notify();
             }));
-            column = column.child(Self::banner("↻", note, Ink::AccentText, Some(dismiss), a));
+            column = column.child(Self::banner(
+                Icon::Resume,
+                note,
+                Ink::AccentText,
+                Some(dismiss),
+                a,
+            ));
         }
         if let Some(rename) = self.model.rename_banner() {
             let go = button(
@@ -163,7 +175,7 @@ impl MachinesView {
                 cx.notify();
             }));
             column = column.child(Self::banner(
-                Icon::Permission.glyph(),
+                Icon::Permission,
                 &rename,
                 Ink::AccentText,
                 Some(go),
@@ -200,7 +212,7 @@ impl MachinesView {
                 }))
             });
             column = column.child(Self::banner(
-                "↑",
+                Icon::Send,
                 &format!("{} has a new value.", offer.secret),
                 Ink::AccentText,
                 Some(update),
@@ -211,16 +223,18 @@ impl MachinesView {
             }
         }
         if let Some(problem) = &self.model.registry_problem {
-            column = column.child(label(
-                &format!("⚠ {problem}"),
+            column = column.child(marked(
+                Icon::Warning,
+                problem,
                 TypeRole::Label,
                 Ink::Expired,
                 a,
             ));
         }
         if self.model.engine().save_refused() {
-            column = column.child(label(
-                "⚠ What the checks found was not saved: machines.json can't be written.",
+            column = column.child(marked(
+                Icon::Warning,
+                "What the checks found was not saved: machines.json can't be written.",
                 TypeRole::Label,
                 Ink::TextMuted,
                 a,
