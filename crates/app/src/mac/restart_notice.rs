@@ -12,7 +12,7 @@ use gpui::{
 };
 
 use crate::switches::restart::{RestartNotice, TurnOn};
-use crate::switches::restart_view::{RestartNoticeView, NOTICE_SIZE};
+use crate::switches::restart_view::{window_size, RestartNoticeView};
 
 /// How often the notice is looked at.
 const TICK: Duration = Duration::from_secs(1);
@@ -60,7 +60,8 @@ fn sync(
             }
         },
         (None, true) => {
-            let bounds = Bounds::centered(None, size(px(NOTICE_SIZE.0), px(NOTICE_SIZE.1)), cx);
+            let (w, h) = window_size(false, false);
+            let bounds = Bounds::centered(None, size(px(w), px(h)), cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: None,

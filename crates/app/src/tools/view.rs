@@ -198,7 +198,8 @@ fn pill(
     } else {
         ButtonKind::Ghost
     };
-    button(id.into(), title, kind, PartState::Rest, a)
+    // 8 pt a side (the 4 pt grid) instead of the button's 12, so a row of four efforts fits
+    button(id.into(), title, kind, PartState::Rest, a).px(px(8.0))
 }
 
 /// The Codex model picker (`CodexModelPicker`): Codex's models, each with its efforts, and

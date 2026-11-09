@@ -103,13 +103,13 @@ pub const NOTICE_BUTTON: &str = "Turn Back On";
 pub const VIEWS: [crate::views::ViewSpec; 2] = [
     crate::views::ViewSpec {
         name: "restart-notice",
-        size: (460.0, 300.0),
+        size: super::restart_view::NOTICE_SIZE,
         about:
             "the notice after a daemon restart: Sessions, Logins and Vault were on (made-up state)",
     },
     crate::views::ViewSpec {
         name: "restart-notice-confirm",
-        size: (460.0, 300.0),
+        size: super::restart_view::CONFIRM_SIZE,
         about: "the restart notice's one confirmation, naming each switch (made-up state)",
     },
 ];

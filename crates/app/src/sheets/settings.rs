@@ -186,7 +186,7 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Sec
         },
         Section {
             title: "Codex",
-            rows: vec![toggle(read, "codexNetwork", "Allow Network in Codex Turns")],
+            rows: vec![toggle(read, "codexNetwork", "Allow network in Codex turns")],
             footer: None,
         },
     ]

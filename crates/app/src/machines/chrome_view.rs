@@ -33,28 +33,36 @@ impl MachinesView {
             };
             cx.notify();
         });
+        let can_act = self.model.can_act();
         let refresh = button(
             "refresh",
             "Refresh",
             ButtonKind::Secondary,
-            PartState::Rest,
+            if can_act {
+                PartState::Rest
+            } else {
+                PartState::Disabled
+            },
             a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
-        let can_add = self.model.can_add();
+        );
+        let refresh = match self.model.off_reason() {
+            Some(off) => gate::tip_text(refresh, SharedString::from(off), a),
+            None => refresh.on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx))),
+        };
+        let add_block = self.model.add_block();
         let add = button(
             "add-machine",
             "Add machine…",
             ButtonKind::Primary,
             gate::state(crate::acting::Control {
-                enabled: can_add,
+                enabled: add_block.is_none(),
                 tooltip: None,
             }),
             a,
         );
-        let add = match self.model.unreadable_note() {
-            Some(note) if !can_add => gate::tip_text(add, SharedString::from(note), a),
-            _ => add.on_click(cx.listener(|this, _, window, cx| {
+        let add = match add_block {
+            Some(why) => gate::tip_text(add, SharedString::from(why), a),
+            None => add.on_click(cx.listener(|this, _, window, cx| {
                 this.open_sheet(Sheet::Add(AddForm::new()), window, cx)
             })),
         };
@@ -228,23 +236,24 @@ impl MachinesView {
     }
 
     fn empty(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let can_add = self.model.can_add();
+        let add_block = self.model.add_block();
         let add = button(
             "add-first-machine",
             "Add machine…",
             ButtonKind::Primary,
-            if can_add {
+            if add_block.is_none() {
                 PartState::Rest
             } else {
                 PartState::Disabled
             },
             a,
-        )
-        .when(can_add, |b| {
-            b.on_click(cx.listener(|this, _, window, cx| {
+        );
+        let add = match add_block {
+            Some(why) => gate::tip_text(add, SharedString::from(why), a),
+            None => add.on_click(cx.listener(|this, _, window, cx| {
                 this.open_sheet(Sheet::Add(AddForm::new()), window, cx)
-            }))
-        });
+            })),
+        };
         div()
             .max_w(px(560.0))
             .py(px(12.0))
