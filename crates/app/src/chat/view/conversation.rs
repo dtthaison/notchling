@@ -17,7 +17,7 @@ use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, claude_mark, hsla, label, KitPart, KitStyled};
+use notchling_kit::ui::{button, claude_mark, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::{markdown, opinions, ChatView};
@@ -25,36 +25,25 @@ use crate::chat::data::Tool;
 use crate::chat::rows::{rows, Row, ToolRow};
 use crate::chat::steps::{self, Detail};
 
-/// Thinking, tools and their buttons sit a little in from the reply's left edge.
-const INDENT: f32 = 12.0;
-/// The chevron that opens and closes a row: right when folded, down when open.
-const CHEVRON_CLOSED: &str = "›";
-const CHEVRON_OPEN: &str = "⌄";
+/// Rows sit this far apart (the Swift app's conversation stack).
+const ROW_GAP: f32 = 14.0;
+/// Above the first row and below the last.
+const COLUMN_PADDING_VERTICAL: f32 = 20.0;
 
-fn glyph(icon: Icon, size: f32, ink: Ink, a: Appearance) -> Div {
-    div()
-        .flex_shrink_0()
-        .text_size(px(size))
-        .font_weight(FontWeight::MEDIUM)
-        .ink(ink, a)
-        .child(icon.glyph())
+/// The chevron that opens and closes a row: right when folded, down when open. `points` is the
+/// Swift app's symbol size (9 on steps, 8 on a thought).
+fn chevron(open: bool, points: f32, a: Appearance) -> Div {
+    let shape = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    icon(shape, points, Ink::TextFaint, a)
 }
 
-fn chevron(open: bool, a: Appearance) -> Div {
-    div()
-        .flex_shrink_0()
-        .w(px(10.0))
-        .flex()
-        .justify_center()
-        .text_size(px(12.0))
-        .font_weight(FontWeight::BOLD)
-        .ink(Ink::TextFaint, a)
-        .child(if open { CHEVRON_OPEN } else { CHEVRON_CLOSED })
-}
-
-/// A small spinner: the working glyph, breathing.
+/// A small spinner: the working icon, breathing.
 fn spinner(key: &str, a: Appearance) -> impl IntoElement {
-    glyph(Icon::Working, 11.0, Ink::Working, a).with_animation(
+    icon(Icon::Working, 11.0, Ink::Working, a).with_animation(
         SharedString::from(format!("spin-{key}")),
         Animation::new(Duration::from_millis(1000)).repeat(),
         |d, t| d.opacity(0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs())),
@@ -150,7 +139,7 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Div {
                 .gap(px(6.0))
                 .border_b(px(1.0))
                 .border_color(hsla(Ink::Hairline.color(a)))
-                .child(glyph(Icon::File, 10.0, Ink::Text, a))
+                .child(icon(Icon::File, 10.0, Ink::Text, a))
                 .child(label(&name, TypeRole::Label, Ink::Text, a))
                 .child(
                     label(&folder, TypeRole::Meta, Ink::TextFaint, a)
@@ -258,7 +247,7 @@ fn step_row(
                 .flex_shrink_0()
                 .flex()
                 .justify_center()
-                .child(glyph(step.icon, 11.0, icon_ink, a)),
+                .child(icon(step.icon, 11.0, icon_ink, a)),
         )
         .child(
             label(&step.title, TypeRole::Body, Ink::Text, a)
@@ -282,9 +271,9 @@ fn step_row(
         })
         .when(running, |d| d.child(spinner(&step.id, a)))
         .when(!running && step.is_error, |d| {
-            d.child(glyph(Icon::Needs, 11.0, Ink::Expired, a))
+            d.child(icon(Icon::Failed, 11.0, Ink::Expired, a))
         })
-        .when(has_detail, |d| d.child(chevron(open, a)))
+        .when(has_detail, |d| d.child(chevron(open, 9.0, a)))
         .part_at("Step Row", Corner::Trailing, a, cx);
     div()
         .flex()
@@ -312,7 +301,7 @@ fn step_chip(
                 steps::icons(steps)
                     .into_iter()
                     .enumerate()
-                    .map(|(n, icon)| {
+                    .map(|(n, kind)| {
                         div()
                             .when(n > 0, |d| d.ml(px(-4.0)))
                             .size(px(20.0))
@@ -323,10 +312,7 @@ fn step_chip(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_size(px(9.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .ink(Ink::TextMuted, a)
-                            .child(icon.glyph())
+                            .child(icon(kind, 9.0, Ink::TextMuted, a))
                     }),
             );
     let key = id.to_owned();
@@ -352,7 +338,7 @@ fn step_chip(
         ))
         .children(steps::failed_text(steps).map(|t| label(&t, TypeRole::Label, Ink::Expired, a)))
         .when(live, |d| d.child(spinner(id, a)))
-        .child(chevron(open, a))
+        .child(chevron(open, 9.0, a))
 }
 
 /// A run of calls: the chip, and when open each call on its own line beside a hairline.
@@ -415,9 +401,9 @@ fn thinking(
                     d.cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| this.toggle(&key, cx)))
                 })
-                .child(glyph(Icon::Thinking, 10.0, Ink::TextFaint, a))
+                .child(icon(Icon::Thinking, 10.0, Ink::TextFaint, a))
                 .child(label(title, TypeRole::Label, Ink::TextFaint, a))
-                .when(has_text, |d| d.child(chevron(open, a)))
+                .when(has_text, |d| d.child(chevron(open, 8.0, a)))
                 .part_at("Thinking Row", Corner::Trailing, a, cx),
         )
         .when(open, |d| {
@@ -456,8 +442,8 @@ fn user_row(text: &str, images: usize, queued: bool, a: Appearance, cx: &Context
         .child(
             div()
                 .max_w(relative(0.75))
-                .px(px(12.0))
-                .py(px(8.0))
+                .px(px(14.0))
+                .py(px(10.0))
                 .rounded(px(RADIUS_CARD))
                 .fill(Ink::AccentWash, a)
                 .kit_type(TypeRole::Body)
@@ -492,12 +478,14 @@ fn row_element(
             images,
             queued,
         } => user_row(text, *images, *queued, a, cx),
-        // No mark before each reply: the bubble alone says who wrote it.
+        // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
+        // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => div().w_full().flex().items_start().child(
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .p(px(12.0))
+                .px(px(14.0))
+                .py(px(12.0))
                 .rounded(px(RADIUS_CARD))
                 .fill(Ink::Card, a)
                 .border(px(1.0))
@@ -505,12 +493,8 @@ fn row_element(
                 .child(markdown::render(id, text, a))
                 .part("Claude's Reply", a, cx),
         ),
-        Row::Thinking { title, text } => div()
-            .pl(px(INDENT))
-            .child(thinking(view, id, title, text, a, cx)),
-        Row::Tools(tools) => div()
-            .pl(px(INDENT))
-            .child(step_group(view, id, tools, live, a, cx)),
+        Row::Thinking { title, text } => thinking(view, id, title, text, a, cx),
+        Row::Tools(tools) => step_group(view, id, tools, live, a, cx),
         Row::TurnEnd { text } => div()
             .w_full()
             .py(px(2.0))
@@ -524,7 +508,7 @@ fn row_element(
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .child(glyph(Icon::Clock, 9.0, Ink::TextFaint, a))
+                    .child(icon(Icon::Clock, 9.0, Ink::TextFaint, a))
                     .child(label(text, TypeRole::Meta, Ink::TextFaint, a)),
             )
             .child(hairline(a))
@@ -535,11 +519,10 @@ fn row_element(
             .justify_center()
             .items_center()
             .gap(px(6.0))
-            .child(glyph(*icon, 11.0, Ink::TextMuted, a))
+            .child(notchling_kit::ui::icon(*icon, 10.0, Ink::TextMuted, a))
             .child(label(text, TypeRole::Meta, Ink::TextMuted, a))
             .part_at("Notice", Corner::Leading, a, cx),
         Row::CommandOutput { text } => div()
-            .pl(px(INDENT))
             .child(markdown::mono_box(
                 &format!("{id}-cmd"),
                 "Output",
@@ -572,7 +555,7 @@ fn row_with_opinions(
         return element;
     }
     let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
-    let buttons = div().pl(px(INDENT)).flex().gap(px(4.0)).children(
+    let buttons = div().flex().gap(px(4.0)).children(
         subjects
             .into_iter()
             .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, a, cx)),
@@ -580,8 +563,7 @@ fn row_with_opinions(
     let cards = view
         .selected
         .as_deref()
-        .and_then(|session| opinions::cards(session, &anchors, a, cx))
-        .map(|cards| cards.pl(px(INDENT)));
+        .and_then(|session| opinions::cards(session, &anchors, a, cx));
     div()
         .flex()
         .flex_col()
@@ -600,10 +582,10 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         .overflow_y_scroll()
         .track_scroll(&view.conversation_scroll)
         .px(px(SIDE_PADDING))
-        .py(px(12.0))
+        .py(px(COLUMN_PADDING_VERTICAL))
         .flex()
         .flex_col()
-        .gap(px(12.0));
+        .gap(px(ROW_GAP));
     if view.loading {
         // The picked session's conversation is on its way; the previous one's would mislead.
         return column;

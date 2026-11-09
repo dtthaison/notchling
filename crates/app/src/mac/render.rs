@@ -65,7 +65,8 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
     let forced = std::env::var(APPEARANCE_ENV)
         .ok()
         .and_then(|v| Appearance::parse(&v));
-    Application::new().run(move |cx: &mut App| {
+    let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
+    app.run(move |cx: &mut App| {
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
         if let Some(appearance) = forced {

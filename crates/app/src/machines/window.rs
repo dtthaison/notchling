@@ -46,7 +46,8 @@ pub fn run(setup: Setup) -> i32 {
     if setup.vault {
         eprintln!("notchling-machines: --vault: the Secret Vault's values may be read");
     }
-    Application::new().run(move |cx: &mut App| {
+    let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
+    app.run(move |cx: &mut App| {
         dock::register(cx);
         dock::apply(Policy::Regular);
         dock::set_main_menu(cx, Policy::Regular);

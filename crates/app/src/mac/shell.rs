@@ -101,7 +101,9 @@ const BRIDGE_POLL: Duration = Duration::from_secs(5);
 pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
     let root = DataRoot::for_run(data_root.as_deref());
     let notch = root.as_ref().map(DataRoot::notch_source);
-    Application::new().run(move |cx: &mut App| {
+    // The kit's icons are SVG assets.
+    let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
+    app.run(move |cx: &mut App| {
         dock::register(cx);
         dock::apply(policy_for(0));
         dock::set_main_menu(cx, policy_for(0));
