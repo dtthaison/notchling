@@ -39,6 +39,9 @@ use crate::tools::requests::{
 };
 use notchling_kit::ui::{TextEditor, TextEditorEvent};
 
+/// How long after Stop a stalled prompt is sent again.
+const RETRY_AFTER_STOP_MS: u64 = 1_500;
+
 /// Why a Claude Code row that isn't a background job takes no reply.
 pub const READ_ONLY: &str = "Read only here. Reply where the session runs.";
 /// Antigravity takes one turn at a time (Codex queues; the daemon says so).
@@ -93,6 +96,8 @@ pub struct ChatTools {
     pub effort_hints: HashMap<String, Hint>,
     /// The row a Stop was sent to and when (ms), until it stops working or 20 s pass.
     pub stopping: Option<(String, i64)>,
+    /// A stalled prompt being sent again (row, when): Retry hides meanwhile.
+    pub retrying: Option<(String, i64)>,
     /// The reply box: the kit's editor (caret, selection, input method), one for every row.
     pub editor: Entity<TextEditor>,
     /// The editor's focus handle.
@@ -133,6 +138,7 @@ impl ChatTools {
             model_hints: HashMap::new(),
             effort_hints: HashMap::new(),
             stopping: None,
+            retrying: None,
             editor,
             focus,
             _editor_events: events,
@@ -462,6 +468,66 @@ impl ChatView {
                     view.tools.stopping = None;
                     view.tools.error = Some(message);
                 }
+            },
+            cx,
+        );
+    }
+
+    /// Retry, on a prompt that got nothing back (`activity::stalled`): the stuck turn is stopped,
+    /// so a late answer can't come with a second copy queued behind it, then the same text goes
+    /// again on a fresh request.
+    pub(super) fn retry_stalled(&mut self, cx: &mut Context<Self>) {
+        if self.tools.sending {
+            return;
+        }
+        let Some(text) = self.stalled_prompt() else {
+            return;
+        };
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        self.tools.retrying = Some((id.clone(), now_ms()));
+        self.spawn_send(
+            Request::interrupt(&id),
+            move |view, result, cx| {
+                if let Err(message) = result {
+                    view.tools.retrying = None;
+                    view.tools.error = Some(message);
+                    return;
+                }
+                // Claude Code takes a moment to drop the turn before the box takes keys again.
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(RETRY_AFTER_STOP_MS))
+                        .await;
+                    this.update(cx, |view, cx| {
+                        let (row, sent) = (id.clone(), text.clone());
+                        view.spawn_send(
+                            Request::reply(&row, &sent),
+                            move |view, result, cx| {
+                                view.tools.retrying = None;
+                                match result {
+                                    Ok(_) => {
+                                        view.tools.delivered(&row, &sent, now_ms());
+                                        view.follow_sent = true;
+                                        view.reload_now(cx);
+                                    }
+                                    Err(message) => {
+                                        // Into an empty box, so the words aren't lost.
+                                        if view.tools.drafts.get(&row).is_none_or(String::is_empty)
+                                        {
+                                            view.put_draft(&row, sent.clone(), cx);
+                                        }
+                                        view.tools.error = Some(message);
+                                    }
+                                }
+                            },
+                            cx,
+                        );
+                    })
+                    .ok();
+                })
+                .detach();
             },
             cx,
         );

@@ -606,6 +606,29 @@ impl ChatView {
         )
     }
 
+    /// The prompt Retry would send again: a Claude Code session's turn that got nothing back
+    /// (`activity::stalled`), unless a Stop or a Retry is on its way.
+    pub(super) fn stalled_prompt(&self) -> Option<String> {
+        if self.loading || self.stopping() {
+            return None;
+        }
+        let session = self.selected_session()?;
+        if session.tool != crate::chat::data::Tool::Claude || !session.agent.can_reply() {
+            return None;
+        }
+        let retrying = self.tools.retrying.as_ref().is_some_and(|(row, at)| {
+            *row == session.agent.id && now_ms() - at < crate::chat::activity::STOPPING_MS * 3
+        });
+        if retrying {
+            return None;
+        }
+        activity::stalled(
+            &self.conversation,
+            self.selected_working(),
+            now_ms() as f64 / 1000.0,
+        )
+    }
+
     /// Whether the "Latest" pill shows: the conversation is scrolled up from its newest message.
     fn latest_pill(&self) -> bool {
         if self.loading {

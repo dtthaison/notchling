@@ -48,8 +48,31 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
 /// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. The
 /// view redraws it once a second while it shows (`ChatView::tick`).
 /// The activity line, just above the reply box: one line, its words cut with an ellipsis before
-/// the counts beside them.
-pub(super) fn activity_row(activity: &Activity, a: Appearance, cx: &Context<ChatView>) -> Div {
+/// the counts beside them. A prompt with nothing back for a while (`stalled`) gets "No reply
+/// yet" and Retry, which stops the stuck turn and sends the prompt again.
+pub(super) fn activity_row(
+    activity: &Activity,
+    stalled: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let retry = stalled.then(|| {
+        crate::mac::gate::tip_text(
+            button(
+                "activity-retry",
+                "Retry",
+                ButtonKind::Secondary,
+                PartState::Rest,
+                a,
+            )
+            .h(px(22.0))
+            .px(px(10.0)),
+            "Nothing came back: stop this turn and send the message again".into(),
+            a,
+        )
+        .flex_shrink_0()
+        .on_click(cx.listener(|this, _, _, cx| this.retry_stalled(cx)))
+    });
     div()
         .w_full()
         .min_w(px(0.0))
@@ -69,6 +92,10 @@ pub(super) fn activity_row(activity: &Activity, a: Appearance, cx: &Context<Chat
         .children(activity.shells.as_ref().map(|shells| {
             label(&format!("· {shells}"), TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0()
         }))
+        .when(stalled, |row| {
+            row.child(label("· No reply yet", TypeRole::Meta, Ink::Needs, a).flex_shrink_0())
+        })
+        .children(retry)
         .part_at("Activity Line", Corner::Trailing, a, cx)
 }
 

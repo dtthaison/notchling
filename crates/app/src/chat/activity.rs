@@ -126,6 +126,27 @@ pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Ac
     })
 }
 
+/// How long a prompt may go with nothing back before the live line offers Retry.
+pub const STALL_S: f64 = 45.0;
+
+/// The prompt to send again when the turn stalled: the session works, your prompt is still the
+/// last thing in the conversation, nothing has come back (no token, thinking or call) and
+/// [`STALL_S`] went by. A request Claude Code sent on a connection that died while the Mac slept
+/// waits like this with no error; sending again starts a fresh one.
+pub fn stalled(conversation: &Conversation, working: bool, now_s: f64) -> Option<String> {
+    if !working || conversation.turn_tokens > 0 {
+        return None;
+    }
+    let start = conversation.turn_start?;
+    if now_s - start < STALL_S {
+        return None;
+    }
+    match conversation.items.last().map(|item| &item.kind) {
+        Some(ItemKind::User { text, .. }) if !text.trim().is_empty() => Some(text.clone()),
+        _ => None,
+    }
+}
+
 /// Whether a Stop sent at `stopped_ms` is still on its way: the session works and it was sent
 /// less than [`STOPPING_MS`] ago.
 pub fn is_stopping(stopped_ms: Option<i64>, working: bool, now_ms: i64) -> bool {
@@ -290,6 +311,52 @@ mod tests {
         let a = line(&c, true, 0.0).unwrap();
         assert_eq!(a.text, "Writing…");
         assert_eq!(a.shells.as_deref(), Some("1 background command running"));
+    }
+
+    #[test]
+    fn a_prompt_with_nothing_back_after_a_while_is_stalled() {
+        let mut c = conversation(vec![
+            ItemKind::Assistant {
+                text: "Done".into(),
+            },
+            ItemKind::TurnEnd {
+                seconds: 5.0,
+                model: None,
+            },
+            ItemKind::user("why page 6"),
+        ]);
+        c.turn_start = Some(1_000.0);
+        assert_eq!(stalled(&c, true, 1_000.0 + STALL_S - 1.0), None, "not yet");
+        assert_eq!(
+            stalled(&c, true, 1_000.0 + STALL_S).as_deref(),
+            Some("why page 6")
+        );
+        assert_eq!(
+            stalled(&c, false, 9_999.0),
+            None,
+            "an idle session isn't stalled"
+        );
+        // Anything back (thinking, a token, a call) means it's under way.
+        c.turn_tokens = 12;
+        assert_eq!(stalled(&c, true, 9_999.0), None);
+        c.turn_tokens = 0;
+        c.items.push(item(ItemKind::Thinking {
+            seconds: 1.0,
+            text: String::new(),
+        }));
+        assert_eq!(stalled(&c, true, 9_999.0), None);
+        // No prompt time to count from: nothing to say.
+        let mut bare = conversation(vec![ItemKind::user("hi")]);
+        assert_eq!(stalled(&bare, true, 9_999.0), None);
+        bare.turn_start = Some(0.0);
+        assert_eq!(stalled(&bare, true, 9_999.0).as_deref(), Some("hi"));
+        // A prompt of only images has nothing to send again.
+        let mut image = conversation(vec![ItemKind::User {
+            text: "  ".into(),
+            images: 1,
+        }]);
+        image.turn_start = Some(0.0);
+        assert_eq!(stalled(&image, true, 9_999.0), None);
     }
 
     #[test]

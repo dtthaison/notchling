@@ -873,10 +873,11 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .children(permission(view, a, cx))
         // What the session is doing, right over the box rather than at the end of the messages.
         .children(view.activity_line().map(|activity| {
+            let stalled = view.stalled_prompt().is_some();
             div()
                 .mx(px(SIDE_PADDING))
                 .pb(px(6.0))
-                .child(super::conversation::activity_row(&activity, a, cx))
+                .child(super::conversation::activity_row(&activity, stalled, a, cx))
         }))
         .child(card)
         .child(footer)
