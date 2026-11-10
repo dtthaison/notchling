@@ -2,12 +2,13 @@
 //! temp folder. Nothing reads a real transcript folder; the zone is UTC so days don't depend on
 //! the machine.
 
-use super::cache::{Cache, CURRENT};
+use super::cache::{old_cache_file, Cache, CACHE_DOC, CURRENT};
 use super::service::CostService;
 use super::summary::{day_key, Window};
 use super::tracker::{Ranged, Root, Tracker, ANTIGRAVITY, CLAUDE_CODE, CODEX, DESKTOP};
 use crate::pages::clock::{civil_at, text};
 use crate::sessions::testutil::TempDir;
+use crate::store;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -50,7 +51,7 @@ fn claude_tracker(tmp: &TempDir) -> Tracker {
             dir: tmp.path("projects"),
             channel: CLAUDE_CODE,
         }],
-        Some(tmp.path("daemon/cost-cache.json")),
+        Some(tmp.path("data")),
         Some(tmp.path("account-log.json")),
     )
     .with_zone(utc)
@@ -185,12 +186,17 @@ fn the_cache_is_saved_and_a_new_tracker_reads_it() {
     );
     t.refresh(NOW);
     t.save_now(NOW);
-    let file = tmp.path("daemon/cost-cache.json");
-    assert!(file.exists());
+    let data = tmp.path("data");
+    assert!(store::doc(&data, CACHE_DOC).unwrap().is_some());
+    assert!(!old_cache_file(&data).exists());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        let mode = std::fs::metadata(store::db_path(&data))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
     }
     let mut again = claude_tracker(&tmp);
@@ -210,18 +216,52 @@ fn the_cache_is_saved_and_a_new_tracker_reads_it() {
 fn a_cache_of_another_version_or_a_broken_one_is_read_from_scratch() {
     let tmp = TempDir::new("cost-version");
     append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 20.0, NOW));
-    let file = tmp.path("daemon/cost-cache.json");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let data = tmp.path("data");
     for stale in [
         format!(r#"{{"version":{},"files":{{}}}}"#, CURRENT + 1),
         "not json".to_string(),
     ] {
-        std::fs::write(&file, stale).unwrap();
+        store::put_doc(&data, CACHE_DOC, &stale).unwrap();
         let mut t = claude_tracker(&tmp);
         t.refresh(NOW);
         near(month(&t.ranged(NOW), Window::All), 20.0);
     }
-    assert_eq!(Cache::load(&tmp.path("missing.json")).version, CURRENT);
+    assert_eq!(Cache::load(&tmp.path("missing")).version, CURRENT);
+}
+
+#[test]
+fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
+    let tmp = TempDir::new("cost-import");
+    let data = tmp.path("data");
+    append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 20.0, NOW));
+    let mut first = claude_tracker(&tmp);
+    first.refresh(NOW);
+    first.save_now(NOW);
+    // Put what it saved back where the old file was.
+    let saved = store::doc(&data, CACHE_DOC).unwrap().unwrap();
+    store::update_doc(&data, CACHE_DOC, |_| Ok(None)).unwrap();
+    let old = tmp.write("data/daemon/cost-cache.json", &saved);
+    let loaded = Cache::load(&data);
+    assert!(!old.exists(), "the old file moved in");
+    assert!(!loaded.files.is_empty(), "and its offsets came with it");
+    assert_eq!(store::doc(&data, CACHE_DOC).unwrap().unwrap(), saved);
+
+    // A file of another version isn't moved in; the next save removes it.
+    let tmp = TempDir::new("cost-import-stale");
+    let data = tmp.path("data");
+    append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 20.0, NOW));
+    let stale = tmp.write(
+        "data/daemon/cost-cache.json",
+        &format!(r#"{{"version":{},"files":{{}}}}"#, CURRENT + 1),
+    );
+    assert!(Cache::load(&data).files.is_empty());
+    assert!(stale.exists());
+    assert_eq!(store::doc(&data, CACHE_DOC).unwrap(), None);
+    let mut t = claude_tracker(&tmp);
+    t.refresh(NOW);
+    near(month(&t.ranged(NOW), Window::All), 20.0);
+    assert!(!stale.exists(), "the first save replaces it");
+    assert!(store::doc(&data, CACHE_DOC).unwrap().is_some());
 }
 
 #[test]
@@ -496,7 +536,7 @@ fn the_codex_model_survives_a_restart_through_the_cache() {
                 dir: tmp.path("codex"),
                 channel: CODEX,
             }],
-            Some(tmp.path("daemon/cost-cache.json")),
+            Some(tmp.path("data")),
             None,
         )
         .with_zone(utc)

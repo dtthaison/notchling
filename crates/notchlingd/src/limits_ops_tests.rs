@@ -185,7 +185,7 @@ fn ops_with(tmp: &TempDir, flag: Arc<SwitchFlag>, room: Arc<FakeRoom>) -> Limits
             dir: tmp.path("claude/projects"),
             channel: CLAUDE_CODE,
         }],
-        cache: None,
+        cache_data: None,
         account_log: tmp.path("account-log.json"),
     }
     .service();

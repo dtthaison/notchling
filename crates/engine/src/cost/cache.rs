@@ -1,17 +1,28 @@
 //! The tracker's own cache: totals, read offsets and the ids already counted, kept so a month of
 //! transcripts (several GB) is read once and then only from where the last scan stopped.
 //!
-//! It lives in the daemon's folder (`<data>/daemon/cost-cache.json`), never in the Swift app's
-//! `cost-cache.json`, and carries its own [`CURRENT`] version: a cache with another version, or
-//! one that can't be read, is dropped and the history is read again. Offsets, totals and counted
-//! ids are saved together, so a crash only means re-reading from the last save, never double
+//! It is the [`CACHE_DOC`] document of `<data>/notchling.db` (it used to be the daemon's
+//! `<data>/daemon/cost-cache.json`, which moves in once), never the Swift app's `cost-cache.json`,
+//! and carries its own [`CURRENT`] version: a cache with another version, or one that can't be
+//! read, is dropped and the history is read again. Offsets, totals and counted ids are saved
+//! together (one row), so a crash only means re-reading from the last save, never double
 //! counting.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use crate::store;
+
+/// The document that holds the cache.
+pub const CACHE_DOC: &str = "daemon/cost-cache";
+
+/// The file the cache was kept in before the database.
+pub fn old_cache_file(data: &Path) -> PathBuf {
+    data.join("daemon").join("cost-cache.json")
+}
 
 /// Bump when the stored fields change; it forces a full re-read.
 pub const CURRENT: u32 = 1;
@@ -103,23 +114,25 @@ mod packed {
 }
 
 impl Cache {
-    /// The saved cache, or an empty one when there is none, it can't be read or it is another
-    /// version.
-    pub fn load(file: &Path) -> Cache {
-        std::fs::read(file)
+    /// The saved cache in `data`'s database (the old file moves in first, once), or an empty one
+    /// when there is none, it can't be read or it is another version.
+    pub fn load(data: &Path) -> Cache {
+        let _ = store::import_file(data, CACHE_DOC, &old_cache_file(data), parses);
+        store::doc(data, CACHE_DOC)
             .ok()
-            .and_then(|data| serde_json::from_slice::<Cache>(&data).ok())
+            .flatten()
+            .and_then(|text| serde_json::from_str::<Cache>(&text).ok())
             .filter(|c| c.version == CURRENT)
             .unwrap_or_default()
     }
 
-    pub fn save(&self, file: &Path) -> std::io::Result<()> {
-        if let Some(dir) = file.parent() {
-            notchling_platform::files::ensure_private_dir(dir).map_err(std::io::Error::other)?;
-        }
-        let data = serde_json::to_vec(self).map_err(std::io::Error::other)?;
-        notchling_platform::files::write_private_no_follow(file, &data)
-            .map_err(std::io::Error::other)
+    /// Writes the cache as one row. An old file left beside the database (an unreadable one, or
+    /// another version, which `load` ignored) is removed: the row replaces it.
+    pub fn save(&self, data: &Path) -> std::io::Result<()> {
+        let text = serde_json::to_string(self).map_err(std::io::Error::other)?;
+        store::put_doc(data, CACHE_DOC, &text).map_err(std::io::Error::other)?;
+        let _ = std::fs::remove_file(old_cache_file(data));
+        Ok(())
     }
 
     /// Every hash counted, for the dedupe set.
@@ -137,4 +150,9 @@ impl Cache {
         self.tokens.retain(|d, _| !old(d));
         self.channel_tokens.retain(|d, _| !old(d));
     }
+}
+
+/// Whether an old file's text is a cache of the current version (anything else isn't moved in).
+fn parses(text: &str) -> bool {
+    serde_json::from_str::<Cache>(text).is_ok_and(|c| c.version == CURRENT)
 }

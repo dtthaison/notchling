@@ -28,7 +28,7 @@
 //!   watcher; `active`, `windows`, `last_switch` and `checked` are what its last check saw (`null`
 //!   or empty before one). `notices` are the last 20 things the watchers said, newest last.
 //! - `limits.status` and `limits.set_mode` work while `accounts` is off: they read and write only
-//!   the daemon's own memory and its own `<data>/daemon/limits.json` (the modes and the switch
+//!   the daemon's own memory and its own `daemon/limits` document in `<data>/notchling.db` (the modes and the switch
 //!   point, under the Swift keys), never a login.
 //! - `limits.set_mode` takes a `provider` and a `mode` (`off`, `notify`, `notifyAndSwitch`) or a
 //!   `switch_at` (80 to 99, refused outside it) or both. Antigravity refuses `notifyAndSwitch`.
@@ -189,7 +189,7 @@ impl LimitsOps {
         }
     }
 
-    /// The daemon's: its own limits file (`<data>/daemon/limits.json`, in memory for a daemon
+    /// The daemon's: its own limits document (`daemon/limits` in `<data>/notchling.db`, in memory for a daemon
     /// given `--socket`) and the cost tracker over the layout's folders.
     pub fn for_daemon(
         layout: &Layout,
@@ -199,7 +199,7 @@ impl LimitsOps {
         let config = if layout.socket_given {
             LimitConfig::in_memory()
         } else {
-            LimitConfig::open(&layout.data_dir.join("daemon").join("limits.json"))
+            LimitConfig::open(&layout.data_dir)
         };
         LimitsOps::new(
             accounts,

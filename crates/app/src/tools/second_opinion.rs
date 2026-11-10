@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use notchling_engine::delegate::options::Tool;
 use notchling_engine::delegate::second_opinion::{build_prompt, title, ModelOption, Subject};
 use notchling_engine::delegate::second_opinion_host::ProcessHost;
-use notchling_engine::delegate::second_opinion_store::{file_in, Request, SecondOpinionStore};
+use notchling_engine::delegate::second_opinion_store::{Request, SecondOpinionStore};
 
 use crate::acting::{Acting, Control};
 use crate::chat::data::DataRoot;
@@ -217,21 +217,17 @@ fn make_id() -> String {
     )
 }
 
-/// Where the app keeps its second opinions: `second-opinions.json` in the app's own folder. Not
-/// the data folder's, which is the Swift app's `SecondOpinionStore` file in the same format, kept
-/// by a process that may be running beside this one.
-pub fn opinions_file(root: &DataRoot) -> PathBuf {
-    file_in(&root.app_dir())
-}
-
-/// The running app's store: over [`opinions_file`], running the `notchling` binary beside `exe`
-/// (the app's own executable rejects `delegate`). `None` for a fixture root, which never starts a
-/// tool, and when the binary can't be named.
+/// The running app's store: the `app/second-opinions` document in the data folder's
+/// `notchling.db` (the old `<data>/app/second-opinions.json` moves in once; never the data
+/// folder's `second-opinions.json`, which is the Swift app's `SecondOpinionStore` file in the same
+/// format, kept by a process that may be running beside this one). It runs the `notchling` binary
+/// beside `exe` (the app's own executable rejects `delegate`). `None` for a fixture root, which
+/// never starts a tool, and when the binary can't be named.
 pub fn store_for_run(root: Option<&DataRoot>, exe: Option<&Path>) -> Option<SecondOpinionStore> {
     let root = root.filter(|r| r.fixture.is_none())?;
     let program: PathBuf = notchling_binary(exe?)?;
     Some(SecondOpinionStore::new(
-        Some(opinions_file(root)),
+        Some(root.data_dir.clone()),
         std::env::temp_dir(),
         Arc::new(ProcessHost::new(program)),
         Box::new(now_secs),
@@ -365,42 +361,76 @@ mod tests {
         assert!(store_for_run(Some(&fixture), Some(Path::new("/bin/true"))).is_none());
         assert!(store_for_run(None, Some(Path::new("/bin/true"))).is_none());
         assert_ne!(make_id(), make_id());
-        // A real root over a scratch folder: the store opens over our own file, writing nothing yet.
+        // A real root over a scratch folder: the store opens over our own document, writing nothing yet.
         let scratch = crate::testutil::Scratch::new("opinions");
         let root = real_root(&scratch);
         let store = store_for_run(Some(&root), Some(Path::new("/bin/true"))).expect("a store");
         assert!(store.opinions().is_empty());
-        assert!(!opinions_file(&root).exists());
+        assert!(!notchling_engine::store::exists(&root.data_dir));
     }
 
     #[test]
     fn the_apps_opinions_are_not_the_swift_apps_file() {
+        use notchling_engine::delegate::second_opinion_store::{old_file, DOC};
         let scratch = crate::testutil::Scratch::new("opinions-path");
         let root = real_root(&scratch);
-        let file = opinions_file(&root);
-        assert_eq!(file, scratch.path().join("data/app/second-opinions.json"));
+        assert_eq!(DOC, "app/second-opinions");
+        let old = old_file(&root.data_dir);
+        assert_eq!(old, scratch.path().join("data/app/second-opinions.json"));
         assert_ne!(
-            file,
-            file_in(&root.data_dir),
+            old,
+            root.data_dir.join("second-opinions.json"),
             "the Swift app's file is in data/"
         );
         assert!(
-            !file.starts_with(root.data_dir.join("daemon")),
+            !old.starts_with(root.data_dir.join("daemon")),
             "nor the daemon's folder"
         );
     }
 
-    /// A card asked for lands in the app's file, and the data folder's own file is never made.
+    /// A card asked for lands in the app's own document, and the Swift app's file is never touched
+    /// or made.
     #[test]
-    fn an_opinion_is_saved_in_the_apps_own_file() {
+    fn an_opinion_is_saved_in_the_apps_own_document() {
+        use notchling_engine::delegate::second_opinion_store::DOC;
         let scratch = crate::testutil::Scratch::new("opinions-saved");
         let root = real_root(&scratch);
         // The program does not exist, so the card fails at once and nothing runs.
         let app = scratch.path().join("nowhere/notchling-app");
         let store = store_for_run(Some(&root), Some(&app)).expect("a store");
         store.start(&request_in(&scratch));
-        assert!(opinions_file(&root).exists());
+        assert!(notchling_engine::store::doc(&root.data_dir, DOC)
+            .unwrap()
+            .is_some());
         assert!(!scratch.path().join("data/second-opinions.json").exists());
+    }
+
+    /// The Swift app's `second-opinions.json` is neither read nor written, and the app's old file
+    /// moves in once.
+    #[test]
+    fn the_swift_apps_opinions_file_is_left_alone_and_the_old_app_file_moves_in() {
+        use notchling_engine::delegate::second_opinion_store::{old_file, DOC};
+        let scratch = crate::testutil::Scratch::new("opinions-swift");
+        let root = real_root(&scratch);
+        let swift = scratch.path().join("data/second-opinions.json");
+        std::fs::create_dir_all(swift.parent().unwrap()).unwrap();
+        let theirs = r#"[{"id":"swift","not":"ours"}]"#;
+        std::fs::write(&swift, theirs).unwrap();
+        let old = old_file(&root.data_dir);
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "[]").unwrap();
+        let app = scratch.path().join("nowhere/notchling-app");
+        let store = store_for_run(Some(&root), Some(&app)).expect("a store");
+        assert!(store.opinions().is_empty());
+        assert!(!old.exists(), "the old app file moved in");
+        assert_eq!(
+            notchling_engine::store::doc(&root.data_dir, DOC)
+                .unwrap()
+                .as_deref(),
+            Some("[]")
+        );
+        store.start(&request_in(&scratch));
+        assert_eq!(std::fs::read_to_string(&swift).unwrap(), theirs);
     }
 
     fn request_in(scratch: &crate::testutil::Scratch) -> Request {

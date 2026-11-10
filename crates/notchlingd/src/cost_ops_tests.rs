@@ -116,15 +116,16 @@ fn a_cost_reply_is_cut_to_fit_a_line() {
 }
 
 #[test]
-fn the_cost_cache_is_the_daemons_own_file_and_never_the_swift_apps() {
+fn the_cost_cache_is_the_daemons_own_document_and_never_the_swift_apps() {
     let tmp = TempDir::new("limits-cost-paths");
     let layout = Layout::resolve(None, Some(tmp.root().as_os_str()), || None).unwrap();
     let setup = CostSetup::from_layout(&layout);
-    let cache = setup.cache.expect("a fixture root keeps a cache");
-    assert_eq!(cache, layout.data_dir.join("daemon/cost-cache.json"));
-    assert_ne!(
-        cache.file_name().and_then(|n| n.to_str()),
-        Some("account-log.json")
+    let data = setup.cache_data.expect("a fixture root keeps a cache");
+    assert_eq!(data, layout.data_dir);
+    assert_eq!(
+        notchling_engine::cost::cache::CACHE_DOC,
+        "daemon/cost-cache",
+        "a row of the daemon's own, not the Swift app's cost-cache.json"
     );
     assert_eq!(setup.account_log, layout.data_dir.join("account-log.json"));
     let channels: Vec<_> = setup.roots.iter().map(|r| r.channel).collect();
@@ -149,7 +150,7 @@ fn the_cost_cache_is_the_daemons_own_file_and_never_the_swift_apps() {
     )
     .unwrap();
     assert!(
-        CostSetup::from_layout(&given).cache.is_none(),
+        CostSetup::from_layout(&given).cache_data.is_none(),
         "a test socket keeps none"
     );
 }

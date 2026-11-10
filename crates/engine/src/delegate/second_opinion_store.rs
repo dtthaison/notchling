@@ -1,26 +1,40 @@
 //! The second opinions asked in Chat, per session (Swift `SecondOpinionStore`): runs
-//! `notchling delegate … --json` through a [`Host`], keeps the answers in memory and in a small JSON
-//! file so they survive a relaunch.
+//! `notchling delegate … --json` through a [`Host`], keeps the answers in memory and in the
+//! [`DOC`] document of `<data>/notchling.db` so they survive a relaunch (it used to be the app's
+//! `<data>/app/second-opinions.json`, which moves in once).
 //!
 //! The store is pure state and bookkeeping: the host starts the process (the real one is
 //! [`super::second_opinion_host::ProcessHost`], tests use a fake) and calls back with the output
 //! when it ends. Cancel marks the card cancelled at once and asks the host to stop the job; the
 //! tool's partial answer, if any, is added when the command has ended.
 //!
-//! The file is the caller's choice (`None` keeps everything in memory) and is written private,
-//! atomically, and never by following a link. The Swift app's own `second-opinions.json` is not
-//! read or written unless a caller names it, which the daemon does not.
+//! The data folder is the caller's choice (`None` keeps everything in memory). The Swift app's own
+//! `<data>/second-opinions.json` is never read or written: this document is the Rust side's own.
 
 use super::options::Tool;
 use super::second_opinion::{Answer, SecondOpinion, Status, TIMEOUT_SECS};
+use crate::store;
 use notchling_platform::files::{ensure_private_dir, write_private_no_follow};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// How many finished opinions the file keeps.
+/// How many finished opinions the document keeps.
 pub const KEEP: usize = 100;
+
+/// The document that holds the opinions.
+pub const DOC: &str = "app/second-opinions";
+
+/// The file the opinions were kept in before the database. Not the Swift app's
+/// `<data>/second-opinions.json`, a different file in the same format.
+pub fn old_file(data: &Path) -> PathBuf {
+    data.join("app").join("second-opinions.json")
+}
+
+fn valid(text: &str) -> bool {
+    serde_json::from_str::<Vec<SecondOpinion>>(text).is_ok()
+}
 
 /// A running delegate command.
 pub trait Job: Send {
@@ -73,7 +87,7 @@ struct State {
 }
 
 struct Inner {
-    file: Option<PathBuf>,
+    data: Option<PathBuf>,
     /// Prompt files are made here.
     temp_dir: PathBuf,
     host: Arc<dyn Host>,
@@ -88,19 +102,22 @@ pub struct SecondOpinionStore {
 }
 
 impl SecondOpinionStore {
-    /// Reads `file` if there is one: a run that was going when the app quit has no process any
-    /// more, so it is shown as failed.
+    /// Reads the document in `data`'s database if there is one (moving the old file in first): a
+    /// run that was going when the app quit has no process any more, so it is shown as failed.
     pub fn new(
-        file: Option<PathBuf>,
+        data: Option<PathBuf>,
         temp_dir: PathBuf,
         host: Arc<dyn Host>,
         now: Box<dyn Fn() -> f64 + Send + Sync>,
         make_id: Box<dyn Fn() -> String + Send + Sync>,
     ) -> SecondOpinionStore {
-        let mut opinions: Vec<SecondOpinion> = file
+        let mut opinions: Vec<SecondOpinion> = data
             .as_deref()
-            .and_then(|f| std::fs::read(f).ok())
-            .and_then(|data| serde_json::from_slice(&data).ok())
+            .and_then(|dir| {
+                let _ = store::import_file(dir, DOC, &old_file(dir), valid);
+                store::doc(dir, DOC).ok().flatten()
+            })
+            .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
         for run in &mut opinions {
             if run.status == Status::Running {
@@ -110,7 +127,7 @@ impl SecondOpinionStore {
         }
         SecondOpinionStore {
             inner: Arc::new(Inner {
-                file,
+                data,
                 temp_dir,
                 host,
                 now,
@@ -309,9 +326,9 @@ impl Inner {
         self.save();
     }
 
-    /// The file keeps the running ones and the last [`KEEP`] minus those.
+    /// The document keeps the running ones and the last [`KEEP`] minus those.
     fn save(&self) {
-        let Some(file) = &self.file else {
+        let Some(data) = &self.data else {
             return;
         };
         let list = {
@@ -334,19 +351,14 @@ impl Inner {
             list.sort_by(|a, b| a.started.total_cmp(&b.started));
             list
         };
-        let Ok(data) = serde_json::to_vec(&list) else {
+        let Ok(text) = serde_json::to_string(&list) else {
             return;
         };
-        if let Some(dir) = file.parent() {
-            let _ = ensure_private_dir(dir);
+        if store::put_doc(data, DOC, &text).is_ok() {
+            // an old file left behind (an unreadable one) would come back as the list
+            let _ = std::fs::remove_file(old_file(data));
         }
-        let _ = write_private_no_follow(file, &data);
     }
-}
-
-/// Where a store's file goes under a data folder.
-pub fn file_in(data_dir: &Path) -> PathBuf {
-    data_dir.join("second-opinions.json")
 }
 
 #[cfg(test)]

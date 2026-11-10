@@ -62,7 +62,7 @@ struct Rig {
 
 impl Rig {
     fn file(&self) -> PathBuf {
-        self.dir.join("data/second-opinions.json")
+        old_file(&self.dir.join("data"))
     }
 
     fn again(&self) -> SecondOpinionStore {
@@ -80,7 +80,7 @@ fn make(host: Arc<FakeHost>, dir: &Path) -> SecondOpinionStore {
     static CLOCK: AtomicUsize = AtomicUsize::new(1000);
     static IDS: AtomicUsize = AtomicUsize::new(0);
     SecondOpinionStore::new(
-        Some(dir.join("data/second-opinions.json")),
+        Some(dir.join("data")),
         dir.join("tmp"),
         host,
         Box::new(|| CLOCK.fetch_add(1, Ordering::SeqCst) as f64),
@@ -306,17 +306,49 @@ fn results_survive_a_relaunch_and_a_run_that_was_going_is_failed() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(rig.file()).unwrap().permissions().mode() & 0o777;
+        let db = store::db_path(&rig.dir.join("data"));
+        let mode = std::fs::metadata(db).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
     }
 }
 
 #[test]
-fn a_damaged_file_is_an_empty_list() {
+fn a_damaged_document_or_old_file_is_an_empty_list() {
     let rig = rig();
-    std::fs::create_dir_all(rig.dir.join("data")).unwrap();
-    std::fs::write(rig.file(), "{ not json").unwrap();
+    let data = rig.dir.join("data");
+    store::put_doc(&data, DOC, "{ not json").unwrap();
     assert!(rig.again().opinions().is_empty());
+
+    let rig = self::rig();
+    std::fs::create_dir_all(rig.file().parent().unwrap()).unwrap();
+    std::fs::write(rig.file(), "{ not json").unwrap();
+    let again = rig.again();
+    assert!(again.opinions().is_empty());
+    assert!(rig.file().exists(), "an unreadable old file is left alone");
+    again.start(&request("a"));
+    assert!(!rig.file().exists(), "the first save replaces it");
+}
+
+#[test]
+fn the_old_file_moves_in_once_and_the_swift_apps_file_is_never_read() {
+    let rig = rig();
+    let data = rig.dir.join("data");
+    rig.store.start(&request("a"));
+    rig.host.finish(&answer("Mine."));
+    let saved = store::doc(&data, DOC).unwrap().unwrap();
+    // Back to the old file, with a different file of the Swift app's beside it.
+    store::update_doc(&data, DOC, |_| Ok(None)).unwrap();
+    std::fs::create_dir_all(rig.file().parent().unwrap()).unwrap();
+    std::fs::write(rig.file(), &saved).unwrap();
+    let swift = data.join("second-opinions.json");
+    std::fs::write(&swift, "[]").unwrap();
+    let again = rig.again();
+    assert_eq!(again.opinions().len(), 1);
+    assert_eq!(again.opinions()[0].reply, "Mine.");
+    assert!(!rig.file().exists(), "the old file moved in");
+    assert_eq!(std::fs::read_to_string(&swift).unwrap(), "[]");
+    again.remove(&again.opinions()[0].id);
+    assert_eq!(std::fs::read_to_string(&swift).unwrap(), "[]");
 }
 
 #[test]
@@ -329,8 +361,12 @@ fn the_file_keeps_the_running_and_the_last_hundred_finished() {
     *rig.host.instant.lock().unwrap() = None;
     rig.store.start(&request("a"));
     assert_eq!(rig.store.opinions().len(), 106, "memory keeps them all");
-    let saved: Vec<SecondOpinion> =
-        serde_json::from_slice(&std::fs::read(rig.file()).unwrap()).unwrap();
+    let saved: Vec<SecondOpinion> = serde_json::from_str(
+        &store::doc(&rig.dir.join("data"), DOC)
+            .unwrap()
+            .expect("the document"),
+    )
+    .unwrap();
     assert_eq!(saved.len(), 100);
     assert_eq!(
         saved.iter().filter(|o| o.status == Status::Running).count(),
@@ -358,6 +394,5 @@ fn without_a_file_nothing_is_written() {
     host.finish(&answer("ok"));
     assert_eq!(store.opinions()[0].status, Status::Done);
     assert!(!dir.join("data").exists());
-    assert_eq!(file_in(&dir), dir.join("second-opinions.json"));
     let _ = std::fs::remove_dir_all(&dir);
 }

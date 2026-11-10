@@ -34,7 +34,7 @@ pub const ANTIGRAVITY: &str = "Antigravity CLI";
 
 /// Days are kept this long.
 const KEEP_DAYS: i64 = 400;
-/// The cache is several MB of JSON, so it is saved at most this often.
+/// The cache is several MB of JSON in one row, so it is saved at most this often.
 const PERSIST_EVERY: f64 = 5.0 * 60.0;
 /// Folders deeper than this are not read, which also ends any loop a mount might make.
 pub(super) const MAX_DEPTH: usize = 32;
@@ -78,7 +78,7 @@ pub struct Ranged {
 
 pub struct Tracker {
     roots: Vec<Root>,
-    cache_file: Option<PathBuf>,
+    cache_data: Option<PathBuf>,
     account_log: Option<PathBuf>,
     zone: ZoneFn,
     cache: Option<Cache>,
@@ -89,16 +89,17 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    /// `cache_file` `None` keeps the cache in memory (tests). `account_log` is the account store's
+    /// `cache_data` is the data folder whose `notchling.db` holds the cache; `None` keeps it in
+    /// memory (tests). `account_log` is the account store's
     /// `account-log.json`, read for the CLI's transcripts.
     pub fn new(
         roots: Vec<Root>,
-        cache_file: Option<PathBuf>,
+        cache_data: Option<PathBuf>,
         account_log: Option<PathBuf>,
     ) -> Tracker {
         Tracker {
             roots,
-            cache_file,
+            cache_data,
             account_log,
             zone: local_offset_secs,
             cache: None,
@@ -120,7 +121,7 @@ impl Tracker {
             return;
         }
         let cache = self
-            .cache_file
+            .cache_data
             .as_deref()
             .map(Cache::load)
             .unwrap_or_default();
@@ -165,11 +166,11 @@ impl Tracker {
     }
 
     fn persist(&mut self, now: f64) {
-        let (Some(file), Some(cache)) = (&self.cache_file, &self.cache) else {
+        let (Some(data), Some(cache)) = (&self.cache_data, &self.cache) else {
             self.unsaved = false;
             return;
         };
-        if cache.save(file).is_ok() {
+        if cache.save(data).is_ok() {
             self.unsaved = false;
             self.last_persist = Some(now);
         }

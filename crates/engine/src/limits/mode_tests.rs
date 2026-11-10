@@ -2,6 +2,7 @@
 
 use super::mode::*;
 use crate::sessions::testutil::TempDir;
+use crate::store;
 
 #[test]
 fn modes_use_the_swift_keys_and_names() {
@@ -52,27 +53,77 @@ fn antigravity_never_switches() {
 #[test]
 fn choices_survive_a_restart_and_a_bad_file_is_never_written_over() {
     let tmp = TempDir::new("limit-config");
-    let file = tmp.path("daemon/limits.json");
-    let config = LimitConfig::open(&file);
+    let data = tmp.path("data");
+    let config = LimitConfig::open(&data);
+    assert!(
+        !data.exists(),
+        "opening with nothing to move in makes no database"
+    );
     config.set_mode(&CLAUDE, LimitMode::Off).unwrap();
     config.set_switch_at(85).unwrap();
-    let again = LimitConfig::open(&file);
+    let again = LimitConfig::open(&data);
     assert_eq!(again.mode(&CLAUDE), LimitMode::Off);
     assert_eq!(again.switch_at(), 85);
 
     // A stored mode the provider doesn't allow reads as its default.
-    std::fs::write(
-        &file,
+    store::put_doc(
+        &data,
+        LIMITS_DOC,
         r#"{"version":1,"values":{"antigravityLimitMode":"notifyAndSwitch","limitSwitchAt":"x"}}"#,
     )
     .unwrap();
-    let odd = LimitConfig::open(&file);
+    let odd = LimitConfig::open(&data);
     assert_eq!(odd.mode(&ANTIGRAVITY), LimitMode::Notify);
     assert_eq!(odd.switch_at(), 95);
 
-    std::fs::write(&file, "{ not json").unwrap();
-    let bad = LimitConfig::open(&file);
+    store::put_doc(&data, LIMITS_DOC, "{ not json").unwrap();
+    let bad = LimitConfig::open(&data);
     assert!(bad.set_mode(&CLAUDE, LimitMode::Off).is_err());
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+    assert_eq!(
+        store::doc(&data, LIMITS_DOC).unwrap().as_deref(),
+        Some("{ not json")
+    );
     assert_eq!(bad.mode(&CLAUDE), CLAUDE.default);
+}
+
+#[test]
+fn the_old_file_moves_in_once_and_an_unreadable_one_stays() {
+    let tmp = TempDir::new("limit-config-import");
+    let data = tmp.path("data");
+    let old = tmp.write(
+        "data/daemon/limits.json",
+        r#"{"version":1,"values":{"limitMode":"off","limitSwitchAt":90}}"#,
+    );
+    let config = LimitConfig::open(&data);
+    assert!(!old.exists(), "the old file moved in");
+    assert_eq!(config.mode(&CLAUDE), LimitMode::Off);
+    assert_eq!(config.switch_at(), 90);
+    config.set_mode(&CODEX, LimitMode::Off).unwrap();
+    let again = LimitConfig::open(&data);
+    assert_eq!(
+        again.mode(&CLAUDE),
+        LimitMode::Off,
+        "kept beside the new choice"
+    );
+    assert_eq!(again.mode(&CODEX), LimitMode::Off);
+
+    let tmp = TempDir::new("limit-config-import-bad");
+    let data = tmp.path("data");
+    let old = tmp.write("data/daemon/limits.json", "{ not json");
+    let bad = LimitConfig::open(&data);
+    assert!(bad.set_mode(&CLAUDE, LimitMode::Off).is_err());
+    assert_eq!(std::fs::read_to_string(&old).unwrap(), "{ not json");
+    assert_eq!(bad.mode(&CLAUDE), CLAUDE.default);
+}
+
+#[test]
+fn two_configs_changing_different_values_keep_both() {
+    let tmp = TempDir::new("limit-config-two");
+    let data = tmp.path("data");
+    let (a, b) = (LimitConfig::open(&data), LimitConfig::open(&data));
+    a.set_mode(&CLAUDE, LimitMode::Off).unwrap();
+    b.set_switch_at(88).unwrap();
+    let all = LimitConfig::open(&data);
+    assert_eq!(all.mode(&CLAUDE), LimitMode::Off);
+    assert_eq!(all.switch_at(), 88);
 }

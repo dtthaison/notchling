@@ -4,10 +4,11 @@
 //! `antigravityLimitMode`, in [`crate::settings::KEYS`]) with the same defaults: Claude Code
 //! Notify and Switch, Codex Notify, Antigravity Notify (Off or Notify only: a switch restarts the
 //! app, and its limits exist only while it runs). The daemon keeps its own copy of these four
-//! values in a file of its own; it never writes the Swift app's `UserDefaults`.
+//! values in a document of its own (`daemon/limits` in `notchling.db`); it never writes the Swift app's `UserDefaults`.
 
 use super::logic::{DEFAULT_SWITCH_AT, SWITCH_RANGE};
 use crate::settings::spec;
+use crate::store;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -92,12 +93,35 @@ pub const PROVIDERS: [WatchedProvider; 3] = [CLAUDE, CODEX, ANTIGRAVITY];
 const SWITCH_AT_KEY: &str = "limitSwitchAt";
 const VERSION: u64 = 1;
 
-/// The four values, in memory and (when given a file) on disk.
+/// The document that holds the four values, in the daemon's own `<data>/notchling.db`.
+pub const LIMITS_DOC: &str = "daemon/limits";
+
+/// The file the values were kept in before the database.
+pub fn old_limits_file(data: &Path) -> PathBuf {
+    data.join("daemon").join("limits.json")
+}
+
+/// The four values, in memory and (when given a data folder) in the [`LIMITS_DOC`] document.
 pub struct LimitConfig {
     values: Mutex<Map<String, Value>>,
-    file: Option<PathBuf>,
-    /// The file exists and can't be read: kept as it is, never written over.
+    data: Option<PathBuf>,
+    /// The old file or the document exists and can't be read: kept as it is, never written over.
     corrupt: bool,
+}
+
+/// The accepted values in a document's text (`{"version": 1, "values": {...}}`), or `None` when
+/// the text isn't JSON.
+fn parse_values(text: &str) -> Option<Map<String, Value>> {
+    let root = serde_json::from_str::<Value>(text).ok()?;
+    let mut values = Map::new();
+    if let Some(map) = root.get("values").and_then(Value::as_object) {
+        for (k, v) in map {
+            if let Some(s) = spec(k).filter(|s| s.accepts(v)) {
+                values.insert(s.name.to_string(), v.clone());
+            }
+        }
+    }
+    Some(values)
 }
 
 impl LimitConfig {
@@ -105,35 +129,29 @@ impl LimitConfig {
     pub fn in_memory() -> LimitConfig {
         LimitConfig {
             values: Mutex::new(Map::new()),
-            file: None,
+            data: None,
             corrupt: false,
         }
     }
 
-    /// Reads `file` (`{"version": 1, "values": {...}}`). A missing file is the defaults; an
-    /// unreadable one reads as the defaults too and is never written over.
-    pub fn open(file: &Path) -> LimitConfig {
+    /// Reads the document in `<data>/notchling.db`, moving the old `<data>/daemon/limits.json` in
+    /// first (once). No document is the defaults; an unreadable one, or an old file that can't be
+    /// moved in, reads as the defaults too and is never written over. Opening makes no database
+    /// unless there is an old file to move in.
+    pub fn open(data: &Path) -> LimitConfig {
+        let old = old_limits_file(data);
+        let _ = store::import_file(data, LIMITS_DOC, &old, |t| parse_values(t).is_some());
+        let mut corrupt = std::fs::symlink_metadata(&old).is_ok();
         let mut values = Map::new();
-        let mut corrupt = false;
-        match std::fs::read(file) {
-            Ok(data) => match serde_json::from_slice::<Value>(&data) {
-                Ok(root) => {
-                    if let Some(map) = root.get("values").and_then(Value::as_object) {
-                        for (k, v) in map {
-                            if let Some(s) = spec(k).filter(|s| s.accepts(v)) {
-                                values.insert(s.name.to_string(), v.clone());
-                            }
-                        }
-                    }
-                }
-                Err(_) => corrupt = true,
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => corrupt = true,
+        if let Ok(Some(text)) = store::doc(data, LIMITS_DOC) {
+            match parse_values(&text) {
+                Some(v) => values = v,
+                None => corrupt = true,
+            }
         }
         LimitConfig {
             values: Mutex::new(values),
-            file: Some(file.to_path_buf()),
+            data: Some(data.to_path_buf()),
             corrupt,
         }
     }
@@ -187,30 +205,28 @@ impl LimitConfig {
     fn put(&self, key: &str, value: Value) -> Result<(), String> {
         let mut values = self.lock();
         if self.corrupt {
-            return Err("the limits settings file can't be read, so it isn't written over".into());
+            return Err("the limits settings can't be read, so they aren't written over".into());
         }
-        let before = values.insert(key.to_string(), value);
-        if let Err(e) = self.save(&values) {
-            match before {
-                Some(old) => values.insert(key.to_string(), old),
-                None => values.remove(key),
-            };
-            return Err(e);
-        }
-        Ok(())
-    }
-
-    fn save(&self, values: &Map<String, Value>) -> Result<(), String> {
-        let Some(file) = &self.file else {
+        let Some(data) = &self.data else {
+            values.insert(key.to_string(), value);
             return Ok(());
         };
-        if let Some(dir) = file.parent() {
-            notchling_platform::files::ensure_private_dir(dir).map_err(|e| e.to_string())?;
+        // Change the stored document, not this copy of it: another process may have set the
+        // other keys since this one opened.
+        let written = store::update_doc(data, LIMITS_DOC, |old| {
+            let mut stored = match old {
+                Some(text) => parse_values(&text).ok_or("the limits settings can't be read")?,
+                None => Map::new(),
+            };
+            stored.insert(key.to_string(), value);
+            let root = json!({"version": VERSION, "values": stored});
+            let mut text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+            text.push('\n');
+            Ok(Some(text))
+        })?;
+        if let Some(stored) = written.as_deref().and_then(parse_values) {
+            *values = stored;
         }
-        let root = json!({"version": VERSION, "values": values});
-        let mut text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-        text.push('\n');
-        notchling_platform::files::write_private_no_follow(file, text.as_bytes())
-            .map_err(|e| e.to_string())
+        Ok(())
     }
 }

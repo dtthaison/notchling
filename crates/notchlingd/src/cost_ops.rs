@@ -45,8 +45,9 @@ pub const MAX_REPLY_BYTES: usize = 700_000;
 #[derive(Clone, Debug)]
 pub struct CostSetup {
     pub roots: Vec<Root>,
-    /// The daemon's own cache (`<data>/daemon/cost-cache.json`); `None` keeps it in memory.
-    pub cache: Option<PathBuf>,
+    /// The data folder whose `notchling.db` holds the daemon's own cache (the `daemon/cost-cache`
+    /// document); `None` keeps it in memory.
+    pub cache_data: Option<PathBuf>,
     /// The account store's `account-log.json`, read only.
     pub account_log: PathBuf,
 }
@@ -66,8 +67,7 @@ impl CostSetup {
                 root(layout.codex_dir().join("sessions"), CODEX),
                 root(layout.antigravity_dir().join("brain"), ANTIGRAVITY),
             ],
-            cache: (!layout.socket_given)
-                .then(|| layout.data_dir.join("daemon").join("cost-cache.json")),
+            cache_data: (!layout.socket_given).then(|| layout.data_dir.clone()),
             account_log: layout.data_dir.join("account-log.json"),
         }
     }
@@ -75,7 +75,7 @@ impl CostSetup {
     pub fn service(&self) -> Arc<CostService> {
         CostService::new(Tracker::new(
             self.roots.clone(),
-            self.cache.clone(),
+            self.cache_data.clone(),
             Some(self.account_log.clone()),
         ))
     }
