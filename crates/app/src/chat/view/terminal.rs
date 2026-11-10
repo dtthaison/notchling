@@ -659,7 +659,9 @@ pub fn button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> imp
             kind,
             PartState::Rest,
             a,
-        ),
+        )
+        .size(px(super::sidebar::HEADER_BUTTON))
+        .px(px(0.0)),
         "Terminal: a shell in this session's folder".into(),
         a,
     )

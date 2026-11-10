@@ -1,7 +1,8 @@
-//! The sidebar: sessions in their groups, the selected one highlighted; a click selects. Its
+//! The sidebar: sessions in their groups, the selected one highlighted; a click selects, and files
+//! dropped on a row select it and go into its reply box at the caret. Its
 //! footer holds the ? button, which names every part on screen (`notchling_kit::ui::KitPart`).
 
-use gpui::{div, prelude::*, px, Context, Div, SharedString};
+use gpui::{div, prelude::*, px, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
@@ -108,9 +109,14 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
 /// Where the sidebar button sits: just right of the traffic lights (which end near 64), on their
 /// row, the button 24 tall about the lights' centre.
 const TOGGLE_LEFT: f32 = 76.0;
-const TOGGLE_TOP: f32 = 8.0;
-const TOGGLE_HEIGHT: f32 = 24.0;
-const TOGGLE_WIDTH: f32 = 28.0;
+const TOGGLE_TOP: f32 = (HEADER_ROW - HEADER_BUTTON) / 2.0;
+const TOGGLE_HEIGHT: f32 = HEADER_BUTTON;
+const TOGGLE_WIDTH: f32 = HEADER_BUTTON;
+
+/// The top row of the Sidebar and of Chat's header: one height, so their buttons line up.
+pub const HEADER_ROW: f32 = 40.0;
+/// Every button on that row: a square this size.
+pub const HEADER_BUTTON: f32 = 28.0;
 /// How far a header starts from the window's left edge while the sidebar is hidden: past the
 /// traffic lights and this button.
 pub const HIDDEN_HEADER_START: f32 = TOGGLE_LEFT + TOGGLE_WIDTH + 4.0 + TOGGLE_WIDTH + 12.0;
@@ -257,6 +263,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 )
             });
             let menu_id = row.id.clone();
+            let drop_id = row.id.clone();
+            let over = hsla(Ink::Selection.color(a));
             let row_el = session_row_marked(
                 SharedString::from(format!("session-{}", row.id)),
                 &row.name,
@@ -269,7 +277,17 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 false,
                 a,
             )
-            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)));
+            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)))
+            // Files from Finder: the row lights up while one is over it; the drop opens this
+            // session with the paths in its reply box.
+            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(over))
+            .on_drop::<ExternalPaths>(cx.listener(
+                move |this, paths: &ExternalPaths, w, cx| {
+                    this.select(&drop_id, cx);
+                    this.drop_paths(paths.paths(), w, cx);
+                    cx.stop_propagation();
+                },
+            ));
             list = list.child(
                 super::row_menu::on_right_click(row_el, menu_id, cx).part_at(
                     "Session Row",

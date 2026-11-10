@@ -10,7 +10,7 @@ use notchling_kit::ui::{button_with, hsla, icon_button, label, phone_mark, KitPa
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
-use super::sidebar::HIDDEN_HEADER_START;
+use super::sidebar::{HEADER_BUTTON, HEADER_ROW, HIDDEN_HEADER_START};
 use super::ChatView;
 use crate::chat::header::header;
 use crate::mac::gate;
@@ -49,7 +49,9 @@ fn phone_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
             kind,
             PartState::Rest,
             a,
-        ),
+        )
+        .size(px(HEADER_BUTTON))
+        .px(px(0.0)),
         tip,
         a,
     )
@@ -90,7 +92,9 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
             kind,
             PartState::Rest,
             a,
-        ),
+        )
+        .size(px(HEADER_BUTTON))
+        .px(px(0.0)),
         tip.into(),
         a,
     )
@@ -100,12 +104,12 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let bar = div()
-        .h(px(48.0))
+        .h(px(HEADER_ROW))
         .flex_shrink_0()
         .px(px(SIDE_PADDING))
         .flex()
         .items_center()
-        .gap(px(12.0))
+        .gap(px(4.0))
         .border_b(px(1.0))
         .border_color(hsla(Ink::Hairline.color(a)))
         // With the sidebar hidden the traffic lights and its button sit over this row's start.

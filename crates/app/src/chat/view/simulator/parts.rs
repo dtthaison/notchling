@@ -828,7 +828,9 @@ pub fn button_in_header(
             kind,
             PartState::Rest,
             a,
-        ),
+        )
+        .size(px(crate::chat::view::sidebar::HEADER_BUTTON))
+        .px(px(0.0)),
         SharedString::from("iOS Simulator: its screen, live"),
         a,
     )
