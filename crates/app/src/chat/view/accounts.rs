@@ -411,9 +411,11 @@ pub(super) fn render_menu(
 const MENU_BOTTOM: f32 = 48.0;
 
 /// How far the account menu's right edge sits from the window's: past the Details Panel when it
-/// shows, the side padding and the limit ring beside the button.
+/// shows (or the page panel in its place), the side padding and the limit ring beside the button.
 fn menu_right(view: &ChatView) -> f32 {
-    let details = if view.details_hidden {
+    let details = if view.page.is_open() {
+        view.page.shown_width()
+    } else if view.details_hidden {
         0.0
     } else {
         super::inspector::WIDTH

@@ -9,7 +9,7 @@
 //! Swift panel sat outside the per-session identity. Its left edge drags to resize it.
 //! `chat::page_panel` decides what a click opens and holds the panel's pure rules.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -67,6 +67,8 @@ pub struct State {
     pub render_only: bool,
     /// Counts the clicks, so the library's answer to an older one is dropped.
     asked: u64,
+    /// The width last drawn, for what is placed beside the panel (the account menu).
+    drawn_width: Cell<f32>,
 }
 
 impl Default for State {
@@ -77,6 +79,7 @@ impl Default for State {
             web: Rc::new(RefCell::new(None)),
             render_only: false,
             asked: 0,
+            drawn_width: Cell::new(DEFAULT_WIDTH),
         }
     }
 }
@@ -98,6 +101,11 @@ impl State {
 
     pub fn is_open(&self) -> bool {
         self.shown.is_some()
+    }
+
+    /// The panel's width as last drawn.
+    pub fn shown_width(&self) -> f32 {
+        self.drawn_width.get()
     }
 }
 
@@ -270,6 +278,7 @@ pub fn render(
     };
     let available = f32::from(window.viewport_size().width) - sidebar;
     let width = panel_width(view.page.width, available);
+    view.page.drawn_width.set(width);
 
     let mark = match shown.opens {
         Opens::Live(_) => Icon::Web,
