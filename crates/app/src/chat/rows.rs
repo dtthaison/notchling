@@ -13,11 +13,13 @@ pub const OUTPUT_LINES: usize = 12;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Row {
-    /// Your message; `queued` while it waits for the turn to end.
+    /// Your message; `queued` while it isn't in the transcript yet (waiting for the turn to end,
+    /// or, `sending`, still being typed into the session).
     User {
         text: String,
         images: usize,
         queued: bool,
+        sending: bool,
     },
     Assistant {
         text: String,
@@ -208,6 +210,7 @@ fn row(item: &ChatItem) -> Row {
             text: text.clone(),
             images: *images,
             queued: false,
+            sending: false,
         },
         ItemKind::Assistant { text } => Row::Assistant { text: text.clone() },
         ItemKind::Thinking { seconds, text } => Row::Thinking {
@@ -242,8 +245,20 @@ pub fn rows(conversation: &Conversation) -> Vec<Row> {
         text: text.clone(),
         images: 0,
         queued: true,
+        sending: false,
     }));
     out
+}
+
+/// `rows`, then the messages sent from this Chat that the transcript doesn't hold yet.
+pub fn with_outgoing(mut rows: Vec<Row>, outgoing: &[String]) -> Vec<Row> {
+    rows.extend(outgoing.iter().map(|text| Row::User {
+        text: text.clone(),
+        images: 0,
+        queued: true,
+        sending: true,
+    }));
+    rows
 }
 
 #[cfg(test)]
@@ -300,7 +315,8 @@ mod tests {
             Row::User {
                 text: "Fix it".into(),
                 images: 0,
-                queued: false
+                queued: false,
+                sending: false
             }
         );
         assert_eq!(
@@ -342,7 +358,27 @@ mod tests {
             Row::User {
                 text: "And bump the version".into(),
                 images: 0,
-                queued: true
+                queued: true,
+                sending: false
+            }
+        );
+    }
+
+    #[test]
+    fn messages_on_their_way_follow_as_bubbles_marked_sending() {
+        let c = Conversation {
+            queued: vec!["queued one".into()],
+            ..Conversation::default()
+        };
+        let rows = with_outgoing(rows(&c), &["Fix the build".to_owned()]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[1],
+            Row::User {
+                text: "Fix the build".into(),
+                images: 0,
+                queued: true,
+                sending: true
             }
         );
     }

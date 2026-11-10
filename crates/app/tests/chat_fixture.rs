@@ -67,7 +67,8 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
         Row::User {
             text: "Fix the failing search test and port the ranking to Rust.".into(),
             images: 0,
-            queued: false
+            queued: false,
+            sending: false
         }
     );
     assert!(matches!(&rows[1], Row::Thinking { title, .. } if title == "Thought for 4s"));
@@ -108,7 +109,8 @@ fn transcripts_in_the_fixture_are_read_relative_to_the_root() {
         Some(&Row::User {
             text: "And bump the version.".into(),
             images: 0,
-            queued: true
+            queued: true,
+            sending: false
         })
     );
 }

@@ -25,7 +25,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::{markdown, message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
 use crate::chat::data::Tool;
-use crate::chat::rows::{rows, Row, ToolRow};
+use crate::chat::rows::{rows, with_outgoing, Row, ToolRow};
 use crate::chat::steps::{self, Detail};
 
 /// Rows sit this far apart (the Swift app's conversation stack).
@@ -470,13 +470,21 @@ fn thinking(
         })
 }
 
-fn user_row(text: &str, images: usize, queued: bool, a: Appearance, cx: &Context<ChatView>) -> Div {
+fn user_row(
+    text: &str,
+    images: usize,
+    queued: bool,
+    sending: bool,
+    a: Appearance,
+    cx: &Context<ChatView>,
+) -> Div {
     // The Swift names: a sent message is "Your Message", one waiting for the turn "Queued Bubble".
-    let name = if queued {
-        "Queued Bubble"
-    } else {
-        "Your Message"
+    let name = match (queued, sending) {
+        (_, true) => "Sending Bubble",
+        (true, false) => "Queued Bubble",
+        (false, false) => "Your Message",
     };
+    let note = if sending { "Sending…" } else { "Queued" };
     div()
         .w_full()
         .flex()
@@ -484,7 +492,7 @@ fn user_row(text: &str, images: usize, queued: bool, a: Appearance, cx: &Context
         .items_end()
         .gap(px(2.0))
         .when(queued, |d| {
-            d.child(label("Queued", TypeRole::Meta, Ink::TextFaint, a))
+            d.child(label(note, TypeRole::Meta, Ink::TextFaint, a))
         })
         .child(
             div()
@@ -524,7 +532,8 @@ fn row_element(
             text,
             images,
             queued,
-        } => user_row(text, *images, *queued, a, cx),
+            sending,
+        } => user_row(text, *images, *queued, *sending, a, cx),
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => div().w_full().flex().items_start().child(
@@ -623,7 +632,7 @@ fn row_with_opinions(
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
-    let rows = rows(&view.conversation);
+    let rows = with_outgoing(rows(&view.conversation), &view.outgoing_texts());
     let column = div()
         .id("conversation")
         .flex_1()

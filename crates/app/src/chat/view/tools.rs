@@ -16,6 +16,7 @@ use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::Tool;
+use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
@@ -72,6 +73,8 @@ pub struct ChatTools {
     pub opens: OpenGate,
     /// Messages the daemon queued behind a Codex turn, shown until that turn ends.
     pub queued: HashMap<String, Vec<String>>,
+    /// Each row's messages sent from here and not in its transcript yet, drawn as "Sending…".
+    pub outgoing: HashMap<String, Vec<Outgoing>>,
     /// Draft rows whose first message the daemon is still starting a Codex session for, with the
     /// text sent: the row follows the session when it is named, or gets the text back.
     pub starting: HashMap<String, String>,
@@ -113,6 +116,7 @@ impl ChatTools {
             agy_config: Vec::new(),
             opens: OpenGate::default(),
             queued: HashMap::new(),
+            outgoing: HashMap::new(),
             starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
@@ -129,9 +133,43 @@ impl ChatTools {
     pub fn draft(&self, id: &str) -> &str {
         self.drafts.get(id).map(String::as_str).unwrap_or("")
     }
+
+    /// The daemon typed `text` into `row`'s session: its bubble now waits only so long.
+    fn delivered(&mut self, row: &str, text: &str, now_ms: i64) {
+        if let Some(out) = self.outgoing.get_mut(row).and_then(|list| {
+            list.iter_mut()
+                .find(|o| o.text == text && o.delivered_at.is_none())
+        }) {
+            out.delivered(now_ms);
+        }
+    }
+
+    /// Drops `text`'s bubble from `row` (it failed, or another bubble shows it now).
+    fn take_outgoing(&mut self, row: &str, text: &str) {
+        if let Some(list) = self.outgoing.get_mut(row) {
+            if let Some(i) = list.iter().position(|o| o.text == text) {
+                list.remove(i);
+            }
+        }
+    }
 }
 
 impl ChatView {
+    /// The selected row's messages on their way, for the conversation's "Sending…" bubbles.
+    pub(super) fn outgoing_texts(&self) -> Vec<String> {
+        let now = now_ms();
+        self.selected
+            .as_deref()
+            .and_then(|row| self.tools.outgoing.get(row))
+            .map(|list| {
+                list.iter()
+                    .filter(|o| o.keep(&self.conversation, now))
+                    .map(|o| o.text.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(super) fn acting(&self, cx: &mut Context<Self>) -> Acting {
         self.acts(cx).acting()
     }
@@ -280,6 +318,12 @@ impl ChatView {
             }
         };
         self.put_draft(&id, String::new(), cx);
+        // Shown at once as your bubble: typing it into the session takes seconds.
+        self.tools
+            .outgoing
+            .entry(id.clone())
+            .or_default()
+            .push(Outgoing::new(&text, &self.conversation));
         // The next reload goes to the end, wherever you were reading.
         self.follow_sent = true;
         self.conversation_scroll.scroll_to_bottom();
@@ -288,14 +332,18 @@ impl ChatView {
             request,
             move |view, result, cx| match result {
                 Ok(reply) => {
+                    view.tools.delivered(&id, &sent_text, now_ms());
                     if session.tool == Tool::Codex {
                         match sent_state(&reply) {
-                            Sent::Queued(_) => view
-                                .tools
-                                .queued
-                                .entry(id.clone())
-                                .or_default()
-                                .push(sent_text.clone()),
+                            Sent::Queued(_) => {
+                                // Its Queued bubble takes over from the Sending one.
+                                view.tools.take_outgoing(&id, &sent_text);
+                                view.tools
+                                    .queued
+                                    .entry(id.clone())
+                                    .or_default()
+                                    .push(sent_text.clone());
+                            }
                             // Not named yet: the draft follows it when the daemon says so.
                             Sent::Starting => {
                                 view.tools.starting.insert(id.clone(), sent_text.clone());
@@ -308,6 +356,9 @@ impl ChatView {
                         if let Some(pick) = view.tools.picks.remove(&id) {
                             view.tools.picks.insert(row.clone(), pick);
                         }
+                        if let Some(out) = view.tools.outgoing.remove(&id) {
+                            view.tools.outgoing.insert(row.clone(), out);
+                        }
                         view.selected = Some(row);
                         view.loading = true;
                         view.show_draft(cx);
@@ -315,6 +366,7 @@ impl ChatView {
                     view.reload_now(cx);
                 }
                 Err(message) => {
+                    view.tools.take_outgoing(&id, &sent_text);
                     // Back into the box, in front of anything typed since.
                     let typed = view.tools.drafts.remove(&id).unwrap_or_default();
                     let back = if typed.is_empty() {
@@ -535,6 +587,11 @@ impl ChatView {
             return;
         };
         let id = session.agent.id;
+        // Messages the transcript now holds give way to the real bubbles.
+        let now = now_ms();
+        if let Some(list) = self.tools.outgoing.get_mut(&id) {
+            list.retain(|o| o.keep(&self.conversation, now));
+        }
         for (row, queued) in self.tools.queued.iter_mut() {
             queued.truncate(self.tools.live.waiting(row));
         }
