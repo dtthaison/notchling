@@ -51,6 +51,17 @@ fn the_claude_page_has_in_use_switch_signed_out_and_lane_rows() {
         ops.switch.is_none(),
         "an account live in a lane isn't switched to"
     );
+    let RowContent::Limits(groups) = &ops.content else {
+        panic!("an account that isn't in use shows its own read");
+    };
+    assert_eq!(
+        (
+            groups[0].lines[0].label.as_str(),
+            groups[0].lines[0].percent
+        ),
+        ("5 hours", 12.0)
+    );
+    assert_eq!(groups[0].lines[1].label, "Week");
     let old = &p.rows[2];
     assert_eq!(
         old.content,
@@ -65,7 +76,7 @@ fn the_claude_page_has_in_use_switch_signed_out_and_lane_rows() {
     assert_eq!(
         team.content,
         RowContent::Text {
-            text: "Limits show once the saved login is checked.".into(),
+            text: "Checking limits…".into(),
             warning: false
         }
     );
@@ -80,6 +91,76 @@ fn the_claude_page_has_in_use_switch_signed_out_and_lane_rows() {
     let busy = page(CLAUDE_CODE, &s, &on(), true, NOW, Zone::UTC);
     let c = busy.rows[3].switch.unwrap();
     assert!(!c.enabled && c.tooltip.is_none());
+}
+
+#[test]
+fn every_claude_account_shows_its_own_limits_a_pending_read_or_why_it_failed() {
+    use crate::accounts::renders::claude_report;
+    let mut s = snapshot(Shown::Claude);
+    let team = |s: &Snapshot| page(CLAUDE_CODE, s, &on(), false, NOW, Zone::UTC).rows[3].clone();
+    // Not read yet: pending, not a promise about later.
+    assert_eq!(
+        team(&s).content,
+        RowContent::Text {
+            text: "Checking limits…".into(),
+            warning: false
+        }
+    );
+    // A failed read says so, in plain words with the daemon's reason.
+    s.claude_usage.errors.insert(
+        "a4".into(),
+        "The saved login has expired. Add the account again to sign in.".into(),
+    );
+    assert_eq!(
+        team(&s).content,
+        RowContent::Text {
+            text: "Couldn't read limits. The saved login has expired. Add the account again to sign in."
+                .into(),
+            warning: true
+        }
+    );
+    // A report wins over an older failure (the daemon keeps the last good read).
+    s.claude_usage.reports.insert("a4".into(), claude_report());
+    let RowContent::Limits(groups) = team(&s).content else {
+        panic!("its own read");
+    };
+    assert_eq!(groups[0].lines.len(), 2);
+    assert_eq!(groups[0].lines[1].percent_text, "58%");
+    // A plan that reports nothing.
+    s.claude_usage.reports.insert(
+        "a4".into(),
+        notchling_engine::limits::report::UsageReport {
+            groups: vec![],
+            fetched: NOW,
+        },
+    );
+    assert_eq!(
+        team(&s).content,
+        RowContent::Text {
+            text: "This account reports no limits.".into(),
+            warning: false
+        }
+    );
+    // The account in use: the watcher's windows while they are the newer check, its own read once
+    // that is newer.
+    let in_use = |s: &Snapshot| page(CLAUDE_CODE, s, &on(), false, NOW, Zone::UTC).rows[0].clone();
+    s.claude_usage.reports.insert("a1".into(), claude_report());
+    let RowContent::Limits(own) = in_use(&s).content else {
+        panic!("its read, the same age as the watcher's check");
+    };
+    assert_eq!(own[0].lines[0].percent, 12.0, "equal ages: its own read");
+    s.limits.providers[0].checked = Some(NOW + 10.0);
+    let RowContent::Limits(watched) = in_use(&s).content else {
+        panic!("the watcher's windows");
+    };
+    assert_eq!(watched[0].lines[0].percent, 41.0);
+    // A signed-out account never shows a read.
+    s.claude_usage.reports.insert("a3".into(), claude_report());
+    let signed_out = page(CLAUDE_CODE, &s, &on(), false, NOW, Zone::UTC).rows[2].clone();
+    assert!(matches!(
+        signed_out.content,
+        RowContent::Text { warning: true, .. }
+    ));
 }
 
 #[test]

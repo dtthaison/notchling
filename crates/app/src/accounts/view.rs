@@ -189,6 +189,16 @@ impl AccountsView {
     }
 
     pub(super) fn refresh(&self, cx: &mut Context<Self>) {
+        self.refresh_with(false, cx);
+    }
+
+    /// The Refresh button's: every provider's limits read afresh for every account, not only
+    /// those due ([`Accounts::refresh_all`]).
+    pub(super) fn refresh_all(&self, cx: &mut Context<Self>) {
+        self.refresh_with(true, cx);
+    }
+
+    fn refresh_with(&self, force: bool, cx: &mut Context<Self>) {
         if !self.store.is_live() {
             return;
         }
@@ -196,7 +206,11 @@ impl AccountsView {
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .spawn(async move {
-                    store.refresh(&switches);
+                    if force {
+                        store.refresh_all(&switches);
+                    } else {
+                        store.refresh(&switches);
+                    }
                     store.refresh_cost(range.wire());
                 })
                 .await;

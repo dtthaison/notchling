@@ -65,6 +65,10 @@ fn daemon(on: bool) -> impl Fn(&str, &Value) -> Result<Value, ClientError> + Sen
         "limits.status" => Ok(json!({"accounts_on": on, "watching": on, "switch_at": 95,
             "providers": [{"id": "claude", "label": "Claude Code", "mode": "notify", "modes": [],
             "active": "me@example.com", "windows": [{"name": "5-hour", "percent": 41.0}]}]})),
+        "limits.usage" => Ok(json!({"accounts_on": on,
+            "reports": {"a1": {"fetched": 2.0, "groups": [{"name": null, "bars": [
+                {"label": "5 hours", "kind": "session", "percent": 12.0, "resets_at": null}]}]}},
+            "errors": {"a2": "The saved login has expired. Add the account again to sign in."}})),
         "cost.summary" => Ok(
             json!({"range": args["range"], "scanned": 1.0, "scanning": false,
             "summary": {"days": [], "today": 1.5, "week": 9.0, "month": 31.0, "models": [],
@@ -110,7 +114,8 @@ fn a_refresh_reads_every_list_and_the_limits_only_with_the_switch_on() {
             "lanes.list",
             "providers.list",
             "limits.status",
-            "providers.usage"
+            "providers.usage",
+            "limits.usage"
         ]
     );
     assert_eq!(calls.lock().unwrap()[0].1, json!({"sync": true}));
@@ -121,6 +126,8 @@ fn a_refresh_reads_every_list_and_the_limits_only_with_the_switch_on() {
     assert_eq!(s.lanes[0].name, "night");
     assert_eq!(s.providers.providers[0].id, "codex");
     assert_eq!(s.usage["codex"]["u:a"].groups[0].bars[0].percent, 41.0);
+    assert_eq!(s.claude_usage.reports["a1"].groups[0].bars[0].percent, 12.0);
+    assert!(s.claude_usage.errors["a2"].contains("expired"));
     assert_eq!(s.limits.providers[0].windows[0].percent, 41.0);
     assert_eq!(s.error, None);
 
@@ -261,13 +268,131 @@ fn the_live_login_is_synced_at_most_every_30_seconds_and_usage_with_it() {
     store.refresh_at(&on, 1_029.0);
     assert_eq!((syncs(&calls), usage(&calls)), (2, 1));
     assert_eq!(
-        calls.lock().unwrap()[5].1,
+        calls.lock().unwrap()[6].1,
         json!({"sync": false}),
         "accounts.list without sync"
     );
     assert_eq!(store.snapshot().usage["codex"]["u:a"].groups.len(), 1);
     store.refresh_at(&on, 1_030.0);
     assert_eq!((syncs(&calls), usage(&calls)), (4, 2));
+}
+
+/// Every call with its arguments, as "op {args}".
+fn log(calls: &Calls) -> Vec<String> {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(op, args)| format!("{op} {args}"))
+        .collect()
+}
+
+#[test]
+fn the_refresh_button_reads_every_providers_limits_afresh_whatever_the_throttle_says() {
+    let (store, calls) = fake(daemon(true));
+    let on = Switches::all_on();
+    store.refresh_at(&on, 1_000.0);
+    calls.lock().unwrap().clear();
+    // One second later a plain refresh syncs nothing; the button forces it all.
+    store.refresh_at(&on, 1_001.0);
+    assert!(
+        !log(&calls).iter().any(|c| c.contains("\"refresh\":true")),
+        "{:?}",
+        log(&calls)
+    );
+    calls.lock().unwrap().clear();
+    store.refresh_all_at(&on, 1_002.0);
+    assert_eq!(
+        log(&calls),
+        [
+            // Before the lists, so the lists' own syncs don't take the daemon's slot first.
+            r#"providers.usage {"provider":"codex","refresh":true}"#,
+            r#"limits.usage {"refresh":true}"#,
+            r#"accounts.list {"sync":true}"#,
+            "lanes.list {}",
+            r#"providers.list {"sync":true}"#,
+            "limits.status {}",
+        ]
+    );
+    let s = store.snapshot();
+    assert_eq!(s.usage["codex"]["u:a"].groups[0].bars[0].percent, 41.0);
+    assert_eq!(s.claude_usage.reports["a1"].groups[0].bars[0].percent, 12.0);
+    // The button counts as the sync: the next plain refresh waits its 30 s again.
+    calls.lock().unwrap().clear();
+    store.refresh_at(&on, 1_020.0);
+    assert!(!log(&calls).iter().any(|c| c.contains("\"sync\":true")));
+}
+
+#[test]
+fn a_forced_refresh_asks_again_while_the_daemon_is_still_reading_and_never_forces_twice() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let busy = Arc::new(AtomicU32::new(2));
+    let inner = daemon(true);
+    let b = busy.clone();
+    let (store, calls) = fake(move |op, args| {
+        let mut reply = inner(op, args)?;
+        if op == "limits.usage" && b.load(Ordering::SeqCst) > 0 {
+            // Still reading for the first two asks.
+            if b.fetch_sub(1, Ordering::SeqCst) > 1 {
+                reply["refreshing"] = json!(true);
+            }
+        }
+        Ok(reply)
+    });
+    let store = store.with_settle_every(Duration::ZERO);
+    store.refresh_all_at(&Switches::all_on(), 1_000.0);
+    let usage_asks: Vec<String> = log(&calls)
+        .into_iter()
+        .filter(|c| c.starts_with("limits.usage"))
+        .collect();
+    assert_eq!(
+        usage_asks,
+        [
+            r#"limits.usage {"refresh":true}"#,
+            r#"limits.usage {"refresh":false}"#
+        ],
+        "the second reply said done, so it stopped asking"
+    );
+}
+
+#[test]
+fn a_refresh_asked_while_another_runs_keeps_being_forced_when_it_runs_after() {
+    use std::sync::mpsc;
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let gate = Mutex::new(Some((entered_tx, release_rx)));
+    let inner = daemon(true);
+    let (store, calls) = fake(move |op, args| {
+        if op == "accounts.list" {
+            let taken = gate.lock().unwrap().take();
+            if let Some((entered, release)) = taken {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+        }
+        inner(op, args)
+    });
+    let store = Arc::new(store);
+    let first = {
+        let store = store.clone();
+        std::thread::spawn(move || store.refresh_at(&Switches::all_on(), 0.0))
+    };
+    entered_rx.recv().unwrap();
+    store.refresh_at(&Switches::all_on(), 1.0);
+    store.refresh_all_at(&Switches::all_on(), 2.0);
+    store.refresh_at(&Switches::all_on(), 3.0);
+    release_tx.send(()).unwrap();
+    first.join().unwrap();
+    let forced = log(&calls)
+        .iter()
+        .filter(|c| c.as_str() == r#"limits.usage {"refresh":true}"#)
+        .count();
+    assert_eq!(forced, 1, "the one run after is the forced one, once");
+    let lists = sent(&calls)
+        .iter()
+        .filter(|o| *o == "accounts.list")
+        .count();
+    assert_eq!(lists, 2);
 }
 
 #[test]

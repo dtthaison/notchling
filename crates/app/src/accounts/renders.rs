@@ -8,8 +8,8 @@ use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
 
 use super::store::Snapshot;
 use super::wire::{
-    AddProgress, ClaudeAccount, ClaudeList, CostReply, Lane, LimitProvider, LimitsStatus, Provider,
-    ProviderAccount, ProviderList, Window,
+    AddProgress, ClaudeAccount, ClaudeList, ClaudeUsage, CostReply, Lane, LimitProvider,
+    LimitsStatus, Provider, ProviderAccount, ProviderList, Window,
 };
 use crate::switches::Switches;
 use crate::views::ViewSpec;
@@ -106,6 +106,20 @@ pub fn codex_report() -> UsageReport {
                     Some(2.0 * 3600.0 + 13.0 * 60.0),
                 ),
                 bar("Week", BarKind::Week, 73.0, Some(3.0 * 86_400.0)),
+            ],
+        }],
+        fetched: NOW,
+    }
+}
+
+/// A Claude Code account's own read: an unnamed group of a 5-hour and a weekly bar.
+pub fn claude_report() -> UsageReport {
+    UsageReport {
+        groups: vec![Group {
+            name: None,
+            bars: vec![
+                bar("5 hours", BarKind::Session, 12.0, Some(4.0 * 3600.0)),
+                bar("Week", BarKind::Week, 58.0, Some(2.0 * 86_400.0)),
             ],
         }],
         fetched: NOW,
@@ -328,6 +342,16 @@ pub fn snapshot(shown: Shown) -> Snapshot {
             syncing: false,
         },
         usage,
+        // The account in a lane has its own read; the one in use shows the watcher's windows and
+        // the team account has not been read yet.
+        claude_usage: ClaudeUsage {
+            reports: if on {
+                BTreeMap::from([("a2".to_owned(), claude_report())])
+            } else {
+                BTreeMap::new()
+            },
+            errors: BTreeMap::new(),
+        },
         limits: LimitsStatus {
             accounts_on: on,
             watching: on,

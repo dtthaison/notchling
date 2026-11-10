@@ -82,7 +82,7 @@ impl AccountsView {
         )
         .when(refresh_control.enabled, |b| {
             b.on_click(cx.listener(|this, _, _, cx| {
-                this.refresh(cx);
+                this.refresh_all(cx);
                 cx.notify();
             }))
         });

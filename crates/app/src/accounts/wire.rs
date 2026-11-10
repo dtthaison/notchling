@@ -111,6 +111,11 @@ impl Call {
         Call::new("limits.status", json!({}))
     }
 
+    /// Every saved Claude Code account's limits; `refresh` reads them all now, not just those due.
+    pub fn limits_usage(refresh: bool) -> Call {
+        Call::new("limits.usage", json!({ "refresh": refresh }))
+    }
+
     /// `range` is "7", "30" or "all".
     pub fn cost_summary(range: &str) -> Call {
         Call::new("cost.summary", json!({ "range": range }))
@@ -293,6 +298,33 @@ pub fn parse_usage(v: &Value) -> BTreeMap<String, UsageReport> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Whether a `providers.usage` or `limits.usage` reply says a read is still going in the daemon.
+pub fn still_refreshing(v: &Value) -> bool {
+    flag(v, "refreshing")
+}
+
+/// `limits.usage`'s reply: each saved Claude Code account's last limits, or why it has none.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ClaudeUsage {
+    pub reports: BTreeMap<String, UsageReport>,
+    pub errors: BTreeMap<String, String>,
+}
+
+pub fn parse_claude_usage(v: &Value) -> ClaudeUsage {
+    ClaudeUsage {
+        reports: parse_usage(v),
+        errors: v
+            .get("errors")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(id, why)| Some((id.clone(), why.as_str()?.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
 }
 
 /// A limit window the watcher last saw (`limits.status`).

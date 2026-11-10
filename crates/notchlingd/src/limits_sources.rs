@@ -50,6 +50,8 @@ pub struct ClaudeLimits {
     store: Arc<ClaudeAccounts>,
     /// The last limits read, by account id.
     usage: Mutex<HashMap<String, AccountUsage>>,
+    /// Why the last read of an account failed, by account id; gone once one works.
+    errors: Mutex<HashMap<String, String>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
@@ -59,6 +61,7 @@ impl ClaudeLimits {
             accounts,
             store,
             usage: Mutex::new(HashMap::new()),
+            errors: Mutex::new(HashMap::new()),
             now: Arc::new(now_secs),
         }
     }
@@ -69,23 +72,59 @@ impl ClaudeLimits {
         self
     }
 
-    /// One account's limits, or `None` with no usable token or no answer.
-    fn fetch(&self, id: &str, now: f64) -> Option<AccountUsage> {
-        let token = self.store.usage_token(id).ok()??;
+    /// Whether `id` is the main login's account or a lane's: its token is read, never renewed.
+    fn in_use(&self, id: &str) -> bool {
+        self.store.snapshot().active.as_deref() == Some(id)
+            || self.store.lanes().iter().any(|l| l.account_id == id)
+    }
+
+    /// One account's limits, or why there are none (words for the user).
+    fn fetch(&self, id: &str, now: f64) -> Result<AccountUsage, String> {
+        let expired = || {
+            if self.in_use(id) {
+                "Its login has expired. Claude Code renews it the next time it runs."
+            } else {
+                "The saved login has expired. Add the account again to sign in."
+            }
+        };
+        let token = match self.store.usage_token(id) {
+            Ok(Some(token)) => token,
+            Ok(None) => return Err(expired().into()),
+            Err(_) => return Err("The login couldn't be read.".into()),
+        };
         let reply = self
             .store
             .env()
             .http
             .send(&HttpRequest::get(USAGE_URL, &token));
-        let json = reply.json_ok()?;
-        Some(parse_usage(&Value::Object(json), now))
+        match reply.json_ok() {
+            Some(json) => Ok(parse_usage(&Value::Object(json), now)),
+            None if reply.status == 0 => Err("No answer from Anthropic. Try Refresh again.".into()),
+            None if matches!(reply.status, 401 | 403) => Err(expired().into()),
+            None => Err(format!(
+                "Anthropic answered with an error ({}).",
+                reply.status
+            )),
+        }
     }
-}
 
-impl ClaudeSource for ClaudeLimits {
-    /// Reads the main login (it may have changed under us), then each account's limits not read
-    /// in the last round (`AccountStore.fetchUsage`).
-    fn sync_usage(&self) {
+    /// Reads one account and keeps the answer or the reason. A failed read leaves the last good
+    /// one in place for the watcher.
+    fn read(&self, id: &str, now: f64) {
+        match self.fetch(id, now) {
+            Ok(usage) => {
+                lock(&self.usage).insert(id.to_string(), usage);
+                lock(&self.errors).remove(id);
+            }
+            Err(why) => {
+                lock(&self.errors).insert(id.to_string(), why);
+            }
+        }
+    }
+
+    /// Reads the main login (it may have changed under us), then every signed-in account's limits
+    /// that were not read in the last round, or all of them when `force`.
+    fn sync_with(&self, force: bool) {
         if !self.accounts.is_on() {
             return;
         }
@@ -95,16 +134,34 @@ impl ClaudeSource for ClaudeLimits {
             if !self.accounts.is_on() {
                 return;
             }
-            let due = lock(&self.usage)
-                .get(&account.id)
-                .is_none_or(|u| now - u.fetched >= SYNC_EVERY);
-            if !due {
+            if account.needs_login {
+                lock(&self.usage).remove(&account.id);
+                lock(&self.errors).remove(&account.id);
                 continue;
             }
-            if let Some(usage) = self.fetch(&account.id, now) {
-                lock(&self.usage).insert(account.id, usage);
+            let due = force
+                || lock(&self.usage)
+                    .get(&account.id)
+                    .is_none_or(|u| now - u.fetched >= SYNC_EVERY);
+            if due {
+                self.read(&account.id, now);
             }
         }
+    }
+}
+
+impl ClaudeSource for ClaudeLimits {
+    /// Each account's limits not read in the last round (`AccountStore.fetchUsage`).
+    fn sync_usage(&self) {
+        self.sync_with(false);
+    }
+
+    fn sync_usage_now(&self) {
+        self.sync_with(true);
+    }
+
+    fn usage_error(&self, id: &str) -> Option<String> {
+        lock(&self.errors).get(id).cloned()
     }
 
     fn accounts(&self) -> Vec<AccountInfo> {

@@ -12,6 +12,7 @@
 //! | --- | --- | --- | --- |
 //! | `limits.status` | app | `{}` | see below |
 //! | `limits.set_mode` | app | `{provider, mode?, switch_at?}` | `{"provider", "mode", "switch_at"}` |
+//! | `limits.usage` | app | `{refresh?}` | each Claude Code account's limits, see [`crate::limits_usage`] |
 //! | `cost.summary` | agent | `{range?}` | see [`crate::cost_ops`] |
 //!
 //! ```json
@@ -38,6 +39,7 @@
 use crate::acting_ops::Room;
 use crate::cost_ops;
 use crate::layout::Layout;
+use crate::limits_usage::{ClaudeUsage, LIMITS_USAGE};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::cost::CostService;
@@ -139,6 +141,8 @@ pub struct LimitsOps {
     notices: Arc<Mutex<VecDeque<(f64, String)>>>,
     room: Arc<dyn Room>,
     cost: Arc<CostService>,
+    /// `limits.usage`: each Claude Code account's limits.
+    claude_usage: ClaudeUsage,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     tick: Duration,
     stop: Mutex<Option<Sender<()>>>,
@@ -182,6 +186,7 @@ impl LimitsOps {
             notices: Arc::new(Mutex::new(VecDeque::new())),
             room,
             cost,
+            claude_usage: ClaudeUsage::default(),
             now: Arc::new(system_now),
             tick: TICK_EVERY,
             stop: Mutex::new(None),
@@ -248,6 +253,7 @@ impl LimitsOps {
 
     /// Feeds the Claude Code watcher from the account store and the jobs that stopped on a limit.
     pub fn set_claude(&self, source: Arc<dyn ClaudeSource>, jobs: Arc<dyn StoppedJobs>) {
+        self.claude_usage.set_source(source.clone());
         let watcher =
             ClaudeWatcher::new(source.clone(), jobs, self.config.clone(), self.announcer());
         self.put(Slot::Claude {
@@ -373,7 +379,7 @@ impl LimitsOps {
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            LIMITS_STATUS | LIMITS_SET_MODE => Some(OpSpec::APP),
+            LIMITS_STATUS | LIMITS_SET_MODE | LIMITS_USAGE => Some(OpSpec::APP),
             COST_SUMMARY => Some(OpSpec::AGENT),
             _ => None,
         }
@@ -383,6 +389,7 @@ impl LimitsOps {
         match op {
             LIMITS_STATUS => Ok(self.status()),
             LIMITS_SET_MODE => self.set_mode(args),
+            LIMITS_USAGE => self.claude_usage.call(self.accounts.is_on(), args),
             COST_SUMMARY => cost_ops::call(&self.cost, args, (self.now)()),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }

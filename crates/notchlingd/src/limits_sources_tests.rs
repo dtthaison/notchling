@@ -109,6 +109,71 @@ fn claude_on_reads_each_accounts_usage_with_its_own_token_and_renews_nothing() {
     assert_eq!(http.seen().len(), before);
 }
 
+#[test]
+fn claude_forced_sync_reads_every_account_again_and_keeps_why_a_read_failed() {
+    let chain = Arc::new(MemoryKeychain::new());
+    let http = Arc::new(ScriptedHttp::new());
+    let w = world("lim-force", true, chain.clone(), http.clone());
+    std::fs::write(
+        w.d.0.join("home/.claude.json"),
+        "{\"oauthAccount\": {\"accountUuid\": \"a1a1\", \"organizationUuid\": \"0101\", \"emailAddress\": \"one@example.com\"}}",
+    )
+    .unwrap();
+    chain.put(
+        LIVE_SERVICE,
+        "me",
+        r#"{"claudeAiOauth":{"accessToken":"test-access-1"}}"#,
+    );
+    chain.put(SAVED_SERVICE, ID2, &slot(ID2, "two@example.com", "2"));
+    std::fs::create_dir_all(w.d.0.join("data/daemon")).unwrap();
+    std::fs::write(
+        w.d.0.join("data/daemon/accounts.json"),
+        format!(r#"[{{"id":"{ID2}","email":"two@example.com","plan":"Pro"}}]"#),
+    )
+    .unwrap();
+    http.answer(PROFILE_URL, 200, &profile(ID1, "one@example.com"));
+    http.answer(USAGE_URL, 200, USAGE);
+    http.answer(USAGE_URL, 200, USAGE);
+    let source =
+        ClaudeLimits::new(w.flag.clone(), w.ops.store()).with_clock(Arc::new(|| 1_800_000_000.0));
+    source.sync_usage();
+    let usage_requests = |http: &ScriptedHttp| {
+        http.seen()
+            .iter()
+            .filter(|(url, _)| url == USAGE_URL)
+            .count()
+    };
+    assert_eq!(usage_requests(&http), 2);
+    assert_eq!(source.usage_error(ID1), None);
+    assert_eq!(source.usage_error(ID2), None);
+
+    // Not due: nothing asked. Forced: both asked again, one refused.
+    source.sync_usage();
+    assert_eq!(usage_requests(&http), 2);
+    http.answer(USAGE_URL, 401, "{}");
+    http.answer(USAGE_URL, 200, USAGE);
+    source.sync_usage_now();
+    assert_eq!(usage_requests(&http), 4);
+    let (e1, e2) = (source.usage_error(ID1), source.usage_error(ID2));
+    assert!(e1.is_some() != e2.is_some(), "{e1:?} {e2:?}");
+    // The failed one keeps its last good read for the watcher, and no token was renewed.
+    assert!(source.usage(ID1).is_some() && source.usage(ID2).is_some());
+    assert!(!http.seen().iter().any(|(url, _)| url == TOKEN_URL));
+
+    // The next read that works clears the reason.
+    http.answer(USAGE_URL, 200, USAGE);
+    http.answer(USAGE_URL, 200, USAGE);
+    source.sync_usage_now();
+    assert_eq!(source.usage_error(ID1), None);
+    assert_eq!(source.usage_error(ID2), None);
+
+    // Off: a forced sync asks nothing either.
+    w.flag.set(false);
+    let before = http.seen().len();
+    source.sync_usage_now();
+    assert_eq!(http.seen().len(), before);
+}
+
 /// A provider that counts what it was asked.
 #[derive(Default)]
 struct CountingProvider {

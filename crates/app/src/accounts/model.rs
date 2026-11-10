@@ -158,13 +158,11 @@ fn cost_line(s: &Snapshot, account: &str) -> Option<String> {
 
 fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zone) -> Page {
     let on = switches.is_on(Switch::Accounts);
-    let windows = s
-        .limits
-        .providers
-        .iter()
-        .find(|p| p.id == "claude")
+    let watched = s.limits.providers.iter().find(|p| p.id == "claude");
+    let windows = watched
         .map(|p| limits::from_windows(&p.windows, now, zone))
         .unwrap_or_default();
+    let checked = watched.and_then(|p| p.checked);
     let rows = s
         .claude
         .accounts
@@ -178,24 +176,42 @@ fn claude_page(s: &Snapshot, switches: &Switches, busy: bool, now: f64, zone: Zo
                 }
                 subtitle.push_str(&format!("{lane} lane"));
             }
+            // Each account shows its own read (`limits.usage`); the account in use shows the
+            // watcher's windows instead when they were checked after that read.
+            let report = s.claude_usage.reports.get(&a.id);
+            let watched_is_newer = report.is_none_or(|r| checked.is_some_and(|at| at > r.fetched));
             let content = if a.needs_login {
                 RowContent::Text {
                     text: "Signed out. Add this account again to sign in.".into(),
                     warning: true,
                 }
-            } else if in_use && !windows.is_empty() {
+            } else if in_use && !windows.is_empty() && watched_is_newer {
                 RowContent::Limits(vec![LimitGroup {
                     name: None,
                     lines: windows.clone(),
                 }])
-            } else if in_use && on {
+            } else if let Some(report) = report {
+                if report.is_empty() {
+                    RowContent::Text {
+                        text: "This account reports no limits.".into(),
+                        warning: false,
+                    }
+                } else {
+                    RowContent::Limits(limits::groups(report, now, zone))
+                }
+            } else if let Some(why) = s.claude_usage.errors.get(&a.id) {
+                RowContent::Text {
+                    text: format!("Couldn't read limits. {why}"),
+                    warning: true,
+                }
+            } else if on {
                 RowContent::Text {
                     text: "Checking limits…".into(),
                     warning: false,
                 }
             } else {
                 RowContent::Text {
-                    text: "Limits show once the saved login is checked.".into(),
+                    text: "Limits show once Accounts is on.".into(),
                     warning: false,
                 }
             };

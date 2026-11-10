@@ -161,3 +161,28 @@ fn a_move_all_result_names_what_failed_and_a_late_reply_is_pending() {
     );
     assert!(parse_move_result(&json!({"moved": []})).is_result());
 }
+
+#[test]
+fn claude_usage_is_read_per_account_with_its_reasons_and_the_refreshing_flag() {
+    let call = Call::limits_usage(true);
+    assert_eq!(
+        (call.op, call.args),
+        ("limits.usage", json!({"refresh": true}))
+    );
+    let reply = json!({"accounts_on": true, "refreshing": true,
+        "reports": {"a1": {"fetched": 5.0, "groups": [{"name": null, "bars": [
+            {"label": "5 hours", "kind": "session", "percent": 42.0, "resets_at": null}]}]}},
+        "errors": {"a2": "The saved login has expired. Add the account again to sign in.",
+                   "a3": 7}});
+    let usage = parse_claude_usage(&reply);
+    assert_eq!(usage.reports["a1"].groups[0].bars[0].percent, 42.0);
+    assert_eq!(
+        usage.errors.len(),
+        1,
+        "a reason that isn't text is left out"
+    );
+    assert!(usage.errors["a2"].starts_with("The saved login"));
+    assert!(still_refreshing(&reply));
+    assert!(!still_refreshing(&json!({"reports": {}})));
+    assert_eq!(parse_claude_usage(&Value::Null), ClaudeUsage::default());
+}

@@ -35,11 +35,21 @@ pub struct LaneInfo {
 pub trait ClaudeSource: Send + Sync {
     /// Fetches every account's limits if they are due (`AccountStore`'s own 5-minute round).
     fn sync_usage(&self);
+    /// Fetches every account's limits now, due or not (the Accounts window's Refresh). The same
+    /// token rules as [`ClaudeSource::sync_usage`]: a login in use is read, never renewed.
+    fn sync_usage_now(&self) {
+        self.sync_usage();
+    }
     fn accounts(&self) -> Vec<AccountInfo>;
     /// The main login's account.
     fn active_id(&self) -> Option<String>;
     /// The last limits fetched for an account.
     fn usage(&self, id: &str) -> Option<AccountUsage>;
+    /// Why the last read of an account's limits failed, in words for the user; `None` when it
+    /// worked or none was tried.
+    fn usage_error(&self, _id: &str) -> Option<String> {
+        None
+    }
     fn lanes(&self) -> Vec<LaneInfo>;
     /// Switches the main login. Refuses an account that is live in a lane.
     fn switch_to(&self, id: &str) -> Result<(), String>;

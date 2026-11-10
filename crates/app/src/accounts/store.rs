@@ -18,9 +18,10 @@ use notchling_local_api::{ClientError, SOCKET_NAME};
 use serde_json::{json, Value};
 
 use super::wire::{
-    parse_add, parse_claude_list, parse_cost, parse_lanes, parse_limits, parse_move_plan,
-    parse_move_result, parse_outcome, parse_providers, parse_usage, working_ticket, AddProgress,
-    Call, ClaudeList, CostReply, Lane, LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList,
+    parse_add, parse_claude_list, parse_claude_usage, parse_cost, parse_lanes, parse_limits,
+    parse_move_plan, parse_move_result, parse_outcome, parse_providers, parse_usage,
+    still_refreshing, working_ticket, AddProgress, Call, ClaudeList, ClaudeUsage, CostReply, Lane,
+    LimitsStatus, MovePlan, MoveResult, Outcome, ProviderList,
 };
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -42,6 +43,8 @@ pub struct Snapshot {
     pub providers: ProviderList,
     /// Limit reports by provider id, then account id.
     pub usage: BTreeMap<String, BTreeMap<String, UsageReport>>,
+    /// Each saved Claude Code account's own limits (`limits.usage`), or why it has none.
+    pub claude_usage: ClaudeUsage,
     pub limits: LimitsStatus,
     pub cost: Option<CostReply>,
     /// A Claude Code sign-in under way, or how the last one ended.
@@ -54,11 +57,25 @@ pub struct Snapshot {
 /// app's rate). Refreshes between, on a tick or an event, read the lists without syncing.
 pub const SYNC_EVERY: f64 = 30.0;
 
+/// How many times a forced refresh asks again for a read the daemon is still making, and how long
+/// it waits between (a read of every account can outlast one call's 5 s).
+const SETTLE_POLLS: u32 = 12;
+const SETTLE_EVERY: Duration = Duration::from_secs(1);
+
 /// One refresh at a time; one asked for meanwhile runs once after.
 #[derive(Default)]
 struct Flight {
     running: bool,
     again: bool,
+    /// The one asked for meanwhile is a forced one (the Refresh button's).
+    force_again: bool,
+}
+
+/// What a forced refresh read before the lists.
+#[derive(Default)]
+struct Forced {
+    providers: BTreeMap<String, BTreeMap<String, UsageReport>>,
+    claude: Option<ClaudeUsage>,
 }
 
 pub struct Accounts {
@@ -69,6 +86,8 @@ pub struct Accounts {
     last_sync: Mutex<Option<f64>>,
     /// A Claude Code sign-in is being polled (one poller at a time).
     add_polling: AtomicBool,
+    /// How long a forced refresh waits between asks for a read still going.
+    settle_every: Duration,
 }
 
 fn message(e: &ClientError) -> String {
@@ -91,7 +110,14 @@ impl Accounts {
             flight: Mutex::default(),
             last_sync: Mutex::new(None),
             add_polling: AtomicBool::new(false),
+            settle_every: SETTLE_EVERY,
         }
+    }
+
+    /// A shorter wait between asks for a read still going (tests).
+    pub fn with_settle_every(mut self, wait: Duration) -> Accounts {
+        self.settle_every = wait;
+        self
     }
 
     /// No daemon behind it, showing `snapshot` as given: a render's.
@@ -102,6 +128,7 @@ impl Accounts {
             flight: Mutex::default(),
             last_sync: Mutex::new(None),
             add_polling: AtomicBool::new(false),
+            settle_every: SETTLE_EVERY,
         }
     }
 
@@ -195,6 +222,27 @@ impl Accounts {
     /// daemon publishes `providers.changed` for each list read, so syncing on every event would
     /// feed itself.
     pub fn refresh_at(&self, switches: &Switches, now: f64) {
+        self.run_refresh(switches, now, false);
+    }
+
+    /// The Refresh button's: like [`Accounts::refresh`], but every provider's limits are read
+    /// afresh for every account (`providers.usage {refresh: true}` for each provider with limits,
+    /// and `limits.usage {refresh: true}` for the Claude Code accounts), whatever [`SYNC_EVERY`]
+    /// says. Blocking; never alongside another refresh (one asked for meanwhile runs once after,
+    /// forced).
+    pub fn refresh_all(&self, switches: &Switches) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        self.refresh_all_at(switches, now);
+    }
+
+    pub fn refresh_all_at(&self, switches: &Switches, now: f64) {
+        self.run_refresh(switches, now, true);
+    }
+
+    fn run_refresh(&self, switches: &Switches, now: f64, force: bool) {
         if self.transport.is_none() {
             return;
         }
@@ -202,15 +250,18 @@ impl Accounts {
             let mut flight = lock(&self.flight);
             if flight.running {
                 flight.again = true;
+                flight.force_again |= force;
                 return;
             }
             flight.running = true;
         }
+        let mut force = force;
         loop {
-            self.read_lists(switches, now);
+            self.read_lists(switches, now, force);
             let mut flight = lock(&self.flight);
             if flight.again {
                 flight.again = false;
+                force = std::mem::take(&mut flight.force_again);
                 continue;
             }
             flight.running = false;
@@ -218,23 +269,69 @@ impl Accounts {
         }
     }
 
-    /// Whether this refresh syncs: the switch is on and the last sync is [`SYNC_EVERY`] old.
-    fn sync_due(&self, on: bool, now: f64) -> bool {
+    /// Whether this refresh syncs: the switch is on and the last sync is [`SYNC_EVERY`] old, or
+    /// the refresh is forced.
+    fn sync_due(&self, on: bool, now: f64, force: bool) -> bool {
         let mut last = lock(&self.last_sync);
         if !on {
             *last = None;
             return false;
         }
-        let due = last.is_none_or(|at| now - at >= SYNC_EVERY || now < at);
+        let due = force || last.is_none_or(|at| now - at >= SYNC_EVERY || now < at);
         if due {
             *last = Some(now);
         }
         due
     }
 
-    fn read_lists(&self, switches: &Switches, now: f64) {
+    /// A call whose reply may say a read is still going in the daemon: asked again (without
+    /// `refresh`, which would start another) until it says it is done, a few times at most.
+    fn settled(&self, first: Call, again: Call) -> Option<Value> {
+        let mut reply = self.call(&first).ok()?;
+        for _ in 0..SETTLE_POLLS {
+            if !still_refreshing(&reply) {
+                break;
+            }
+            std::thread::sleep(self.settle_every);
+            match self.call(&again) {
+                Ok(next) => reply = next,
+                Err(_) => break,
+            }
+        }
+        Some(reply)
+    }
+
+    /// A forced refresh's reads: every provider with limits asked to read them again, and the
+    /// Claude Code accounts. Done before the lists are read, since a list's own sync would hold
+    /// the daemon's slot for its provider and the forced read would be dropped.
+    fn read_forced(&self) -> Forced {
+        let mut known = self.snapshot().providers;
+        if known.providers.is_empty() {
+            if let Ok(v) = self.call(&Call::providers_list(false)) {
+                known = parse_providers(&v);
+            }
+        }
+        let mut forced = Forced::default();
+        for p in known.providers.iter().filter(|p| p.can(USAGE)) {
+            let first = Call::providers_usage(&p.id, true);
+            if let Some(v) = self.settled(first, Call::providers_usage(&p.id, false)) {
+                forced.providers.insert(p.id.clone(), parse_usage(&v));
+            }
+        }
+        forced.claude = self
+            .settled(Call::limits_usage(true), Call::limits_usage(false))
+            .map(|v| parse_claude_usage(&v));
+        forced
+    }
+
+    fn read_lists(&self, switches: &Switches, now: f64, force: bool) {
         let on = switches.is_on(Switch::Accounts);
-        let sync = self.sync_due(on, now);
+        let sync = self.sync_due(on, now, force);
+        let mut forced = if sync && force {
+            self.read_forced()
+        } else {
+            Forced::default()
+        };
         let claude = match self.call(&Call::accounts_list(sync)) {
             Ok(v) => parse_claude_list(&v),
             Err(e) => {
@@ -263,11 +360,21 @@ impl Accounts {
         let mut usage = BTreeMap::new();
         if let (true, Ok(list)) = (sync, &providers) {
             for p in list.providers.iter().filter(|p| p.can(USAGE)) {
-                if let Ok(v) = self.call(&Call::providers_usage(&p.id, false)) {
+                if let Some(reports) = forced.providers.remove(&p.id) {
+                    usage.insert(p.id.clone(), reports);
+                } else if let Ok(v) = self.call(&Call::providers_usage(&p.id, false)) {
                     usage.insert(p.id.clone(), parse_usage(&v));
                 }
             }
         }
+        let claude_usage = match (sync, forced.claude.take()) {
+            (false, _) => None,
+            (true, Some(read)) => Some(read),
+            (true, None) => self
+                .call(&Call::limits_usage(false))
+                .ok()
+                .map(|v| parse_claude_usage(&v)),
+        };
         self.update(|s| {
             s.attached = true;
             s.claude = claude;
@@ -282,8 +389,12 @@ impl Accounts {
             }
             if sync {
                 s.usage = usage;
+                if let Some(read) = claude_usage {
+                    s.claude_usage = read;
+                }
             } else if !on {
                 s.usage.clear();
+                s.claude_usage = ClaudeUsage::default();
             }
             s.error = None;
         });
