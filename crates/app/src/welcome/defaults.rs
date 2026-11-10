@@ -1,4 +1,4 @@
-//! Reading the Swift app's settings, read-only, and moving them into the app's own `settings.json`.
+//! Reading the Swift app's settings, read-only, and moving them into the app's own settings.
 //!
 //! The Swift app keeps its settings in the UserDefaults domain `local.notchling` (and, from before
 //! it was renamed, `local.awake.menubar`). The engine's migration ([`notchling_engine::settings::
@@ -223,8 +223,9 @@ impl Imported {
 }
 
 /// Reads the Swift app's settings and puts them into `file`, the app's own. Values already in
-/// `file` win, so running it again, or after a setting was changed here, loses nothing. Only
-/// `file` is written; an unreadable `file` is left as it is.
+/// `file` win, so running it again, or after a setting was changed here, loses nothing. Only the
+/// rows for the new settings are written (`file` names the old `settings.json`, whose folder holds
+/// `notchling.db`); an unreadable `file` is left as it is.
 pub fn import_into(source: &dyn DefaultsSource, file: &Path) -> Result<Imported, String> {
     let (export, unreadable) = read_export(source)?;
     let mut settings = Settings::open(file).map_err(|e| e.to_string())?;
@@ -340,13 +341,13 @@ mod tests {
         // Changed here since, then imported again: the change wins and nothing else moves.
         let mut store = store;
         store.set("mode", json!("off")).unwrap();
-        let before = std::fs::read_to_string(&file).unwrap();
+        let before = Settings::open(&file).unwrap().values().clone();
         let again = import_into(&fixtures(), &file).unwrap();
         assert!(again.added.is_empty() && again.kept.len() == first.added.len());
         assert_eq!(again.line(), "Nothing new: every setting is already here.");
-        let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(after, serde_json::from_str::<Value>(&before).unwrap());
-        assert_eq!(after["values"]["mode"], json!("off"));
+        let after = Settings::open(&file).unwrap().values().clone();
+        assert_eq!(after, before);
+        assert_eq!(after["mode"], json!("off"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -389,9 +390,7 @@ mod tests {
         let dir = temp("own");
         let file = dir.join("settings.json");
         let mut store = Settings::open(&file).unwrap();
-        let mut values = store.values().clone();
-        values.insert("actingOn".into(), json!(true));
-        store.replace_all(values).unwrap();
+        store.set_unchecked("actingOn", json!(true)).unwrap();
         import_into(&fixtures(), &file).unwrap();
         assert_eq!(
             Settings::open(&file).unwrap().raw("actingOn"),

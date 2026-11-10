@@ -467,8 +467,9 @@ mod tests {
         assert!(!choice.get(), "off until chosen");
         choice.set(true).unwrap();
         assert!(SettingsChoice { file: file.clone() }.get());
-        let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains(ACTING_CHOICE_KEY), "{text}");
+        let kept = notchling_engine::settings::Settings::open(&file).unwrap();
+        assert_eq!(kept.raw(ACTING_CHOICE_KEY), Some(&json!(true)));
+        assert!(!file.exists(), "kept in notchling.db, not in the old file");
         choice.set(false).unwrap();
         assert!(!choice.get());
         let _ = std::fs::remove_dir_all(&dir);

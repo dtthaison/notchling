@@ -183,6 +183,71 @@ pub fn put_draft(data_dir: &Path, row_id: &str, text: &str, now_ms: i64) -> Resu
     changed.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Every setting, key to the JSON text of its value; none when there's no database yet.
+pub fn settings(data_dir: &Path) -> Result<HashMap<String, String>, String> {
+    let Some(db) = open_existing(data_dir)? else {
+        return Ok(HashMap::new());
+    };
+    let mut query = db
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|e| e.to_string())?;
+    let rows = query
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+/// Sets one setting to `value` (JSON text), leaving every other row as it is.
+pub fn put_setting(data_dir: &Path, key: &str, value: &str) -> Result<(), String> {
+    update_settings(data_dir, None, &[(key.to_owned(), value.to_owned())], &[])
+}
+
+/// Forgets one setting; no database yet means nothing to forget.
+pub fn remove_setting(data_dir: &Path, key: &str) -> Result<(), String> {
+    update_settings(data_dir, None, &[], &[key.to_owned()])
+}
+
+/// Changes some settings in one transaction: first `seed` goes in, but only while there are no
+/// settings at all (the old `settings.json`, moved in once; whoever gets there first wins), then
+/// `puts`, then `removes`. Only the named rows are touched, so the app and the daemon changing
+/// different keys at once both keep their change.
+pub fn update_settings(
+    data_dir: &Path,
+    seed: Option<&[(String, String)]>,
+    puts: &[(String, String)],
+    removes: &[String],
+) -> Result<(), String> {
+    if seed.is_none() && puts.is_empty() && (removes.is_empty() || !exists(data_dir)) {
+        return Ok(());
+    }
+    let mut db = open(data_dir)?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let put = "INSERT INTO settings (key, value) VALUES (?1, ?2)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+    if let Some(seed) = seed {
+        let any: bool = tx
+            .query_row("SELECT EXISTS (SELECT 1 FROM settings)", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if !any {
+            for (key, value) in seed {
+                tx.execute(put, params![key, value])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    for (key, value) in puts {
+        tx.execute(put, params![key, value])
+            .map_err(|e| e.to_string())?;
+    }
+    for key in removes {
+        tx.execute("DELETE FROM settings WHERE key = ?1", [key])
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
 /// A named document (what used to be a whole JSON file); none when there's no database or row.
 pub fn doc(data_dir: &Path, name: &str) -> Result<Option<String>, String> {
     let Some(db) = open_existing(data_dir)? else {
@@ -280,6 +345,63 @@ mod tests {
         );
         put_draft(&dir, "job-1", "", 4).unwrap();
         assert_eq!(drafts(&dir).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn settings_are_a_row_each_and_reading_or_forgetting_makes_nothing() {
+        let tmp = TempDir::new("store-settings");
+        let dir = tmp.path("data");
+        assert!(settings(&dir).unwrap().is_empty());
+        remove_setting(&dir, "showPet").unwrap();
+        assert!(!dir.exists(), "reading and forgetting make no database");
+        put_setting(&dir, "showPet", "false").unwrap();
+        put_setting(&dir, "notchWidth", "\"large\"").unwrap();
+        put_setting(&dir, "showPet", "true").unwrap();
+        assert_eq!(
+            settings(&dir).unwrap(),
+            HashMap::from([
+                ("showPet".to_owned(), "true".to_owned()),
+                ("notchWidth".to_owned(), "\"large\"".to_owned()),
+            ])
+        );
+        remove_setting(&dir, "showPet").unwrap();
+        assert_eq!(settings(&dir).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_seed_goes_in_only_while_there_are_no_settings() {
+        let tmp = TempDir::new("store-seed");
+        let dir = tmp.path("data");
+        let row = |k: &str, v: &str| (k.to_owned(), v.to_owned());
+        let first = [row("a", "1"), row("b", "2")];
+        update_settings(&dir, Some(&first), &[row("c", "3")], &["a".to_owned()]).unwrap();
+        assert_eq!(
+            settings(&dir).unwrap(),
+            HashMap::from([row("b", "2"), row("c", "3")])
+        );
+        // Later, a seed that arrives second finds rows already there and adds nothing.
+        update_settings(&dir, Some(&[row("z", "9")]), &[row("d", "4")], &[]).unwrap();
+        assert_eq!(settings(&dir).unwrap().len(), 3);
+        assert!(!settings(&dir).unwrap().contains_key("z"));
+    }
+
+    #[test]
+    fn writers_of_different_settings_at_once_both_keep_theirs() {
+        let tmp = TempDir::new("store-settings-writers");
+        let dir = tmp.path("data");
+        std::thread::scope(|scope| {
+            for t in 0..6 {
+                let dir = dir.clone();
+                scope.spawn(move || {
+                    for i in 0..10 {
+                        put_setting(&dir, &format!("key{t}"), &i.to_string()).unwrap();
+                    }
+                });
+            }
+        });
+        let all = settings(&dir).unwrap();
+        assert_eq!(all.len(), 6);
+        assert!(all.values().all(|v| v == "9"));
     }
 
     #[test]

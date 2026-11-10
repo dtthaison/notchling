@@ -1,4 +1,5 @@
-//! Yes/no facts the app keeps in its own `settings.json`, past the engine's key list the way
+//! Yes/no facts the app keeps in its own settings (`notchling.db`, opened by the path of its old
+//! `settings.json`), past the engine's key list the way
 //! `actingOn` and `bridgeOn` are: the first-run flag and the user's choice for each M6 switch. The
 //! Swift app's preferences are never touched.
 
@@ -15,7 +16,7 @@ pub fn choice_key(switch: &str) -> String {
     format!("{switch}On")
 }
 
-/// Booleans in one settings file.
+/// Booleans in one data folder's settings; `file` names its old `settings.json`.
 #[derive(Clone, Debug)]
 pub struct Flags {
     pub file: PathBuf,
@@ -30,20 +31,18 @@ impl Flags {
             .unwrap_or(false)
     }
 
-    /// Stores `on`, keeping every other value; a file that can't be read is left as it is.
+    /// Stores `on` and nothing else (one row); a file that can't be read is left as it is.
     pub fn set(&self, key: &str, on: bool) -> Result<(), String> {
-        let _lock = self.lock()?;
         let mut store = Settings::open(&self.file).map_err(|e| e.to_string())?;
-        let mut values = store.values().clone();
-        values.insert(key.to_owned(), Value::Bool(on));
-        store.replace_all(values).map_err(|e| e.to_string())
+        store
+            .set_unchecked(key, Value::Bool(on))
+            .map_err(|e| e.to_string())
     }
 
-    /// Stores the user's choice for a switch. Unlike [`Flags::set`], a file that can't be read
-    /// doesn't stop it: that file is moved aside (`settings.json.unreadable-<secs>`, nothing in it
-    /// lost) and a new one is written, so "off" is always kept.
+    /// Stores the user's choice for a switch. Unlike [`Flags::set`], an old `settings.json` that
+    /// can't be read doesn't stop it: that file is moved aside (`settings.json.unreadable-<secs>`,
+    /// nothing in it lost) and the choice is written, so "off" is always kept.
     pub fn set_choice(&self, key: &str, on: bool) -> Result<(), String> {
-        let _lock = self.lock()?;
         let mut store = match Settings::open(&self.file) {
             Ok(store) => store,
             Err(SettingsError::Corrupt(_)) => {
@@ -64,36 +63,9 @@ impl Flags {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let mut values = store.values().clone();
-        values.insert(key.to_owned(), Value::Bool(on));
-        store.replace_all(values).map_err(|e| e.to_string())
-    }
-
-    /// The lock every write of the app's settings takes (`.settings.json.lock` beside it), so two
-    /// of the app's writers never lose each other's keys. The write itself is atomic (a temp file,
-    /// then a rename: the engine's `Settings::save`).
-    fn lock(&self) -> Result<std::fs::File, String> {
-        let name = self
-            .file
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if let Some(dir) = self.file.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).truncate(false).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options
-            .open(self.file.with_file_name(format!(".{name}.lock")))
-            .map_err(|e| e.to_string())?;
-        // Released when the file is dropped (closed).
-        file.lock().map_err(|e| e.to_string())?;
-        Ok(file)
+        store
+            .set_unchecked(key, Value::Bool(on))
+            .map_err(|e| e.to_string())
     }
 }
 

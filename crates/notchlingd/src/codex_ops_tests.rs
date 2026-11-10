@@ -352,11 +352,10 @@ fn a_flag_shaped_message_is_passed_as_a_prompt() {
 #[test]
 fn the_network_follows_the_codex_network_setting() {
     let s = setup("net", true);
-    std::fs::write(
-        s.dir.0.join("data/settings.json"),
-        r#"{"version":1,"values":{"codexNetwork":false}}"#,
-    )
-    .expect("settings");
+    notchling_engine::settings::Settings::open(&s.dir.0.join("data/settings.json"))
+        .expect("settings")
+        .set("codexNetwork", json!(false))
+        .expect("set");
     s.spawner.push(FakeRun::ok(&[]));
     s.call(
         ops::CODEX_SEND,

@@ -144,8 +144,8 @@ fn the_choice_is_kept_in_the_apps_own_settings() {
     choice.set(Switch::Vault, true).unwrap();
     assert!(SettingsChoice { file: file.clone() }.get(Switch::Vault));
     assert!(!choice.get(Switch::Accounts));
-    let text = std::fs::read_to_string(&file).unwrap();
-    assert!(text.contains("vaultOn"), "{text}");
+    let kept = notchling_engine::settings::Settings::open(&file).unwrap();
+    assert_eq!(kept.raw("vaultOn"), Some(&json!(true)));
 }
 
 #[test]

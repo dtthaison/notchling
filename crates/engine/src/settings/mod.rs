@@ -2,11 +2,16 @@
 //!
 //! # Public API
 //!
-//! - [`Settings::open`] / [`Settings::get`] / [`Settings::set`]: a JSON file (`settings.json` in
-//!   [`data_dir`]), `{"version": 1, "values": {...}}`, written atomically (temp file, then rename) with
-//!   mode 0600. A missing file is an empty store; an unreadable one is [`SettingsError::Corrupt`] and is
-//!   never written over. Reads fall back to the key's default; `set` refuses unknown keys and values
-//!   of the wrong type.
+//! - [`Settings::open`] / [`Settings::get`] / [`Settings::set`]: one row per key in the `settings`
+//!   table of `notchling.db` ([`crate::store`], decision 0014), so the app and the daemon setting
+//!   different keys at once both keep their change. `open` takes the path of `settings.json` in
+//!   [`data_dir`]: the file's folder is the data folder, and the file is what the settings used to
+//!   be (`{"version": 1, "values": {...}}`). While the database has no settings, `open` reads that
+//!   file (a missing one is an empty store) and the first write moves its values into rows and removes
+//!   it; an unreadable one is [`SettingsError::Corrupt`] and is left where it is, never written over
+//!   or removed. Reads fall back to the key's default; `set` refuses unknown keys and values of the
+//!   wrong type, and `set_unchecked` writes a key the list below doesn't have (the app's own
+//!   switches). A write rereads the rows, so the store then shows other writers' keys too.
 //! - [`KEYS`]: the table below, as data.
 //! - [`migrate`]: the Swift app's exported UserDefaults in, new settings out. The app exports the
 //!   `local.notchling` domain (and `local.awake.menubar` when upgrading from Awake) as JSON; reading
