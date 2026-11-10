@@ -1,12 +1,14 @@
 //! Files dropped on the middle column (header, conversation, reply box), as the Swift
-//! `SessionDetail` takes them on its conversation column: the paths go into the reply box at the
-//! caret (`chat::drops`; a screenshot thumbnail's short-lived file is copied first, under the data
-//! folder's `drops/`) and the caret comes back to the box. While a drag is over the column a
+//! `SessionDetail` takes them on its conversation column: they are attached to the reply (a tile
+//! each over the box, a picture shown as itself, × takes one off), and their paths follow the
+//! words when it is sent (`chat::drops`; a screenshot thumbnail's short-lived file is copied first,
+//! under the data folder's `drops/`). The attached files are kept with the drafts, so they survive
+//! a quit. The caret comes back to the box. While a drag is over the column a
 //! hint covers it (a wash with a dashed accent edge and one sentence), drawn with the kit's inks
 //! and never taking the mouse; the composer's own edge turns accent as well. Nothing is offered
 //! while the composer is off (acting off, a read-only session): no target, no hint.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui::{div, prelude::*, px, Context, Div, ExternalPaths, Window};
 use notchling_kit::metric::RADIUS_CARD;
@@ -60,7 +62,32 @@ pub fn hint(preview: bool, a: Appearance) -> Div {
 }
 
 impl ChatView {
-    /// Puts dropped paths into the reply box at the caret and gives it the focus back.
+    /// The files attached to `row`'s reply, in the order they came.
+    pub(super) fn attached(&self, row: &str) -> Vec<PathBuf> {
+        drops::attachments_from(self.tools.draft(&drops::attachments_key(row)))
+    }
+
+    /// Sets `row`'s attached files (kept with the drafts).
+    pub(super) fn set_attached(&mut self, row: &str, files: &[PathBuf], cx: &mut Context<Self>) {
+        let key = drops::attachments_key(row);
+        self.put_draft(&key, drops::attachments_text(files), cx);
+        cx.notify();
+    }
+
+    /// Takes one file off the selected row's reply (its tile's ×).
+    pub(super) fn remove_attached(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let Some(row) = self.selected.clone() else {
+            return;
+        };
+        let files: Vec<PathBuf> = self
+            .attached(&row)
+            .into_iter()
+            .filter(|f| f != path)
+            .collect();
+        self.set_attached(&row, &files, cx);
+    }
+
+    /// Attaches dropped files to the selected row's reply and gives the box the focus back.
     pub(super) fn drop_paths(
         &mut self,
         paths: &[PathBuf],
@@ -73,13 +100,18 @@ impl ChatView {
             &self.root.data_dir.join("drops"),
             crate::phone::bridge::now_ms(),
         );
-        self.tools.editor.update(cx, |editor, cx| {
-            let mut edit = editor.edit().clone();
-            if drops::insert_paths(&mut edit, &paths) {
-                editor.set_edit(edit, cx);
+        if let Some(row) = self.selected.clone() {
+            let mut files = self.attached(&row);
+            for path in paths {
+                if !files.contains(&path) {
+                    files.push(path);
+                }
             }
-            editor.focus(window);
-        });
+            self.set_attached(&row, &files, cx);
+        }
+        self.tools
+            .editor
+            .update(cx, |editor, _| editor.focus(window));
     }
 }
 

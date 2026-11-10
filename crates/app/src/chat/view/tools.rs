@@ -347,8 +347,10 @@ impl ChatView {
         if self.tools.starting.contains_key(&id) {
             return;
         }
-        // The editor's text, which is this row's draft, read live rather than from the copy.
-        let text = self.tools.editor.read(cx).text().trim().to_owned();
+        // The editor's text, which is this row's draft, read live rather than from the copy; the
+        // attached files' paths follow it.
+        let files = self.attached(&id);
+        let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
         if text.is_empty() {
             return;
         }
@@ -367,7 +369,10 @@ impl ChatView {
                         cx,
                     );
                     match opened {
-                        Ok(()) => self.put_draft(&id, String::new(), cx),
+                        Ok(()) => {
+                            self.put_draft(&id, String::new(), cx);
+                            self.set_attached(&id, &[], cx);
+                        }
                         Err(message) => self.tools.error = Some(message),
                     }
                     cx.notify();
@@ -403,6 +408,7 @@ impl ChatView {
             }
         };
         self.put_draft(&id, String::new(), cx);
+        self.set_attached(&id, &[], cx);
         // Shown at once as your bubble: typing it into the session takes seconds.
         self.tools
             .outgoing

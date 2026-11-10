@@ -94,39 +94,51 @@ pub fn paths_text(paths: &[impl AsRef<Path>]) -> String {
         .join(" ")
 }
 
-/// The images a draft names, each once, in order: the words of `text` read as the shell reads
-/// them (single quotes, a backslash before one character), kept when one is an absolute path ending
-/// in an image kind. What [`paths_text`] writes reads back here, so a dropped picture shows over the
-/// box; a quote left open ends nothing. Trailing punctuation after a bare path is not part of it.
-pub fn image_words(text: &str) -> Vec<PathBuf> {
-    const KINDS: [&str; 8] = [
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
-    ];
-    let mut out: Vec<PathBuf> = Vec::new();
-    let mut keep = |word: &mut String, bare_end: bool| {
+/// The kinds of file drawn as a picture.
+const IMAGE_KINDS: [&str; 8] = [
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
+];
+
+/// Whether `path` names a picture, by its kind.
+pub fn is_image(path: &Path) -> bool {
+    let lower = path.to_string_lossy().to_lowercase();
+    IMAGE_KINDS.iter().any(|k| lower.ends_with(k))
+}
+
+/// The words of `text` that are pictures, with where each sits (its quotes included): the words
+/// read as the shell reads them (single quotes, a backslash before one character), kept when one
+/// is an absolute path ending in an image kind. A quote left open ends the reading. Trailing
+/// punctuation after a bare path is not part of it.
+fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {
+    let mut out = Vec::new();
+    let mut keep = |word: &mut String, from: usize, to: usize, bare_end: bool| {
+        let mut to = to;
         if bare_end {
-            while word.ends_with([',', '.', ';', ':', '!', '?', ')']) {
+            while let Some(c) = word.chars().last().filter(|c| ",.;:!?)".contains(*c)) {
                 word.pop();
+                to -= c.len_utf8();
             }
         }
-        let lower = word.to_lowercase();
-        if word.starts_with('/') && KINDS.iter().any(|k| lower.ends_with(k)) {
-            let path = PathBuf::from(word.as_str());
-            if !out.contains(&path) {
-                out.push(path);
-            }
+        let path = PathBuf::from(word.as_str());
+        if word.starts_with('/') && is_image(&path) {
+            out.push((from..to, path));
         }
         word.clear();
     };
     let mut word = String::new();
+    // Where the word being read starts, if one is.
+    let mut from: Option<usize> = None;
     // Whether the word's last piece was outside quotes, so its punctuation may be trimmed.
     let mut bare = false;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
+    let mut chars = text.char_indices();
+    while let Some((at, c)) = chars.next() {
+        if !c.is_whitespace() && from.is_none() {
+            from = Some(at);
+        }
         match c {
             '\'' => {
                 let mut closed = false;
-                for q in chars.by_ref() {
+                for (_, q) in chars.by_ref() {
                     if q == '\'' {
                         closed = true;
                         break;
@@ -139,14 +151,14 @@ pub fn image_words(text: &str) -> Vec<PathBuf> {
                 bare = false;
             }
             '\\' => {
-                if let Some(next) = chars.next() {
+                if let Some((_, next)) = chars.next() {
                     word.push(next);
                 }
                 bare = false;
             }
             c if c.is_whitespace() => {
-                if !word.is_empty() {
-                    keep(&mut word, bare);
+                if let Some(start) = from.take() {
+                    keep(&mut word, start, at, bare);
                 }
             }
             c => {
@@ -155,10 +167,99 @@ pub fn image_words(text: &str) -> Vec<PathBuf> {
             }
         }
     }
-    if !word.is_empty() {
-        keep(&mut word, bare);
+    if let Some(start) = from {
+        keep(&mut word, start, text.len(), bare);
     }
     out
+}
+
+/// The pictures `text` names, each once, in order. What [`paths_text`] writes reads back here.
+pub fn image_words(text: &str) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for (_, path) in image_spans(text) {
+        if !out.contains(&path) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// A sent message as its bubble shows it: the words, without the pictures `exists` finds (with a
+/// space beside each), and those pictures, to be drawn as pictures.
+pub fn split_images(text: &str, exists: impl Fn(&Path) -> bool) -> (String, Vec<PathBuf>) {
+    let mut words = String::new();
+    let mut pictures: Vec<PathBuf> = Vec::new();
+    let mut at = 0;
+    for (range, path) in image_spans(text) {
+        if !exists(&path) {
+            continue;
+        }
+        let mut before = &text[at..range.start];
+        let mut end = range.end;
+        if let Some(cut) = before.strip_suffix(' ') {
+            before = cut;
+        } else if text[end..].starts_with(' ') {
+            end += 1;
+        }
+        words.push_str(before);
+        at = end;
+        if !pictures.contains(&path) {
+            pictures.push(path);
+        }
+    }
+    words.push_str(&text[at..]);
+    (words.trim().to_owned(), pictures)
+}
+
+/// What goes to the session: the typed words, then the attached files' paths after a blank line.
+pub fn with_attachments(text: &str, files: &[PathBuf]) -> String {
+    let text = text.trim();
+    let paths = paths_text(files);
+    match (text.is_empty(), paths.is_empty()) {
+        (_, true) => text.to_owned(),
+        (true, false) => paths,
+        (false, false) => format!("{text}\n\n{paths}"),
+    }
+}
+
+/// A file on this Mac as a `file://` URL, for macOS to open: every byte but the plain ones escaped.
+pub fn file_url(path: &Path) -> String {
+    let mut url = String::from("file://");
+    for b in path.to_string_lossy().bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+            url.push(b as char);
+        } else {
+            url.push_str(&format!("%{b:02X}"));
+        }
+    }
+    url
+}
+
+/// Where a row's attached files are kept among the drafts: the row's id and a separator no id has.
+pub fn attachments_key(row: &str) -> String {
+    format!("{row}\u{1f}files")
+}
+
+/// The row an [`attachments_key`] belongs to; `None` for a row's own draft.
+pub fn attachments_row(key: &str) -> Option<&str> {
+    key.strip_suffix("\u{1f}files")
+}
+
+/// Attached files as a draft's text, a line each.
+pub fn attachments_text(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|f| f.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// [`attachments_text`] read back.
+pub fn attachments_from(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// Puts the paths at the caret (over the selection), with a space before them unless the caret
@@ -215,6 +316,51 @@ mod tests {
             PathBuf::from("/tmp/x.gif"),
         ];
         assert_eq!(image_words(&paths_text(&dropped)), dropped.to_vec());
+    }
+
+    #[test]
+    fn a_message_with_attachments_ends_with_their_paths() {
+        let files = [PathBuf::from("/tmp/Shot 1.png"), PathBuf::from("/tmp/a.rs")];
+        assert_eq!(
+            with_attachments("  look at these \n", &files),
+            "look at these\n\n'/tmp/Shot 1.png' /tmp/a.rs"
+        );
+        assert_eq!(with_attachments("", &files), "'/tmp/Shot 1.png' /tmp/a.rs");
+        assert_eq!(with_attachments(" hi ", &[] as &[PathBuf]), "hi");
+    }
+
+    #[test]
+    fn a_sent_message_shows_its_pictures_apart_from_its_words() {
+        let text = "look at these\n\n'/tmp/Shot 1.png' /tmp/a.rs /tmp/gone.png";
+        let (words, pictures) = split_images(text, |p| p != Path::new("/tmp/gone.png"));
+        assert_eq!(words, "look at these\n\n/tmp/a.rs /tmp/gone.png");
+        assert_eq!(pictures, vec![PathBuf::from("/tmp/Shot 1.png")]);
+        let (words, pictures) = split_images("'/tmp/x y.png'", |_| true);
+        assert_eq!((words.as_str(), pictures.len()), ("", 1));
+        let (words, _) = split_images("before /tmp/b.png after", |_| true);
+        assert_eq!(words, "before after");
+    }
+
+    #[test]
+    fn a_path_opens_as_a_file_url_with_its_spaces_escaped() {
+        assert_eq!(
+            file_url(Path::new("/Users/me/Screen Shot 12.00 AM.png")),
+            "file:///Users/me/Screen%20Shot%2012.00%20AM.png"
+        );
+        assert_eq!(
+            file_url(Path::new("/tmp/ảnh#1.png")),
+            "file:///tmp/%E1%BA%A3nh%231.png"
+        );
+    }
+
+    #[test]
+    fn attachments_keep_in_the_drafts_under_a_key_no_row_has() {
+        let files = vec![PathBuf::from("/tmp/a b.png"), PathBuf::from("/tmp/c.rs")];
+        let key = attachments_key("claude:abc");
+        assert_eq!(attachments_row(&key), Some("claude:abc"));
+        assert_eq!(attachments_row("claude:abc"), None);
+        assert_eq!(attachments_from(&attachments_text(&files)), files);
+        assert!(attachments_text(&[]).is_empty());
     }
 
     fn scratch(tag: &str) -> PathBuf {

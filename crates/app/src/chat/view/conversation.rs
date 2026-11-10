@@ -517,6 +517,8 @@ fn user_row(
         (false, false) => "Your Message",
     };
     let note = if sending { "Sending…" } else { "Queued" };
+    // The pictures you sent show as pictures, their paths taken out of the words.
+    let (words, pictures) = crate::chat::drops::split_images(text, |p| p.is_file());
     // Under the bubble where its delivered mark, time and Copy go once it's in (same gray, same
     // row height), so nothing moves when it lands.
     let status = queued.then(|| {
@@ -534,19 +536,33 @@ fn user_row(
         .flex_col()
         .items_end()
         .gap(px(2.0))
-        .child(
-            div()
-                .max_w(relative(0.75))
-                .px(px(14.0))
-                .py(px(10.0))
-                .rounded(px(RADIUS_CARD))
-                .fill(Ink::AccentWash, a)
-                .kit_type(TypeRole::Body)
-                .ink(Ink::Text, a)
-                .when(queued, |d| d.opacity(0.6))
-                .child(super::markdown::plain(&format!("{id}-mine"), text, a))
-                .part_at(name, Corner::TopTrailing, a, cx),
-        )
+        .when(!pictures.is_empty(), |d| {
+            d.child(
+                div()
+                    .max_w(relative(0.75))
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .gap(px(6.0))
+                    .when(queued, |d| d.opacity(0.6))
+                    .children(pictures.iter().map(|p| sent_picture(id, p, a))),
+            )
+        })
+        .when(!words.is_empty() || pictures.is_empty(), |d| {
+            d.child(
+                div()
+                    .max_w(relative(0.75))
+                    .px(px(14.0))
+                    .py(px(10.0))
+                    .rounded(px(RADIUS_CARD))
+                    .fill(Ink::AccentWash, a)
+                    .kit_type(TypeRole::Body)
+                    .ink(Ink::Text, a)
+                    .when(queued, |d| d.opacity(0.6))
+                    .child(super::markdown::plain(&format!("{id}-mine"), &words, a))
+                    .part_at(name, Corner::TopTrailing, a, cx),
+            )
+        })
         .when(images > 0, |d| {
             d.child(label(
                 &format!("{images} image{}", if images == 1 { "" } else { "s" }),
@@ -556,6 +572,32 @@ fn user_row(
             ))
         })
         .children(status)
+}
+
+/// How tall a picture you sent shows over your words.
+const SENT_PICTURE: f32 = 120.0;
+
+/// A picture you sent, over your bubble; a click opens it.
+fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoElement {
+    let text = path.to_string_lossy().into_owned();
+    let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
+    let width = (SENT_PICTURE * w as f32 / h.max(1) as f32).clamp(60.0, 320.0);
+    let to = text.clone();
+    div()
+        .id(SharedString::from(format!("sent-pic-{id}-{text}")))
+        .w(px(width))
+        .h(px(SENT_PICTURE))
+        .rounded(px(RADIUS_CARD))
+        .border(px(1.0))
+        .border_color(hsla(Ink::Hairline.color(a)))
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(move |_, window, cx| super::page_panel::follow_link(&to, window, cx))
+        .child(
+            gpui::img(path.to_path_buf())
+                .size_full()
+                .object_fit(gpui::ObjectFit::Cover),
+        )
 }
 
 /// A row, drawn. `id` is the item's (the queued bubbles at the end have none), `live` whether this

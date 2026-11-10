@@ -754,18 +754,25 @@ fn add_button(
 }
 
 /// How full the session's context is (the latest request's tokens against the model's window).
-/// How tall a picture named in the draft shows over the text.
+/// How tall an attached file's tile is over the text.
 const THUMB_HEIGHT: f32 = 64.0;
+/// A file that isn't a picture: its tile's width.
+const FILE_TILE: f32 = 180.0;
 
-/// The pictures the draft names (a dropped screenshot, a pasted path), small over the text, so
-/// what goes with the message can be seen; a click opens one beside the chat. A path that no longer
-/// exists shows nothing.
-fn thumbnails(draft: &str, a: Appearance) -> Option<Div> {
-    let paths: Vec<_> = crate::chat::drops::image_words(draft)
-        .into_iter()
-        .filter(|p| p.is_file())
-        .collect();
-    if paths.is_empty() {
+/// The files attached to the reply (dropped, or picked with +), a tile each over the text: a
+/// picture shows as itself, anything else as its name; a click opens it, × takes it off. Pictures
+/// whose paths are typed in the text show too, without ×. A file that's gone shows nothing.
+fn thumbnails(view: &ChatView, id: &str, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let attached = view.attached(id);
+    let mut tiles: Vec<(std::path::PathBuf, bool)> =
+        attached.iter().map(|p| (p.clone(), true)).collect();
+    for path in crate::chat::drops::image_words(view.tools.editor.read(cx).text()) {
+        if !attached.contains(&path) {
+            tiles.push((path, false));
+        }
+    }
+    tiles.retain(|(p, _)| p.exists());
+    if tiles.is_empty() {
         return None;
     }
     let row = div()
@@ -774,27 +781,100 @@ fn thumbnails(draft: &str, a: Appearance) -> Option<Div> {
         .gap(px(6.0))
         .px(px(TEXT_PAD_LEADING))
         .pt(px(4.0))
-        .children(paths.into_iter().map(|path| {
-            let text = path.to_string_lossy().into_owned();
-            let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
-            let width = (THUMB_HEIGHT * w as f32 / h.max(1) as f32).clamp(32.0, 200.0);
-            let to = text.clone();
-            div()
-                .id(SharedString::from(format!("composer-thumb-{text}")))
-                .w(px(width))
-                .h(px(THUMB_HEIGHT))
-                .rounded(px(RADIUS_SM))
-                .border(px(1.0))
-                .border_color(hsla(Ink::Hairline.color(a)))
-                .overflow_hidden()
-                .cursor_pointer()
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    super::page_panel::follow_link(&to, window, cx)
-                })
-                .child(img(path).size_full().object_fit(ObjectFit::Cover))
-        }));
+        .children(
+            tiles
+                .into_iter()
+                .map(|(path, removable)| tile(path, removable, a, cx)),
+        );
     Some(row)
+}
+
+fn tile(
+    path: std::path::PathBuf,
+    removable: bool,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> impl IntoElement {
+    let text = path.to_string_lossy().into_owned();
+    let picture = crate::chat::drops::is_image(&path);
+    let width = if picture {
+        let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
+        (THUMB_HEIGHT * w as f32 / h.max(1) as f32).clamp(40.0, 200.0)
+    } else {
+        FILE_TILE
+    };
+    let to = text.clone();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| text.clone());
+    let body = if picture {
+        div()
+            .size_full()
+            .child(img(path.clone()).size_full().object_fit(ObjectFit::Cover))
+    } else {
+        div()
+            .size_full()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(icon(
+                if path.is_dir() {
+                    Icon::Folder
+                } else {
+                    Icon::File
+                },
+                16.0,
+                Ink::TextMuted,
+                a,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(label(&name, TypeRole::Meta, Ink::Text, a).elide()),
+            )
+    };
+    let remove = removable.then(|| {
+        div()
+            .id(SharedString::from(format!("composer-unattach-{text}")))
+            .absolute()
+            .top(px(3.0))
+            .right(px(3.0))
+            .size(px(18.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .fill(Ink::Card, a)
+            .border(px(1.0))
+            .border_color(hsla(Ink::Hairline.color(a)))
+            .cursor_pointer()
+            .child(icon(Icon::Close, 10.0, Ink::TextMuted, a))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.remove_attached(&path, cx);
+            }))
+    });
+    div()
+        .id(SharedString::from(format!("composer-thumb-{text}")))
+        .relative()
+        .w(px(width))
+        .h(if picture { px(THUMB_HEIGHT) } else { px(36.0) })
+        .rounded(px(RADIUS_SM))
+        .border(px(1.0))
+        .border_color(hsla(Ink::Hairline.color(a)))
+        .fill(Ink::Card, a)
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            super::page_panel::follow_link(&to, window, cx)
+        })
+        .child(body)
+        .children(remove)
+        .part("Attachment", a, cx)
 }
 
 fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
@@ -818,7 +898,9 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         control.enabled = true;
     }
     let id = view.selected.clone().unwrap_or_default();
-    let empty = !view.composer.preview.typed && view.tools.draft(&id).trim().is_empty();
+    let empty = !view.composer.preview.typed
+        && view.tools.draft(&id).trim().is_empty()
+        && view.attached(&id).is_empty();
     let focused = control.enabled && view.tools.focus.is_focused(window);
     let edge = if focused { EDGE_FOCUSED } else { EDGE_REST };
     let edge_color = if focused {
@@ -879,7 +961,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
             blur_radius: px(14.0),
             spread_radius: px(0.0),
         }])
-        .children(thumbnails(view.tools.editor.read(cx).text(), a))
+        .children(thumbnails(view, &id, a, cx))
         .child(text_area)
         .child(bottom)
         .when(control.enabled, |c| {
