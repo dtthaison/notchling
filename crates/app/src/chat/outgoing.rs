@@ -51,18 +51,30 @@ impl Outgoing {
 
 /// Your messages in `conversation` that read `text`, sent or queued, ignoring the space around.
 fn copies(text: &str, conversation: &Conversation) -> usize {
-    let text = text.trim();
+    let text = comparable(text);
     let sent = conversation
         .items
         .iter()
-        .filter(|item| matches!(&item.kind, ItemKind::User { text: t, .. } if t.trim() == text))
+        .filter(
+            |item| matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text),
+        )
         .count();
     let queued = conversation
         .queued
         .iter()
-        .filter(|t| t.trim() == text)
+        .filter(|t| comparable(t) == text)
         .count();
     sent + queued
+}
+
+/// A message as both sides write it: trimmed, and a shell command's `!` without the space the
+/// transcript's reader puts after it ("!ls" is sent, "! ls" read back).
+fn comparable(text: &str) -> String {
+    let text = text.trim();
+    match text.strip_prefix('!') {
+        Some(command) => format!("!{}", command.trim_start()),
+        None => text.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +127,13 @@ mod tests {
         out.delivered(1_000);
         assert!(out.keep(&c, 1_000 + GRACE_MS - 1));
         assert!(!out.keep(&c, 1_000 + GRACE_MS));
+    }
+
+    #[test]
+    fn a_shell_command_arrives_as_the_transcript_writes_it() {
+        // Sent as "!ls -la"; the transcript's <bash-input> reads back as "! ls -la".
+        let out = Outgoing::new("!ls -la", &with_user(&[]));
+        assert!(out.arrived(&with_user(&["! ls -la"])));
     }
 
     #[test]
