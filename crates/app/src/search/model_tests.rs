@@ -46,6 +46,7 @@ fn results(pages: usize, sessions: usize) -> Results {
             .map(|i| session(&format!("s{i}"), Some("a match here")))
             .collect(),
         indexing: false,
+        secrets: Vec::new(),
     }
 }
 
@@ -54,6 +55,7 @@ fn only_pages(pages: Vec<Page>) -> Results {
         pages,
         sessions: Vec::new(),
         indexing: false,
+        secrets: Vec::new(),
     }
 }
 
@@ -168,12 +170,12 @@ fn the_empty_text_says_why_the_list_is_empty() {
 #[test]
 fn a_note_shows_for_a_moment_over_the_footers_text() {
     let mut m = SearchModel::new();
-    assert_eq!(m.footer_text(NOW), "Pages and Sessions");
+    assert_eq!(m.footer_text(NOW), "Pages, Vault and Sessions");
     m.flash("Link Copied", NOW);
     assert_eq!(m.note(NOW), Some("Link Copied"));
     assert_eq!(m.footer_text(NOW + NOTE_MS - 1), "Link Copied");
     assert_eq!(m.note(NOW + NOTE_MS), None);
-    assert_eq!(m.footer_text(NOW + NOTE_MS), "Pages and Sessions");
+    assert_eq!(m.footer_text(NOW + NOTE_MS), "Pages, Vault and Sessions");
     m.indexing = true;
     assert_eq!(m.footer_text(NOW + NOTE_MS), INDEXING);
     m.error = Some("the daemon isn't attached".into());
@@ -307,4 +309,41 @@ fn item_ids_tell_pages_and_sessions_apart() {
     assert_eq!(s.id(), "session:claude:abc");
     assert_eq!(p.row_height(), layout::PAGE_ROW);
     assert_eq!(s.row_height(), layout::SESSION_ROW);
+}
+
+#[test]
+fn vault_entries_come_between_pages_and_sessions_and_return_edits_one() {
+    use notchling_engine::vault::{Kind, VaultEntry};
+    let mut m = SearchModel::new();
+    m.query = "github".into();
+    let mut r = results(1, 1);
+    let mut token = VaultEntry::new("m1-github-issues", Kind::Token);
+    token.url = Some("https://github.com".into());
+    r.secrets = vec![token.clone()];
+    m.apply(r, None);
+    let sections: Vec<Section> = m.items().iter().map(Item::section).collect();
+    assert_eq!(
+        sections,
+        [Section::Pages, Section::Vault, Section::Sessions]
+    );
+    assert!(m.starts_section(1) && m.starts_section(2));
+    assert_eq!(Section::Vault.title(), "Vault");
+    m.move_by(1);
+    assert_eq!(
+        m.current().map(Item::id).as_deref(),
+        Some("secret:m1-github-issues")
+    );
+    assert_eq!(m.hints()[0], ("↩", "Edit"));
+    assert_eq!(
+        m.press(&Press::plain("enter", None)),
+        Outcome::Open(Item::Secret(token))
+    );
+    assert_eq!(
+        m.press(&Press::command("c")),
+        Outcome::Copy {
+            text: "m1-github-issues".into(),
+            note: "Name Copied",
+        }
+    );
+    assert_eq!(m.footer_text(NOW), "Pages, Vault and Sessions");
 }

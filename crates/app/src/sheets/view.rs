@@ -8,12 +8,14 @@ use gpui::{
     div, prelude::*, px, Context, Div, EventEmitter, PathPromptOptions, Render, SharedString,
     Stateful, Window,
 };
-use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING, SPINNER_SMALL, TITLE_BAR};
+use notchling_kit::metric::{
+    RADIUS_CARD, RADIUS_MD, SIDE_PADDING, SPINNER_SMALL, TITLE_BAR, TOOL_ICON,
+};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon as kit_icon, label, scrollable, spinner, window_appearance,
-    KitStyled,
+    button, card, hsla, icon, icon as kit_icon, label, scrollable, spinner, tool_icon,
+    window_appearance, KitStyled, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
@@ -118,6 +120,24 @@ fn column_title(text: &str, a: Appearance) -> Div {
         Ink::TextFaint,
         a,
     ))
+}
+
+/// A tool's title over its accounts, with the tool's icon.
+fn section_title(section: Section, a: Appearance) -> Div {
+    let tool = match section {
+        Section::Claude => ToolMark::Claude,
+        Section::Codex => ToolMark::Codex,
+        Section::Antigravity => ToolMark::Antigravity,
+    };
+    div()
+        .px(px(10.0))
+        .pt(px(8.0))
+        .pb(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(tool_icon(tool, TOOL_ICON, a))
+        .child(label(section.title(), TypeRole::Section, Ink::TextFaint, a))
 }
 
 /// The New Session sheet.
@@ -317,7 +337,7 @@ impl NewSessionView {
         for (i, account) in self.model.accounts.iter().enumerate() {
             if section != Some(account.section) {
                 section = Some(account.section);
-                rows.push(column_title(account.section.title(), a).into_any_element());
+                rows.push(section_title(account.section, a).into_any_element());
             }
             let row = choice_row(
                 format!("account-{i}"),

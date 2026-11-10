@@ -134,6 +134,7 @@ pub fn results(shown: Shown) -> Results {
                 ),
             ],
             indexing: false,
+            secrets: Vec::new(),
         },
         Shown::Results => Results {
             pages: vec![page(
@@ -164,6 +165,7 @@ pub fn results(shown: Shown) -> Results {
                 ),
             ],
             indexing: false,
+            secrets: Vec::new(),
         },
     }
 }

@@ -24,7 +24,7 @@ use super::model::{layout, Item, Outcome, Press, SearchModel};
 use super::pacer::{Pacer, Settled, DEBOUNCE};
 use super::panel;
 use super::renders::{model, results, shown};
-use super::rows::{hairline, page_row, section_header, session_row};
+use super::rows::{hairline, page_row, secret_row, section_header, session_row};
 
 /// How often the window is put back where it belongs (GPUI moves it after opening).
 const PLACE_EVERY: Duration = Duration::from_millis(100);
@@ -151,10 +151,25 @@ impl SearchPanelView {
             self.model.query.clone(),
             self.model.limit(),
         );
+        // The vault's list (names, sites, notes, variable names; never a value) is the app's own.
+        // Read again with each query, since nothing else keeps it fresh while the sheet is closed.
+        let vault = cx
+            .try_global::<crate::mac::shell::AppVault>()
+            .map(|v| v.0.clone());
+        let switches = crate::accounts::window::app_stores(cx).1.switches();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { library.search(&text, limit) })
+                .spawn(async move {
+                    library.search(&text, limit).map(|mut results| {
+                        if let (Some(vault), false) = (vault, text.trim().is_empty()) {
+                            vault.refresh(&switches);
+                            let entries = vault.snapshot().entries;
+                            results.secrets = notchling_engine::vault::list::find(&text, &entries);
+                        }
+                        results
+                    })
+                })
                 .await;
             this.update(cx, |view, cx| {
                 let answered = view.pacer.finished(generation);
@@ -246,6 +261,7 @@ impl SearchPanelView {
         panel::close(cx, window, false);
         match item {
             Item::Page(page) => crate::pages::window::open(cx, Some(page.key().to_owned())),
+            Item::Secret(entry) => crate::mac::shell::open_chat_secret(cx, &entry.name),
             Item::Session(session) => crate::mac::shell::open_chat_session(cx, session.reference()),
         }
     }
@@ -327,6 +343,7 @@ impl SearchPanelView {
             let selected = index == self.model.selected;
             let row = match item {
                 Item::Page(page) => page_row(page, selected, now_secs, a),
+                Item::Secret(entry) => secret_row(entry, selected, a),
                 Item::Session(session) => session_row(session, selected, now_secs, &home, a),
             };
             let opened = item.clone();

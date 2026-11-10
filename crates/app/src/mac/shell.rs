@@ -316,6 +316,17 @@ pub fn open_chat_session(cx: &mut App, target: SessionRef) {
     }
 }
 
+/// Opens Chat with the Secret Vault sheet on `name`'s form (from Search).
+pub fn open_chat_secret(cx: &mut App, name: &str) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        let name = name.to_owned();
+        handle
+            .update(cx, |view, window, cx| view.show_secret(&name, window, cx))
+            .ok();
+    }
+}
+
 /// Counts another titled window of ours (the Artifacts window) toward the Dock icon.
 pub fn note_titled(cx: &mut App, id: WindowId) {
     cx.global_mut::<Shell>().titled.insert(id);

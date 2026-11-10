@@ -12,7 +12,7 @@ use super::tool_images::tool_image;
 use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::ink::{avatar as avatar_colors, claude_mark_top};
 use crate::metric::{
-    AVATAR, BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
+    BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
     SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
 };
 use crate::part::{
@@ -397,15 +397,16 @@ pub fn session_row_marked(
     )
 }
 
-/// What the two session rows share: the frame, the avatar, the lines column, the age.
+/// What the two session rows share: the frame, the lines column, the age. No avatar: the group
+/// a row is in and its status line say how it is.
 #[allow(clippy::too_many_arguments)]
 fn session_row_shell(
     id: impl Into<ElementId>,
     frame: Div,
-    name: &str,
+    _name: &str,
     lines: Div,
     age: &str,
-    status: Status,
+    _status: Status,
     state: PartState,
     focused: bool,
     appearance: Appearance,
@@ -420,7 +421,6 @@ fn session_row_shell(
         .gap(px(10.0))
         .rounded(px(RADIUS_MD))
         .look(&row_look(state, focused, appearance))
-        .child(avatar(name, AVATAR, Some(status), Ink::Sidebar, appearance))
         .child(lines)
         .child(label(age, TypeRole::Meta, Ink::TextFaint, appearance));
     interactive(

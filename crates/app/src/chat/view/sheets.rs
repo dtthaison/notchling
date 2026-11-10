@@ -81,6 +81,23 @@ impl ChatView {
         self.show(entity, cx);
     }
 
+    /// The Secret Vault sheet with `name`'s form open (Search's Return on a vault entry); just the
+    /// list when it is gone.
+    pub fn show_secret(&mut self, name: &str, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let vault = cx
+            .try_global::<AppVault>()
+            .map(|v| v.0.clone())
+            .unwrap_or_else(|| Arc::new(Vault::fixed(Vec::new())));
+        let feed = self.switches.clone();
+        let entity = cx.new(|cx| VaultSheetView::live(vault, feed, cx));
+        entity.update(cx, |sheet, cx| {
+            if let Some(entry) = sheet.entry(name) {
+                sheet.open_form(crate::vault::form::Form::edit(&entry), window, cx);
+            }
+        });
+        self.show(entity, cx);
+    }
+
     pub(super) fn show_sheet<V: gpui::Render + gpui::EventEmitter<Dismiss>>(
         &mut self,
         entity: Entity<V>,

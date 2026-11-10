@@ -181,14 +181,14 @@ impl VaultSheetView {
         cx.notify();
     }
 
-    pub(super) fn open_form(&mut self, form: Form, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_form(&mut self, form: Form, window: &mut Window, cx: &mut Context<Self>) {
         self.form = Some(form);
         self.note = None;
         window.focus(&self.focus);
         cx.notify();
     }
 
-    pub(super) fn entry(&self, name: &str) -> Option<VaultEntry> {
+    pub fn entry(&self, name: &str) -> Option<VaultEntry> {
         self.vault
             .snapshot()
             .entries

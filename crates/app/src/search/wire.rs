@@ -164,6 +164,9 @@ impl SessionRef {
 pub struct Results {
     pub pages: Vec<Page>,
     pub sessions: Vec<SessionRow>,
+    /// Secret Vault entries that fit the words: the list's part only, never a value. The app fills
+    /// these from its own vault list; the daemon's answer has none.
+    pub secrets: Vec<notchling_engine::vault::VaultEntry>,
     /// The index is being read again: ask once more in a moment.
     pub indexing: bool,
 }
@@ -252,6 +255,7 @@ pub fn parse_results(v: &Value) -> Results {
             .filter_map(parse_session)
             .collect(),
         indexing: flag(v, "indexing"),
+        secrets: Vec::new(),
     }
 }
 

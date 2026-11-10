@@ -1,5 +1,5 @@
 //! What the search panel shows and what each key does, pure (the Swift `SearchModel` and
-//! `SearchPanelController.handleKey`): the query, the results grouped Pages then Sessions, the
+//! `SearchPanelController.handleKey`): the query, the results grouped Pages, Vault, then Sessions, the
 //! selection, the panel's height for what it shows, the footer's hints, and a short note such as
 //! "Link Copied". The GPUI view (`view`, macOS) only lays it out and asks the daemon.
 
@@ -27,6 +27,8 @@ pub const EMPTY_LIMIT: usize = 6;
 pub const LIMIT: usize = 30;
 /// How many pages are listed at most with words typed (sessions keep the daemon's limit).
 pub const PAGE_CAP: usize = 20;
+/// How many Secret Vault entries are listed at most.
+pub const SECRET_CAP: usize = 5;
 /// What the footer says while the daemon reads the index again.
 pub const INDEXING: &str = "Indexing sessions…";
 
@@ -34,6 +36,7 @@ pub const INDEXING: &str = "Indexing sessions…";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     Pages,
+    Vault,
     Sessions,
 }
 
@@ -41,6 +44,7 @@ impl Section {
     pub fn title(self) -> &'static str {
         match self {
             Section::Pages => "Pages",
+            Section::Vault => "Vault",
             Section::Sessions => "Sessions",
         }
     }
@@ -50,6 +54,8 @@ impl Section {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
     Page(Page),
+    /// A Secret Vault entry (no value): Return opens its form in Chat's vault sheet.
+    Secret(notchling_engine::vault::VaultEntry),
     Session(SessionRow),
 }
 
@@ -58,6 +64,7 @@ impl Item {
     pub fn id(&self) -> String {
         match self {
             Item::Page(p) => format!("page:{}", p.key()),
+            Item::Secret(e) => format!("secret:{}", e.name),
             Item::Session(s) => format!("session:{}", s.id),
         }
     }
@@ -65,13 +72,14 @@ impl Item {
     pub fn section(&self) -> Section {
         match self {
             Item::Page(_) => Section::Pages,
+            Item::Secret(_) => Section::Vault,
             Item::Session(_) => Section::Sessions,
         }
     }
 
     pub fn row_height(&self) -> f32 {
         match self {
-            Item::Page(_) => layout::PAGE_ROW,
+            Item::Page(_) | Item::Secret(_) => layout::PAGE_ROW,
             Item::Session(_) => layout::SESSION_ROW,
         }
     }
@@ -180,7 +188,8 @@ impl SearchModel {
         }
     }
 
-    /// Takes a search's answer: pages first (capped), then sessions. The selection stays on
+    /// Takes a search's answer: pages first (capped), then vault entries (only with words), then
+    /// sessions. The selection stays on
     /// `keeping`'s row when it is still there, else goes to the top.
     pub fn apply(&mut self, results: Results, keeping: Option<&str>) {
         let cap = if self.query.trim().is_empty() {
@@ -193,6 +202,14 @@ impl SearchModel {
             .into_iter()
             .take(cap)
             .map(Item::Page)
+            .chain(
+                results
+                    .secrets
+                    .into_iter()
+                    .filter(|_| !self.query.trim().is_empty())
+                    .take(SECRET_CAP)
+                    .map(Item::Secret),
+            )
             .chain(results.sessions.into_iter().map(Item::Session))
             .collect();
         self.indexing = results.indexing;
@@ -292,7 +309,7 @@ impl SearchModel {
         if self.indexing {
             return INDEXING.to_owned();
         }
-        "Pages and Sessions".to_owned()
+        "Pages, Vault and Sessions".to_owned()
     }
 
     /// The footer's key hints for the selected row: (key, what it does).
@@ -304,6 +321,10 @@ impl SearchModel {
                 if !page.link.is_empty() {
                     hints.push(("⌘C", "Copy Link"));
                 }
+            }
+            Some(Item::Secret(_)) => {
+                hints.push(("↩", "Edit"));
+                hints.push(("⌘C", "Copy Name"));
             }
             Some(Item::Session(_)) => {
                 hints.push(("↩", "Open in Chat"));
@@ -349,6 +370,10 @@ impl SearchModel {
                     Some(Item::Page(page)) if !page.link.is_empty() => Outcome::Copy {
                         text: page.link.clone(),
                         note: "Link Copied",
+                    },
+                    Some(Item::Secret(entry)) => Outcome::Copy {
+                        text: entry.name.clone(),
+                        note: "Name Copied",
                     },
                     Some(Item::Session(session)) => Outcome::Copy {
                         text: session.session_id.clone(),

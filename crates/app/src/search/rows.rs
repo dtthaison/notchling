@@ -110,6 +110,40 @@ pub(super) fn page_row(page: &Page, selected: bool, now_secs: f64, a: Appearance
         ))
 }
 
+/// A Secret Vault entry: its name over what it's for (the site, then the note's first line).
+pub(super) fn secret_row(
+    entry: &notchling_engine::vault::VaultEntry,
+    selected: bool,
+    a: Appearance,
+) -> Div {
+    let note = entry.note.lines().next().unwrap_or("").trim();
+    let detail: Vec<&str> = [entry.url.as_deref().unwrap_or(""), note]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
+    row_frame(layout::PAGE_ROW, selected, a)
+        .child(icon_box(selected, a).child(icon(
+            Icon::Key,
+            TypeRole::Heading.spec().size,
+            if selected {
+                Ink::AccentText
+            } else {
+                Ink::TextMuted
+            },
+            a,
+        )))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(label(&entry.name, TypeRole::Heading, Ink::Text, a).elide())
+                .child(label(&detail.join(" · "), TypeRole::Meta, Ink::TextMuted, a).elide()),
+        )
+}
+
 /// The snippet with the query's words bold, else the folder.
 fn session_detail(session: &SessionRow, home: &std::path::Path, a: Appearance) -> Div {
     let line = div()
