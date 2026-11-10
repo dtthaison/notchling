@@ -2,6 +2,8 @@
 //! engine's `terminal::keys`, which speaks macOS key codes), how many rows and columns fit, a cell's
 //! color, and a screen row cut into runs of one style for drawing.
 
+use notchling_engine::control::slash;
+use notchling_engine::sessions::AgentTarget;
 use notchling_engine::terminal::keys::{self, Press};
 use notchling_engine::terminal::{TermCell, TermColor, TermStyle};
 
@@ -179,9 +181,76 @@ impl<T> Tabs<T> {
     }
 }
 
+/// Where a Claude Code command typed in the box goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuRoute {
+    /// Not a command that opens a menu: it goes to the session like any reply.
+    Reply,
+    /// A menu: a terminal tab attached to this background job runs it, where the menu shows.
+    Attach { job: String },
+    /// A menu in a session that runs in a terminal of its own, which Chat can't attach to.
+    OwnTerminal,
+}
+
+/// A menu command (`/mcp`, `/plugin`, a bare `/model`…) writes nothing to the transcript, so typed
+/// through the hidden attach it would open on a screen nobody sees and hold the session.
+pub fn menu_route(text: &str, target: &AgentTarget) -> MenuRoute {
+    if !slash::opens_menu(text) {
+        return MenuRoute::Reply;
+    }
+    match target {
+        AgentTarget::Job(job) => MenuRoute::Attach { job: job.clone() },
+        _ => MenuRoute::OwnTerminal,
+    }
+}
+
+/// What a menu command's tab types once `claude attach` has drawn: clear the session's input box
+/// (Ctrl+E, Ctrl+U: never Ctrl+K or Esc), the command, then Enter, each after a pause, since in one
+/// burst they read as a paste.
+pub fn menu_keys(command: &str) -> [(u64, String); 3] {
+    [
+        (1500, "\x05\x15".to_owned()),
+        (200, command.trim().to_owned()),
+        (300, "\r".to_owned()),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_menu_command_in_a_background_job_runs_in_an_attached_tab() {
+        let job = AgentTarget::Job("ab12".into());
+        assert_eq!(
+            menu_route("/mcp", &job),
+            MenuRoute::Attach { job: "ab12".into() }
+        );
+        assert_eq!(
+            menu_route("  /model ", &job),
+            MenuRoute::Attach { job: "ab12".into() }
+        );
+        assert_eq!(menu_route("/model claude-opus-5-5", &job), MenuRoute::Reply);
+        assert_eq!(menu_route("/compact", &job), MenuRoute::Reply);
+        assert_eq!(menu_route("fix the /mcp bug", &job), MenuRoute::Reply);
+    }
+
+    #[test]
+    fn a_menu_command_in_a_terminal_session_stays_out_of_it() {
+        assert_eq!(
+            menu_route("/plugin", &AgentTarget::Process(42)),
+            MenuRoute::OwnTerminal
+        );
+    }
+
+    #[test]
+    fn the_tab_clears_the_box_before_typing_the_command() {
+        let keys = menu_keys(" /mcp ");
+        assert_eq!(keys[0].1, "\x05\x15");
+        assert_eq!(keys[1].1, "/mcp");
+        assert_eq!(keys[2].1, "\r");
+        assert!(keys.iter().all(|(pause, _)| *pause > 0));
+    }
 
     #[test]
     fn tabs_are_numbered_in_order_and_the_new_one_shows() {

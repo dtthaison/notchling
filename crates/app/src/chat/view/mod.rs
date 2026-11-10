@@ -665,6 +665,7 @@ impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
         self.drawn_ms = now_ms();
+        self.take_terminal_focus(window);
         self.sync_prompt();
         self.overlay_open = self.sheet.is_some()
             || self.account_menu

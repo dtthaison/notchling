@@ -74,6 +74,8 @@ pub struct State {
     pub expanded: bool,
     /// The redraw loop, running while any shell is.
     ticking: bool,
+    /// The active tab takes the keyboard at the next draw (set where no window is at hand).
+    pub focus_next: bool,
 }
 
 impl State {
@@ -89,12 +91,13 @@ fn start(cwd: &str, home: &Path, cx: &mut Context<ChatView>) -> Result<Shell, St
         .ok()
         .filter(|s| s.starts_with('/'))
         .unwrap_or_else(|| "/bin/zsh".to_owned());
-    start_program(&program, &["-l"], cwd, home, cx)
+    start_program(&program, &["-l"], &[], cwd, home, cx)
 }
 
 fn start_program(
     program: &str,
     args: &[&str],
+    env: &[(&str, &str)],
     cwd: &str,
     home: &Path,
     cx: &mut Context<ChatView>,
@@ -111,6 +114,9 @@ fn start_program(
         .cwd(&folder)
         .env("COLORTERM", "truecolor")
         .size(rows, cols);
+    for (key, value) in env {
+        command.env(key, value);
+    }
     let pty = Arc::new(Pty::spawn(&command).map_err(|e| format!("Couldn't start {program}: {e}"))?);
     let screen = Arc::new(Mutex::new(TerminalScreen::new(
         usize::from(rows),
@@ -174,7 +180,7 @@ impl ChatView {
         let home = self.root.home.clone();
         let cwd = home.to_string_lossy().into_owned();
         for _ in 0..2 {
-            if let Ok(shell) = start_program("/bin/cat", &[], &cwd, &home, cx) {
+            if let Ok(shell) = start_program("/bin/cat", &[], &[], &cwd, &home, cx) {
                 shell
                     .screen
                     .lock()
@@ -185,6 +191,60 @@ impl ChatView {
         }
         self.terminal.open = true;
         self.terminal.expanded = expanded;
+    }
+
+    /// A menu command (`/mcp`, `/plugin`…) for a background job: a tab on `claude attach <job>`,
+    /// with the job's lane, that types the command once the session has drawn. The menu is then
+    /// the user's, with the keyboard, as in Claude Code's own terminal; closing the tab detaches.
+    pub(super) fn open_menu_command(
+        &mut self,
+        job: &str,
+        config_dir: Option<&str>,
+        cwd: &str,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let home = self.root.home.clone();
+        let claude = notchling_engine::control::launcher::claude_path(&home);
+        let claude = claude.to_string_lossy().into_owned();
+        let env: Vec<(&str, &str)> = config_dir
+            .map(|dir| vec![("CLAUDE_CONFIG_DIR", dir)])
+            .unwrap_or_default();
+        let mut shell = start_program(&claude, &["attach", job], &env, cwd, &home, cx)?;
+        shell.name = command.trim().to_owned();
+        let pty = shell.pty.clone();
+        let stop = shell.stop.clone();
+        let keys = crate::chat::terminal::menu_keys(command);
+        std::thread::spawn(move || {
+            for (pause, text) in keys {
+                std::thread::sleep(Duration::from_millis(pause));
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                if pty
+                    .write_all_timeout(text.as_bytes(), Duration::from_secs(1))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
+        if self.page.is_open() {
+            self.close_page(cx);
+        }
+        self.terminal.tabs.add(shell);
+        self.terminal.open = true;
+        self.terminal.focus_next = true;
+        self.tick_terminals(cx);
+        cx.notify();
+        Ok(())
+    }
+
+    /// The keyboard to the active tab, when a call without a window asked for it.
+    pub(super) fn take_terminal_focus(&mut self, window: &mut Window) {
+        if std::mem::take(&mut self.terminal.focus_next) {
+            self.focus_terminal(window);
+        }
     }
 
     /// The header's Terminal button: shows the panel (opening a first shell), or hides it.

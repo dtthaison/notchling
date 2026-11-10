@@ -315,6 +315,37 @@ impl ChatView {
         if text.is_empty() {
             return;
         }
+        // A command that opens a menu runs in a terminal tab attached to the session, where the
+        // menu shows; typed through the hidden attach it would hold the session on a menu unseen.
+        if session.tool == Tool::Claude {
+            use crate::chat::terminal::{menu_route, MenuRoute};
+            match menu_route(&text, &session.agent.target) {
+                MenuRoute::Reply => {}
+                MenuRoute::Attach { job } => {
+                    let opened = self.open_menu_command(
+                        &job,
+                        session.agent.config_dir.as_deref(),
+                        &session.agent.cwd,
+                        &text,
+                        cx,
+                    );
+                    match opened {
+                        Ok(()) => self.put_draft(&id, String::new(), cx),
+                        Err(message) => self.tools.error = Some(message),
+                    }
+                    cx.notify();
+                    return;
+                }
+                MenuRoute::OwnTerminal => {
+                    self.tools.error = Some(format!(
+                        "{} opens a menu: run it in this session's own terminal",
+                        text.split_whitespace().next().unwrap_or("This command")
+                    ));
+                    cx.notify();
+                    return;
+                }
+            }
+        }
         let draft = is_draft(&id);
         let request = match session.tool {
             Tool::Claude => Request::reply(&id, &text),
