@@ -3,8 +3,8 @@
 //! an Artifact opens beside the chat, anything else in the browser).
 
 use gpui::{
-    div, font, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
-    InteractiveText, MouseButton, SharedString, StrikethroughStyle, StyledText, TextRun,
+    div, font, img, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
+    InteractiveText, MouseButton, ObjectFit, SharedString, StrikethroughStyle, StyledText, TextRun,
     UnderlineStyle,
 };
 use notchling_kit::metric::RADIUS_MD;
@@ -12,10 +12,12 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SYSTEM_FONT};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use crate::chat::markdown::{blocks, spans, Block, LinkPress, ListItem, Span};
+use crate::chat::markdown::{blocks, image_links, spans, Block, LinkPress, ListItem, Span};
 
 /// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
+/// A linked image's width under its paragraph; its height follows its shape.
+const IMAGE_WIDTH: f32 = 360.0;
 
 /// The spans of `text` as one text element: bold, italics, code (the mono face on a raised wash),
 /// strikethrough, links (accent, underlined, clickable). `weight` is the text's own weight (a
@@ -82,7 +84,29 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
     .into_any_element()
 }
 
+/// An image file's width and height, read once from the first bytes of the file.
+fn image_shape(path: &str) -> Option<(u32, u32)> {
+    if let Some(known) = SHAPES.with(|s| s.borrow().get(path).copied()) {
+        return known;
+    }
+    let shape = (|| {
+        use std::io::Read;
+        let mut head = Vec::with_capacity(64 * 1024);
+        std::fs::File::open(path)
+            .ok()?
+            .take(64 * 1024)
+            .read_to_end(&mut head)
+            .ok()?;
+        crate::chat::image_size::size(&head)
+    })();
+    SHAPES.with(|s| s.borrow_mut().insert(path.to_owned(), shape));
+    shape
+}
+
 thread_local! {
+    /// Image shapes read so far, by path.
+    static SHAPES: std::cell::RefCell<std::collections::HashMap<String, Option<(u32, u32)>>> =
+        Default::default();
     /// The link press under way; one pointer, so one press at a time.
     static PRESS: std::cell::RefCell<LinkPress> = std::cell::RefCell::new(LinkPress::default());
 }
@@ -215,11 +239,40 @@ fn heading(key: &str, level: usize, text: &str, first: bool, a: Appearance) -> D
 }
 
 fn paragraph(key: &str, text: &str, ink: Ink, a: Appearance) -> Div {
+    let images = image_links(text)
+        .into_iter()
+        .filter(|path| std::path::Path::new(path).is_file());
     div()
         .kit_type(TypeRole::Body)
         .line_height(px(BODY_LINE))
         .ink(ink, a)
         .child(inline(key, text, FontWeight::NORMAL, ink, a))
+        .children(images.map(|path| image(key, &path, a)))
+}
+
+/// A linked image on this Mac, drawn under its paragraph (Codex's generated images); a click
+/// opens it beside the chat, as its link does.
+fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
+    let to = path.to_owned();
+    // GPUI sizes an image's box from its pixels, not its width: the height comes from its shape.
+    let (w, h) = image_shape(path).unwrap_or((4, 3));
+    div()
+        .id(SharedString::from(format!("md-img-{key}-{path}")))
+        .mt(px(8.0))
+        .w(px(IMAGE_WIDTH))
+        .h(px(IMAGE_WIDTH * h as f32 / w as f32))
+        .rounded(px(RADIUS_MD))
+        .border(px(1.0))
+        .border_color(hsla(Ink::Hairline.color(a)))
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(move |_, window, cx| super::page_panel::follow_link(&to, window, cx))
+        .child(
+            img(std::path::PathBuf::from(path))
+                .size_full()
+                .rounded(px(RADIUS_MD))
+                .object_fit(ObjectFit::Contain),
+        )
 }
 
 fn list(key: &str, items: &[ListItem], a: Appearance) -> Div {

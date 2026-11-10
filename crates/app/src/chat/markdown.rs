@@ -412,6 +412,21 @@ fn bare_url(rest: &str) -> Option<usize> {
     (end > scheme).then_some(end)
 }
 
+/// The links in `text` to image files on this Mac (an absolute path ending in .png, .jpg, .jpeg,
+/// .gif or .webp), each once: Chat draws them under the paragraph, so a generated image shows.
+pub fn image_links(text: &str) -> Vec<String> {
+    const KINDS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+    let mut out: Vec<String> = Vec::new();
+    for span in spans(text) {
+        let Some(url) = span.link else { continue };
+        let lower = url.to_ascii_lowercase();
+        if url.starts_with('/') && KINDS.iter().any(|k| lower.ends_with(k)) && !out.contains(&url) {
+            out.push(url);
+        }
+    }
+    out
+}
+
 /// `[label](url)` at the start of `rest`: the label, the url, how many bytes it took.
 fn link(rest: &str) -> Option<(&str, &str, usize)> {
     let close = rest.find("](")?;
@@ -420,6 +435,15 @@ fn link(rest: &str) -> Option<(&str, &str, usize)> {
         return None;
     }
     let after = &rest[close + 2..];
+    // `(<url>)`: the url is what's inside the brackets, spaces and all (Codex links its images so).
+    if let Some(inside) = after.strip_prefix('<') {
+        let gt = inside.find('>')?;
+        let url = &inside[..gt];
+        if url.is_empty() || url.contains('\n') || !inside[gt + 1..].starts_with(')') {
+            return None;
+        }
+        return Some((label, url, close + 2 + 1 + gt + 2));
+    }
     let end = after.find(')')?;
     let url = after[..end].trim();
     if url.is_empty() || url.contains(' ') {
@@ -676,6 +700,38 @@ mod tests {
                 code: true,
                 ..Span::default()
             }]
+        );
+    }
+
+    #[test]
+    fn a_paragraph_s_links_to_local_images_are_drawn_under_it() {
+        let text = "[Edited image](</w/a.png>) · see [b](/w/B.JPG), [page](https://x.com/c.png), [d](/w/d.txt), [e](rel/e.png)";
+        assert_eq!(image_links(text), ["/w/a.png", "/w/B.JPG"]);
+        assert_eq!(
+            image_links("[a](/w/a.png) and [again](/w/a.png)"),
+            ["/w/a.png"],
+            "once"
+        );
+    }
+
+    #[test]
+    fn a_link_in_angle_brackets_goes_to_what_is_inside() {
+        // Codex writes its images' links so, and a path in brackets may hold spaces.
+        let link = |text: &str, to: &str| Span {
+            text: text.into(),
+            link: Some(to.into()),
+            ..Span::default()
+        };
+        assert_eq!(
+            spans("[Edited image](</Users/me/.codex/generated_images/a/b.png>) · 1536 × 1024"),
+            [
+                link("Edited image", "/Users/me/.codex/generated_images/a/b.png"),
+                plain(" · 1536 × 1024"),
+            ]
+        );
+        assert_eq!(
+            spans("[x](</Users/me/My Folder/a.png>)"),
+            [link("x", "/Users/me/My Folder/a.png")]
         );
     }
 
