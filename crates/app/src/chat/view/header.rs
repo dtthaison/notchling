@@ -1,11 +1,12 @@
-//! The header over the conversation: avatar, title, folder and host, context, shells, status.
+//! The header over the conversation: avatar, title, folder and host, context. The limits are the
+//! reply box's ring, the shells and status are in the Details Panel and the Sidebar.
 
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{AVATAR, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    avatar, button_with, hsla, icon_button, label, phone_mark, status_pill, KitPart, KitStyled,
+    avatar, button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled,
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
@@ -123,7 +124,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         Some(model) => format!("{} · {} · {}", h.folder, h.host, model),
         None => format!("{} · {}", h.folder, h.host),
     };
-    let meters = accounts::header_meters(view, a);
     bar.child(
         avatar(&h.title, AVATAR, Some(h.status), Ink::Window, a).part_at(
             "Avatar",
@@ -164,16 +164,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                     ),
             ),
     )
-    .when(!meters.is_empty(), |bar| {
-        bar.child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .children(meters)
-                .part_at("Limit Meters", Corner::Bottom, a, cx),
-        )
-    })
     .when_some(h.context.as_deref(), |bar, context| {
         bar.child(chip(&format!("Context {context}"), a).part_at(
             "Context Meter",
@@ -182,15 +172,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             cx,
         ))
     })
-    .when(h.shells > 0, |bar| {
-        let text = if h.shells == 1 {
-            "1 shell".to_owned()
-        } else {
-            format!("{} shells", h.shells)
-        };
-        bar.child(chip(&text, a).part_at("Shells Chip", Corner::Bottom, a, cx))
-    })
-    .child(status_pill(h.status, &h.status_word, a).part_at("Status Pill", Corner::Top, a, cx))
     .child(details_button(view, a, cx))
     .child(phone_button(view, a, cx))
     .part_at("Header", Corner::Bottom, a, cx)

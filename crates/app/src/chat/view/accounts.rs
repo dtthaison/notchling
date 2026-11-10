@@ -13,12 +13,10 @@ use notchling_kit::ui::{button_with, card, hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
-use crate::accounts::limits::{self, Meter, Zone};
 use crate::accounts::menu::{
     account_menu, move_all_account, move_needs_accounts, AccountMenu, Entry, Place, Target,
 };
 use crate::accounts::model::{CLAUDE_CODE, CODEX};
-use crate::accounts::view_rows::meter;
 use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
 use crate::mac::gate;
@@ -26,13 +24,6 @@ use crate::switches::Switch;
 
 /// How often Chat reads the accounts store for the header, while the window is open.
 pub(super) const POLL: Duration = Duration::from_secs(10);
-
-fn now_secs() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-}
 
 /// Whether `codex` is on the PATH or in its usual places. It reads the disk, so Chat asks with the
 /// accounts poll, not on each render.
@@ -171,39 +162,6 @@ impl ChatView {
             Entry::MoveAll | Entry::Header(_) | Entry::Note(_) | Entry::Separator => {}
         }
     }
-}
-
-/// The header's limit meters for the selected session: Claude Code's 5h and Week (the account in
-/// use), Codex's bars (the active Codex login); nothing for Antigravity.
-pub(super) fn header_meters(view: &ChatView, a: Appearance) -> Vec<Stateful<Div>> {
-    let Some(session) = view.selected_session() else {
-        return Vec::new();
-    };
-    let s = view.accounts.snapshot();
-    let now = now_secs();
-    let meters: Vec<Meter> = match session.tool {
-        Tool::Claude if session.agent.config_dir.is_none() => s
-            .limits
-            .providers
-            .iter()
-            .find(|p| p.id == "claude")
-            .map(|p| limits::claude_meters(&p.windows, now, Zone::LOCAL))
-            .unwrap_or_default(),
-        Tool::Codex => {
-            let codex = s.providers.providers.iter().find(|p| p.id == CODEX);
-            codex
-                .and_then(|p| p.active_id.as_ref())
-                .and_then(|id| s.usage.get(CODEX).and_then(|r| r.get(id)))
-                .map(|report| limits::codex_meters(report, now, Zone::LOCAL))
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    };
-    meters
-        .iter()
-        .enumerate()
-        .map(|(i, m)| meter(SharedString::from(format!("meter-{i}")), m, a))
-        .collect()
 }
 
 /// The account button under the title: the email with the lane, or the Codex login.
