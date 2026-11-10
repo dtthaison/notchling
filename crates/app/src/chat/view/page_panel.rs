@@ -20,7 +20,7 @@ use gpui::{
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SIDEBAR_WIDTH;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button_with, hsla, icon, icon_button, label, KitPart, KitStyled};
+use notchling_kit::ui::{hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::ChatView;
@@ -40,7 +40,7 @@ use crate::search::panel::app_library;
 pub const PAGE_ENV: &str = "NOTCHLING_RENDER_PAGE";
 
 /// What the header's height is (the Swift panel's 48).
-const HEADER: f32 = 48.0;
+const HEADER: f32 = 36.0;
 
 /// The panel's left edge, dragged.
 struct PanelEdge;
@@ -101,6 +101,13 @@ impl State {
 
     pub fn is_open(&self) -> bool {
         self.shown.is_some()
+    }
+
+    /// Gives the keyboard back to Chat if the page has it.
+    pub fn take_keys_back(&self) {
+        if let Some(web) = self.web.borrow().as_ref() {
+            web.take_keys_back();
+        }
     }
 
     /// The panel's width as last drawn.
@@ -280,68 +287,62 @@ pub fn render(
     let width = panel_width(view.page.width, available);
     view.page.drawn_width.set(width);
 
-    let mark = match shown.opens {
-        Opens::Live(_) => Icon::Web,
-        _ => Icon::Page,
-    };
-    let titles = div()
+    // One line: the Artifact mark (where the page comes from on hover), the title in all the room
+    // the three icon buttons leave, then Refresh, Open in Browser and Back to Details.
+    let mark = gate::tip_text(
+        div().id("page-panel-mark").flex_shrink_0().child(icon(
+            Icon::Page,
+            12.0,
+            Ink::AccentText,
+            a,
+        )),
+        shown.subtitle.clone().into(),
+        a,
+    );
+    let title = label(&shown.title, TypeRole::Label, Ink::Text, a)
         .flex_1()
         .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(1.0))
-        .child(
-            label(&shown.title, TypeRole::Heading, Ink::Text, a)
-                .truncate()
-                .whitespace_nowrap(),
-        )
-        .child(
-            label(&shown.subtitle, TypeRole::Meta, Ink::TextMuted, a)
-                .truncate()
-                .whitespace_nowrap(),
-        );
-    let browser = (!shown.link.is_empty()).then(|| {
-        let link = shown.link.clone();
-        let content = div()
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .child(icon(Icon::Web, 11.0, Ink::Text, a))
-            .child("Open in Browser");
-        button_with(
-            "page-panel-browser",
-            content,
-            ButtonKind::Ghost,
-            PartState::Rest,
+        .elide();
+    let tool = |id: &'static str, shape: Icon, tip: &'static str| {
+        gate::tip_text(
+            icon_button(
+                id,
+                shape,
+                IconSize::Button.points(),
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            ),
+            tip.into(),
             a,
         )
         .flex_shrink_0()
-        .on_click(move |_, _, cx| cx.open_url(&link))
+    };
+    let web_for_reload = view.page.web.clone();
+    let refresh =
+        tool("page-panel-refresh", Icon::Resume, "Reload the page").on_click(move |_, _, _| {
+            if let Some(web) = web_for_reload.borrow().as_ref() {
+                web.reload();
+            }
+        });
+    let browser = (!shown.link.is_empty()).then(|| {
+        let link = shown.link.clone();
+        tool("page-panel-browser", Icon::Web, "Open in Browser")
+            .on_click(move |_, _, cx| cx.open_url(&link))
     });
-    let back = gate::tip_text(
-        icon_button(
-            "page-panel-back",
-            Icon::Close,
-            IconSize::Button.points(),
-            ButtonKind::Ghost,
-            PartState::Rest,
-            a,
-        ),
-        "Back to Details".into(),
-        a,
-    )
-    .flex_shrink_0()
-    .on_click(cx.listener(|this, _, _, cx| this.close_page(cx)));
+    let back = tool("page-panel-back", Icon::Close, "Back to Details")
+        .on_click(cx.listener(|this, _, _, cx| this.close_page(cx)));
     let header = div()
         .h(px(HEADER))
         .flex_shrink_0()
-        .pl(px(14.0))
-        .pr(px(8.0))
+        .pl(px(12.0))
+        .pr(px(6.0))
         .flex()
         .items_center()
-        .gap(px(8.0))
-        .child(icon(mark, 12.0, Ink::AccentText, a))
-        .child(titles)
+        .gap(px(6.0))
+        .child(mark)
+        .child(title)
+        .child(refresh)
         .children(browser)
         .child(back);
 
@@ -357,7 +358,7 @@ pub fn render(
         Ink::TextMuted
     };
     let web = view.page.web.clone();
-    let visible = !view.overlay_open && shown.error.is_none();
+    let visible = !view.page_covered && shown.error.is_none();
     if !visible {
         if let Some(web) = web.borrow().as_ref() {
             web.hide();

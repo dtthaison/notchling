@@ -191,7 +191,8 @@ fn status(
     };
     Some(
         label(&sentence(&text), TypeRole::Meta, ink, a)
-            .line_clamp(2)
+            .w_full()
+            .elide()
             .part_at("Composer Hint", Corner::Trailing, a, cx),
     )
 }

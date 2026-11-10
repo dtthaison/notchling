@@ -177,6 +177,24 @@ pub fn live_allows(url: &str) -> bool {
     !host.is_empty() && live_host(host)
 }
 
+/// What is open over Chat, as far as the page panel cares. The web view is a native view above
+/// everything GPUI draws, so it hides while something GPUI draws would sit under it.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct Covers {
+    /// A sheet, centred in the window.
+    pub sheet: bool,
+    /// The phone popover, at the header's right end.
+    pub phone: bool,
+    /// The part names, drawn over every part.
+    pub parts: bool,
+}
+
+/// Whether the page hides. Menus and pickers that open in the conversation column don't count:
+/// they sit beside the panel, so the page stays in view while one is up.
+pub fn page_covered(covers: Covers) -> bool {
+    covers.sheet || covers.phone || covers.parts
+}
+
 /// Whether a link a live page wanted to open in a new window may go to the browser: http or https.
 pub fn opens_in_browser(url: &str) -> bool {
     let lower = url.trim().to_ascii_lowercase();
@@ -230,6 +248,31 @@ pub fn dragged_width(pointer_x: f32, area_left: f32, area_right: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_is_drawn_over_the_panel_hides_its_page() {
+        // The + menu, the pickers and the account menu open in the conversation column, beside
+        // the panel: the page stays.
+        assert!(!page_covered(Covers::default()));
+        // A sheet in the middle of the window, the phone popover at the top right and the part
+        // names over everything are drawn where the page is.
+        for covers in [
+            Covers {
+                sheet: true,
+                ..Covers::default()
+            },
+            Covers {
+                phone: true,
+                ..Covers::default()
+            },
+            Covers {
+                parts: true,
+                ..Covers::default()
+            },
+        ] {
+            assert!(page_covered(covers));
+        }
+    }
 
     fn page(id: &str, path: &str, updated: f64) -> Page {
         Page {

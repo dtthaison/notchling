@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use block2::RcBlock;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::{MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask, NSWindowWillCloseNotification,
 };
@@ -245,6 +245,8 @@ pub struct PanelHooks {
 /// view, laid on the panel by [`PanelWeb::place`]. Hidden until first placed.
 pub struct PanelWeb {
     view: WebView,
+    /// GPUI's own view, which takes key events back when the person clicks outside the page.
+    gpui: Weak<NSView>,
     /// The frame last set and whether it showed, so a frame that changed nothing touches nothing.
     placed: Cell<Option<(Frame, bool)>>,
 }
@@ -266,8 +268,11 @@ impl PanelWeb {
         };
         // SAFETY: GPUI's handle names its live view, on the main thread; it is only borrowed here to
         // reach its superview, which comes back retained.
-        let content = unsafe { appkit.ns_view.cast::<NSView>().as_ref().superview() }
-            .ok_or("the Chat window has no content view")?;
+        let gpui_view = unsafe { appkit.ns_view.cast::<NSView>().as_ref() };
+        let gpui = Weak::from_retained(&gpui_view.retain());
+        // SAFETY: an AppKit view call on the main thread, checked above.
+        let content =
+            unsafe { gpui_view.superview() }.ok_or("the Chat window has no content view")?;
         let PanelHooks { title, leave } = hooks;
         let builder = match page {
             PanelPage::Local(source) => local_builder(source),
@@ -302,6 +307,7 @@ impl PanelWeb {
         }
         Ok(PanelWeb {
             view,
+            gpui,
             placed: Cell::new(None),
         })
     }
@@ -330,6 +336,32 @@ impl PanelWeb {
         );
         web.setFrame(rect);
         web.setHidden(!visible);
+    }
+
+    /// Hands the keyboard back to GPUI's view. A click on the page makes the web view the window's
+    /// first responder, and a click on GPUI's view never takes it back by itself (the view doesn't
+    /// accept first responder on a click), so without this the reply box gets no keys.
+    pub fn take_keys_back(&self) {
+        let Some(gpui) = self.gpui.load() else {
+            return;
+        };
+        let Some(window) = gpui.window() else {
+            return;
+        };
+        let has_keys = window.firstResponder().is_some_and(|r| {
+            std::ptr::eq(
+                Retained::as_ptr(&r).cast::<NSView>(),
+                Retained::as_ptr(&gpui),
+            )
+        });
+        if !has_keys {
+            window.makeFirstResponder(Some(&gpui));
+        }
+    }
+
+    /// Loads the page again.
+    pub fn reload(&self) {
+        let _ = self.view.reload();
     }
 
     /// Hides it where it is (an overlay is up, or the panel wasn't drawn).

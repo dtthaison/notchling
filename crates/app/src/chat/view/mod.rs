@@ -148,6 +148,8 @@ pub struct ChatView {
     /// Whether a sheet, menu, panel or the part names were up when last drawn: Esc then belongs
     /// to them, not to Stop.
     overlay_open: bool,
+    /// Whether something drawn over the page panel is open, so its web view hides.
+    page_covered: bool,
     /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
     tools: tools::ChatTools,
     /// New Session or Settings, over the window.
@@ -360,6 +362,7 @@ impl ChatView {
             follow_sent: false,
             clock_second: 0,
             overlay_open: false,
+            page_covered: false,
             tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
@@ -627,6 +630,12 @@ impl Render for ChatView {
             || self.tools.picker.is_some()
             || self.composer.is_open()
             || parts_on(cx);
+        self.page_covered =
+            crate::chat::page_panel::page_covered(crate::chat::page_panel::Covers {
+                sheet: self.sheet.is_some(),
+                phone: self.phone.is_some(),
+                parts: parts_on(cx),
+            });
         // Files from Finder land anywhere on the middle column while the box can take them.
         let takes_drops = self.composer_control(cx).enabled;
         let conversation = div()
@@ -670,6 +679,9 @@ impl Render for ChatView {
             .size_full()
             .flex()
             .fill(Ink::Window, a)
+            // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
+            // draws takes it back, or typing would go on reaching the page.
+            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
             .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(
