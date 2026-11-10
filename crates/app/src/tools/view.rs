@@ -141,7 +141,7 @@ pub enum PickerAction {
     Reset,
 }
 
-fn pop_up(a: Appearance) -> Div {
+pub(crate) fn pop_up(a: Appearance) -> Div {
     card(a)
         .w(px(320.0))
         .p(px(8.0))
@@ -151,7 +151,7 @@ fn pop_up(a: Appearance) -> Div {
 }
 
 /// A clickable row of a pop-up: a check when selected, the title, a faint detail under it.
-fn pick_row(
+pub(crate) fn pick_row(
     id: impl Into<SharedString>,
     title: &str,
     detail: &str,

@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
+use crate::chat::claude_picker::{self, Hint, Kind};
 use crate::chat::data::Tool;
 use crate::chat::prompts::is_dialog;
 use crate::phone::bridge::now_ms;
@@ -40,6 +41,12 @@ pub const EXITED: &str = "This session has exited.";
 pub enum Picker {
     Codex(CodexPicker),
     Agy,
+    /// A Claude Code session's Model menu; `more` is its More Models list open.
+    ClaudeModel {
+        more: bool,
+    },
+    /// A Claude Code session's Effort menu.
+    ClaudeEffort,
 }
 
 /// What Chat keeps about acting on the other tools.
@@ -71,6 +78,9 @@ pub struct ChatTools {
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
+    /// A model or effort picked for a Claude Code row, shown until its transcript says so.
+    pub model_hints: HashMap<String, Hint>,
+    pub effort_hints: HashMap<String, Hint>,
     /// The row a Stop was sent to and when (ms), until it stops working or 20 s pass.
     pub stopping: Option<(String, i64)>,
     /// The reply box: the kit's editor (caret, selection, input method), one for every row.
@@ -106,6 +116,8 @@ impl ChatTools {
             starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
+            model_hints: HashMap::new(),
+            effort_hints: HashMap::new(),
             stopping: None,
             editor,
             focus,
@@ -414,6 +426,92 @@ impl ChatView {
             Tool::Claude => None,
         };
         cx.notify();
+    }
+
+    /// Opens or closes a Claude Code session's Model or Effort menu (the other closes).
+    pub(super) fn toggle_claude_picker(&mut self, kind: Kind, cx: &mut Context<Self>) {
+        let open = matches!(
+            (&self.tools.picker, kind),
+            (Some(Picker::ClaudeModel { .. }), Kind::Model)
+                | (Some(Picker::ClaudeEffort), Kind::Effort)
+        );
+        self.tools.picker = (!open).then_some(match kind {
+            Kind::Model => Picker::ClaudeModel { more: false },
+            Kind::Effort => Picker::ClaudeEffort,
+        });
+        cx.notify();
+    }
+
+    /// The model the selected row shows: the pick not yet in the transcript, else the transcript's.
+    pub(super) fn claude_model(&self) -> Option<&str> {
+        let hint = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.tools.model_hints.get(id));
+        Hint::shown(
+            hint,
+            self.conversation.facts.model.as_deref(),
+            self.drawn_ms,
+        )
+    }
+
+    /// The effort the selected row shows, the same way.
+    pub(super) fn claude_effort(&self) -> Option<&str> {
+        let hint = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.tools.effort_hints.get(id));
+        Hint::shown(
+            hint,
+            self.conversation.facts.effort.as_deref(),
+            self.drawn_ms,
+        )
+    }
+
+    /// A pick in the Model or Effort menu: `/model <id>` or `/effort <level>` goes to the session
+    /// as a reply (`session.reply`), as the reply box would send it. The box's own text stays.
+    pub(super) fn pick_claude(&mut self, kind: Kind, value: &'static str, cx: &mut Context<Self>) {
+        self.tools.picker = None;
+        if self.tools.sending || !self.composer_control(cx).enabled {
+            cx.notify();
+            return;
+        }
+        let Some(session) = self.selected_session().filter(|s| s.tool == Tool::Claude) else {
+            return;
+        };
+        let id = session.agent.id.clone();
+        let (text, hints, fact) = match kind {
+            Kind::Model => (
+                claude_picker::model_text(value),
+                &mut self.tools.model_hints,
+                self.conversation.facts.model.as_deref(),
+            ),
+            Kind::Effort => (
+                claude_picker::effort_text(value),
+                &mut self.tools.effort_hints,
+                self.conversation.facts.effort.as_deref(),
+            ),
+        };
+        hints.insert(id.clone(), Hint::new(value, fact, now_ms()));
+        self.spawn_send(
+            Request::reply(&id, &text),
+            move |view, result, cx| match result {
+                Ok(_) => view.reload_now(cx),
+                Err(message) => {
+                    // Not sent: what the label showed goes back to the transcript's.
+                    match kind {
+                        Kind::Model => view.tools.model_hints.remove(&id),
+                        Kind::Effort => view.tools.effort_hints.remove(&id),
+                    };
+                    let asking = is_dialog(&message);
+                    view.tools.error = Some(message);
+                    if asking {
+                        view.reload_now(cx);
+                    }
+                }
+            },
+            cx,
+        );
     }
 
     /// Keeps a Codex pick for the row.

@@ -8,7 +8,8 @@
 //! when it queues), Shift or Option Return adds a line, Esc stops a working session
 //! (`view::mod`). Files dropped anywhere on the middle column go in at the caret as paths
 //! (`chat::drops`, the drop target is the column in `view::mod`); the card's edge turns accent
-//! while one is over it. Under the card, one row: the model or options picker at the left, the
+//! while one is over it. Under the card, one row: the model or options picker at the left (for a Claude
+//! Code session the Model and Effort pickers, `chat::claude_picker`), the
 //! status line (the error, "Sending…", what waits, or why the box is off) and the usage-limit ring
 //! (`view::limit_ring`). Above it, the question or permission a Claude Code session waits on
 //! (`view::prompts`), an Antigravity permission card when the daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the reason is the status
@@ -29,13 +30,16 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::tools::Picker;
 use super::ChatView;
+use crate::chat::claude_picker::{self, Kind};
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
 use crate::chat::data::Tool;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
 use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
-use crate::tools::view::{agy_card, agy_options_card, codex_picker_card, PickerAction};
+use crate::tools::view::{
+    agy_card, agy_options_card, codex_picker_card, pick_row, pop_up as menu_card, PickerAction,
+};
 
 /// The text grows to this many lines, then scrolls (the Swift `ReplyMeasurer.maxLines`).
 pub const MAX_LINES: usize = 8;
@@ -120,7 +124,8 @@ fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
             cx,
             |this, option, value, cx| this.set_agy_option(option, value, cx),
         ),
-        None => return None,
+        // Claude Code's two menus open from their own buttons (`claude_pickers`).
+        Some(Picker::ClaudeModel { .. }) | Some(Picker::ClaudeEffort) | None => return None,
     };
     Some(
         div()
@@ -251,6 +256,230 @@ fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<
     )
 }
 
+/// Which Claude Code menu is open: the one clicked, or the one a render forces.
+fn claude_open(view: &ChatView) -> Option<Kind> {
+    match &view.tools.picker {
+        Some(Picker::ClaudeModel { .. }) => Some(Kind::Model),
+        Some(Picker::ClaudeEffort) => Some(Kind::Effort),
+        _ => view.composer.preview.picker,
+    }
+}
+
+/// One row of a Claude Code menu.
+fn claude_row(
+    id: String,
+    row: &claude_picker::Row,
+    kind: Kind,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Stateful<Div> {
+    let value = row.value;
+    pick_row(id, &row.title, "", row.selected, a)
+        .on_click(cx.listener(move |this, _, _, cx| this.pick_claude(kind, value, cx)))
+}
+
+/// The More Models row: opens the older models under it.
+fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
+    div()
+        .id("model-more")
+        .w_full()
+        .px(px(8.0))
+        .py(px(5.0))
+        .rounded(px(RADIUS_SM))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_pointer()
+        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
+        .child(div().w(px(14.0)).flex_shrink_0())
+        .child(div().flex_1().child(label(
+            claude_picker::MORE_MODELS,
+            TypeRole::Label,
+            Ink::Text,
+            a,
+        )))
+        .child(icon(
+            if open {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            },
+            9.0,
+            Ink::TextMuted,
+            a,
+        ))
+        .on_click(cx.listener(|this, _, _, cx| {
+            if let Some(Picker::ClaudeModel { more }) = &mut this.tools.picker {
+                *more = !*more;
+                cx.notify();
+            }
+        }))
+}
+
+/// The Model or Effort menu, over its button and the layer that closes it on an outside click
+/// (both `deferred`, as the + menu).
+fn claude_menu(
+    view: &ChatView,
+    kind: Kind,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> impl IntoElement {
+    let more = matches!(view.tools.picker, Some(Picker::ClaudeModel { more: true }));
+    let mut card = menu_card(a)
+        .id("claude-menu")
+        .w(px(200.0))
+        .gap(px(2.0))
+        .shadow_lg()
+        .occlude();
+    match kind {
+        Kind::Model => {
+            let current = view.claude_model();
+            for (i, row) in claude_picker::models(current).iter().enumerate() {
+                card = card.child(claude_row(format!("model-{i}"), row, kind, a, cx));
+            }
+            card = card
+                .child(div().h(px(1.0)).w_full().bg(hsla(Ink::Hairline.color(a))))
+                .child(more_row(more, a, cx));
+            if more {
+                for (i, row) in claude_picker::older_models(current).iter().enumerate() {
+                    card = card.child(claude_row(format!("older-{i}"), row, kind, a, cx));
+                }
+            }
+        }
+        Kind::Effort => {
+            for (i, row) in claude_picker::efforts(view.claude_effort())
+                .iter()
+                .enumerate()
+            {
+                card = card.child(claude_row(format!("effort-{i}"), row, kind, a, cx));
+            }
+        }
+    }
+    let name = match kind {
+        Kind::Model => "Model Menu",
+        Kind::Effort => "Effort Menu",
+    };
+    deferred(
+        div()
+            .absolute()
+            .bottom(relative(1.0))
+            .left(px(0.0))
+            .pb(px(MENU_GAP))
+            .child(
+                div()
+                    .id("claude-menu-click-away")
+                    .absolute()
+                    .top(px(-4000.0))
+                    .left(px(-4000.0))
+                    .size(px(8000.0))
+                    .occlude()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.tools.picker = None;
+                        cx.notify();
+                    })),
+            )
+            .child(card.part_at(name, Corner::TopTrailing, a, cx)),
+    )
+    .with_priority(1)
+}
+
+/// One Claude Code picker button: the cpu or gauge icon, the label and a chevron in the Meta
+/// type and the muted ink, a ghost button (the Swift `ModelPicker` / `EffortPicker`).
+fn claude_picker(
+    view: &ChatView,
+    kind: Kind,
+    control: crate::acting::Control,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Div {
+    let (glyph, title, part, tip, id) = match kind {
+        Kind::Model => (
+            Icon::Cpu,
+            claude_picker::model_label(view.claude_model()),
+            "Model Picker",
+            claude_picker::MODEL_TIP,
+            "model-picker",
+        ),
+        Kind::Effort => (
+            Icon::Gauge,
+            claude_picker::effort_label(view.claude_effort()),
+            "Effort Picker",
+            claude_picker::EFFORT_TIP,
+            "effort-picker",
+        ),
+    };
+    let open = claude_open(view) == Some(kind);
+    let enabled = control.enabled;
+    let ink = if enabled {
+        Ink::TextMuted
+    } else {
+        Ink::TextFaint
+    };
+    let content = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(icon(glyph, 9.0, ink, a))
+        .child(label(&title, TypeRole::Meta, ink, a))
+        .child(icon(Icon::ChevronDown, 7.0, ink, a));
+    let b = button_with(
+        id,
+        content,
+        if open {
+            ButtonKind::Secondary
+        } else {
+            ButtonKind::Ghost
+        },
+        if enabled {
+            PartState::Rest
+        } else {
+            PartState::Disabled
+        },
+        a,
+    )
+    .h(px(20.0))
+    .px(px(6.0));
+    // The acting reason when off, else what the picker does.
+    let b = gate::tip(
+        b,
+        crate::acting::Control {
+            enabled: true,
+            tooltip: Some(control.tooltip.unwrap_or(tip)),
+        },
+        a,
+    );
+    let b = b
+        .when(enabled, |b| {
+            b.on_click(cx.listener(move |this, _, _, cx| this.toggle_claude_picker(kind, cx)))
+        })
+        .part_at(part, Corner::Top, a, cx);
+    div()
+        .relative()
+        .flex_shrink_0()
+        .child(b)
+        .children(open.then(|| claude_menu(view, kind, a, cx)))
+}
+
+/// The Model and Effort pickers under the card, for a Claude Code session.
+fn claude_pickers(
+    view: &ChatView,
+    control: crate::acting::Control,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Option<Div> {
+    if view.selected_session()?.tool != Tool::Claude {
+        return None;
+    }
+    Some(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(claude_picker(view, Kind::Model, control, a, cx))
+            .child(claude_picker(view, Kind::Effort, control, a, cx)),
+    )
+}
+
 /// What a render can force, since nothing types, works or clicks in a picture.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Preview {
@@ -260,6 +489,8 @@ pub struct Preview {
     pub working: bool,
     /// The + menu is open (`NOTCHLING_RENDER_ADD=1`).
     pub menu: bool,
+    /// A Claude Code picker's menu is open (`NOTCHLING_RENDER_PICKER=model|effort`).
+    pub picker: Option<Kind>,
 }
 
 /// What Chat keeps for the box's controls.
@@ -272,7 +503,7 @@ pub struct State {
 
 impl Preview {
     fn any(self) -> bool {
-        self.typed || self.working || self.menu
+        self.typed || self.working || self.menu || self.picker.is_some()
     }
 }
 
@@ -616,6 +847,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .items_center()
         .gap(px(8.0))
         .children(picker(view, a, cx))
+        .children(claude_pickers(view, control, a, cx))
         .child(
             div()
                 .flex_1()
