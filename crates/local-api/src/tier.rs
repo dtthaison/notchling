@@ -88,11 +88,16 @@ impl Allowlist {
 }
 
 /// Where the installed desktop app's binary sits, per OS. Only these and the dev variable count.
+/// `Notchling Next.app` is the Rust app installed beside the Swift one until the Swift app retires.
 pub fn installed_app_paths() -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
-        vec![PathBuf::from(
+        [
             "/Applications/Notchling.app/Contents/MacOS/notchling-app",
-        )]
+            "/Applications/Notchling Next.app/Contents/MacOS/notchling-app",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
     } else {
         Vec::new()
     }
@@ -217,6 +222,18 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_side_by_side_bundle_is_the_app_too() {
+        let paths = installed_app_paths();
+        for want in [
+            "/Applications/Notchling.app/Contents/MacOS/notchling-app",
+            "/Applications/Notchling Next.app/Contents/MacOS/notchling-app",
+        ] {
+            assert!(paths.contains(&PathBuf::from(want)), "{want}");
+        }
     }
 
     fn exe_at(dir: &TempDir, rel: &str) -> PathBuf {

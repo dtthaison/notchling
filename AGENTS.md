@@ -24,6 +24,7 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 ```sh
 ./build.sh                # build/Notchling.app (arm64 + x86_64, signed ad hoc)
 ./build.sh --dev          # build/Notchling Dev.app, run it with tools/dev-profile.sh app
+tools/bundle-next.sh      # build/Notchling Next.app: the Rust app and its daemon, beside the Swift app (--install: the maintainer only)
 swift test                # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 export PYTHONPATH=tools/guard
 python3 -m unittest discover -s tools/guard/tests -t tools/guard   # the guard's own tests
