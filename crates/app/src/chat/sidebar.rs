@@ -190,7 +190,9 @@ impl PendingSession {
 }
 
 /// Needs input, Working, Done, in that order; a group with no sessions has no section. The rows
-/// keep the engine's order (newest first within a group).
+/// keep the engine's order (newest first within a group). A Claude Code session that has exited
+/// (its process or job is gone) isn't listed: the maintainer asked on 2026-11-10 that Done hold
+/// only sessions still there; search still finds an exited one.
 pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     [
         AgentGroup::NeedsInput,
@@ -201,7 +203,7 @@ pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     .filter_map(|group| {
         let rows: Vec<SidebarRow> = sessions
             .iter()
-            .filter(|s| s.agent.group == group)
+            .filter(|s| s.agent.group == group && !exited(s))
             .map(|s| row(s, now_ms))
             .collect();
         (!rows.is_empty()).then(|| Section {
@@ -210,6 +212,10 @@ pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
         })
     })
     .collect()
+}
+
+fn exited(s: &Session) -> bool {
+    s.tool == Tool::Claude && s.agent.label == "Exited"
 }
 
 #[cfg(test)]
@@ -249,6 +255,24 @@ mod tests {
             tool,
             transcript: None,
         }
+    }
+
+    #[test]
+    fn a_claude_session_that_exited_is_not_listed() {
+        let mut gone = session("gone", AgentGroup::Completed, None, Tool::Claude);
+        gone.agent.label = "Exited".into();
+        let sessions = vec![
+            gone,
+            session("idle", AgentGroup::Completed, None, Tool::Claude),
+        ];
+        let sections = sections(&sessions, 1_000_000_000_000);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].rows.len(), 1);
+        assert_eq!(sections[0].rows[0].status_line, "Idle");
+        // Only exited ones: no Done section at all.
+        let mut only = session("x", AgentGroup::Completed, None, Tool::Claude);
+        only.agent.label = "Exited".into();
+        assert!(super::sections(&[only], 1_000_000_000_000).is_empty());
     }
 
     #[test]

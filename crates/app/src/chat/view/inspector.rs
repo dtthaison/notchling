@@ -350,8 +350,15 @@ fn subagent_row(index: usize, s: &SubagentRow, a: Appearance) -> Div {
 fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
-        text = text.child(label(&s.title, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE)));
+        text = text.child(
+            label(&s.title, TypeRole::Meta, Ink::Text, a)
+                .line_height(px(ROW_LINE))
+                .w_full()
+                .elide(),
+        );
     }
+    // A command can run to pages (a whole prompt passed to a tool): one line of title and two of
+    // command, cut with an ellipsis; Output shows the rest.
     div()
         .flex()
         .items_start()
@@ -359,7 +366,11 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
         .child(mark_box(s.mark, &format!("shell-{index}"), a))
         .child(
             text.child(
-                label(&s.command, TypeRole::Mono, Ink::TextMuted, a).line_height(px(ROW_LINE)),
+                label(&s.command, TypeRole::Mono, Ink::TextMuted, a)
+                    .line_height(px(ROW_LINE))
+                    .w_full()
+                    .line_clamp(2)
+                    .elide(),
             )
             .child(
                 label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
