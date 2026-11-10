@@ -1,10 +1,16 @@
 //! The main window: how it opens (size, hidden title bar, traffic lights over the sidebar's top) and
 //! the empty shell view shown where no data root is known. Chat's own view is `crate::chat::view`.
 
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
+
 use gpui::{
-    div, point, prelude::*, px, size, App, Bounds, Context, Render, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    div, point, prelude::*, px, size, App, Bounds, Context, DisplayId, Render, Subscription,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
 };
+use notchling_engine::settings::Settings;
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
@@ -12,6 +18,11 @@ use notchling_kit::ui::{
     KitStyled, TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
+
+use crate::window_frame::{Frame, KEY};
+
+/// How long after the last move or resize the frame is written.
+const SAVE_AFTER: Duration = Duration::from_millis(400);
 
 /// The empty shell: the kit's surfaces in their places, no data.
 pub struct ShellView {
@@ -119,15 +130,85 @@ impl Render for ShellView {
     }
 }
 
-/// Opens the main window with `build`'s root view: 1040 × 720, at least 720 × 460, title bar
+/// Where the window opens: the saved frame on its screen when that screen is here (pulled onto it
+/// if it no longer fits), else 1040 × 720 in the middle of the main screen.
+fn placement(saved: Option<Frame>, cx: &App) -> (Option<DisplayId>, WindowBounds) {
+    let default = || {
+        let bounds = Bounds::centered(None, size(px(WINDOW_DEFAULT.0), px(WINDOW_DEFAULT.1)), cx);
+        (None, WindowBounds::Windowed(bounds))
+    };
+    let Some(saved) = saved else {
+        return default();
+    };
+    let Some(display) = cx
+        .displays()
+        .into_iter()
+        .find(|d| d.uuid().is_ok_and(|u| u.to_string() == saved.display))
+    else {
+        return default();
+    };
+    let screen = display.bounds().size;
+    let (x, y, w, h) = saved.fit(
+        (f32::from(screen.width), f32::from(screen.height)),
+        WINDOW_MIN,
+    );
+    let bounds = Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
+    let bounds = if saved.maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
+    };
+    (Some(display.id()), bounds)
+}
+
+/// The window's frame now, on its screen.
+fn frame_of(window: &Window, cx: &App) -> Frame {
+    let display = window
+        .display(cx)
+        .and_then(|d| d.uuid().ok())
+        .map(|u| u.to_string())
+        .unwrap_or_default();
+    let (bounds, maximized) = match window.window_bounds() {
+        WindowBounds::Windowed(b) | WindowBounds::Fullscreen(b) => (b, false),
+        WindowBounds::Maximized(b) => (b, true),
+    };
+    Frame {
+        display,
+        x: f32::from(bounds.origin.x),
+        y: f32::from(bounds.origin.y),
+        width: f32::from(bounds.size.width),
+        height: f32::from(bounds.size.height),
+        maximized,
+    }
+}
+
+fn save_frame(settings: &Path, frame: &Frame) {
+    match Settings::open(settings) {
+        Ok(mut store) => {
+            if let Err(e) = store.set(KEY, frame.to_value()) {
+                eprintln!("save the window's frame: {e}");
+            }
+        }
+        Err(e) => eprintln!("save the window's frame: {e}"),
+    }
+}
+
+/// Opens the main window with `build`'s root view: where it was last (`settings`, the app's
+/// `settings.json`, keeps its screen and frame), else 1040 × 720; at least 720 × 460, title bar
 /// hidden with the traffic lights over the sidebar's top. `None` when GPUI can't open a window.
 pub fn open_main_window<V: Render>(
     cx: &mut App,
+    settings: Option<PathBuf>,
     build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
 ) -> Option<WindowHandle<V>> {
-    let bounds = Bounds::centered(None, size(px(WINDOW_DEFAULT.0), px(WINDOW_DEFAULT.1)), cx);
+    let saved = settings
+        .as_deref()
+        .and_then(|p| Settings::open(p).ok())
+        .and_then(|s| Frame::from_value(s.get(KEY).as_ref()));
+    let (display_id, bounds) = placement(saved, cx);
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_bounds: Some(bounds),
+        display_id,
         titlebar: Some(TitlebarOptions {
             title: Some("Notchling".into()),
             appears_transparent: true,
@@ -137,7 +218,29 @@ pub fn open_main_window<V: Render>(
         kind: WindowKind::Normal,
         ..Default::default()
     };
-    cx.open_window(options, |window, cx| cx.new(|cx| build(window, cx)))
-        .map_err(|e| eprintln!("open window: {e}"))
-        .ok()
+    cx.open_window(options, |window, cx| {
+        cx.new(|cx| {
+            if let Some(path) = settings {
+                // Written once the window has stopped moving, not at every step of a drag.
+                let moves = Rc::new(Cell::new(0u64));
+                cx.observe_window_bounds(window, move |_, window, cx| {
+                    let frame = frame_of(window, cx);
+                    let n = moves.get() + 1;
+                    moves.set(n);
+                    let (moves, path) = (moves.clone(), path.clone());
+                    cx.spawn(async move |_, cx| {
+                        cx.background_executor().timer(SAVE_AFTER).await;
+                        if moves.get() == n {
+                            save_frame(&path, &frame);
+                        }
+                    })
+                    .detach();
+                })
+                .detach();
+            }
+            build(window, cx)
+        })
+    })
+    .map_err(|e| eprintln!("open window: {e}"))
+    .ok()
 }

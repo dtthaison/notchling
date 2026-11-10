@@ -285,13 +285,18 @@ fn open_chat(cx: &mut App) {
         let sessions = cx.global::<Shell>().sessions.clone();
         let id = match root {
             Some(root) => {
-                let handle = open_main_window(cx, |window, cx| {
+                // Not over a fixture: a fixture root's folder isn't the app's own.
+                let settings = root
+                    .fixture
+                    .is_none()
+                    .then(|| root.data_dir.join("settings.json"));
+                let handle = open_main_window(cx, settings, |window, cx| {
                     ChatView::with_source(root, sessions, window, cx)
                 });
                 cx.global_mut::<Shell>().chat = handle;
                 handle.map(|h| h.window_id())
             }
-            None => open_main_window(cx, |window, cx| ShellView::new(None, window, cx))
+            None => open_main_window(cx, None, |window, cx| ShellView::new(None, window, cx))
                 .map(|h| h.window_id()),
         };
         if let Some(id) = id {

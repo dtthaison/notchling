@@ -34,6 +34,7 @@ pub mod transcripts;
 pub mod vault;
 pub mod views;
 pub mod welcome;
+pub mod window_frame;
 
 /// What `main` prints on a system the app isn't built for yet.
 pub const NOT_SUPPORTED: &str = "notchling-app: not supported yet on this system";
