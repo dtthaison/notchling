@@ -10,6 +10,18 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // The real app (not a fixture root or a render) writes its panics down before it aborts.
+    if matches!(
+        command,
+        Command::Run {
+            data_root: None,
+            ..
+        }
+    ) {
+        if let Some(dir) = notchling_platform::paths::data_dir() {
+            notchling_app::crash_log::install(dir);
+        }
+    }
     match command {
         Command::Version => println!("{}", cli::version_line()),
         Command::Help => println!("{}", cli::usage()),

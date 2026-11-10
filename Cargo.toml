@@ -7,3 +7,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 publish = false
+
+# GPUI 0.2.2 with one fix (vendor/gpui/NOTCHLING.md): its text element re-truncated the runs it
+# had already truncated, and a window resize panicked slicing a string mid-character.
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }

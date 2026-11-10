@@ -15,6 +15,7 @@ pub mod acting;
 pub mod actions;
 pub mod chat;
 pub mod cli;
+pub mod crash_log;
 pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod mac;
