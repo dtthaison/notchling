@@ -276,6 +276,11 @@ fn chat_window(cx: &App) -> Option<WindowHandle<ChatView>> {
 
 /// Brings the Chat window forward, opening it first if it isn't open.
 fn open_chat(cx: &mut App) {
+    // The app active first, then the window: GPUI 0.2.2 answers a window becoming key while the
+    // app isn't active by calling `resignKeyWindow` with the window's lock held, and the resign
+    // callback waits on that same lock, so Chat opened from the menu bar could hang the app.
+    dock::apply(Policy::Regular);
+    cx.activate(true);
     if let Some(handle) = chat_window(cx) {
         handle
             .update(cx, |_, window, _| window.activate_window())
