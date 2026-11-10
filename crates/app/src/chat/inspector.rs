@@ -40,6 +40,8 @@ pub struct ShellRow {
     pub status_word: String,
     pub running: bool,
     pub mark: Mark,
+    /// The file Claude Code writes the command's output to (Output opens it).
+    pub output_path: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -356,6 +358,7 @@ pub fn inspector(
                     status_word: word,
                     running: status == Status::Working,
                     mark,
+                    output_path: shell.output_path.clone(),
                 }
             })
             .collect(),

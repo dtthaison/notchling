@@ -49,10 +49,12 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
 /// view redraws it once a second while it shows (`ChatView::tick`).
 /// The activity line, just above the reply box: one line, its words cut with an ellipsis before
 /// the counts beside them. A prompt with nothing back for a while (`stalled`) gets "No reply
-/// yet" and Retry, which stops the stuck turn and sends the prompt again.
+/// yet" and Retry, which stops the stuck turn and sends the prompt again. With a background
+/// command still running (`shell`: its name and output file), the line is a link to its output.
 pub(super) fn activity_row(
     activity: &Activity,
     stalled: bool,
+    shell: Option<(String, String)>,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
@@ -73,7 +75,17 @@ pub(super) fn activity_row(
         .flex_shrink_0()
         .on_click(cx.listener(|this, _, _, cx| this.retry_stalled(cx)))
     });
-    div()
+    let open_output = shell.map(|(name, path)| {
+        div()
+            .id("activity-output")
+            .flex_shrink_0()
+            .cursor_pointer()
+            .child(label("Show Output", TypeRole::Meta, Ink::AccentText, a))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_shell_output(&name, &path, cx);
+            }))
+    });
+    let row = div()
         .w_full()
         .min_w(px(0.0))
         .flex()
@@ -95,8 +107,9 @@ pub(super) fn activity_row(
         .when(stalled, |row| {
             row.child(label("· No reply yet", TypeRole::Meta, Ink::Needs, a).flex_shrink_0())
         })
-        .children(retry)
-        .part_at("Activity Line", Corner::Trailing, a, cx)
+        .children(open_output)
+        .children(retry);
+    row.part_at("Activity Line", Corner::Trailing, a, cx)
 }
 
 /// The "↓ Latest" pill over the conversation's bottom right, while it is scrolled up (the Swift

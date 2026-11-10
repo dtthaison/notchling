@@ -6,7 +6,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use gpui::{div, prelude::*, px, relative, App, Div, Global, SharedString, Window, WindowId};
+use gpui::{
+    div, prelude::*, px, relative, App, Context, Div, Global, SharedString, Stateful, WeakEntity,
+    Window, WindowId,
+};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
 use notchling_kit::metric::{METER_BAR, SIDE_PADDING};
@@ -52,13 +55,18 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 }
 
 /// The inspector panel, for the selected session.
-pub fn render(view: &ChatView, a: Appearance, _cx: &App) -> impl IntoElement {
+pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
     let i = inspector(&view.conversation, &view.subagents, &no_writers);
     let folder = view.selected_session().map(|s| {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    Panel { i, folder, a }
+    Panel {
+        i,
+        folder,
+        a,
+        chat: cx.entity().downgrade(),
+    }
 }
 
 #[derive(IntoElement)]
@@ -67,6 +75,8 @@ struct Panel {
     /// The session's folder as shown (`~/…`), and as a path.
     folder: Option<(String, String)>,
     a: Appearance,
+    /// For a row's actions (Output).
+    chat: WeakEntity<ChatView>,
 }
 
 impl RenderOnce for Panel {
@@ -136,11 +146,12 @@ impl RenderOnce for Panel {
         let shells = if i.shells.is_empty() {
             empty("None running", a)
         } else {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .children(i.shells.iter().enumerate().map(|(n, s)| shell_row(n, s, a)))
+            div().flex().flex_col().gap(px(6.0)).children(
+                i.shells
+                    .iter()
+                    .enumerate()
+                    .map(|(n, s)| shell_row(n, s, a, &self.chat)),
+            )
         };
 
         let sections = [
@@ -343,7 +354,7 @@ fn subagent_row(index: usize, s: &SubagentRow, a: Appearance) -> Div {
         )
 }
 
-fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
+fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Div {
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
         text = text.child(
@@ -369,9 +380,35 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
                     .line_clamp(2),
             )
             .child(
-                label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)
+                            .line_height(px(ROW_LINE)),
+                    )
+                    .child(output_link(index, s, a, chat.clone())),
             ),
         )
+}
+
+/// Output: the command's output in a terminal tab, live while it runs.
+fn output_link(
+    index: usize,
+    s: &ShellRow,
+    a: Appearance,
+    chat: WeakEntity<ChatView>,
+) -> Stateful<Div> {
+    let (name, path) = (s.title.clone(), s.output_path.clone());
+    div()
+        .id(SharedString::from(format!("shell-output-{index}")))
+        .cursor_pointer()
+        .child(label("Output", TypeRole::Meta, Ink::AccentText, a).line_height(px(ROW_LINE)))
+        .on_click(move |_, _, cx| {
+            chat.update(cx, |this, cx| this.open_shell_output(&name, &path, cx))
+                .ok();
+        })
 }
 
 /// "Show N more" / "Show less" under the subagents: a small accent row.

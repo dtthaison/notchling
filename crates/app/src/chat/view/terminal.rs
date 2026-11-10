@@ -240,6 +240,38 @@ impl ChatView {
         Ok(())
     }
 
+    /// A background shell's output in a terminal tab: `tail -f` on the file Claude Code writes,
+    /// from its first line and live while the command runs. Closing the tab stops only the tail.
+    pub(super) fn open_shell_output(&mut self, name: &str, path: &str, cx: &mut Context<Self>) {
+        let home = self.root.home.clone();
+        let cwd = self
+            .selected_session()
+            .map(|s| s.agent.cwd.clone())
+            .unwrap_or_default();
+        match start_program(
+            "/usr/bin/tail",
+            &["-n", "+1", "-f", path],
+            &[],
+            &cwd,
+            &home,
+            cx,
+        ) {
+            Ok(mut shell) => {
+                shell.name = name.trim().to_owned();
+                if self.page.is_open() {
+                    self.close_page(cx);
+                }
+                self.terminal.tabs.add(shell);
+                self.terminal.open = true;
+                self.terminal.focus_next = true;
+                self.tools.error = None;
+                self.tick_terminals(cx);
+            }
+            Err(message) => self.tools.error = Some(message),
+        }
+        cx.notify();
+    }
+
     /// The keyboard to the active tab, when a call without a window asked for it.
     pub(super) fn take_terminal_focus(&mut self, window: &mut Window) {
         if std::mem::take(&mut self.terminal.focus_next) {

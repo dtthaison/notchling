@@ -94,6 +94,24 @@ fn doing(conversation: &Conversation) -> String {
 /// The live line, or none. `working` is the session's own state (a working group, a running turn):
 /// without it nothing is shown, whatever a stale transcript says. `now_s` is the wall clock in
 /// seconds since the epoch, like the transcript's timestamps.
+/// The newest background shell with no notification yet: what a click on the activity line
+/// opens. Its name (the Bash call's description, else the command) and its output file.
+pub fn newest_unfinished_shell(conversation: &Conversation) -> Option<(String, String)> {
+    conversation
+        .shells
+        .iter()
+        .rev()
+        .find(|shell| !conversation.finished_agents.contains_key(&shell.id))
+        .map(|shell| {
+            let name = if shell.title.is_empty() {
+                shell.command.clone()
+            } else {
+                shell.title.clone()
+            };
+            (name, shell.output_path.clone())
+        })
+}
+
 pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Activity> {
     if !working {
         return None;
@@ -302,6 +320,26 @@ mod tests {
         );
         c.finished_agents.insert("b1".into(), "killed".into());
         assert_eq!(line(&c, true, 100.0), None, "all ended: nothing to show");
+    }
+
+    #[test]
+    fn the_line_opens_the_newest_shell_still_running() {
+        let mut c = conversation(vec![]);
+        assert_eq!(newest_unfinished_shell(&c), None);
+        let mut titled = shell("b2");
+        titled.title = "Full tap-book check".into();
+        c.shells = vec![shell("b1"), titled, shell("b3")];
+        c.finished_agents.insert("b3".into(), "completed".into());
+        assert_eq!(
+            newest_unfinished_shell(&c),
+            Some(("Full tap-book check".into(), "/tmp/b2.output".into()))
+        );
+        c.finished_agents.insert("b2".into(), "completed".into());
+        assert_eq!(
+            newest_unfinished_shell(&c),
+            Some(("sleep 60".into(), "/tmp/b1.output".into())),
+            "no title: the command"
+        );
     }
 
     #[test]
