@@ -7,7 +7,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Subscription};
+use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscription};
+
+/// Every row's unsent text, kept by the app rather than the Chat window, so closing Chat and
+/// opening it again finds what you were typing.
+#[derive(Clone, Default)]
+struct SavedDrafts(HashMap<String, String>);
+
+impl Global for SavedDrafts {}
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use serde_json::Value;
@@ -106,7 +113,10 @@ impl ChatTools {
         );
         ChatTools {
             live: ToolLive::default(),
-            drafts: HashMap::new(),
+            drafts: cx
+                .try_global::<SavedDrafts>()
+                .map(|d| d.0.clone())
+                .unwrap_or_default(),
             sending: false,
             error: None,
             picks: HashMap::new(),
@@ -185,6 +195,7 @@ impl ChatView {
         } else {
             self.tools.drafts.insert(id, text);
         }
+        self.save_drafts(cx);
         cx.notify();
     }
 
@@ -195,9 +206,15 @@ impl ChatView {
         } else {
             self.tools.drafts.insert(id.to_owned(), text);
         }
+        self.save_drafts(cx);
         if self.selected.as_deref() == Some(id) {
             self.show_draft(cx);
         }
+    }
+
+    /// Hands the drafts to the app, which outlives this window.
+    fn save_drafts(&self, cx: &mut Context<Self>) {
+        cx.set_global(SavedDrafts(self.tools.drafts.clone()));
     }
 
     /// Puts the selected row's draft in the editor (after a switch of rows).
