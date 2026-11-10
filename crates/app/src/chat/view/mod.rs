@@ -17,6 +17,7 @@ mod limit_ring;
 mod markdown;
 mod message_actions;
 mod opinions;
+mod page_panel;
 mod phone;
 mod prompts;
 mod sheets;
@@ -84,6 +85,8 @@ pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 /// Set to `question` or `permission`, a render draws that card above the reply box, over the
 /// selected Claude Code session, with its controls live (`chat::prompts::Preview`).
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
+/// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
+pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 
 /// Whether a render switch is on.
 fn switch(name: &str) -> bool {
@@ -179,6 +182,9 @@ pub struct ChatView {
     /// The Details panel is hidden. The Swift app saves this as `chatInspector` (hidden until
     /// first opened); here the panel starts shown and the choice lasts for the window.
     details_hidden: bool,
+    /// The page panel: an Artifact clicked in a conversation, in the Details Panel's place. The
+    /// window's, not a session's, so picking another session keeps it.
+    page: page_panel::State,
     _appearance_changes: Subscription,
     /// Esc hides the part names, wherever the keys go.
     _parts_escape: Subscription,
@@ -217,6 +223,10 @@ impl ChatView {
             .and_then(|v| crate::chat::prompts::Preview::parse(&v));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
+        if let Ok(id) = std::env::var(PAGE_ENV) {
+            view.page.preview(&id);
+        }
+        view.page.render_only = true;
         if switch(PARTS_ENV) {
             set_parts(cx, true);
         }
@@ -229,8 +239,12 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Hides the Details panel, or shows it again.
+    /// Hides the Details panel, or shows it again. With a page open in its place, back to Details.
     pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
+        if self.page.is_open() {
+            self.close_page(cx);
+            return;
+        }
         self.details_hidden = !self.details_hidden;
         cx.notify();
     }
@@ -342,6 +356,7 @@ impl ChatView {
             drawn_ms: 0,
             sidebar_hidden: false,
             details_hidden: false,
+            page: page_panel::State::default(),
             follow_sent: false,
             clock_second: 0,
             overlay_open: false,
@@ -665,11 +680,20 @@ impl Render for ChatView {
                     .flex()
                     .flex_col()
                     .child(header::render(self, a, cx))
-                    .child(
-                        div().flex_1().min_h(px(0.0)).flex().child(column).children(
-                            (!self.details_hidden).then(|| inspector::render(self, a, cx)),
-                        ),
-                    ),
+                    // A page opened from a link takes the Details Panel's place.
+                    .child(page_panel::follows_edge(
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .flex()
+                            .child(column)
+                            .children(page_panel::render(self, a, window, cx))
+                            .children(
+                                (!self.page.is_open() && !self.details_hidden)
+                                    .then(|| inspector::render(self, a, cx).into_any_element()),
+                            ),
+                        cx,
+                    )),
             )
             // Beside the traffic lights, over the sidebar's top or the header's start.
             .child(sidebar::toggle_button(self, a, cx))

@@ -1,5 +1,6 @@
 //! A reply's Markdown drawn with the kit (`MarkdownView` in the Swift app): `chat::markdown`'s
-//! blocks, each paragraph's spans as one styled text, links clickable through `open_url`.
+//! blocks, each paragraph's spans as one styled text, links clickable (`page_panel::follow_link`:
+//! an Artifact opens beside the chat, anything else in the browser).
 
 use gpui::{
     div, font, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
@@ -37,9 +38,9 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
     InteractiveText::new(SharedString::from(format!("md-{key}")), styled)
-        .on_click(ranges, move |index, _, cx| {
+        .on_click(ranges, move |index, window, cx| {
             if let Some(url) = urls.get(index) {
-                cx.open_url(url);
+                super::page_panel::follow_link(url, window, cx);
             }
         })
         .into_any_element()
