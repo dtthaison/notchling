@@ -9,7 +9,8 @@ use gpui::{
     Stateful, Window,
 };
 use notchling_kit::metric::{
-    RADIUS_CARD, RADIUS_MD, SIDE_PADDING, SPINNER_SMALL, TITLE_BAR, TOOL_ICON,
+    CONTROL, RADIUS_CARD, RADIUS_MD, SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW,
+    SIDE_PADDING, SPINNER_SMALL, TITLE_BAR, TOOL_ICON,
 };
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
@@ -98,23 +99,34 @@ pub fn choice_row(
     div()
         .id(id)
         .w_full()
+        .flex_shrink_0()
+        // The Sidebar's session row is the standard: its height, inset and line heights.
+        .min_h(px(SESSION_ROW))
         .px(px(10.0))
-        .py(px(6.0))
         .rounded(px(RADIUS_MD))
         .flex()
         .flex_col()
-        .gap(px(1.0))
+        .justify_center()
+        .gap(px(2.0))
         .cursor_pointer()
         .when(picked, |r| r.fill(Ink::Selection, a))
         .when(!picked, |r| {
             r.hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
         })
-        .child(label(title, TypeRole::Label, Ink::Text, a).elide())
-        .child(label(detail, TypeRole::Meta, Ink::TextFaint, a).elide())
+        .child(
+            label(title, TypeRole::Label, Ink::Text, a)
+                .line_height(px(SESSION_LINE_HEADING))
+                .elide(),
+        )
+        .child(
+            label(detail, TypeRole::Meta, Ink::TextFaint, a)
+                .line_height(px(SESSION_LINE_META))
+                .elide(),
+        )
 }
 
 fn column_title(text: &str, a: Appearance) -> Div {
-    div().px(px(10.0)).pt(px(4.0)).pb(px(6.0)).child(label(
+    div().px(px(8.0)).pt(px(12.0)).pb(px(4.0)).child(label(
         text,
         TypeRole::Section,
         Ink::TextFaint,
@@ -130,9 +142,9 @@ fn section_title(section: Section, a: Appearance) -> Div {
         Section::Antigravity => ToolMark::Antigravity,
     };
     div()
-        .px(px(10.0))
-        .pt(px(8.0))
-        .pb(px(6.0))
+        .px(px(8.0))
+        .pt(px(12.0))
+        .pb(px(4.0))
         .flex()
         .items_center()
         .gap(px(6.0))
@@ -358,8 +370,11 @@ impl NewSessionView {
             .flex_shrink_0()
             .h_full()
             .overflow_y_scroll()
-            .p(px(12.0))
+            // The Sidebar's list inset and row spacing.
+            .pl(px(8.0))
             .pr(px(GUTTER))
+            .pt(px(4.0))
+            .pb(px(12.0))
             .flex()
             .flex_col()
             .gap(px(4.0))
@@ -386,8 +401,10 @@ impl NewSessionView {
         });
         let choose = div()
             .id("choose-folder")
+            .min_h(px(CONTROL))
+            .flex()
+            .items_center()
             .px(px(10.0))
-            .py(px(6.0))
             .rounded(px(RADIUS_MD))
             .cursor_pointer()
             .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
@@ -399,8 +416,11 @@ impl NewSessionView {
             .min_w(px(0.0))
             .h_full()
             .overflow_y_scroll()
-            .p(px(12.0))
+            // The Sidebar's list inset and row spacing.
+            .pl(px(8.0))
             .pr(px(GUTTER))
+            .pt(px(4.0))
+            .pb(px(12.0))
             .flex()
             .flex_col()
             .gap(px(4.0))
