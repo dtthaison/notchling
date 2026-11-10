@@ -707,7 +707,7 @@ impl Render for ChatView {
                 self.slash_typed(&text);
             }
         }
-        self.sync_prompt();
+        self.sync_prompt(cx);
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.row_menu.is_some()

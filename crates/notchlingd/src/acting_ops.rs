@@ -14,7 +14,7 @@
 //! | `settings.set_acting` | app | `{on: bool}` | `{"acting": bool}` |
 //! | `prompts.list` | app | `{}` | `[prompt...]` |
 //! | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
-//! | `session.question` | agent | `{id}` | `{"promptId", "items"}`, or `unimplemented` for one only on screen (`ReplySender.readQuestion` isn't ported) |
+//! | `session.question` | agent (a held prompt), app (the screen) | `{id}` | `{"promptId", "items"}` for a held question; else, for the app with acting on, the job's screen read (`{"id": "screen:…", "items"}`, `{"items": []}` when no question shows) |
 //! | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
 //!
 //! An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from
@@ -43,9 +43,10 @@ use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
+use notchling_engine::reply::read::read_question;
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec};
+use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -289,7 +290,7 @@ impl ActingOps {
                 // out rather than failing the list and hiding the rest.
                 Ok(Value::Array(fit_list(list)))
             }
-            ops::SESSION_QUESTION => self.question(args),
+            ops::SESSION_QUESTION => self.question(caller, args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(args),
             ops::SESSION_INTERRUPT => self.interrupt(args),
@@ -535,7 +536,7 @@ impl ActingOps {
             .publish(topics::PROMPTS, topics::PROMPT_RESOLVED, &data);
     }
 
-    fn question(&self, args: &Value) -> Result<Value, ApiError> {
+    fn question(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         if let Some(prompt) = self.held_for_reading(args)? {
             if let Some(q) = &prompt.question {
                 let mut out = question_json(q);
@@ -547,9 +548,29 @@ impl ActingOps {
         if !self.acting.is_on() {
             return Err(forbidden(ACTING_OFF));
         }
-        Err(unimplemented(
-            "reading a question off the screen isn't ported yet (ReplySender.readQuestion)",
-        ))
+        if caller.tier != Tier::App {
+            return Err(forbidden(
+                "reading a question off the screen moves its tabs: only the app does it",
+            ));
+        }
+        let agent = self.agent(args)?;
+        let job = match &agent.target {
+            AgentTarget::Job(job) if agent.can_reply() => job.clone(),
+            _ => return Err(bad("this session has no terminal to read")),
+        };
+        let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+        let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
+        let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+        let read = read_question(pty.as_mut(), &job)
+            .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))?;
+        Ok(match read {
+            Some(q) => {
+                let mut out = question_json(&q);
+                out["id"] = json!(q.tool_use_id);
+                out
+            }
+            None => json!({"items": []}),
+        })
     }
 }
 

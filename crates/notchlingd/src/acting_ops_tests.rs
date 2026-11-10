@@ -431,21 +431,51 @@ fn a_take_back_reads_the_queue_from_the_transcript() {
 }
 
 #[test]
-fn a_question_off_the_screen_waits_for_the_terminal_and_the_switch() {
-    let off = setup(false, PROMPT, sessions());
-    let read = off.ops.call(
-        &caller(ClientKind::Cli),
-        ops::SESSION_QUESTION,
-        &json!({"id": "job-a"}),
-    );
+fn a_question_off_the_screen_waits_for_the_switch_and_the_app() {
+    let screen = [
+        "Where should it go?",
+        "❯ 1. Home (Recommended)",
+        "  2. Away",
+        "  3. Type something.",
+        "  4. Chat about this",
+        "Enter to select · Esc to cancel",
+    ];
+    let off = setup(false, &screen, sessions());
+    let read = off
+        .ops
+        .call(&app(), ops::SESSION_QUESTION, &json!({"id": "job-a"}));
     assert_eq!(code(read), (ErrorCode::Forbidden, ACTING_OFF.to_string()));
-    let on = setup(true, PROMPT, sessions());
-    let read = on.ops.call(
-        &caller(ClientKind::Cli),
-        ops::SESSION_QUESTION,
-        &json!({"id": "job-a"}),
+    let on = setup(true, &screen, sessions());
+    let agent = Caller {
+        tier: Tier::Agent,
+        ..caller(ClientKind::Cli)
+    };
+    let read = on
+        .ops
+        .call(&agent, ops::SESSION_QUESTION, &json!({"id": "job-a"}));
+    assert_eq!(
+        code(read).0,
+        ErrorCode::Forbidden,
+        "the screen moves: app only"
     );
-    assert_eq!(code(read).0, ErrorCode::Unimplemented);
+    assert!(on.attached.lock().unwrap().is_empty());
+    let read = on
+        .ops
+        .call(&app(), ops::SESSION_QUESTION, &json!({"id": "job-a"}))
+        .unwrap();
+    assert_eq!(read["items"][0]["question"], "Where should it go?");
+    assert_eq!(
+        read["items"][0]["options"],
+        json!(["Home (Recommended)", "Away"])
+    );
+    assert!(read["promptId"].is_null());
+    assert!(on.writes.lock().unwrap().is_empty(), "nothing typed");
+    let none = setup(true, PROMPT, sessions());
+    let read = none
+        .ops
+        .call(&app(), ops::SESSION_QUESTION, &json!({"id": "job-a"}))
+        .unwrap();
+    assert_eq!(read, json!({"items": []}));
 }
 
 #[test]

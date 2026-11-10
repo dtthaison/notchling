@@ -34,6 +34,7 @@ pub mod ops {
     pub const FOLDER_TRUST: &str = "folder.trust";
     pub const SESSION_MOVE: &str = "session.move";
     pub const SESSION_COMMAND: &str = "session.command";
+    pub const SESSION_QUESTION: &str = "session.question";
 }
 
 /// Whether actions can be sent.
@@ -227,6 +228,11 @@ impl Request {
             json!({ "id": row, "decision": decision.wire(),
                     "expect": { "tool": tool, "summary": summary } }),
         )
+    }
+
+    /// Reads the question on a row's screen (`session.question`): the app only, with acting on.
+    pub fn question(id: &str) -> Request {
+        Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
     }
 
     pub fn interrupt(id: &str) -> Request {

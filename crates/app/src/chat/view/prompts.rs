@@ -24,11 +24,16 @@ use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
 use crate::chat::prompts::{
-    is_dialog, permission_request, preview_prompt, prompt_for, question_key, Preview, Prompt,
+    is_dialog, permission_request, preview_prompt, prompt_for, question_key, screen_question,
+    screen_read_key, Preview, Prompt,
 };
 use crate::mac::gate;
 use crate::notch::answer::{type_key, QuestionDraft, Typed};
 use crate::notch::requests::HookRequest;
+use crate::phone::bridge::now_ms;
+
+/// How long after a screen read that found no question the next one may go.
+const SCREEN_RETRY_MS: i64 = 3_000;
 
 /// The permission's command shows at most this many lines.
 const SUMMARY_LINES: usize = 12;
@@ -41,6 +46,14 @@ pub struct State {
     pub files: HashMap<String, HookRequest>,
     /// The selected session's unanswered question in its transcript.
     pub transcript: Option<PendingQuestion>,
+    /// The question read off a job's screen, by its read key (`chat::prompts::screen_read_key`).
+    screen: Option<(String, PendingQuestion)>,
+    /// The read key last asked for, so each question is read once (an answer or a new question
+    /// changes the job's summary, and with it the key).
+    screen_asked: Option<String>,
+    /// When a read that found nothing may be tried again (the dialog draws after the state says
+    /// it waits), in ms.
+    screen_retry_ms: i64,
     draft: QuestionDraft,
     sending: bool,
     error: Option<String>,
@@ -55,6 +68,9 @@ impl State {
             shown: None,
             files: HashMap::new(),
             transcript: None,
+            screen: None,
+            screen_asked: None,
+            screen_retry_ms: 0,
             draft: QuestionDraft::default(),
             sending: false,
             error: None,
@@ -77,19 +93,74 @@ impl ChatView {
             return (session.tool == Tool::Claude).then(|| preview_prompt(preview));
         }
         let (prompts, answered) = self.source.held();
+        let key = screen_read_key(&session.agent, session.tool);
+        let screen = self
+            .prompt
+            .screen
+            .as_ref()
+            .filter(|(k, _)| key.as_ref() == Some(k))
+            .map(|(_, q)| q);
         prompt_for(
             &session.agent,
             session.tool,
             prompts.as_deref(),
             &self.prompt.files,
             self.prompt.transcript.as_ref(),
+            screen,
             &answered,
         )
     }
 
+    /// Asks the daemon to read the question off the selected job's screen, once per question, when
+    /// no hook holds it and the transcript doesn't have it yet. Nothing is asked while acting is
+    /// off (the read moves the dialog's tabs) or in a render.
+    fn read_screen_question(&mut self, cx: &mut Context<Self>) {
+        if self.prompt.preview.is_some() || self.root.fixture.is_some() {
+            return;
+        }
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        let Some(key) = screen_read_key(&session.agent, session.tool) else {
+            return;
+        };
+        let row = session.agent.id.clone();
+        let held = matches!(&self.prompt.shown, Some(Prompt::Question(q)) if q.tool_use_id.starts_with("hook:"));
+        if held
+            || self.prompt.transcript.is_some()
+            || (self.prompt.screen_asked.as_ref() == Some(&key)
+                && (self.prompt.screen.as_ref().is_some_and(|(k, _)| *k == key)
+                    || now_ms() < self.prompt.screen_retry_ms))
+            || !self.acting(cx).control().enabled
+        {
+            return;
+        }
+        self.prompt.screen_asked = Some(key.clone());
+        // Never two reads at once: the next try waits for this one's answer, then a pause.
+        self.prompt.screen_retry_ms = i64::MAX;
+        let actions = self.acts(cx).actions;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions.send(&Request::question(&row)) })
+                .await;
+            this.update(cx, |view, cx| {
+                match result.ok().as_ref().and_then(screen_question) {
+                    Some(q) => view.prompt.screen = Some((key, q)),
+                    // Nothing on screen yet, or the read failed: tried again after a pause.
+                    None => view.prompt.screen_retry_ms = now_ms() + SCREEN_RETRY_MS,
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Before a draw: works out the prompt on show, and keeps the answers being put together
     /// following it (another question starts afresh, and so does its error).
-    pub(super) fn sync_prompt(&mut self) {
+    pub(super) fn sync_prompt(&mut self, cx: &mut Context<Self>) {
+        self.read_screen_question(cx);
         let shown = self.prompt_now();
         let key = |p: &Option<Prompt>| p.as_ref().map(Prompt::key);
         if key(&shown) != key(&self.prompt.shown) {

@@ -9,11 +9,10 @@
 //! the dialog off the screen and types the option's digit only when the dialog asks about the tool
 //! and command the card showed.
 //!
-//! What none of them can see: a question a background job has asked but not yet written to its
-//! transcript, with several questions or one with brackets (the job's state summary doesn't carry
-//! them). The daemon has no op that reads a question off the screen (`session.question` answers
-//! `unimplemented` for one only on screen), so those stay in the terminal and the reply box says
-//! so ([`error_text`]).
+//! A background job writes its question into the transcript only once it's answered, and the
+//! state's summary lacks later questions and breaks on brackets ("Side by side (Recommended)"). So
+//! while a job waits on an answer Chat asks the daemon to read the question off its screen
+//! (`session.question`, once per summary: [`screen_read_key`]), and that read wins over the summary.
 
 use std::collections::{HashMap, HashSet};
 
@@ -156,6 +155,7 @@ pub fn prompt_for(
     prompts: Option<&[Value]>,
     files: &HashMap<String, HookRequest>,
     from_transcript: Option<&PendingQuestion>,
+    from_screen: Option<&PendingQuestion>,
     answered: &HashSet<String>,
 ) -> Option<Prompt> {
     if tool != Tool::Claude || agent.command.is_some() {
@@ -171,6 +171,7 @@ pub fn prompt_for(
         .as_ref()
         .and_then(|r| r.question().cloned())
         .or_else(|| from_transcript.cloned())
+        .or_else(|| from_screen.cloned())
         .or_else(|| question_from_needs(agent))
         .filter(|q| !answered.contains(&q.tool_use_id));
     if let Some(q) = question {
@@ -179,6 +180,32 @@ pub fn prompt_for(
     permission_from_needs(agent)
         .filter(|r| !answered.contains(&r.id))
         .map(|r| Prompt::Permission(Box::new(r)))
+}
+
+/// What a screen read of `agent`'s question is for: a background Claude job waiting on an answer,
+/// keyed by its row and state summary, so the screen is read once per question, not per draw.
+pub fn screen_read_key(agent: &Agent, tool: Tool) -> Option<String> {
+    if tool != Tool::Claude
+        || agent.command.is_some()
+        || agent.group != AgentGroup::NeedsInput
+        || !matches!(agent.target, AgentTarget::Job(_))
+    {
+        return None;
+    }
+    let needs = agent.detail.as_deref()?;
+    needs
+        .starts_with("answer:")
+        .then(|| format!("{}|{needs}", agent.id))
+}
+
+/// `session.question`'s reply as a question: `None` when no question showed.
+pub fn screen_question(reply: &Value) -> Option<PendingQuestion> {
+    let items = crate::notch::requests::question_items(reply);
+    let id = reply.get("id").and_then(Value::as_str)?;
+    (!items.is_empty()).then(|| PendingQuestion {
+        tool_use_id: id.to_owned(),
+        items,
+    })
 }
 
 /// The made-up prompt a render draws.
@@ -292,7 +319,15 @@ mod tests {
         transcript: Option<&PendingQuestion>,
         answered: &HashSet<String>,
     ) -> Option<Prompt> {
-        prompt_for(agent, Tool::Claude, prompts, &none(), transcript, answered)
+        prompt_for(
+            agent,
+            Tool::Claude,
+            prompts,
+            &none(),
+            transcript,
+            None,
+            answered,
+        )
     }
 
     fn q(id: &str, text: &str) -> PendingQuestion {
@@ -307,6 +342,43 @@ mod tests {
                 multi_select: false,
             }],
         }
+    }
+
+    #[test]
+    fn a_job_waiting_on_an_answer_is_read_off_its_screen_once_per_summary() {
+        let needs = "answer: How? (Side by side (Recommended) · Full)";
+        let agent = job("job1", "sess-1", Some(needs));
+        assert_eq!(
+            screen_read_key(&agent, Tool::Claude).as_deref(),
+            Some("job1|answer: How? (Side by side (Recommended) · Full)")
+        );
+        assert_eq!(screen_read_key(&agent, Tool::Codex), None);
+        assert_eq!(
+            screen_read_key(&job("j", "s", Some("approve Bash: ls")), Tool::Claude),
+            None
+        );
+        let mut working = agent.clone();
+        working.group = AgentGroup::Working;
+        assert_eq!(screen_read_key(&working, Tool::Claude), None);
+        // The read wins over the summary, and keeps its brackets.
+        let reply = json!({"id": "screen:job1:How?", "items": [{"header": "", "question": "How?",
+            "options": ["Side by side (Recommended)", "Full"], "details": ["", ""], "multiSelect": false}]});
+        let read = screen_question(&reply).expect("a question");
+        let shown = prompt_for(
+            &agent,
+            Tool::Claude,
+            None,
+            &none(),
+            None,
+            Some(&read),
+            &HashSet::new(),
+        );
+        let Some(Prompt::Question(q)) = shown else {
+            panic!("a question")
+        };
+        assert_eq!(q.items[0].options, ["Side by side (Recommended)", "Full"]);
+        assert_eq!(q.tool_use_id, "screen:job1:How?");
+        assert_eq!(screen_question(&json!({"items": []})), None);
     }
 
     #[test]
@@ -430,8 +502,17 @@ mod tests {
     fn only_a_claude_code_session_that_isnt_a_command_has_a_card() {
         let agent = job("job1", "sess-1", None);
         let prompts = vec![permission_prompt("p1", "sess-1", 1)];
-        let by_tool =
-            |tool| prompt_for(&agent, tool, Some(&prompts), &none(), None, &HashSet::new());
+        let by_tool = |tool| {
+            prompt_for(
+                &agent,
+                tool,
+                Some(&prompts),
+                &none(),
+                None,
+                None,
+                &HashSet::new(),
+            )
+        };
         assert!(by_tool(Tool::Claude).is_some());
         assert!(by_tool(Tool::Codex).is_none() && by_tool(Tool::Antigravity).is_none());
         let mut command = agent.clone();
@@ -442,6 +523,7 @@ mod tests {
                 Tool::Claude,
                 Some(&prompts),
                 &none(),
+                None,
                 None,
                 &HashSet::new()
             ),
@@ -465,7 +547,15 @@ mod tests {
         .unwrap();
         let files = HashMap::from([("sess-1".to_owned(), request)]);
         let from_files = |prompts: Option<&[Value]>| {
-            prompt_for(&agent, Tool::Claude, prompts, &files, None, &HashSet::new())
+            prompt_for(
+                &agent,
+                Tool::Claude,
+                prompts,
+                &files,
+                None,
+                None,
+                &HashSet::new(),
+            )
         };
         assert!(matches!(from_files(None), Some(Prompt::Permission(_))));
         assert_eq!(

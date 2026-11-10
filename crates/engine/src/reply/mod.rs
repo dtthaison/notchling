@@ -22,6 +22,7 @@ pub mod live;
 pub mod plan;
 pub mod popall;
 pub mod question;
+pub mod read;
 pub mod shell;
 
 #[cfg(test)]

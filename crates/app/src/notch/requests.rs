@@ -88,7 +88,44 @@ impl HookRequest {
             agy: None,
         })
     }
+}
 
+/// The questions in a `{"items": [{header, question, options, details, multiSelect}]}` object, as
+/// the daemon writes them (a held prompt's `question`, or `session.question`'s screen read).
+pub fn question_items(value: &Value) -> Vec<QuestionItem> {
+    let strings = |v: Option<&Value>| -> Vec<String> {
+        v.and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let text = |i: &Value, key: &str| i.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+    value
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|i| QuestionItem {
+                    header: text(i, "header"),
+                    question: text(i, "question"),
+                    options: strings(i.get("options")),
+                    details: strings(i.get("details")),
+                    multi_select: i
+                        .get("multiSelect")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl HookRequest {
     /// A prompt the daemon holds, from `prompt.pending`'s data (the daemon's `Prompt::to_json`).
     /// `None` without an id and session, or for a question with no questions in it.
     pub fn from_prompt(p: &Value) -> Option<HookRequest> {
@@ -97,36 +134,7 @@ impl HookRequest {
         let session_id = p.get("sessionId")?.as_str()?.to_owned();
         let kind = match p.get("kind").and_then(Value::as_str) {
             Some("question") => {
-                let strings = |v: Option<&Value>| -> Vec<String> {
-                    v.and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(String::from)
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                };
-                let items: Vec<QuestionItem> = p
-                    .get("question")
-                    .and_then(|q| q.get("items"))
-                    .and_then(Value::as_array)?
-                    .iter()
-                    .map(|i| QuestionItem {
-                        header: i.get("header").and_then(Value::as_str).unwrap_or("").into(),
-                        question: i
-                            .get("question")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .into(),
-                        options: strings(i.get("options")),
-                        details: strings(i.get("details")),
-                        multi_select: i
-                            .get("multiSelect")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                    })
-                    .collect();
+                let items = question_items(p.get("question")?);
                 if items.is_empty() {
                     return None;
                 }
