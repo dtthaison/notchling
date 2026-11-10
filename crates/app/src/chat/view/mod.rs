@@ -109,6 +109,9 @@ fn switch(name: &str) -> bool {
 pub struct ChatView {
     root: DataRoot,
     sessions: Vec<Session>,
+    /// Codex and Antigravity rows New Session opened, listed until their first message starts
+    /// the session or another row is picked.
+    new_drafts: Vec<Session>,
     selected: Option<String>,
     conversation: Conversation,
     subagents: Vec<Subagent>,
@@ -399,6 +402,7 @@ impl ChatView {
             loader: Some(Loader::new(root.clone())),
             root,
             sessions: Vec::new(),
+            new_drafts: Vec::new(),
             selected: None,
             conversation: Conversation::default(),
             subagents: Vec::new(),
@@ -519,7 +523,15 @@ impl ChatView {
     ) {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
-        let all = loaded.sessions;
+        let mut all = loaded.sessions;
+        let (selected, starting) = (self.selected.clone(), &self.tools.starting);
+        self.new_drafts.retain(|d| {
+            selected.as_deref() == Some(d.agent.id.as_str()) || starting.contains_key(&d.agent.id)
+        });
+        all.extend(self.new_drafts.iter().cloned());
+        let draft_asked = asked
+            .as_deref()
+            .is_some_and(|id| self.new_drafts.iter().any(|d| d.agent.id == id));
         self.prompt.files = loaded.requests;
         // The search panel's session, now that the list has it (closed or not), or never.
         if let Some(pending) = self.pending_session.as_mut() {
@@ -538,7 +550,12 @@ impl ChatView {
         self.sessions = self.open_rows(all);
         if self.selected == asked {
             let was = self.selected.take();
-            self.selected = loaded.selected;
+            // The loader doesn't know a draft New Session opened; it stays picked.
+            self.selected = if draft_asked {
+                asked.clone()
+            } else {
+                loaded.selected
+            };
             // The loader picks from every row; a closed one gives way to the first one shown.
             if let Some(sel) = self.selected.clone() {
                 if !self.sessions.iter().any(|s| s.agent.id == sel) {

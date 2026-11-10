@@ -17,14 +17,32 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::new_session::{folder_title, parent_line, trust_text, NewSession, Stage, TRUST_TITLE};
+use super::new_session::{
+    folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage, TRUST_TITLE,
+};
+use crate::accounts::store::Accounts;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
 use crate::mac::gate;
 use crate::session_source::{Link, SessionSource};
+use crate::switches::feed::SwitchFeed;
 
 /// A sheet asks to close.
 pub struct Dismiss;
+
+/// New Session picked a Codex or Antigravity account (switched to first when it wasn't in use):
+/// Chat opens a draft row in `folder`, and its first message starts the session.
+pub struct StartDraft {
+    pub provider: String,
+    pub folder: String,
+}
+
+/// The accounts store New Session makes lanes and switches logins through.
+#[derive(Clone)]
+pub struct AccountsHandle {
+    pub store: Arc<Accounts>,
+    pub feed: Arc<SwitchFeed>,
+}
 
 /// Where a sheet's acting comes from: the app's actions and whether the daemon serves the rows.
 #[derive(Clone)]
@@ -106,13 +124,20 @@ fn column_title(text: &str, a: Appearance) -> Div {
 pub struct NewSessionView {
     pub model: NewSession,
     acts: Acts,
+    /// None in a render: a lane or a switch then fails with a reason.
+    accounts: Option<AccountsHandle>,
 }
 
 impl EventEmitter<Dismiss> for NewSessionView {}
+impl EventEmitter<StartDraft> for NewSessionView {}
 
 impl NewSessionView {
-    pub fn new(model: NewSession, acts: Acts) -> NewSessionView {
-        NewSessionView { model, acts }
+    pub fn new(model: NewSession, acts: Acts, accounts: Option<AccountsHandle>) -> NewSessionView {
+        NewSessionView {
+            model,
+            acts,
+            accounts,
+        }
     }
 
     /// Sends `request`, then hands the answer to `done`; a follow-up request it returns is sent too.
@@ -154,16 +179,105 @@ impl NewSessionView {
         if !self.model.start_control(self.acts.acting()).enabled {
             return;
         }
-        if let Some(request) = self.model.start() {
-            self.send(
+        let confirm = self.model.confirming();
+        match self.model.plan() {
+            Some(Plan::Request(request)) => self.send(
                 request,
                 |m, r| {
                     m.started(r);
                     None
                 },
                 cx,
-            );
+            ),
+            Some(Plan::Lane { account }) => self.make_lane(account, cx),
+            Some(Plan::Draft {
+                provider,
+                account,
+                switch,
+                folder,
+            }) => {
+                if switch {
+                    self.switch_then_draft(provider, account, confirm, folder, cx);
+                } else {
+                    self.model.stage = Stage::Started;
+                    cx.emit(StartDraft { provider, folder });
+                    cx.emit(Dismiss);
+                }
+            }
+            None => {}
         }
+        cx.notify();
+    }
+
+    /// A lane for a saved Claude Code account (`lanes.create`), then `session.new` in it.
+    fn make_lane(&mut self, account: String, cx: &mut Context<Self>) {
+        let Some(handle) = self.accounts.clone() else {
+            self.model
+                .lane_made(Err("No accounts to make a lane with".into()));
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let made = cx
+                .background_executor()
+                .spawn(async move {
+                    handle
+                        .store
+                        .create_lane(&handle.feed.switches(), &account)
+                        .map(|lane| lane.path)
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                if let Some(request) = view.model.lane_made(made) {
+                    view.send(
+                        request,
+                        |m, r| {
+                            m.started(r);
+                            None
+                        },
+                        cx,
+                    );
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Switches Codex or Antigravity to `account` (`providers.switch`; a yes first when the
+    /// daemon asks), then opens the draft.
+    fn switch_then_draft(
+        &mut self,
+        provider: String,
+        account: String,
+        confirm: bool,
+        folder: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(handle) = self.accounts.clone() else {
+            self.model.switched(Err("No accounts to switch".into()));
+            return;
+        };
+        let id = provider.clone();
+        cx.spawn(async move |this, cx| {
+            let switched = cx
+                .background_executor()
+                .spawn(async move {
+                    handle
+                        .store
+                        .switch_provider(&handle.feed.switches(), &id, &account, confirm)
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                if view.model.switched(switched) {
+                    cx.emit(StartDraft { provider, folder });
+                    cx.emit(Dismiss);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn trust(&mut self, cx: &mut Context<Self>) {
@@ -197,9 +311,15 @@ impl NewSessionView {
         .detach();
     }
 
-    fn accounts(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
-        let rows = self.model.accounts.iter().enumerate().map(|(i, account)| {
-            choice_row(
+    fn accounts(&self, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
+        let mut rows = Vec::new();
+        let mut section: Option<Section> = None;
+        for (i, account) in self.model.accounts.iter().enumerate() {
+            if section != Some(account.section) {
+                section = Some(account.section);
+                rows.push(column_title(account.section.title(), a).into_any_element());
+            }
+            let row = choice_row(
                 format!("account-{i}"),
                 &account.title,
                 &account.detail,
@@ -209,20 +329,23 @@ impl NewSessionView {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.model.pick_account(i);
                 cx.notify();
-            }))
-        });
+            }));
+            rows.push(row.into_any_element());
+        }
         div()
+            .id("accounts")
             .w(px(230.0))
             .flex_shrink_0()
             .h_full()
+            .overflow_y_scroll()
             .p(px(12.0))
+            .pr(px(GUTTER))
             .flex()
             .flex_col()
             .gap(px(4.0))
             .border_r(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
             .child(column_title("Account", a))
-            .child(column_title("Claude Code", a))
             .children(rows)
     }
 
@@ -278,9 +401,13 @@ impl NewSessionView {
         .flex_1()
         .min_w(px(0.0))
         .line_clamp(2);
+        let title = match &self.model.stage {
+            Stage::Confirm { button, .. } => button.clone(),
+            _ => "Start Session".to_owned(),
+        };
         let start = button(
             "start-session",
-            "Start Session",
+            &title,
             ButtonKind::Primary,
             gate::state(control),
             a,
@@ -441,7 +568,7 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     Some(match which {
         Shown::Banner => cx.new(|_| BannersView { banners: banners() }).into(),
         Shown::NewSession | Shown::TrustFolder => cx
-            .new(|_| NewSessionView::new(new_session(which), acts))
+            .new(|_| NewSessionView::new(new_session(which), acts, None))
             .into(),
         Shown::Settings => cx.new(|_| SettingsView::new(None, acts)).into(),
     })

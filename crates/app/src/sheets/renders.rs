@@ -8,6 +8,8 @@ use crate::views::ViewSpec;
 
 use super::banner::{Banner, Banners};
 use super::new_session::{accounts, folders, NewSession};
+use crate::accounts::menu::targets;
+use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
 pub const VIEWS: [ViewSpec; 4] = [
     ViewSpec {
@@ -65,7 +67,12 @@ pub fn new_session(shown: Shown) -> NewSession {
     let mut source = Source::keeping_everything(DataRoot::for_render());
     let agents = source.load(0).agents;
     let saved = vec!["/work/notchling/apps/flutter".to_owned()];
-    let mut sheet = NewSession::new(accounts(&agents), folders(&saved, &agents), "");
+    let made_up = snapshot(AccountsShown::Claude);
+    let mut sheet = NewSession::new(
+        accounts(&targets(&made_up), &agents, &made_up.providers.providers),
+        folders(&saved, &agents),
+        "",
+    );
     if shown == Shown::TrustFolder {
         sheet.pick_folder(0);
         sheet.start();

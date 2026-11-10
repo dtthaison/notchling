@@ -1,14 +1,21 @@
-//! The New Session sheet, pure (part U8, `NewSessionSheet.swift`): an account column (Claude Code
-//! accounts only for now: the main login and each lane sessions run in), a folder column, then
-//! Start, which asks the daemon for `session.new`. A folder Claude Code hasn't trusted is refused;
-//! the Trust Folder pop-up then offers `folder.trust` and starts again.
+//! The New Session sheet, pure (part U8, `NewSessionSheet.swift`): an account column (every Claude
+//! Code account: the main login, each lane and each saved account, which gets a lane first; then
+//! each Codex and Antigravity account), a folder column, then Start. Claude Code asks the daemon
+//! for `session.new`; a folder it hasn't trusted is refused, and the Trust Folder pop-up then
+//! offers `folder.trust` and starts again. Codex and Antigravity switch login first when the
+//! account isn't the one in use, then open a draft row whose first message starts the session.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use notchling_engine::sessions::Agent;
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 
+use crate::accounts::menu::{Place, Target};
+use crate::accounts::model::{ANTIGRAVITY, CODEX};
+use crate::accounts::wire::{Outcome, Provider, ProviderAccount};
 use crate::acting::{self, Acting, Control, Request};
+use crate::chat::data::{Session, Tool};
+use crate::tools::requests::{AGY_DRAFT_PREFIX, CODEX_DRAFT_PREFIX};
 
 /// The most folders the column lists (`chatProjectFolders` keeps 30).
 pub const MAX_FOLDERS: usize = 30;
@@ -18,8 +25,59 @@ pub const MAX_FOLDERS: usize = 30;
 pub struct AccountChoice {
     pub title: String,
     pub detail: String,
-    /// The lane's config folder; `None` is the main login.
-    pub config_dir: Option<String>,
+    pub section: Section,
+    pub pick: Pick,
+}
+
+/// The tool an account is listed under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+impl Section {
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::Claude => "Claude Code",
+            Section::Codex => "Codex",
+            Section::Antigravity => "Antigravity",
+        }
+    }
+}
+
+/// What starting on an account takes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pick {
+    /// Claude Code in this config folder (`None`: the main login).
+    Claude(Option<String>),
+    /// A saved Claude Code account no folder holds yet: a lane is made for it first.
+    ClaudeSaved(String),
+    /// Codex or Antigravity (`provider`) on `account`; `switch` when it isn't the login in use,
+    /// since each has one login.
+    Tool {
+        provider: String,
+        account: String,
+        switch: bool,
+    },
+}
+
+/// What Start asks of the view once picked.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Plan {
+    /// `session.new`.
+    Request(Request),
+    /// A lane for `account`, then `session.new` there ([`NewSession::lane_made`]).
+    Lane { account: String },
+    /// Switch `provider` to `account` first when `switch`, then a draft row in `folder`: its
+    /// first message starts the session.
+    Draft {
+        provider: String,
+        account: String,
+        switch: bool,
+        folder: String,
+    },
 }
 
 /// Where the sheet is.
@@ -33,6 +91,12 @@ pub enum Stage {
     /// `folder.trust` is out.
     Trusting,
     Failed(String),
+    /// The switch to another Codex or Antigravity login needs a yes first (Antigravity restarts):
+    /// Start then says `button` and confirms.
+    Confirm {
+        message: String,
+        button: String,
+    },
     /// Started; the sheet closes.
     Started,
 }
@@ -49,22 +113,79 @@ pub struct NewSession {
     pub home: String,
 }
 
-/// The main login, then each lane a session runs in, by name.
-pub fn accounts(agents: &[Agent]) -> Vec<AccountChoice> {
-    let lanes: BTreeSet<&str> = agents
+/// Every account to start on: Claude Code's (`targets`: the main login, each lane, each saved
+/// account; with none known, the main login and the lanes sessions run in), then each Codex and
+/// Antigravity account that can be used (`providers`), the one in use first.
+pub fn accounts(
+    targets: &[Target],
+    agents: &[Agent],
+    providers: &[Provider],
+) -> Vec<AccountChoice> {
+    let claude = |title: &str, detail: &str, pick: Pick| AccountChoice {
+        title: title.to_owned(),
+        detail: detail.to_owned(),
+        section: Section::Claude,
+        pick,
+    };
+    let mut list: Vec<AccountChoice> = targets
         .iter()
-        .filter_map(|a| a.config_dir.as_deref())
+        .map(|t| match &t.place {
+            Place::Main => claude(&t.title, "Main login", Pick::Claude(None)),
+            Place::Lane(path) => claude(&t.title, "Lane", Pick::Claude(Some(path.clone()))),
+            Place::Saved(account) => {
+                claude(&t.title, "Opens a lane", Pick::ClaudeSaved(account.clone()))
+            }
+        })
         .collect();
-    let mut list = vec![AccountChoice {
-        title: "Claude Code".to_owned(),
-        detail: "Main login".to_owned(),
-        config_dir: None,
-    }];
-    list.extend(lanes.into_iter().map(|dir| AccountChoice {
-        title: last_part(dir).to_owned(),
-        detail: "Lane".to_owned(),
-        config_dir: Some(dir.to_owned()),
-    }));
+    if list.is_empty() {
+        list.push(claude("Claude Code", "Main login", Pick::Claude(None)));
+        let lanes: BTreeSet<&str> = agents
+            .iter()
+            .filter_map(|a| a.config_dir.as_deref())
+            .collect();
+        list.extend(
+            lanes
+                .into_iter()
+                .map(|dir| claude(last_part(dir), "Lane", Pick::Claude(Some(dir.to_owned())))),
+        );
+    }
+    for (id, section) in [(CODEX, Section::Codex), (ANTIGRAVITY, Section::Antigravity)] {
+        let Some(p) = providers.iter().find(|p| p.id == id && p.available) else {
+            continue;
+        };
+        let active = p.active_id.as_deref();
+        let mut usable: Vec<&ProviderAccount> = p
+            .accounts
+            .iter()
+            .filter(|acc| Some(acc.id.as_str()) == active || (acc.switchable && !acc.needs_login))
+            .collect();
+        usable.sort_by_key(|acc| Some(acc.id.as_str()) != active);
+        let tool = |title: &str, detail: String, account: &str, switch: bool| AccountChoice {
+            title: title.to_owned(),
+            detail,
+            section,
+            pick: Pick::Tool {
+                provider: id.to_owned(),
+                account: account.to_owned(),
+                switch,
+            },
+        };
+        for acc in &usable {
+            let in_use = Some(acc.id.as_str()) == active;
+            let detail = if in_use {
+                "In use".to_owned()
+            } else {
+                format!("Switches {}", section.title())
+            };
+            list.push(tool(&acc.email, detail, &acc.id, !in_use));
+        }
+        // Signed in with a login it doesn't keep (a ChatGPT or Google account): that one.
+        if usable.is_empty() {
+            if let Some(title) = &p.unlisted_active_title {
+                list.push(tool(title, "In use".to_owned(), "", false));
+            }
+        }
+    }
     list
 }
 
@@ -89,6 +210,43 @@ fn last_part(path: &str) -> &str {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(path)
+}
+
+/// A new Codex or Antigravity row in `folder`, listed until its first message starts the session
+/// (`codex-new:<n>`, `agy-new:<n>`). `None` for any other provider.
+pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Session> {
+    let (prefix, tool, host) = match provider {
+        CODEX => (CODEX_DRAFT_PREFIX, Tool::Codex, "Codex"),
+        ANTIGRAVITY => (AGY_DRAFT_PREFIX, Tool::Antigravity, "Antigravity"),
+        _ => return None,
+    };
+    let project = last_part(folder).to_owned();
+    let agent = Agent {
+        id: format!("{prefix}{now_ms}"),
+        name: format!("New {host} Session"),
+        project,
+        cwd: folder.to_owned(),
+        group: AgentGroup::Completed,
+        label: "New".to_owned(),
+        detail: None,
+        since_ms: now_ms,
+        target: AgentTarget::Resume {
+            session_id: String::new(),
+            cwd: folder.to_owned(),
+        },
+        suggested_reply: None,
+        transcript_path: None,
+        host: host.to_owned(),
+        headless: false,
+        config_dir: None,
+        command: None,
+        resume_session_id: None,
+    };
+    Some(Session {
+        agent,
+        tool,
+        transcript: None,
+    })
 }
 
 /// A folder's name in the list: its own, or with its parent when another folder shares it
@@ -154,7 +312,10 @@ impl NewSession {
 
     /// Another pick clears a refusal, as `.onChange` did.
     fn reset(&mut self) {
-        if matches!(self.stage, Stage::Untrusted | Stage::Failed(_)) {
+        if matches!(
+            self.stage,
+            Stage::Untrusted | Stage::Failed(_) | Stage::Confirm { .. }
+        ) {
             self.stage = Stage::Choosing;
         }
     }
@@ -183,12 +344,79 @@ impl NewSession {
         }
     }
 
-    /// `session.new` for the choice, marking it out.
+    /// `session.new` for a Claude Code choice in a folder it already has, marking it out.
     pub fn start(&mut self) -> Option<Request> {
         let (account, folder) = self.chosen()?;
-        let request = Request::new_session(folder, account.config_dir.as_deref(), &[]);
+        let Pick::Claude(dir) = &account.pick else {
+            return None;
+        };
+        let request = Request::new_session(folder, dir.as_deref(), &[]);
         self.stage = Stage::Starting;
         Some(request)
+    }
+
+    /// What Start does for the choice, marking it out.
+    pub fn plan(&mut self) -> Option<Plan> {
+        let (account, folder) = self.chosen()?;
+        let plan = match account.pick.clone() {
+            Pick::Claude(_) => return self.start().map(Plan::Request),
+            Pick::ClaudeSaved(account) => Plan::Lane { account },
+            Pick::Tool {
+                provider,
+                account,
+                switch,
+            } => Plan::Draft {
+                provider,
+                account,
+                switch,
+                folder: folder.to_owned(),
+            },
+        };
+        self.stage = Stage::Starting;
+        Some(plan)
+    }
+
+    /// The lane made for a saved account: the choice now starts there (`session.new`).
+    pub fn lane_made(&mut self, result: Result<String, String>) -> Option<Request> {
+        match result {
+            Ok(path) => {
+                let i = self.account?;
+                let choice = self.accounts.get_mut(i)?;
+                choice.pick = Pick::Claude(Some(path));
+                choice.detail = "Lane".to_owned();
+                self.start()
+            }
+            Err(message) => {
+                self.stage = Stage::Failed(message);
+                None
+            }
+        }
+    }
+
+    /// The answer to switching Codex or Antigravity before a draft: done, or a yes to ask for.
+    /// True when the draft can be made.
+    pub fn switched(&mut self, result: Result<Outcome, String>) -> bool {
+        match result {
+            Ok(Outcome::Done { .. }) => {
+                self.stage = Stage::Started;
+                true
+            }
+            Ok(Outcome::NeedsConfirmation {
+                message, button, ..
+            }) => {
+                self.stage = Stage::Confirm { message, button };
+                false
+            }
+            Err(message) => {
+                self.stage = Stage::Failed(message);
+                false
+            }
+        }
+    }
+
+    /// Whether Start now confirms a switch.
+    pub fn confirming(&self) -> bool {
+        matches!(self.stage, Stage::Confirm { .. })
     }
 
     /// The daemon's answer to `session.new`.
@@ -233,7 +461,7 @@ impl NewSession {
     /// The footer's line: what Start will do, or what went wrong.
     pub fn footer(&self) -> String {
         match &self.stage {
-            Stage::Failed(message) => message.clone(),
+            Stage::Failed(message) | Stage::Confirm { message, .. } => message.clone(),
             Stage::Untrusted => "Claude Code hasn't trusted this folder yet.".to_owned(),
             Stage::Starting => "Starting…".to_owned(),
             Stage::Trusting => "Trusting the folder…".to_owned(),
@@ -302,7 +530,7 @@ mod tests {
             agent("/h/old/api", 20, None),
         ];
         NewSession::new(
-            accounts(&agents),
+            accounts(&[], &agents, &[]),
             folders(&["/h/work/new".into()], &agents),
             "/h",
         )
@@ -318,9 +546,163 @@ mod tests {
             .collect();
         assert_eq!(titles, [("Claude Code", "Main login"), ("night", "Lane")]);
         assert_eq!(
-            s.accounts[1].config_dir.as_deref(),
-            Some("/h/.claude-lanes/night")
+            s.accounts[1].pick,
+            Pick::Claude(Some("/h/.claude-lanes/night".into()))
         );
+    }
+
+    fn provider(id: &str, active: Option<&str>, accounts: &[(&str, bool)]) -> Provider {
+        Provider {
+            id: id.into(),
+            title: id.into(),
+            available: true,
+            active_id: active.map(str::to_owned),
+            accounts: accounts
+                .iter()
+                .map(|(email, switchable)| ProviderAccount {
+                    id: format!("id-{email}"),
+                    email: (*email).into(),
+                    plan: None,
+                    needs_login: false,
+                    switchable: *switchable,
+                })
+                .collect(),
+            ..Provider::default()
+        }
+    }
+
+    fn every_tool() -> NewSession {
+        let targets = [
+            Target {
+                title: "me@a.com".into(),
+                place: Place::Main,
+                account: Some("a".into()),
+            },
+            Target {
+                title: "night@b.com".into(),
+                place: Place::Lane("/h/.claude-lanes/night".into()),
+                account: Some("b".into()),
+            },
+            Target {
+                title: "spare@c.com".into(),
+                place: Place::Saved("c".into()),
+                account: Some("c".into()),
+            },
+        ];
+        let providers = [
+            provider(
+                CODEX,
+                Some("id-on@x.com"),
+                &[
+                    ("off@x.com", true),
+                    ("on@x.com", true),
+                    ("locked@x.com", false),
+                ],
+            ),
+            provider(ANTIGRAVITY, Some("id-g@y.com"), &[("g@y.com", true)]),
+            Provider {
+                available: false,
+                ..provider("claudeDesktop", None, &[("d@z.com", true)])
+            },
+        ];
+        NewSession::new(
+            accounts(&targets, &[], &providers),
+            vec!["/h/w".into()],
+            "/h",
+        )
+    }
+
+    #[test]
+    fn every_claude_code_account_then_codex_then_antigravity() {
+        let s = every_tool();
+        let rows: Vec<(Section, &str, &str)> = s
+            .accounts
+            .iter()
+            .map(|a| (a.section, a.title.as_str(), a.detail.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (Section::Claude, "me@a.com", "Main login"),
+                (Section::Claude, "night@b.com", "Lane"),
+                (Section::Claude, "spare@c.com", "Opens a lane"),
+                (Section::Codex, "on@x.com", "In use"),
+                (Section::Codex, "off@x.com", "Switches Codex"),
+                (Section::Antigravity, "g@y.com", "In use"),
+            ]
+        );
+    }
+
+    #[test]
+    fn start_plans_a_session_a_lane_first_or_a_draft() {
+        let mut s = every_tool();
+        assert!(matches!(s.plan(), Some(Plan::Request(r)) if r.op == "session.new"));
+        s.stage = Stage::Choosing;
+        s.pick_account(2);
+        assert_eq!(
+            s.plan(),
+            Some(Plan::Lane {
+                account: "c".into()
+            })
+        );
+        let r = s.lane_made(Ok("/h/.claude-lanes/spare".into())).unwrap();
+        assert_eq!(
+            r.args,
+            json!({"folder": "/h/w", "config_dir": "/h/.claude-lanes/spare"})
+        );
+        s.stage = Stage::Choosing;
+        s.pick_account(4);
+        assert_eq!(
+            s.plan(),
+            Some(Plan::Draft {
+                provider: CODEX.into(),
+                account: "id-off@x.com".into(),
+                switch: true,
+                folder: "/h/w".into(),
+            })
+        );
+        assert!(s.busy());
+    }
+
+    #[test]
+    fn a_switch_that_needs_a_yes_asks_in_the_footer() {
+        let mut s = every_tool();
+        s.pick_account(4);
+        s.plan();
+        let ask = Outcome::NeedsConfirmation {
+            title: "Switch?".into(),
+            message: "Antigravity restarts.".into(),
+            button: "Switch and Start".into(),
+        };
+        assert!(!s.switched(Ok(ask)));
+        assert!(s.confirming());
+        assert_eq!(s.footer(), "Antigravity restarts.");
+        let done = Outcome::Done {
+            state: "switched".into(),
+            sign_in_url: None,
+        };
+        assert!(s.switched(Ok(done)));
+        assert_eq!(s.stage, Stage::Started);
+        assert!(!s.switched(Err("no".into())));
+        assert_eq!(s.stage, Stage::Failed("no".into()));
+    }
+
+    #[test]
+    fn a_draft_row_is_codex_or_antigravity_in_the_folder() {
+        let codex = draft_session(CODEX, "/h/w/api", 7).unwrap();
+        assert_eq!(codex.agent.id, "codex-new:7");
+        assert_eq!(
+            (codex.tool, codex.agent.cwd.as_str()),
+            (Tool::Codex, "/h/w/api")
+        );
+        assert_eq!(codex.agent.project, "api");
+        let agy = draft_session(ANTIGRAVITY, "/h/w", 8).unwrap();
+        assert_eq!(
+            (agy.agent.id.as_str(), agy.tool),
+            ("agy-new:8", Tool::Antigravity)
+        );
+        assert!(crate::chat::used::is_draft(&agy.agent.id));
+        assert_eq!(draft_session("claudeDesktop", "/h/w", 9), None);
     }
 
     #[test]

@@ -15,15 +15,16 @@ use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Appearance, Ink};
 
 use super::ChatView;
+use crate::accounts::menu::targets;
 use crate::accounts::view::AccountsView;
 use crate::acting::Acting;
 use crate::actions::Actions;
 use crate::chat::data::Tool;
 use crate::mac::shell::{AppActions, AppVault};
-use crate::sheets::new_session::{accounts, folders, NewSession};
+use crate::sheets::new_session::{accounts, draft_session, folders, NewSession};
 use crate::sheets::second_opinion_view::SecondOpinionView;
 use crate::sheets::settings_view::SettingsView;
-use crate::sheets::view::{Acts, Dismiss, NewSessionView};
+use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft};
 use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
 use crate::vault::view::VaultSheetView;
@@ -104,7 +105,8 @@ impl ChatView {
         cx.notify();
     }
 
-    /// New Session over Claude Code's sessions: their lanes and their folders.
+    /// New Session over every account (Claude Code's main login, lanes and saved accounts, then
+    /// Codex's and Antigravity's) and Claude Code's folders.
     pub(super) fn open_new_session(&mut self, cx: &mut Context<Self>) {
         let agents: Vec<_> = self
             .sessions
@@ -113,10 +115,31 @@ impl ChatView {
             .map(|s| s.agent.clone())
             .collect();
         let home = self.root.home.to_string_lossy().into_owned();
-        let model = NewSession::new(accounts(&agents), folders(&[], &agents), &home);
+        let snapshot = self.accounts.snapshot();
+        let choices = accounts(&targets(&snapshot), &agents, &snapshot.providers.providers);
+        let model = NewSession::new(choices, folders(&[], &agents), &home);
         let acts = self.acts(cx);
-        let entity = cx.new(|_| NewSessionView::new(model, acts));
+        let handle = self.accounts.is_live().then(|| AccountsHandle {
+            store: self.accounts.clone(),
+            feed: self.switches.clone(),
+        });
+        let entity = cx.new(|_| NewSessionView::new(model, acts, handle));
+        cx.subscribe(&entity, |this, _, e: &StartDraft, cx| {
+            this.open_draft(&e.provider, &e.folder, cx)
+        })
+        .detach();
         self.show(entity, cx);
+    }
+
+    /// A new Codex or Antigravity row in `folder`, selected, for its first message to start.
+    fn open_draft(&mut self, provider: &str, folder: &str, cx: &mut Context<Self>) {
+        let Some(draft) = draft_session(provider, folder, super::now_ms()) else {
+            return;
+        };
+        let id = draft.agent.id.clone();
+        self.new_drafts.push(draft.clone());
+        self.sessions.insert(0, draft);
+        self.select(&id, cx);
     }
 
     /// Second Opinion over a reply or an edit of the selected session: the tools installed, Codex's
