@@ -396,11 +396,27 @@ pub(super) fn render_menu(
             .child(
                 div()
                     .absolute()
-                    .top(px(60.0))
-                    .left(px(notchling_kit::metric::SIDEBAR_WIDTH + SIDE_PADDING))
+                    // Over the row under the reply box, right-aligned above its account button.
+                    .bottom(px(MENU_BOTTOM))
+                    .right(px(menu_right(view)))
                     .occlude()
                     .rounded(px(RADIUS_MD))
                     .child(items),
             ),
     )
+}
+
+/// How far the account menu's bottom edge sits above the window's: over the row under the reply
+/// box that holds the account button.
+const MENU_BOTTOM: f32 = 48.0;
+
+/// How far the account menu's right edge sits from the window's: past the Details Panel when it
+/// shows, the side padding and the limit ring beside the button.
+fn menu_right(view: &ChatView) -> f32 {
+    let details = if view.details_hidden {
+        0.0
+    } else {
+        super::inspector::WIDTH
+    };
+    details + SIDE_PADDING + 28.0
 }

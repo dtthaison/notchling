@@ -854,6 +854,11 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 .min_w(px(0.0))
                 .children(status(view, control, a, cx)),
         )
+        // The session's account, beside its limits: click to switch or add one.
+        .children(
+            super::accounts::account_control(view, a, cx)
+                .map(|b| b.part_at("Account Menu", Corner::Top, a, cx)),
+        )
         .children(super::limit_ring::ring(view, a, cx));
     div()
         .relative()

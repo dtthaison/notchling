@@ -22,7 +22,7 @@ use crate::chat::inspector::{
     TaskRow,
 };
 
-const WIDTH: f32 = 260.0;
+pub(super) const WIDTH: f32 = 260.0;
 /// A row's mark sits in a box this wide, so the text lines up whatever the mark.
 const MARK_BOX: f32 = 14.0;
 /// One line of a row's text. The icon box is this tall too, so the icon sits centred on the first

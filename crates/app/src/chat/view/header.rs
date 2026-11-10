@@ -10,7 +10,6 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
-use super::accounts;
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
 use super::sidebar::HIDDEN_HEADER_START;
 use super::ChatView;
@@ -148,20 +147,10 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                     .part_at("Session Name", Corner::Trailing, a, cx),
             )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        label(&subtitle, TypeRole::Meta, Ink::TextMuted, a)
-                            .min_w(px(0.0))
-                            .elide()
-                            .part_at("Project Line", Corner::BottomLeading, a, cx),
-                    )
-                    .children(
-                        accounts::account_control(view, a, cx)
-                            .map(|b| b.part_at("Account Menu", Corner::Top, a, cx)),
-                    ),
+                label(&subtitle, TypeRole::Meta, Ink::TextMuted, a)
+                    .w_full()
+                    .elide()
+                    .part_at("Project Line", Corner::BottomLeading, a, cx),
             ),
     )
     .when_some(h.context.as_deref(), |bar, context| {
