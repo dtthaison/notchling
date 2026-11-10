@@ -450,6 +450,7 @@ impl ChatView {
             _appearance_changes: changes,
             _parts_escape: parts_escape,
         };
+        view.restore_drafts(cx);
         view.start_load(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(TICK).await;

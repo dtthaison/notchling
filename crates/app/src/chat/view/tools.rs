@@ -219,8 +219,33 @@ impl ChatView {
         }
     }
 
-    /// Hands the drafts to the app, which outlives this window.
+    /// Hands the drafts to the app, which outlives this window, and to disk, which outlives the
+    /// app (a quit, a crash, an install).
     fn save_drafts(&self, cx: &mut Context<Self>) {
+        cx.set_global(SavedDrafts(self.tools.drafts.clone()));
+        if let Some(path) = self.drafts_file() {
+            // A draft that can't be written still lives in memory; the next keystroke tries again.
+            let _ = crate::chat::drafts::save(&path, &self.tools.drafts);
+        }
+    }
+
+    /// Where the drafts are kept; none over a fixture or a render.
+    fn drafts_file(&self) -> Option<std::path::PathBuf> {
+        self.root
+            .fixture
+            .is_none()
+            .then(|| self.root.data_dir.join(crate::chat::drafts::FILE))
+    }
+
+    /// The first Chat window since the app started: the drafts saved on disk come back.
+    pub(super) fn restore_drafts(&mut self, cx: &mut Context<Self>) {
+        if cx.has_global::<SavedDrafts>() {
+            return;
+        }
+        let Some(path) = self.drafts_file() else {
+            return;
+        };
+        self.tools.drafts = crate::chat::drafts::load(&path);
         cx.set_global(SavedDrafts(self.tools.drafts.clone()));
     }
 
