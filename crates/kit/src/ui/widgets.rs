@@ -4,6 +4,7 @@
 
 use gpui::{
     div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Stateful,
+    StyleRefinement,
 };
 
 use super::icons::{icon, icon_in};
@@ -36,19 +37,33 @@ pub fn card(appearance: Appearance) -> Div {
         .border_color(hsla(Ink::Hairline.color(appearance)))
 }
 
+/// A hover or press look as a style. GPUI 0.2.2 puts a state's text style in place of the
+/// element's whole one, not over it, so setting the text color alone dropped the font size and a
+/// button's words grew while hovered or pressed; `role` (the type the element's own text is in)
+/// goes along with the color.
+fn state_style(style: StyleRefinement, look: &Look, role: Option<TypeRole>) -> StyleRefinement {
+    let style = match role {
+        Some(role) => style.kit_type(role),
+        None => style,
+    };
+    style.look(look)
+}
+
 /// Live hover and press looks on an element at rest; a forced state draws only itself. The pointing
 /// hand shows over anything clickable that isn't disabled (LINT-POINTER-CURSOR's rule, kept here).
+/// `role` is the type of text the element holds itself, which its states must keep.
 fn interactive(
     element: Stateful<Div>,
     state: PartState,
     hover: Look,
     pressed: Look,
+    role: Option<TypeRole>,
 ) -> Stateful<Div> {
     match state {
         PartState::Rest => element
             .cursor_pointer()
-            .hover(move |style| style.look(&hover))
-            .active(move |style| style.look(&pressed)),
+            .hover(move |style| state_style(style, &hover, role))
+            .active(move |style| state_style(style, &pressed, role)),
         PartState::Disabled => element,
         _ => element.cursor_pointer(),
     }
@@ -89,6 +104,7 @@ pub fn button_with(
         state,
         button_look(kind, PartState::Hover, appearance),
         button_look(kind, PartState::Pressed, appearance),
+        Some(TypeRole::Label),
     )
 }
 
@@ -412,6 +428,7 @@ fn session_row_shell(
         state,
         row_look(PartState::Hover, focused, appearance),
         row_look(PartState::Pressed, focused, appearance),
+        None,
     )
 }
 
@@ -466,6 +483,7 @@ pub fn option_row(
         state,
         option_look(PartState::Hover, selected, appearance).look,
         option_look(PartState::Pressed, selected, appearance).look,
+        None,
     )
 }
 
@@ -504,4 +522,19 @@ pub fn field(text: &str, placeholder: &str, focused: bool, appearance: Appearanc
         .look(&field_look(focused, appearance))
         .when(empty, |field| field.ink(Ink::TextFaint, appearance))
         .child(if empty { placeholder } else { text }.to_owned())
+}
+
+#[cfg(test)]
+mod press_tests {
+    use super::*;
+
+    #[test]
+    fn a_pressed_button_keeps_its_text_size() {
+        // GPUI 0.2.2 swaps the whole text style for a state's, so the size must come along.
+        let look = button_look(ButtonKind::Ghost, PartState::Pressed, Appearance::Dark);
+        let style = state_style(StyleRefinement::default(), &look, Some(TypeRole::Label));
+        let text = style.text.expect("a text style");
+        assert_eq!(text.font_size, Some(px(TypeRole::Label.spec().size).into()));
+        assert!(text.color.is_some());
+    }
 }
