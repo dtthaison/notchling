@@ -173,6 +173,8 @@ pub struct ChatView {
     pending_session: Option<PendingSession>,
     /// Codex and Antigravity rows closed in Chat (`chat::closed`), kept in the settings file.
     closed: std::collections::HashMap<String, f64>,
+    /// What the Tasks bar saw of each session's list (`chat::tasks_bar`), by row id.
+    tasks_seen: std::collections::HashMap<String, crate::chat::tasks_bar::Seen>,
     /// Codex and Antigravity rows used in Chat (`chat::used`): only these are in the Sidebar.
     used: std::collections::HashMap<String, f64>,
     /// The accounts store the header's meters and account menu read, and the switch feed.
@@ -430,6 +432,7 @@ impl ChatView {
             pending_session: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),
+            tasks_seen: std::collections::HashMap::new(),
             _appearance_changes: changes,
             _parts_escape: parts_escape,
         };
@@ -712,6 +715,7 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
+        self.sync_tasks(cx);
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.row_menu.is_some()

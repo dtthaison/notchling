@@ -34,6 +34,7 @@ pub mod rows;
 pub mod sidebar;
 pub mod slash_menu;
 pub mod steps;
+pub mod tasks_bar;
 pub mod terminal;
 pub mod used;
 #[cfg(target_os = "macos")]
