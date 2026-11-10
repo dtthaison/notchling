@@ -67,6 +67,8 @@ pub const TYPED_ENV: &str = "NOTCHLING_RENDER_TYPED";
 pub const WORKING_ENV: &str = "NOTCHLING_RENDER_WORKING";
 /// Set to `1`, a render draws the reply box's + menu open.
 pub const ADD_ENV: &str = "NOTCHLING_RENDER_ADD";
+/// Set to `model` or `effort`, a render draws that Claude Code picker's menu open.
+pub const PICKER_ENV: &str = "NOTCHLING_RENDER_PICKER";
 /// Set to `1`, a render draws the usage-limit card open (`limit_ring::LIMITS_ENV`).
 pub const LIMITS_ENV: &str = limit_ring::LIMITS_ENV;
 /// Set to `1`, a render draws the Tasks bar open, its list under it.
@@ -204,6 +206,9 @@ impl ChatView {
                 typed: switch(TYPED_ENV),
                 working: switch(WORKING_ENV),
                 menu: switch(ADD_ENV),
+                picker: std::env::var(PICKER_ENV)
+                    .ok()
+                    .and_then(|v| crate::chat::claude_picker::Kind::parse(&v)),
             },
             cx,
         );
@@ -293,7 +298,7 @@ impl ChatView {
             }
             if parts_on(cx) {
                 set_parts(cx, false);
-            } else if this.composer.close_menu() {
+            } else if this.composer.close_menu() | this.tools.picker.take().is_some() {
                 cx.notify();
             } else if !this.overlay_open && this.selected_working() {
                 this.stop(cx);

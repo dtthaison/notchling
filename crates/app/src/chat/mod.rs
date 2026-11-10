@@ -11,6 +11,7 @@
 //! [`view`], macOS only for now.
 
 pub mod activity;
+pub mod claude_picker;
 pub mod codex_list;
 pub mod composer;
 pub mod data;
