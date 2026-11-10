@@ -21,6 +21,7 @@ pub mod reply;
 pub mod search;
 pub mod sessions;
 pub mod settings;
+pub mod store;
 pub mod terminal;
 pub mod tools;
 pub mod transcript;

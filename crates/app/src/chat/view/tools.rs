@@ -197,44 +197,49 @@ impl ChatView {
         };
         let text = self.tools.editor.read(cx).text().to_owned();
         self.slash_typed(&text);
+        self.save_draft(&id, &text, cx);
         if text.is_empty() {
             self.tools.drafts.remove(&id);
         } else {
             self.tools.drafts.insert(id, text);
         }
-        self.save_drafts(cx);
+        self.share_drafts(cx);
         cx.notify();
     }
 
     /// Sets a row's draft; the editor follows when that row is the one on show.
     pub(super) fn put_draft(&mut self, id: &str, text: String, cx: &mut Context<Self>) {
+        self.save_draft(id, &text, cx);
         if text.is_empty() {
             self.tools.drafts.remove(id);
         } else {
             self.tools.drafts.insert(id.to_owned(), text);
         }
-        self.save_drafts(cx);
+        self.share_drafts(cx);
         if self.selected.as_deref() == Some(id) {
             self.show_draft(cx);
         }
     }
 
-    /// Hands the drafts to the app, which outlives this window, and to disk, which outlives the
-    /// app (a quit, a crash, an install).
-    fn save_drafts(&self, cx: &mut Context<Self>) {
+    /// Hands the drafts to the app, which outlives this window.
+    fn share_drafts(&self, cx: &mut Context<Self>) {
         cx.set_global(SavedDrafts(self.tools.drafts.clone()));
-        if let Some(path) = self.drafts_file() {
+    }
+
+    /// Writes one row's draft to the app's database, which outlives the app (a quit, a crash, an
+    /// install). Nothing is written over a fixture or a render.
+    fn save_draft(&self, id: &str, text: &str, _cx: &mut Context<Self>) {
+        if let Some(dir) = self.drafts_dir() {
             // A draft that can't be written still lives in memory; the next keystroke tries again.
-            let _ = crate::chat::drafts::save(&path, &self.tools.drafts);
+            let _ = crate::chat::drafts::put(&dir, id, text);
         }
     }
 
-    /// Where the drafts are kept; none over a fixture or a render.
-    fn drafts_file(&self) -> Option<std::path::PathBuf> {
+    fn drafts_dir(&self) -> Option<std::path::PathBuf> {
         self.root
             .fixture
             .is_none()
-            .then(|| self.root.data_dir.join(crate::chat::drafts::FILE))
+            .then(|| self.root.data_dir.clone())
     }
 
     /// The first Chat window since the app started: the drafts saved on disk come back.
@@ -242,11 +247,11 @@ impl ChatView {
         if cx.has_global::<SavedDrafts>() {
             return;
         }
-        let Some(path) = self.drafts_file() else {
+        let Some(dir) = self.drafts_dir() else {
             return;
         };
-        self.tools.drafts = crate::chat::drafts::load(&path);
-        cx.set_global(SavedDrafts(self.tools.drafts.clone()));
+        self.tools.drafts = crate::chat::drafts::load(&dir);
+        self.share_drafts(cx);
     }
 
     /// Puts the selected row's draft in the editor (after a switch of rows).
