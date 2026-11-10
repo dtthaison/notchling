@@ -119,9 +119,26 @@ pub fn is_animating(since: f32) -> bool {
     since < HOLD_SECONDS + FADE_SECONDS
 }
 
+/// Whether the pointer holds the bar on screen: only one scrolling already showed (`shown`), or
+/// that it already holds, so it can be grabbed. Passing over a hidden bar shows nothing.
+pub fn holds(over: bool, shown: bool, hovered: bool) -> bool {
+    over && (shown || hovered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pointer_never_shows_a_hidden_bar() {
+        // Over a bar nothing scrolled: it stays hidden.
+        assert!(!holds(true, false, false));
+        // Over a bar scrolling showed: it holds, so it can be grabbed, and keeps holding.
+        assert!(holds(true, true, false));
+        assert!(holds(true, false, true));
+        // Away from the bar: nothing to hold.
+        assert!(!holds(false, true, true));
+    }
 
     #[test]
     fn hidden_when_the_content_fits() {

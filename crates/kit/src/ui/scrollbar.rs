@@ -231,7 +231,8 @@ impl Element for Scrollable {
             let dragging = state.drag.is_some();
             // The pointer only holds a bar that scrolling already showed (so it can be grabbed);
             // over a hidden bar it shows nothing.
-            let hovered = dragging || (zone.is_hovered(window) && (state.shown || state.hovered));
+            let hovered =
+                dragging || math::holds(zone.is_hovered(window), state.shown, state.hovered);
             if hovered != state.hovered {
                 state.hovered = hovered;
                 if !hovered {
@@ -307,7 +308,8 @@ impl Element for Scrollable {
                     cx.stop_propagation();
                     return;
                 }
-                let over = zone.is_hovered(window);
+                // Not `is_hovered` alone: over a hidden bar that would show it on the next draw.
+                let over = math::holds(zone.is_hovered(window), state.shown, state.hovered);
                 if over != state.hovered {
                     state.hovered = over;
                     if !over {
