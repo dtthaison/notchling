@@ -23,6 +23,7 @@ mod prompts;
 mod row_menu;
 mod sheets;
 mod sidebar;
+mod simulator;
 mod slash_menu;
 mod tasks;
 mod terminal;
@@ -90,6 +91,8 @@ pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
 /// Set to `1` (or `expanded`), a render draws the terminal panel with two tabs over a sample screen.
 pub const TERMINAL_ENV: &str = terminal::RENDER_ENV;
+/// Set, a render draws the iOS Simulator panel with a sample device.
+pub const SIMULATOR_ENV: &str = simulator::RENDER_ENV;
 /// Set to a text such as `/co`, a render types it in the box, so the command list shows.
 pub const SLASH_ENV: &str = "NOTCHLING_RENDER_SLASH";
 /// Set to `1`, a render draws the first sidebar row's right-click menu open.
@@ -206,6 +209,8 @@ pub struct ChatView {
     page: page_panel::State,
     /// The terminal panel: its tabs, whether it shows, and whether it is expanded.
     terminal: terminal::State,
+    /// The iOS Simulator panel (`view::simulator`).
+    simulator: simulator::State,
     /// The command list over the reply box, and the commands of the folder last read.
     slash: crate::chat::slash_menu::SlashMenu,
     slash_commands: Option<(String, Vec<notchling_engine::control::slash::SlashCommand>)>,
@@ -253,6 +258,9 @@ impl ChatView {
         view.load_closed();
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
             view.render_terminal(how == "expanded", cx);
+        }
+        if std::env::var_os(SIMULATOR_ENV).is_some() {
+            view.render_simulator();
         }
         if switch(ROW_MENU_ENV) {
             // The sessions load after this; the menu needs only an id.
@@ -417,6 +425,7 @@ impl ChatView {
             details_hidden: false,
             page: page_panel::State::default(),
             terminal: terminal::State::default(),
+            simulator: simulator::State::default(),
             slash: Default::default(),
             slash_commands: None,
             slash_preview: None,
@@ -802,8 +811,14 @@ impl Render for ChatView {
                             .children(page_panel::render(self, a, window, cx))
                             .children(terminal::render(self, a, window, cx))
                             .children(
+                                (!self.terminal.shown())
+                                    .then(|| simulator::render(self, a, window, cx))
+                                    .flatten(),
+                            )
+                            .children(
                                 (!self.page.is_open()
                                     && !self.terminal.shown()
+                                    && !self.simulator.shown()
                                     && !self.details_hidden)
                                     .then(|| inspector::render(self, a, cx).into_any_element()),
                             ),

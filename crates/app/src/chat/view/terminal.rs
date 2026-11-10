@@ -261,6 +261,10 @@ impl ChatView {
         if self.page.is_open() {
             self.close_page(cx);
         }
+        // They share the Details Panel's place.
+        if self.simulator.shown() {
+            self.toggle_simulator(cx);
+        }
         self.focus_terminal(window);
         cx.notify();
     }
