@@ -194,8 +194,12 @@ impl ToolLive {
             if RowTool::of(&agent.id) == RowTool::Agy {
                 if let Some(Some(live)) = self.rows.get(&agent.id) {
                     let transcript = agent.transcript_path.take();
+                    // The daemon's row carries its event's time; when the session was last used
+                    // is the file's (a closed row would reopen on every event otherwise).
+                    let since = agent.since_ms;
                     *agent = live.clone();
                     agent.transcript_path = transcript;
+                    agent.since_ms = since;
                 }
             }
             if self.is_working(&agent.id) {
@@ -401,5 +405,23 @@ mod tests {
             (AgentGroup::Working, "Working")
         );
         assert_eq!(rows[3].group, AgentGroup::Completed);
+    }
+
+    #[test]
+    fn a_live_antigravity_row_keeps_when_it_was_last_used() {
+        // The daemon stamps its row with the time of its event; opening or reading a session
+        // isn't using it, so a closed row stays closed.
+        let mut live = ToolLive::default();
+        let stamped = Agent {
+            since_ms: 9_000_000,
+            ..agent("agy:a1", AgentGroup::Completed, "Antigravity")
+        };
+        live.apply(&event(
+            "session.changed",
+            json!({"id": "agy:a1", "row": serde_json::to_value(&stamped).unwrap(), "change": "loaded"}),
+        ));
+        let mut rows = vec![agent("agy:a1", AgentGroup::Completed, "Antigravity")];
+        live.overlay(&mut rows);
+        assert_eq!(rows[0].since_ms, 1_000, "the file's time");
     }
 }
