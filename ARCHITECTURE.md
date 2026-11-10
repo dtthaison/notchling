@@ -76,6 +76,7 @@ The feature folders in `legacy/macos/Sources/Notchling/`:
 ### Data on disk
 
 - `~/Library/Application Support/Notchling/`: the hook's `requests/`, `responses/` and `heartbeat`; `lanes.json`; `pages/` with `pages.json`; `machines.json`; `vault.json` (names only, no values) and `vault.sock`; `search-index.json`.
+- The Rust app and daemon use the same folder for their own data in SQLite ([0014](docs/decisions/0014-app-data-in-sqlite.md)): `notchling.db` (Chat's unsent replies; settings move in next, `settings.json` until then) and `daemon/search.db` (the session index, FTS5 ranked by bm25). `search-index.json` is the Swift app's only.
 - `~/Library/Application Support/AgentConsole/`: `bridge/` (the certificate, paired phones, tunnel settings, the audit log), `hostd.sock` and `hostd-state.json`. The folder keeps the old Agent Console name so paired phones survive.
 - UserDefaults: bundle id `local.notchling`.
 

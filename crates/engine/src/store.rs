@@ -1,5 +1,8 @@
 //! The app's own data in one SQLite database, `notchling.db` in the data folder (decision 0014):
-//! settings and Chat's unsent replies today. Each value is its own row, so the app and the daemon
+//! Chat's unsent replies (`drafts`), settings (`settings`, a row per key) and every other file
+//! Notchling alone used to rewrite whole (`docs`, a row per former file, changed in one transaction
+//! so two writers never lose each other's change; [`import_file`] moves the old file in once).
+//! Each value is its own row, so the app and the daemon
 //! writing at once each keep their change (the whole-file JSON rewrite lost one of them), and a
 //! crash mid-write leaves the last committed state.
 //!
@@ -20,7 +23,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 pub const DB_NAME: &str = "notchling.db";
 
 /// The schema's version (`PRAGMA user_version`).
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 /// How long a write waits for another process's write to finish.
 const BUSY: Duration = Duration::from_secs(5);
@@ -124,7 +127,8 @@ fn migrate(db: &Connection) -> Result<(), String> {
          CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS drafts (
              row_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_ms INTEGER NOT NULL);
-         PRAGMA user_version = 1;
+         CREATE TABLE IF NOT EXISTS docs (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+         PRAGMA user_version = 2;
          COMMIT;",
         )
     })
@@ -179,6 +183,79 @@ pub fn put_draft(data_dir: &Path, row_id: &str, text: &str, now_ms: i64) -> Resu
     changed.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// A named document (what used to be a whole JSON file); none when there's no database or row.
+pub fn doc(data_dir: &Path, name: &str) -> Result<Option<String>, String> {
+    let Some(db) = open_existing(data_dir)? else {
+        return Ok(None);
+    };
+    db.query_row("SELECT value FROM docs WHERE name = ?1", [name], |r| {
+        r.get(0)
+    })
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Replaces a named document.
+pub fn put_doc(data_dir: &Path, name: &str, value: &str) -> Result<(), String> {
+    update_doc(data_dir, name, |_| Ok(Some(value.to_owned()))).map(|_| ())
+}
+
+/// Reads a named document and writes what `change` makes of it in one transaction, so another
+/// process changing it at the same moment waits instead of being overwritten. `change` returning
+/// `None` removes the document; an error writes nothing. Returns what was written.
+pub fn update_doc(
+    data_dir: &Path,
+    name: &str,
+    change: impl FnOnce(Option<String>) -> Result<Option<String>, String>,
+) -> Result<Option<String>, String> {
+    let mut db = open(data_dir)?;
+    // IMMEDIATE takes the write lock before the read, waiting out another writer (busy timeout).
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let old: Option<String> = tx
+        .query_row("SELECT value FROM docs WHERE name = ?1", [name], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let new = change(old)?;
+    match &new {
+        Some(v) => tx.execute(
+            "INSERT INTO docs (name, value) VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+            params![name, v],
+        ),
+        None => tx.execute("DELETE FROM docs WHERE name = ?1", [name]),
+    }
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(new)
+}
+
+/// Moves the file Notchling used before into the document `name`, once: a row already there wins,
+/// and the file is removed after the row is committed. A link, a file that can't be read as text,
+/// or one `valid` rejects is left where it is and nothing is written. Returns whether one moved in.
+pub fn import_file(
+    data_dir: &Path,
+    name: &str,
+    old: &Path,
+    valid: impl Fn(&str) -> bool,
+) -> Result<bool, String> {
+    if std::fs::symlink_metadata(old).map_or(true, |m| !m.is_file()) {
+        return Ok(false);
+    }
+    let Ok(text) = std::fs::read_to_string(old) else {
+        return Ok(false);
+    };
+    if !valid(&text) {
+        return Ok(false);
+    }
+    update_doc(data_dir, name, |row| Ok(Some(row.unwrap_or(text))))?;
+    std::fs::remove_file(old).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +280,70 @@ mod tests {
         );
         put_draft(&dir, "job-1", "", 4).unwrap();
         assert_eq!(drafts(&dir).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn documents_change_in_one_transaction_and_reading_makes_nothing() {
+        let tmp = TempDir::new("store-docs");
+        let dir = tmp.path("data");
+        assert_eq!(doc(&dir, "limits").unwrap(), None);
+        assert!(!dir.exists(), "reading makes no database");
+        put_doc(&dir, "limits", r#"{"a":1}"#).unwrap();
+        assert_eq!(doc(&dir, "limits").unwrap().as_deref(), Some(r#"{"a":1}"#));
+        assert!(update_doc(&dir, "limits", |_| Err("no".into())).is_err());
+        assert_eq!(
+            doc(&dir, "limits").unwrap().as_deref(),
+            Some(r#"{"a":1}"#),
+            "a failed change writes nothing"
+        );
+        update_doc(&dir, "limits", |_| Ok(None)).unwrap();
+        assert_eq!(doc(&dir, "limits").unwrap(), None);
+    }
+
+    #[test]
+    fn concurrent_updates_of_one_document_lose_nothing() {
+        let tmp = TempDir::new("store-docs-writers");
+        let dir = tmp.path("data");
+        std::thread::scope(|scope| {
+            for _ in 0..6 {
+                let dir = dir.clone();
+                scope.spawn(move || {
+                    for _ in 0..10 {
+                        update_doc(&dir, "n", |old| {
+                            let n: i64 = old.as_deref().unwrap_or("0").parse().unwrap();
+                            Ok(Some((n + 1).to_string()))
+                        })
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(doc(&dir, "n").unwrap().as_deref(), Some("60"));
+    }
+
+    #[test]
+    fn an_old_file_moves_in_once_and_a_bad_one_stays() {
+        let tmp = TempDir::new("store-import");
+        let dir = tmp.path("data");
+        let old = tmp.write("data/limits.json", r#"{"v":1}"#);
+        assert!(import_file(&dir, "limits", &old, |t| t.starts_with('{')).unwrap());
+        assert!(!old.exists());
+        assert_eq!(doc(&dir, "limits").unwrap().as_deref(), Some(r#"{"v":1}"#));
+
+        let again = tmp.write("data/limits.json", r#"{"v":2}"#);
+        assert!(import_file(&dir, "limits", &again, |_| true).unwrap());
+        assert_eq!(
+            doc(&dir, "limits").unwrap().as_deref(),
+            Some(r#"{"v":1}"#),
+            "the row already there wins"
+        );
+
+        let bad = tmp.write("data/other.json", "not json");
+        assert!(!import_file(&dir, "other", &bad, |t| t.starts_with('{')).unwrap());
+        assert!(bad.exists());
+        assert_eq!(doc(&dir, "other").unwrap(), None);
+        let missing = tmp.path("data/missing.json");
+        assert!(!import_file(&dir, "none", &missing, |_| true).unwrap());
     }
 
     #[test]
