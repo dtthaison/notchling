@@ -53,12 +53,7 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 
 /// The inspector panel, for the selected session.
 pub fn render(view: &ChatView, a: Appearance, _cx: &App) -> impl IntoElement {
-    let i = inspector(
-        &view.conversation,
-        &view.subagents,
-        &view.root.home,
-        &no_writers,
-    );
+    let i = inspector(&view.conversation, &view.subagents, &no_writers);
     let folder = view.selected_session().map(|s| {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)

@@ -1,13 +1,11 @@
 //! The inspector beside the conversation: tasks, the session's facts, subagents, background shells.
 
-use std::path::Path;
-
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
 use notchling_engine::transcript::shells::{self, ShellState};
 use notchling_engine::transcript::subagents::{Status as SubagentStatus, Subagent};
 use notchling_kit::{Icon, Ink, Status};
 
-use super::format::{model_name, short_path, tokens};
+use super::format::{model_name, tokens};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskRow {
@@ -283,7 +281,7 @@ impl Inspector {
 }
 
 /// Facts as the inspector lists them: only what the transcript says.
-pub fn facts(conversation: &Conversation, home: &Path) -> Vec<(&'static str, String)> {
+pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     let f = &conversation.facts;
     let mut out: Vec<(&'static str, String)> = Vec::new();
     if let Some(branch) = &f.branch {
@@ -311,10 +309,7 @@ pub fn facts(conversation: &Conversation, home: &Path) -> Vec<(&'static str, Str
     if f.commands > 0 {
         out.push(("Commands", f.commands.to_string()));
     }
-    if !f.files.is_empty() {
-        let names: Vec<String> = f.files.iter().map(|p| short_path(p, home)).collect();
-        out.push(("Files", names.join("\n")));
-    }
+    // The files the session touched aren't listed: long paths, and the Git section says what changed.
     out
 }
 
@@ -324,12 +319,11 @@ pub fn facts(conversation: &Conversation, home: &Path) -> Vec<(&'static str, Str
 pub fn inspector(
     conversation: &Conversation,
     subagents: &[Subagent],
-    home: &Path,
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
     Inspector {
         tasks: task_rows(conversation),
-        facts: facts(conversation, home),
+        facts: facts(conversation),
         subagents: subagents.iter().map(subagent_row).collect(),
         shells: conversation
             .shells
@@ -464,7 +458,7 @@ mod tests {
             ..Conversation::default()
         };
         c.finished_agents.insert("b1".into(), "completed".into());
-        let i = inspector(&c, &[], Path::new("/Users/me"), &no_writers);
+        let i = inspector(&c, &[], &no_writers);
         assert_eq!(i.tasks[0].status, Status::Done);
         assert_eq!(i.tasks[1].icon, Icon::Working);
         assert_eq!(
@@ -476,7 +470,6 @@ mod tests {
                 ("Turns", "2".to_owned()),
                 ("Tokens", "15.4k in · 900 out".to_owned()),
                 ("Commands", "3".to_owned()),
-                ("Files", "~/w/a.rs".to_owned()),
             ]
         );
         assert_eq!(i.shells[0].title, "Run tests");
@@ -503,12 +496,7 @@ mod tests {
             updated: 0.0,
             status: SubagentStatus::Completed,
         };
-        let i = inspector(
-            &Conversation::default(),
-            &[agent],
-            Path::new("/x"),
-            &no_writers,
-        );
+        let i = inspector(&Conversation::default(), &[agent], &no_writers);
         assert_eq!(
             i.subagents[0],
             SubagentRow {
@@ -548,7 +536,6 @@ mod tests {
                 agent(SubagentStatus::Running, "general-purpose"),
                 agent(SubagentStatus::Failed, "Plan"),
             ],
-            Path::new("/x"),
             &no_writers,
         );
         assert_eq!(i.subagents[0].mark, Mark::Spinner);
@@ -587,10 +574,7 @@ mod tests {
         assert_eq!(counted_title("Subagents", 0, 7), "Subagents · 7");
         assert_eq!(counted_title("Shells", 0, 0), "Shells");
         let mut c = Conversation::default();
-        assert_eq!(
-            inspector(&c, &[], Path::new("/x"), &no_writers).tasks_title(),
-            "Tasks"
-        );
+        assert_eq!(inspector(&c, &[], &no_writers).tasks_title(), "Tasks");
         c.tasks = vec![
             TaskEntry {
                 id: "1".into(),
@@ -603,10 +587,7 @@ mod tests {
                 status: TaskStatus::Pending,
             },
         ];
-        assert_eq!(
-            inspector(&c, &[], Path::new("/x"), &no_writers).tasks_title(),
-            "Tasks · 1/2"
-        );
+        assert_eq!(inspector(&c, &[], &no_writers).tasks_title(), "Tasks · 1/2");
     }
 
     #[test]
@@ -625,7 +606,7 @@ mod tests {
             }
         }
         let writers = |path: &str| if path == "/live" { vec![1] } else { Vec::new() };
-        let i = inspector(&c, &[], Path::new("/x"), &writers);
+        let i = inspector(&c, &[], &writers);
         assert_eq!(i.shells[0].mark, Mark::Icon(Icon::Done, Ink::Done));
         assert!(i.shells[1].running && i.shells[1].mark == Mark::Spinner);
         assert_eq!(i.shells_title(), "Shells · 1 running");

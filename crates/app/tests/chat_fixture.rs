@@ -167,7 +167,7 @@ fn header_and_inspector_read_the_facts() {
 
     let subagents = root.subagents(fix, &c, NOW_MS as f64 / 1000.0);
     assert_eq!(subagents.len(), 1);
-    let i = inspector(&c, &subagents, &root.home, &no_writers);
+    let i = inspector(&c, &subagents, &no_writers);
     assert_eq!(i.tasks.len(), 3);
     assert_eq!(i.tasks[0].status, Status::Done);
     assert!(i.facts.contains(&("Branch", "m1-chat".to_owned())));
