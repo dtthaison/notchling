@@ -23,6 +23,7 @@ mod prompts;
 mod row_menu;
 mod sheets;
 mod sidebar;
+mod slash_menu;
 mod tasks;
 mod terminal;
 mod tools;
@@ -89,6 +90,8 @@ pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
 /// Set to `1` (or `expanded`), a render draws the terminal panel with two tabs over a sample screen.
 pub const TERMINAL_ENV: &str = terminal::RENDER_ENV;
+/// Set to a text such as `/co`, a render types it in the box, so the command list shows.
+pub const SLASH_ENV: &str = "NOTCHLING_RENDER_SLASH";
 /// Set to `1`, a render draws the first sidebar row's right-click menu open.
 pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
@@ -197,6 +200,11 @@ pub struct ChatView {
     page: page_panel::State,
     /// The terminal panel: its tabs, whether it shows, and whether it is expanded.
     terminal: terminal::State,
+    /// The command list over the reply box, and the commands of the folder last read.
+    slash: crate::chat::slash_menu::SlashMenu,
+    slash_commands: Option<(String, Vec<notchling_engine::control::slash::SlashCommand>)>,
+    /// What a render types in the box (`SLASH_ENV`).
+    slash_preview: Option<String>,
     _appearance_changes: Subscription,
     /// Esc hides the part names, wherever the keys go.
     _parts_escape: Subscription,
@@ -235,6 +243,7 @@ impl ChatView {
             .and_then(|v| crate::chat::prompts::Preview::parse(&v));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
+        view.slash_preview = std::env::var(SLASH_ENV).ok();
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
             view.render_terminal(how == "expanded", cx);
         }
@@ -401,6 +410,9 @@ impl ChatView {
             details_hidden: false,
             page: page_panel::State::default(),
             terminal: terminal::State::default(),
+            slash: Default::default(),
+            slash_commands: None,
+            slash_preview: None,
             follow_sent: false,
             clock_second: 0,
             overlay_open: false,
@@ -666,6 +678,14 @@ impl Render for ChatView {
         let a = window_appearance(window);
         self.drawn_ms = now_ms();
         self.take_terminal_focus(window);
+        if let Some(text) = self.slash_preview.clone() {
+            if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
+                self.tools
+                    .editor
+                    .update(cx, |editor, cx| editor.set_text(&text, cx));
+                self.slash_typed(&text);
+            }
+        }
         self.sync_prompt();
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
@@ -728,6 +748,10 @@ impl Render for ChatView {
             // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
             // draws takes it back, or typing would go on reaching the page.
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
+            // The command list's keys, before the reply box moves its caret on Up and Down.
+            .capture_key_down(
+                cx.listener(|this, event, window, cx| this.capture_slash_key(event, window, cx)),
+            )
             .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(

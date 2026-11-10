@@ -190,6 +190,7 @@ impl ChatView {
             return;
         };
         let text = self.tools.editor.read(cx).text().to_owned();
+        self.slash_typed(&text);
         if text.is_empty() {
             self.tools.drafts.remove(&id);
         } else {

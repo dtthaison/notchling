@@ -880,6 +880,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(card)
         .child(footer)
         .children(pop_up(view, a, cx))
+        .children(super::slash_menu::render(view, a, cx))
 }
 
 #[cfg(test)]
