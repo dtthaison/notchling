@@ -237,14 +237,24 @@ pub(super) fn account_control(
     })
 }
 
-fn menu_item(id: SharedString, title: &str, checked: bool, a: Appearance) -> Stateful<Div> {
+pub(super) fn menu_item(
+    id: SharedString,
+    title: &str,
+    checked: bool,
+    a: Appearance,
+) -> Stateful<Div> {
     menu_row(id, title, checked, Ink::Text, a)
         .cursor_pointer()
         .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
 }
 
 /// An item the `accounts` switch holds off: faint, no click, the reason on hover.
-fn held_item(id: SharedString, title: &str, control: Control, a: Appearance) -> Stateful<Div> {
+pub(super) fn held_item(
+    id: SharedString,
+    title: &str,
+    control: Control,
+    a: Appearance,
+) -> Stateful<Div> {
     gate::tip(menu_row(id, title, false, Ink::TextFaint, a), control, a)
 }
 

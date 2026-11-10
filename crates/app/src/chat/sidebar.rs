@@ -214,6 +214,20 @@ pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     .collect()
 }
 
+/// The session id a row's Copy Session ID puts on the clipboard: the tool's own id (Claude Code's
+/// session UUID is the row id; Codex and Antigravity rows carry a `codex:` or `agy:` prefix). A
+/// draft that hasn't started has none.
+pub fn copyable_id(row_id: &str) -> Option<&str> {
+    if row_id.starts_with("codex-new:") || row_id.starts_with("agy-new:") {
+        return None;
+    }
+    let id = row_id
+        .strip_prefix("codex:")
+        .or_else(|| row_id.strip_prefix("agy:"))
+        .unwrap_or(row_id);
+    (!id.is_empty()).then_some(id)
+}
+
 fn exited(s: &Session) -> bool {
     s.tool == Tool::Claude && s.agent.label == "Exited"
 }
@@ -255,6 +269,17 @@ mod tests {
             tool,
             transcript: None,
         }
+    }
+
+    #[test]
+    fn copy_session_id_gives_the_tools_own_id() {
+        let claude = "be50d36a-4348-4ba6-ab58-96959399a893";
+        assert_eq!(copyable_id(claude), Some(claude));
+        assert_eq!(copyable_id("codex:019a-77"), Some("019a-77"));
+        assert_eq!(copyable_id("agy:c0ffee"), Some("c0ffee"));
+        assert_eq!(copyable_id("codex-new:1234"), None);
+        assert_eq!(copyable_id("agy-new:1234"), None);
+        assert_eq!(copyable_id("codex:"), None);
     }
 
     #[test]

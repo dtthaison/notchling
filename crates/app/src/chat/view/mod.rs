@@ -20,6 +20,7 @@ mod opinions;
 mod page_panel;
 mod phone;
 mod prompts;
+mod row_menu;
 mod sheets;
 mod sidebar;
 mod tasks;
@@ -85,6 +86,8 @@ pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 /// Set to `question` or `permission`, a render draws that card above the reply box, over the
 /// selected Claude Code session, with its controls live (`chat::prompts::Preview`).
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
+/// Set to `1`, a render draws the first sidebar row's right-click menu open.
+pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 
@@ -173,6 +176,8 @@ pub struct ChatView {
     limit_ring: limit_ring::State,
     /// The header's account menu is open.
     account_menu: bool,
+    /// The menu a right click on a sidebar row opened.
+    row_menu: Option<row_menu::RowMenu>,
     /// When the accounts store was last read for the header (ms).
     accounts_polled_ms: i64,
     /// Whether `codex` is installed (the account menu's Codex Accounts…), looked up with the
@@ -225,6 +230,13 @@ impl ChatView {
             .and_then(|v| crate::chat::prompts::Preview::parse(&v));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
+        if switch(ROW_MENU_ENV) {
+            // The sessions load after this; the menu needs only an id.
+            view.row_menu = Some(row_menu::RowMenu {
+                row_id: "render-session".into(),
+                at: gpui::point(px(120.0), px(110.0)),
+            });
+        }
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
         }
@@ -316,7 +328,10 @@ impl ChatView {
             let open = Open {
                 parts: parts_on(cx),
                 menu: this.composer.is_open() || this.tools.picker.is_some(),
-                popup: this.sheet.is_some() || this.phone.is_some() || this.account_menu,
+                popup: this.sheet.is_some()
+                    || this.phone.is_some()
+                    || this.account_menu
+                    || this.row_menu.is_some(),
                 working: this.selected_working(),
             };
             match escape(open) {
@@ -330,6 +345,7 @@ impl ChatView {
                     this.sheet = None;
                     this.phone = None;
                     this.account_menu = false;
+                    this.row_menu = None;
                     cx.notify();
                 }
                 Escape::Stop => this.stop(cx),
@@ -344,6 +360,7 @@ impl ChatView {
             composer: composer::State::default(),
             limit_ring: limit_ring::State::default(),
             account_menu: false,
+            row_menu: None,
             accounts_polled_ms: 0,
             codex_installed: accounts::codex_installed(&root.home),
             loader: Some(Loader::new(root.clone())),
@@ -642,6 +659,7 @@ impl Render for ChatView {
         self.sync_prompt();
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
+            || self.row_menu.is_some()
             || self.phone.is_some()
             || self.tools.picker.is_some()
             || self.composer.is_open()
@@ -727,6 +745,7 @@ impl Render for ChatView {
             .child(sidebar::toggle_button(self, a, cx))
             .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))
+            .children(row_menu::render(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
             .child(resize_edges(window, TopBorder::InContent))

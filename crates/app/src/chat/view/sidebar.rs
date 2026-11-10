@@ -270,21 +270,27 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                     cx,
                 )
             });
+            let menu_id = row.id.clone();
+            let row_el = session_row_marked(
+                SharedString::from(format!("session-{}", row.id)),
+                &row.name,
+                tool,
+                account,
+                &row.status_line,
+                &row.age,
+                row.status,
+                state,
+                false,
+                a,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)));
             list = list.child(
-                session_row_marked(
-                    SharedString::from(format!("session-{}", row.id)),
-                    &row.name,
-                    tool,
-                    account,
-                    &row.status_line,
-                    &row.age,
-                    row.status,
-                    state,
-                    false,
+                super::row_menu::on_right_click(row_el, menu_id, cx).part_at(
+                    "Session Row",
+                    Corner::Trailing,
                     a,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)))
-                .part_at("Session Row", Corner::Trailing, a, cx),
+                    cx,
+                ),
             );
         }
     }
