@@ -23,7 +23,7 @@ use super::ChatView;
 use crate::accounts::limits::Zone;
 use crate::accounts::model::{CLAUDE_CODE, CODEX};
 use crate::chat::data::Tool;
-use crate::chat::limit_ring::{self as rules, Arc, Hover, Limit, GRACE_MS};
+use crate::chat::limit_ring::{self as rules, Arc, Hover, Limit, Wait, GRACE_MS, OPEN_MS};
 
 /// Set to `1`, a render draws the card open, since nothing hovers in a picture.
 pub const LIMITS_ENV: &str = "NOTCHLING_RENDER_LIMITS";
@@ -116,13 +116,22 @@ impl ChatView {
         } else {
             hover.card(inside)
         };
-        if let Some(epoch) = wait {
+        if let Some(wait) = wait {
+            let ms = match wait {
+                Wait::Open(_) => OPEN_MS,
+                Wait::Close(_) => GRACE_MS,
+            };
             cx.spawn(async move |this, cx| {
                 cx.background_executor()
-                    .timer(Duration::from_millis(GRACE_MS))
+                    .timer(Duration::from_millis(ms))
                     .await;
                 this.update(cx, |view, cx| {
-                    if view.limit_ring.hover.close_if_still(epoch) {
+                    let hover = &mut view.limit_ring.hover;
+                    let changed = match wait {
+                        Wait::Open(epoch) => hover.open_if_still(epoch),
+                        Wait::Close(epoch) => hover.close_if_still(epoch),
+                    };
+                    if changed {
                         cx.notify();
                     }
                 })

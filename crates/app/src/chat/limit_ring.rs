@@ -218,60 +218,78 @@ pub fn arc_end(fraction: f32, cx: f32, cy: f32, r: f32) -> (f32, f32) {
     (cx + r * angle.sin(), cy - r * angle.cos())
 }
 
+/// How long the pointer rests on the ring before the card opens, so passing over it opens nothing.
+pub const OPEN_MS: u64 = 1500;
+
 /// How long the card stays after the pointer leaves, so it can cross the gap to the card.
 pub const GRACE_MS: u64 = 250;
 
+/// What the view waits for after a move, then asks about with the epoch it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// Wait [`OPEN_MS`], then [`Hover::open_if_still`].
+    Open(u64),
+    /// Wait [`GRACE_MS`], then [`Hover::close_if_still`].
+    Close(u64),
+}
+
 /// Where the pointer is, and so whether the card shows. The ring and the card each report entering
-/// and leaving; after a leave with the pointer in neither, the view waits [`GRACE_MS`] and asks
-/// [`Hover::close_if_still`] with the epoch it was given.
+/// and leaving. Entering the ring asks the view to wait [`OPEN_MS`] before the card opens; once
+/// open, a leave with the pointer in neither asks it to wait [`GRACE_MS`] before it closes.
 #[derive(Debug, Default)]
 pub struct Hover {
     ring: bool,
     card: bool,
-    /// The pointer left both and the grace hasn't run out.
-    lingering: bool,
+    /// The card is open (it stays open during the grace after a leave).
+    shown: bool,
     epoch: u64,
 }
 
 impl Hover {
     /// Whether the card shows, with `forced` a render's switch.
     pub fn open(&self, forced: bool) -> bool {
-        forced || self.ring || self.card || self.lingering
+        forced || self.shown
     }
 
     fn away(&self) -> bool {
         !self.ring && !self.card
     }
 
-    /// The pointer entered or left the ring. Returns the epoch to close at after the grace, when
-    /// the pointer is now in neither.
-    pub fn ring(&mut self, inside: bool) -> Option<u64> {
+    /// The pointer entered or left the ring.
+    pub fn ring(&mut self, inside: bool) -> Option<Wait> {
         self.ring = inside;
         self.moved()
     }
 
-    /// The pointer entered or left the card.
-    pub fn card(&mut self, inside: bool) -> Option<u64> {
+    /// The pointer entered or left the card (only drawn while open).
+    pub fn card(&mut self, inside: bool) -> Option<Wait> {
         self.card = inside;
         self.moved()
     }
 
-    fn moved(&mut self) -> Option<u64> {
+    fn moved(&mut self) -> Option<Wait> {
         self.epoch += 1;
-        if self.away() {
-            self.lingering = true;
-            Some(self.epoch)
-        } else {
-            self.lingering = false;
-            None
+        if !self.shown {
+            // A leave before the wait ran out cancels the open through the new epoch.
+            return self.ring.then_some(Wait::Open(self.epoch));
         }
+        self.away().then_some(Wait::Close(self.epoch))
+    }
+
+    /// The open wait ran: opens the card if the pointer stayed on the ring. Returns whether it did.
+    pub fn open_if_still(&mut self, epoch: u64) -> bool {
+        let open = self.epoch == epoch && self.ring && !self.shown;
+        if open {
+            self.shown = true;
+        }
+        open
     }
 
     /// The grace ran: closes the card if nothing happened since `epoch`. Returns whether it did.
     pub fn close_if_still(&mut self, epoch: u64) -> bool {
-        let close = self.epoch == epoch && self.away();
+        let close = self.epoch == epoch && self.away() && self.shown;
         if close {
-            self.lingering = false;
+            self.shown = false;
         }
         close
     }
@@ -441,19 +459,55 @@ mod tests {
         assert!(near(arc_end(0.75, 10.0, 10.0, 5.0), (5.0, 10.0)));
     }
 
+    /// Rests on the ring until the card opens.
+    fn opened() -> Hover {
+        let mut h = Hover::default();
+        let Some(Wait::Open(epoch)) = h.ring(true) else {
+            panic!("entering the ring waits to open");
+        };
+        assert!(h.open_if_still(epoch));
+        h
+    }
+
+    #[test]
+    fn the_card_opens_only_after_the_pointer_rests_on_the_ring() {
+        let mut h = Hover::default();
+        let Some(Wait::Open(epoch)) = h.ring(true) else {
+            panic!("entering the ring waits to open");
+        };
+        assert!(!h.open(false), "nothing shows during the wait");
+        assert!(h.open_if_still(epoch));
+        assert!(h.open(false));
+
+        // Passing over the ring: the leave cancels the open.
+        let mut h = Hover::default();
+        let Some(Wait::Open(epoch)) = h.ring(true) else {
+            panic!();
+        };
+        assert_eq!(
+            h.ring(false),
+            None,
+            "a leave before it opens waits for nothing"
+        );
+        assert!(!h.open_if_still(epoch));
+        assert!(!h.open(false));
+        assert_eq!(OPEN_MS, 1500);
+    }
+
     #[test]
     fn the_card_waits_a_grace_before_closing_and_a_return_cancels_it() {
-        let mut h = Hover::default();
-        assert!(!h.open(false));
-        assert_eq!(h.ring(true), None);
-        assert!(h.open(false));
-        let epoch = h.ring(false).expect("away from both");
+        let mut h = opened();
+        let Some(Wait::Close(epoch)) = h.ring(false) else {
+            panic!("away from both waits to close");
+        };
         assert!(h.open(false), "still open during the grace");
         // The pointer crosses into the card before the grace ends.
         assert_eq!(h.card(true), None);
         assert!(!h.close_if_still(epoch), "a later move cancels the close");
         assert!(h.open(false));
-        let epoch = h.card(false).unwrap();
+        let Some(Wait::Close(epoch)) = h.card(false) else {
+            panic!();
+        };
         assert!(h.close_if_still(epoch));
         assert!(!h.open(false));
         assert!(h.open(true), "a render can force it open");
