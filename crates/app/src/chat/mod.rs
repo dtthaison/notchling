@@ -35,5 +35,6 @@ pub mod sidebar;
 pub mod slash_menu;
 pub mod steps;
 pub mod terminal;
+pub mod used;
 #[cfg(target_os = "macos")]
 pub mod view;

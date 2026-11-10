@@ -408,6 +408,7 @@ impl ChatView {
                         if let Some(out) = view.tools.outgoing.remove(&id) {
                             view.tools.outgoing.insert(row.clone(), out);
                         }
+                        view.mark_used(&row);
                         view.selected = Some(row);
                         view.loading = true;
                         view.show_draft(cx);
@@ -690,6 +691,7 @@ impl ChatView {
                         self.tools.picks.insert(row.clone(), pick);
                     }
                     if self.selected.as_deref() == Some(draft.as_str()) {
+                        self.mark_used(&row);
                         self.selected = Some(row);
                         self.loading = true;
                         self.show_draft(cx);

@@ -17,6 +17,7 @@ use crate::chat::closed;
 use crate::chat::data::Session;
 use crate::chat::data::Tool;
 use crate::chat::sidebar::copyable_id;
+use crate::chat::used;
 use crate::phone::bridge::now_ms;
 
 /// An open row menu: the row it is for and where the click was, in the window.
@@ -152,6 +153,23 @@ impl ChatView {
     pub(super) fn load_closed(&mut self) {
         if let Some(store) = self.settings_store() {
             self.closed = closed::from_value(store.get(closed::KEY).as_ref());
+            self.used = closed::from_value(store.get(used::KEY).as_ref());
+        }
+    }
+
+    /// Records that `id` was used here, so the Sidebar keeps showing it.
+    pub(super) fn mark_used(&mut self, id: &str) {
+        if !used::mark(&mut self.used, id, now_ms() as f64 / 1000.0) {
+            return;
+        }
+        self.save_used();
+    }
+
+    fn save_used(&mut self) {
+        if let Some(mut store) = self.settings_store() {
+            if let Err(e) = store.set(used::KEY, closed::to_value(&self.used)) {
+                self.tools.error = Some(format!("Couldn't save the sessions used in Chat: {e}"));
+            }
         }
     }
 
@@ -170,9 +188,17 @@ impl ChatView {
         }
     }
 
-    /// The rows the sidebar shows: all but the closed Codex and Antigravity ones.
+    /// The rows the sidebar shows: Claude Code's, and the Codex and Antigravity ones used here
+    /// (`chat::used`; the selected one too) that weren't closed since. A fixture or a render, with
+    /// no settings to remember uses in, shows every row.
     pub(super) fn open_rows(&self, all: Vec<Session>) -> Vec<Session> {
+        let remembers = self.root.fixture.is_none();
         all.into_iter()
+            .filter(|s| {
+                !remembers
+                    || used::shown(s, &self.used)
+                    || self.selected.as_deref() == Some(s.agent.id.as_str())
+            })
             .filter(|s| !closed::is_closed(s, &self.closed))
             .collect()
     }
@@ -194,6 +220,9 @@ impl ChatView {
         }
         closed::close(&mut self.closed, &ids, now_ms() as f64 / 1000.0);
         self.save_closed();
+        if used::forget(&mut self.used, &ids) {
+            self.save_used();
+        }
         let all = std::mem::take(&mut self.sessions);
         self.sessions = self.open_rows(all);
         let gone = self.selected.as_ref().is_some_and(|sel| ids.contains(sel));

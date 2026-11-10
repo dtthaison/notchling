@@ -173,6 +173,8 @@ pub struct ChatView {
     pending_session: Option<PendingSession>,
     /// Codex and Antigravity rows closed in Chat (`chat::closed`), kept in the settings file.
     closed: std::collections::HashMap<String, f64>,
+    /// Codex and Antigravity rows used in Chat (`chat::used`): only these are in the Sidebar.
+    used: std::collections::HashMap<String, f64>,
     /// The accounts store the header's meters and account menu read, and the switch feed.
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
@@ -427,6 +429,7 @@ impl ChatView {
             phone_dot: false,
             pending_session: None,
             closed: std::collections::HashMap::new(),
+            used: std::collections::HashMap::new(),
             _appearance_changes: changes,
             _parts_escape: parts_escape,
         };
@@ -623,6 +626,7 @@ impl ChatView {
             return;
         }
         self.selected = Some(id.to_owned());
+        self.mark_used(id);
         self.conversation = Conversation::default();
         self.subagents.clear();
         self.prompt.transcript = None;
