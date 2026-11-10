@@ -4,14 +4,15 @@
 
 use gpui::{
     div, font, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
-    InteractiveText, SharedString, StrikethroughStyle, StyledText, TextRun, UnderlineStyle,
+    InteractiveText, MouseButton, SharedString, StrikethroughStyle, StyledText, TextRun,
+    UnderlineStyle,
 };
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SYSTEM_FONT};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use crate::chat::markdown::{blocks, spans, Block, ListItem, Span};
+use crate::chat::markdown::{blocks, spans, Block, LinkPress, ListItem, Span};
 
 /// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
@@ -37,13 +38,36 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
         return styled.into_any_element();
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
-    InteractiveText::new(SharedString::from(format!("md-{key}")), styled)
-        .on_click(ranges, move |index, window, cx| {
-            if let Some(url) = urls.get(index) {
+    let layout = styled.layout().clone();
+    let hand = ranges.clone();
+    let link_at = move |position| {
+        let index = layout.index_for_position(position).ok()?;
+        ranges.iter().position(|r| r.contains(&index))
+    };
+    let pressed = link_at.clone();
+    let (down_key, up_key) = (key.to_owned(), key.to_owned());
+    let id = SharedString::from(format!("md-{key}"));
+    // The pointing hand over links comes from the clickable text; the click itself is ours, on
+    // listeners that are there every frame (`LinkPress`).
+    let text = InteractiveText::new(id.clone(), styled).on_click(hand, |_, _, _| {});
+    div()
+        .id(id)
+        .on_mouse_down(MouseButton::Left, move |event, _, _| {
+            PRESS.with(|p| p.borrow_mut().down(&down_key, pressed(event.position)));
+        })
+        .on_mouse_up(MouseButton::Left, move |event, window, cx| {
+            let open = PRESS.with(|p| p.borrow_mut().up(&up_key, link_at(event.position)));
+            if let Some(url) = open.and_then(|i| urls.get(i)) {
                 super::page_panel::follow_link(url, window, cx);
             }
         })
+        .child(text)
         .into_any_element()
+}
+
+thread_local! {
+    /// The link press under way; one pointer, so one press at a time.
+    static PRESS: std::cell::RefCell<LinkPress> = std::cell::RefCell::new(LinkPress::default());
 }
 
 fn run(span: &Span, weight: FontWeight, ink: Ink, a: Appearance) -> TextRun {

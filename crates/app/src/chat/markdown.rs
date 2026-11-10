@@ -428,9 +428,52 @@ fn link(rest: &str) -> Option<(&str, &str, usize)> {
     Some((label, url, close + 2 + end + 1))
 }
 
+/// A press on a message's link, held from mouse down to mouse up: the link opens when the button
+/// comes up over the link it went down on. Kept here rather than in GPUI's clickable text, which
+/// listens for the release only after a redraw, so a quick click on a long conversation (a slow
+/// frame) was missed and took a second click.
+#[derive(Default, Debug)]
+pub struct LinkPress {
+    /// The text's key and the link's index there.
+    down: Option<(String, usize)>,
+}
+
+impl LinkPress {
+    /// The button went down over `link` (the index of the link under it, if any) in text `key`.
+    pub fn down(&mut self, key: &str, link: Option<usize>) {
+        self.down = link.map(|i| (key.to_owned(), i));
+    }
+
+    /// The button came up over `link` in text `key`: the link to open, when it's the one pressed.
+    pub fn up(&mut self, key: &str, link: Option<usize>) -> Option<usize> {
+        let (k, i) = self.down.take()?;
+        (k == key && link == Some(i)).then_some(i)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_opens_on_one_press_and_release_over_it() {
+        let mut press = LinkPress::default();
+        press.down("i3-0", Some(1));
+        assert_eq!(press.up("i3-0", Some(1)), Some(1));
+        // Released: a second release alone opens nothing.
+        assert_eq!(press.up("i3-0", Some(1)), None);
+    }
+
+    #[test]
+    fn a_press_that_ends_somewhere_else_opens_nothing() {
+        let mut press = LinkPress::default();
+        press.down("i3-0", Some(1));
+        assert_eq!(press.up("i3-0", Some(0)), None);
+        press.down("i3-0", Some(1));
+        assert_eq!(press.up("i4-0", Some(1)), None);
+        press.down("i3-0", None);
+        assert_eq!(press.up("i3-0", Some(1)), None);
+    }
 
     fn item(marker: &str, text: &str, depth: usize) -> ListItem {
         ListItem {
