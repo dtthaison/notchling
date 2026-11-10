@@ -60,7 +60,7 @@ fn setup(dir: &Dir) -> PagesSetup {
             lanes_file: dir.path("data/lanes.json"),
         },
         codex_sessions: dir.path("codex/sessions"),
-        cache: Some(dir.path("data/daemon/search-index.json")),
+        cache: Some(dir.path("data/daemon/search.db")),
     }
 }
 
@@ -378,7 +378,7 @@ fn reads_leave_the_swift_apps_folder_alone() {
         "the pages folder is read, not written"
     );
     // The index cache is the daemon's own file, not the Swift app's.
-    assert!(dir.path("data/daemon/search-index.json").exists());
+    assert!(dir.path("data/daemon/search.db").exists());
     assert!(!dir.path("data/search-index.json").exists());
 }
 
@@ -435,7 +435,7 @@ fn the_setup_follows_the_layout() {
     assert_eq!(s.codex_sessions, PathBuf::from("/r/codex/sessions"));
     assert_eq!(
         s.cache,
-        Some(PathBuf::from("/r/notchling/daemon/search-index.json"))
+        Some(PathBuf::from("/r/notchling/daemon/search.db"))
     );
     // A daemon given a socket (a test) keeps no cache file.
     let with_socket = Layout::resolve(
@@ -459,7 +459,7 @@ fn the_setup_follows_the_layout() {
         .cache
         .as_ref()
         .unwrap()
-        .ends_with("Notchling/daemon/search-index.json"));
+        .ends_with("Notchling/daemon/search.db"));
     assert_eq!(
         s.pages_dir,
         PathBuf::from("/Users/me/Library/Application Support/Notchling/pages")

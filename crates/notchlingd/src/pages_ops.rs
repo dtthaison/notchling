@@ -101,7 +101,7 @@ pub struct PagesSetup {
 impl PagesSetup {
     /// From the daemon's layout. The library is the data folder's `pages`, which on a real run is
     /// the Swift app's folder, so it is read-only. The cache is the daemon's own file
-    /// (`<data dir>/daemon/search-index.json`), never the Swift app's `search-index.json`; a
+    /// (`<data dir>/daemon/search.db`), never the Swift app's `search-index.json`; a
     /// daemon given `--socket` (a test) keeps none.
     pub fn from_layout(layout: &Layout) -> PagesSetup {
         let roots = layout.roots();
@@ -123,7 +123,7 @@ impl PagesSetup {
             roots,
             codex_sessions: codex_home.join("sessions"),
             cache: (!layout.socket_given)
-                .then(|| layout.data_dir.join("daemon").join("search-index.json")),
+                .then(|| layout.data_dir.join("daemon").join("search.db")),
         }
     }
 }

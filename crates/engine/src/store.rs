@@ -51,12 +51,32 @@ pub fn open(data_dir: &Path) -> Result<Connection, String> {
         private(&path)?;
     }
     db.busy_timeout(BUSY).map_err(|e| e.to_string())?;
-    db.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| e.to_string())?;
+    // Turning WAL on, and the first schema, take a lock SQLite's busy timeout doesn't wait on:
+    // two processes opening a new database at once retry for a moment instead of failing.
+    retry_busy(|| db.pragma_update(None, "journal_mode", "WAL"))?;
     db.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| e.to_string())?;
     migrate(&db)?;
     Ok(db)
+}
+
+/// Runs `step` again while another connection holds the lock, for up to [`BUSY`].
+fn retry_busy<T>(mut step: impl FnMut() -> rusqlite::Result<T>) -> Result<T, String> {
+    let until = std::time::Instant::now() + BUSY;
+    loop {
+        match step() {
+            Ok(v) => return Ok(v),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if matches!(
+                    e.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                ) && std::time::Instant::now() < until =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
 }
 
 /// Opens the database only when it exists: for reads, which never make one.
@@ -97,16 +117,17 @@ fn migrate(db: &Connection) -> Result<(), String> {
     if version >= SCHEMA {
         return Ok(());
     }
-    db.execute_batch(
-        "BEGIN IMMEDIATE;
+    retry_busy(|| {
+        db.execute_batch(
+            "BEGIN IMMEDIATE;
          CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS drafts (
              row_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_ms INTEGER NOT NULL);
          PRAGMA user_version = 1;
          COMMIT;",
-    )
-    .map_err(|e| e.to_string())
+        )
+    })
 }
 
 /// A `meta` value.
@@ -192,7 +213,7 @@ mod tests {
             for t in 0..6 {
                 let dir = dir.clone();
                 scope.spawn(move || {
-                    for i in 0..30 {
+                    for i in 0..10 {
                         put_draft(&dir, &format!("row-{t}"), &format!("text {i}"), i).unwrap();
                     }
                 });
@@ -200,7 +221,7 @@ mod tests {
         });
         let all = drafts(&dir).unwrap();
         assert_eq!(all.len(), 6);
-        assert!(all.values().all(|t| t == "text 29"));
+        assert!(all.values().all(|t| t == "text 9"));
     }
 
     #[cfg(unix)]

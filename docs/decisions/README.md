@@ -21,6 +21,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0011](0011-one-owner-per-resource.md) | One owner per resource while the Swift app and the daemon run side by side | Accepted |
 | [0012](0012-remote-computers.md) | Remote computers: identity by certificate, host-qualified session ids, nothing replicated | Proposed |
 | [0013](0013-page-panel-web-view.md) | A web view in Chat's page panel, and the live claude.ai page | Proposed |
+| [0014](0014-app-data-in-sqlite.md) | The app's own data in SQLite, and search by bm25 | Accepted |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

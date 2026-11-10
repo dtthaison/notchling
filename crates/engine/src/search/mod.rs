@@ -48,6 +48,7 @@
 //!   lowercased text; [`highlights`] returns nothing if lowercasing changed the snippet's length.
 
 mod builder;
+pub mod fts;
 pub mod index;
 mod meta;
 mod pages;

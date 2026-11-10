@@ -359,7 +359,7 @@ fn a_file_that_vanishes_or_cannot_be_read_does_not_stop_the_scan() {
 }
 
 #[test]
-fn the_cache_carries_the_index_to_the_next_start() {
+fn the_database_carries_the_index_to_the_next_start() {
     let dir = TempDir::new("idx-cache");
     transcript(
         &dir,
@@ -367,23 +367,14 @@ fn the_cache_carries_the_index_to_the_next_start() {
         &[user("remember me please", "/w/a")],
         10.0,
     );
-    let cache = dir.path("daemon/search-index.json");
+    let db = dir.path("daemon/search.db");
     let r = roots(&dir);
-    let first = SessionIndex::new(Some(cache.clone()));
+    let first = SessionIndex::new(Some(db.clone()));
     first.refresh(&r, now());
-    assert!(cache.exists());
-    // The Swift app's shape.
-    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
-    assert_eq!(raw["version"], CACHE_VERSION);
-    assert_eq!(raw["sessions"][0]["meta"]["toolKey"], "claude");
-    assert_eq!(raw["sessions"][0]["meta"]["sessionID"], "a");
-    assert!(raw["sessions"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("remember me"));
+    assert!(db.exists());
 
-    // A new index answers from the cache before it reads anything, and reuses the entry.
-    let second = SessionIndex::new(Some(cache.clone()));
+    // A new index answers from the database before it reads anything, and reuses the entry.
+    let second = SessionIndex::new(Some(db.clone()));
     second.load_cache();
     assert_eq!(keys(&second, &["remember"]), vec!["claude:a"]);
     let stats = second.refresh(&r, now());
@@ -391,7 +382,28 @@ fn the_cache_carries_the_index_to_the_next_start() {
 }
 
 #[test]
-fn a_cache_of_another_version_or_damaged_is_rebuilt() {
+fn bm25_ranks_first_and_a_word_inside_another_still_finds_by_substring() {
+    let dir = TempDir::new("idx-bm25");
+    transcript(
+        &dir,
+        "claude/projects/p/a.jsonl",
+        &[user("the ranking test fails", "/w")],
+        10.0,
+    );
+    let index = SessionIndex::new(None);
+    index.refresh(&roots(&dir), now());
+    assert_eq!(
+        keys(&index, &["rank"]),
+        vec!["claude:a"],
+        "a prefix, by bm25"
+    );
+    assert_eq!(keys(&index, &["anking"]), vec!["claude:a"], "inside a word");
+    let hit = &index.search(&["ranking"], now(), 5)[0];
+    assert!(hit.snippet.as_deref().unwrap_or("").contains("ranking"));
+}
+
+#[test]
+fn a_damaged_database_is_set_aside_and_rebuilt() {
     let dir = TempDir::new("idx-version");
     transcript(
         &dir,
@@ -399,27 +411,18 @@ fn a_cache_of_another_version_or_damaged_is_rebuilt() {
         &[user("rebuild me", "/w")],
         10.0,
     );
-    let cache = dir.path("daemon/search-index.json");
+    let db = dir.path("daemon/search.db");
     let r = roots(&dir);
-    SessionIndex::new(Some(cache.clone())).refresh(&r, now());
-
-    let mut raw: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
-    raw["version"] = serde_json::json!(CACHE_VERSION + 1);
-    // A stale entry the rebuild must not trust.
-    raw["sessions"][0]["text"] = serde_json::json!("stale words");
-    std::fs::write(&cache, raw.to_string()).unwrap();
-    let rebuilt = SessionIndex::new(Some(cache.clone()));
-    let stats = rebuilt.refresh(&r, now());
-    assert_eq!(stats.read, 1, "read again, not reused");
-    assert_eq!(keys(&rebuilt, &["stale"]), Vec::<String>::new());
-    assert_eq!(keys(&rebuilt, &["rebuild"]), vec!["claude:a"]);
-
-    std::fs::write(&cache, "{ not json").unwrap();
-    let damaged = SessionIndex::new(Some(cache));
+    std::fs::create_dir_all(dir.path("daemon")).unwrap();
+    std::fs::write(&db, "{ not a database").unwrap();
+    let damaged = SessionIndex::new(Some(db.clone()));
     damaged.load_cache();
     assert!(damaged.is_empty());
     assert_eq!(damaged.refresh(&r, now()).read, 1);
+    assert_eq!(keys(&damaged, &["rebuild"]), vec!["claude:a"]);
+    let again = SessionIndex::new(Some(db));
+    again.load_cache();
+    assert_eq!(again.len(), 1, "the new database was kept");
 }
 
 #[test]

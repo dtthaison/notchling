@@ -194,7 +194,7 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
 
     // The daemon read; it wrote the pages folder not at all, and its cache is its own.
     assert_eq!(std::fs::read(&list_file).unwrap(), list_before);
-    assert!(root.join("notchling/daemon/search-index.json").exists());
+    assert!(root.join("notchling/daemon/search.db").exists());
     assert!(!root.join("notchling/search-index.json").exists());
 
     // Without a daemon the same commands read the library themselves, with the same text.

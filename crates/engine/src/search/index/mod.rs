@@ -1,8 +1,9 @@
 //! E7: the session index behind ⌘⇧P, ported from the Swift app's `SessionIndex`. It lists the
 //! recent conversations (Claude Code transcripts under every config folder, Codex rollouts, and
 //! Antigravity titles), reads only the files that changed, and keeps their searchable text in
-//! memory and in a cache file so the next start begins from it. Matching and ranking are
-//! [`crate::search::rank`].
+//! memory and in a SQLite database ([`crate::search::fts`]) so the next start begins from it. A
+//! query is ranked there by bm25 over an FTS5 table; when that finds nothing, the substring match
+//! of [`crate::search::rank`] runs over the sessions in memory (a word inside another word).
 //!
 //! # Roots are parameters
 //!
@@ -25,17 +26,17 @@
 //! at most about 4 MB whatever its size, and an entry holds at most
 //! [`crate::search::MAX_CHARS`] characters.
 //!
-//! # The cache
+//! # The database
 //!
-//! `{"version": 2, "sessions": [{"meta": {...}, "text": "..."}]}`, the Swift app's shape, but the
-//! daemon keeps its own file in its own folder (the caller picks the path), so it never writes the
-//! Swift app's `search-index.json`. A different version, or damage, rebuilds the index.
+//! The caller picks the path (the daemon's own folder, never the Swift app's `search-index.json`).
+//! A refresh writes only the sessions it read or dropped. A database that can't be opened leaves
+//! the index in memory only; another schema version is rebuilt.
 
-mod cache;
 mod read;
 mod scan;
 
-use super::{rank, IndexedSession, SessionHit, SessionMeta, SessionTool};
+use super::fts::SearchDb;
+use super::{rank, snippet, IndexedSession, SessionHit, SessionMeta, SessionTool, DEFAULT_RADIUS};
 use read::Read1;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -50,8 +51,6 @@ pub const WHOLE_FILE_BYTES: u64 = 4_000_000;
 pub const HEAD_BYTES: u64 = 200_000;
 /// ...and the last (the newest text).
 pub const TAIL_BYTES: u64 = 3_500_000;
-/// The cache file's version; bump it when the stored fields change.
-pub const CACHE_VERSION: u32 = 2;
 
 /// One Claude Code config folder's transcripts.
 #[derive(Clone, Debug)]
@@ -108,7 +107,7 @@ struct State {
 pub struct SessionIndex {
     state: Mutex<State>,
     refreshing: AtomicBool,
-    cache: Option<PathBuf>,
+    db: Option<SearchDb>,
 }
 
 /// Lets go of the "refreshing" flag however the refresh ends.
@@ -121,12 +120,16 @@ impl Drop for Flag<'_> {
 }
 
 impl SessionIndex {
-    /// An index that loads and saves its cache at `cache` (none: memory only).
-    pub fn new(cache: Option<PathBuf>) -> SessionIndex {
+    /// An index kept in the database at `db` (none, or one that can't be opened: memory only,
+    /// still ranked by bm25 in a database in memory).
+    pub fn new(db: Option<PathBuf>) -> SessionIndex {
+        let db = db
+            .and_then(|path| SearchDb::open(&path).ok())
+            .or_else(|| SearchDb::memory().ok());
         SessionIndex {
             state: Mutex::new(State::default()),
             refreshing: AtomicBool::new(false),
-            cache,
+            db,
         }
     }
 
@@ -142,8 +145,8 @@ impl SessionIndex {
             return;
         }
         state.loaded = true;
-        if let Some(path) = &self.cache {
-            state.sessions = cache::load(path);
+        if let Some(db) = &self.db {
+            state.sessions = db.sessions();
         }
     }
 
@@ -176,7 +179,31 @@ impl SessionIndex {
         if words.iter().all(|w| w.as_ref().is_empty()) {
             return super::latest(&state.sessions, limit);
         }
-        rank(words, &state.sessions, now, limit)
+        let ranked = self
+            .db
+            .as_ref()
+            .map(|db| db.rank(words, now, limit))
+            .unwrap_or_default();
+        let by_key: HashMap<&str, &IndexedSession> = state
+            .sessions
+            .iter()
+            .map(|s| (s.meta.key.as_str(), s))
+            .collect();
+        let hits: Vec<SessionHit> = ranked
+            .into_iter()
+            .filter_map(|(key, score)| {
+                let s = by_key.get(key.as_str())?;
+                Some(SessionHit {
+                    meta: s.meta.clone(),
+                    snippet: snippet(s, words, DEFAULT_RADIUS),
+                    score,
+                })
+            })
+            .collect();
+        if hits.is_empty() {
+            return rank(words, &state.sessions, now, limit);
+        }
+        hits
     }
 
     /// Reads what changed under `roots` as of `now` (seconds since 1970). Blocks for the file
@@ -216,7 +243,8 @@ impl SessionIndex {
         let mut live: HashSet<String> = HashSet::new();
         let mut empty: HashMap<String, (f64, i64)> = HashMap::new();
         let mut batch: Vec<IndexedSession> = Vec::new();
-        let mut changed = false;
+        // Every session read or retitled, for the database at the end.
+        let mut written: Vec<IndexedSession> = Vec::new();
         for candidate in candidates {
             let key = candidate.meta.key.clone();
             let stamp = (candidate.meta.modified, candidate.meta.size);
@@ -232,8 +260,8 @@ impl SessionIndex {
             match read::read(&candidate.meta, candidate.tool) {
                 Read1::Built(session) => {
                     stats.read += 1;
+                    written.push((*session).clone());
                     batch.push(*session);
-                    changed = true;
                     // Search works while the first scan is still going.
                     if batch.len() >= 25 {
                         self.merge(std::mem::take(&mut batch));
@@ -270,23 +298,28 @@ impl SessionIndex {
                 if existing.get(meta.key.as_str()) == Some(&&meta) {
                     continue;
                 }
-                batch.push(IndexedSession::new(meta, row.title.clone()));
-                changed = true;
+                let session = IndexedSession::new(meta, row.title.clone());
+                written.push(session.clone());
+                batch.push(session);
             }
         }
 
         let mut state = self.lock();
         merge_into(&mut state.sessions, batch);
-        let before = state.sessions.len();
+        let gone: Vec<String> = state
+            .sessions
+            .iter()
+            .filter(|s| !live.contains(&s.meta.key))
+            .map(|s| s.meta.key.clone())
+            .collect();
         state.sessions.retain(|s| live.contains(&s.meta.key));
-        stats.dropped = before - state.sessions.len();
+        stats.dropped = gone.len();
         state.empty = empty;
         state.refreshed_at = Some(now);
-        if changed || stats.dropped > 0 {
-            if let Some(path) = &self.cache {
-                // Best effort: an index that can't be cached still works.
-                let _ = cache::save(path, &state.sessions);
-            }
+        if let Some(db) = &self.db {
+            // Best effort: an index that can't be kept on disk still works from memory.
+            let _ = db.put(&written);
+            let _ = db.remove(&gone);
         }
         stats
     }
