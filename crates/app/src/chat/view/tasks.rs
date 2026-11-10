@@ -24,7 +24,7 @@ use crate::phone::bridge::now_ms;
 pub const OPEN_ID: &str = "tasks-open";
 
 /// The bar sits this far under the header.
-const TOP: f32 = 12.0;
+const TOP: f32 = 16.0;
 /// The folded bar's height: 10 + 10 padding, a 16 pt line, the 1 pt border each side.
 const FOLDED_HEIGHT: f32 = 38.0;
 /// How much room the conversation leaves above its first row so the folded bar doesn't cover it.

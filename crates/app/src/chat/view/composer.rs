@@ -10,7 +10,8 @@
 //! (`chat::drops`, the drop target is the column in `view::mod`); the card's edge turns accent
 //! while one is over it. Under the card, one row: the model or options picker at the left (for a Claude
 //! Code session the Model and Effort pickers, `chat::claude_picker`), the
-//! status line (the error, "Sending…", what waits, or why the box is off) and the usage-limit ring
+//! status line (the error, "Sending…", what waits, or why the box is off), the context meter, the
+//! session's account and the usage-limit ring
 //! (`view::limit_ring`). Above it, the question or permission a Claude Code session waits on
 //! (`view::prompts`), an Antigravity permission card when the daemon holds one for the row, and the picker's pop-up. Disabled while acting isn't on; the reason is the status
 //! line, and only there.
@@ -752,6 +753,21 @@ fn add_button(
     Some(div().relative().flex_shrink_0().child(b).children(menu))
 }
 
+/// How full the session's context is (the latest request's tokens against the model's window).
+fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let session = view.selected_session()?;
+    let h = crate::chat::header::header(session, &view.conversation, &view.root.home);
+    let context = h.context?;
+    Some(
+        super::header::chip(&format!("Context {context}"), a).part_at(
+            "Context Meter",
+            Corner::Top,
+            a,
+            cx,
+        ),
+    )
+}
+
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
     let mut control = view.composer_control(cx);
     // A render forcing a state has no acting; the box is drawn as if it could take input.
@@ -856,7 +872,8 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
                 .min_w(px(0.0))
                 .children(status(view, control, a, cx)),
         )
-        // The session's account, beside its limits: click to switch or add one.
+        // The session's context, then its account and limits: click the account to switch or add one.
+        .children(context_meter(view, a, cx))
         .children(
             super::accounts::account_control(view, a, cx)
                 .map(|b| b.part_at("Account Menu", Corner::Top, a, cx)),

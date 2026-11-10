@@ -1,13 +1,12 @@
-//! The header over the conversation: avatar, title, folder and host, context. The limits are the
-//! reply box's ring, the shells and status are in the Details Panel and the Sidebar.
+//! The header over the conversation: the session's title and the window's buttons. The context,
+//! the account and the limits are under the reply box; the folder, host, model, shells and status
+//! are in the Details Panel and the Sidebar.
 
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{AVATAR, SIDE_PADDING};
+use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{
-    avatar, button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled,
-};
+use notchling_kit::ui::{button_with, hsla, icon_button, label, phone_mark, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::phone::{BUTTON_TIP_OFF, BUTTON_TIP_ON};
@@ -16,8 +15,8 @@ use super::ChatView;
 use crate::chat::header::header;
 use crate::mac::gate;
 
-/// A small raised chip of meta text (the context meter, the shells count).
-fn chip(text: &str, a: Appearance) -> Div {
+/// A small raised chip of meta text (the context meter under the reply box).
+pub(super) fn chip(text: &str, a: Appearance) -> Div {
     div()
         .h(px(20.0))
         .px(px(8.0))
@@ -101,7 +100,7 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     let bar = div()
-        .h(px(56.0))
+        .h(px(48.0))
         .flex_shrink_0()
         .px(px(SIDE_PADDING))
         .flex()
@@ -121,48 +120,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             .part_at("Header", Corner::Bottom, a, cx);
     };
     let h = header(session, &view.conversation, &view.root.home);
-    let subtitle = match &h.model {
-        Some(model) => format!("{} · {} · {}", h.folder, h.host, model),
-        None => format!("{} · {}", h.folder, h.host),
-    };
     bar.child(
-        avatar(&h.title, AVATAR, Some(h.status), Ink::Window, a).part_at(
-            "Avatar",
-            Corner::Bottom,
-            a,
-            cx,
-        ),
-    )
-    .child(
-        // Clipped: when the header is narrow the project line elides first, and the account button
-        // never spills over the limit meters beside it.
-        div()
+        label(&h.title, TypeRole::Heading, Ink::Text, a)
             .flex_1()
             .min_w(px(0.0))
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .child(
-                label(&h.title, TypeRole::Heading, Ink::Text, a)
-                    .elide()
-                    .part_at("Session Name", Corner::Trailing, a, cx),
-            )
-            .child(
-                label(&subtitle, TypeRole::Meta, Ink::TextMuted, a)
-                    .w_full()
-                    .elide()
-                    .part_at("Project Line", Corner::BottomLeading, a, cx),
-            ),
+            .elide()
+            .part_at("Session Name", Corner::Trailing, a, cx),
     )
-    .when_some(h.context.as_deref(), |bar, context| {
-        bar.child(chip(&format!("Context {context}"), a).part_at(
-            "Context Meter",
-            Corner::Bottom,
-            a,
-            cx,
-        ))
-    })
     .child(details_button(view, a, cx))
     .child(super::terminal::button(view, a, cx))
     .child(super::simulator::button_in_header(view, a, cx))

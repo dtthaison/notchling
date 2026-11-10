@@ -145,7 +145,7 @@ impl RenderOnce for Panel {
 
         let sections = [
             ("Tasks", "Task Panel", i.tasks_title(), tasks),
-            ("Facts", "Session Facts", "Facts".to_owned(), facts),
+            ("Facts", "Session Facts", "Session".to_owned(), facts),
             ("Subagents", "Subagents", i.subagents_title(), subagents),
             ("Shells", "Background Shells", i.shells_title(), shells),
         ];
@@ -155,6 +155,7 @@ impl RenderOnce for Panel {
             .min_h(px(0.0))
             .overflow_y_scroll()
             .px(px(SIDE_PADDING))
+            .pt(px(16.0))
             .pb(px(SIDE_PADDING))
             .flex()
             .flex_col()
