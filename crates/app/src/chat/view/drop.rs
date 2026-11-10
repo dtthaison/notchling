@@ -1,6 +1,7 @@
 //! Files dropped on the middle column (header, conversation, reply box), as the Swift
 //! `SessionDetail` takes them on its conversation column: the paths go into the reply box at the
-//! caret (`chat::drops`) and the caret comes back to the box. While a drag is over the column a
+//! caret (`chat::drops`; a screenshot thumbnail's short-lived file is copied first, under the data
+//! folder's `drops/`) and the caret comes back to the box. While a drag is over the column a
 //! hint covers it (a wash with a dashed accent edge and one sentence), drawn with the kit's inks
 //! and never taking the mouse; the composer's own edge turns accent as well. Nothing is offered
 //! while the composer is off (acting off, a read-only session): no target, no hint.
@@ -66,9 +67,15 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The screenshot thumbnail's file is gone soon after the drop: the box gets a copy that stays.
+        let paths = drops::keep(
+            paths,
+            &self.root.data_dir.join("drops"),
+            crate::phone::bridge::now_ms(),
+        );
         self.tools.editor.update(cx, |editor, cx| {
             let mut edit = editor.edit().clone();
-            if drops::insert_paths(&mut edit, paths) {
+            if drops::insert_paths(&mut edit, &paths) {
                 editor.set_edit(edit, cx);
             }
             editor.focus(window);
