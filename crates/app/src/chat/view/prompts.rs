@@ -192,6 +192,9 @@ impl ChatView {
         }
         self.prompt.sending = true;
         self.prompt.error = None;
+        // As a sent message does: the answer and what the session does next show at the end.
+        self.follow_sent = true;
+        self.conversation_scroll.scroll_to_bottom();
         let actions = self.acts(cx).actions;
         cx.spawn(async move |this, cx| {
             let result = cx
