@@ -2,16 +2,16 @@
 //! Chat's unsent replies (`drafts`), settings (`settings`, a row per key) and every other file
 //! Notchling alone used to rewrite whole (`docs`, a row per former file, changed in one transaction
 //! so two writers never lose each other's change; [`import_file`] moves the old file in once).
-//! Each value is its own row, so the app and the daemon
-//! writing at once each keep their change (the whole-file JSON rewrite lost one of them), and a
-//! crash mid-write leaves the last committed state.
+//! Each value is its own row, so the app and the daemon writing at once each keep their change
+//! (the whole-file JSON rewrite lost one of them), and a crash mid-write leaves the last committed
+//! state.
 //!
 //! The file is 0600 in a 0700 folder Notchling makes (a folder already there is left alone), in WAL
 //! mode with a busy timeout so concurrent writers wait instead of failing. A symlink where the
 //! database belongs is refused: the file is Notchling's own, so a planted link must not steer writes.
 //!
-//! Files other programs read (`lanes.json`, `pages.json`, `machines.json`, the bridge's files,
-//! Claude Code's `settings.json`) stay as they are.
+//! Files other programs read (`lanes.json`, `pages.json`, the Swift app's `machines.json` and
+//! `vault.json`, the bridge's files, Claude Code's `settings.json`) stay as they are.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
