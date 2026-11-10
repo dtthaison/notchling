@@ -16,6 +16,7 @@ pub mod codex_list;
 pub mod composer;
 pub mod data;
 pub mod drops;
+pub mod escape;
 pub mod follow;
 pub mod format;
 pub mod header;

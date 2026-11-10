@@ -312,12 +312,28 @@ impl ChatView {
             if keys.key != "escape" {
                 return;
             }
-            if parts_on(cx) {
-                set_parts(cx, false);
-            } else if this.composer.close_menu() | this.tools.picker.take().is_some() {
-                cx.notify();
-            } else if !this.overlay_open && this.selected_working() {
-                this.stop(cx);
+            use crate::chat::escape::{escape, Escape, Open};
+            let open = Open {
+                parts: parts_on(cx),
+                menu: this.composer.is_open() || this.tools.picker.is_some(),
+                popup: this.sheet.is_some() || this.phone.is_some() || this.account_menu,
+                working: this.selected_working(),
+            };
+            match escape(open) {
+                Escape::HideParts => set_parts(cx, false),
+                Escape::CloseMenu => {
+                    this.composer.close_menu();
+                    this.tools.picker = None;
+                    cx.notify();
+                }
+                Escape::ClosePopup => {
+                    this.sheet = None;
+                    this.phone = None;
+                    this.account_menu = false;
+                    cx.notify();
+                }
+                Escape::Stop => this.stop(cx),
+                Escape::Nothing => {}
             }
         });
         let (accounts, switches) = crate::accounts::window::app_stores(cx);

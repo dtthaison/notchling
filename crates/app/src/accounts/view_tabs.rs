@@ -106,7 +106,7 @@ impl AccountsView {
             .fill(Ink::Card, a)
             .border_b(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
-            .children(done)
+            // Balances Refresh and Done on the right, so the tabs stay centred.
             .child(div().flex_1())
             .child(segmented(
                 "accounts-tab",
@@ -116,8 +116,16 @@ impl AccountsView {
                 cx,
                 pick,
             ))
-            .child(div().flex_1())
-            .child(refresh)
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .child(refresh)
+                    .children(done),
+            )
     }
 
     pub(super) fn cost_tab(
