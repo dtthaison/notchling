@@ -83,6 +83,7 @@ pub(crate) fn world(
         }),
         now_ms: Arc::new(|| 1_800_000_000_000),
         config_file: d.0.join("home/.claude.json"),
+        data_dir: d.0.join("data"),
         list_file: d.0.join("data/daemon/accounts.json"),
         lanes: LaneStore::new(&d.0.join("home"), &d.0.join("data")),
     };

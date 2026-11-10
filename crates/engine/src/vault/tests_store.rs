@@ -1,7 +1,8 @@
-//! The store against a fake Keychain item and a temp `vault.json` (Swift `VaultStoreRenameTests`,
+//! The store against a fake Keychain item and a temp database (Swift `VaultStoreRenameTests`,
 //! plus saves, removes, Always Allow and the errors, which never hold a value).
 
 use super::entry::{Kind, VaultEntry, VaultValue};
+use super::list::VaultIndex;
 use super::store::{KeychainError, VaultError, VaultKeychain, VaultStore};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -45,8 +46,16 @@ impl Temp {
         std::fs::create_dir_all(&dir).unwrap();
         Temp(dir)
     }
-    fn index(&self) -> PathBuf {
+    /// The list as the daemon keeps it: a document in `<temp>/notchling.db`.
+    fn index(&self) -> VaultIndex {
+        VaultIndex::in_data(&self.0)
+    }
+    /// The file the list was before the database.
+    fn old_file(&self) -> PathBuf {
         self.0.join("daemon/vault.json")
+    }
+    fn text(&self) -> Option<String> {
+        crate::store::doc(&self.0, super::list::INDEX_DOC).unwrap()
     }
 }
 
@@ -71,6 +80,75 @@ fn store(tag: &str) -> (Temp, FakeItem, VaultStore) {
 }
 
 #[test]
+fn the_old_list_file_is_read_then_moved_in_by_the_first_save() {
+    let (temp, _item, store) = store("import");
+    std::fs::create_dir_all(temp.old_file().parent().unwrap()).unwrap();
+    let old = serde_json::to_string(&[VaultEntry::new("npm", Kind::Token)]).unwrap();
+    std::fs::write(temp.old_file(), old).unwrap();
+    assert_eq!(store.entries().unwrap()[0].name, "npm");
+    assert!(temp.old_file().exists());
+    assert!(!crate::store::exists(&temp.0), "reading made no database");
+    store
+        .save(
+            &VaultEntry::new("github", Kind::Token),
+            Some(value("fake-gh-0001")),
+            None,
+            "t",
+        )
+        .unwrap();
+    assert!(!temp.old_file().exists(), "moved in");
+    let names: Vec<String> = store
+        .entries()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert_eq!(names, ["github", "npm"]);
+    assert!(temp.text().is_some());
+}
+
+#[test]
+fn two_stores_saving_at_once_both_keep_their_entries() {
+    let temp = Temp::new("two-writers");
+    std::thread::scope(|scope| {
+        for t in 0..4 {
+            let index = temp.index();
+            scope.spawn(move || {
+                // each its own store, as the daemon and the Machines tool each have one
+                let store = VaultStore::new(index, Box::new(FakeItem::default()));
+                for i in 0..5 {
+                    let entry = VaultEntry::new(&format!("s{t}-{i}"), Kind::Token);
+                    store
+                        .save(&entry, Some(value("fake-0001")), None, "t")
+                        .unwrap();
+                }
+            });
+        }
+    });
+    assert_eq!(temp.index().read().unwrap().len(), 20);
+}
+
+#[test]
+fn the_stamp_follows_the_list_and_nothing_else() {
+    let temp = Temp::new("stamp");
+    let index = temp.index();
+    assert_eq!(index.stamp(), None);
+    let mut a = VaultEntry::new("a", Kind::Token);
+    a.updated = "2026-11-01T00:00:00Z".into();
+    index.write(std::slice::from_ref(&a)).unwrap();
+    let first = index.stamp().unwrap();
+    crate::store::put_doc(&temp.0, "elsewhere", "1").unwrap();
+    assert_eq!(
+        index.stamp(),
+        Some(first),
+        "another document doesn't change it"
+    );
+    a.updated = "2026-11-09T00:00:00Z".into();
+    index.write(&[a]).unwrap();
+    assert_ne!(index.stamp(), Some(first), "a same-length change does");
+}
+
+#[test]
 fn a_save_writes_the_list_0600_and_the_value_to_the_item_only() {
     let (temp, item, store) = store("save");
     let entry = VaultEntry::new("github", Kind::Token);
@@ -84,22 +162,18 @@ fn a_save_writes_the_list_0600_and_the_value_to_the_item_only() {
         .unwrap();
     assert!(saved.value_changed);
     assert_eq!(saved.entry.updated, "2026-11-08T00:00:00Z");
-    let text = std::fs::read_to_string(temp.index()).unwrap();
-    assert!(
-        !text.contains("fake-gh-token-0001"),
-        "no value in vault.json"
-    );
+    let text = temp.text().unwrap();
+    assert!(!text.contains("fake-gh-token-0001"), "no value in the list");
     assert!(text.contains("\"secretVar\": \"GITHUB_TOKEN\""), "{text}");
+    assert!(!temp.old_file().exists(), "no file is written any more");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(temp.index())
+        let mode = std::fs::metadata(crate::store::db_path(&temp.0))
             .unwrap()
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
-        let dir = std::fs::metadata(temp.index().parent().unwrap()).unwrap();
-        assert_eq!(dir.permissions().mode() & 0o777, 0o700);
     }
     assert_eq!(item.values()["github"]["secret"], "fake-gh-token-0001");
     assert_eq!(
@@ -148,15 +222,18 @@ fn an_empty_value_is_refused_and_nothing_is_written() {
         )
         .unwrap_err();
     assert_eq!(e.to_string(), "Enter the token.");
-    assert!(!temp.index().exists());
+    assert!(
+        !crate::store::exists(&temp.0),
+        "a refused save makes no database"
+    );
     assert!(item.data.lock().unwrap().is_none());
 }
 
 #[test]
 fn a_list_that_cant_be_read_is_left_alone() {
     let (temp, _item, store) = store("broken");
-    std::fs::create_dir_all(temp.index().parent().unwrap()).unwrap();
-    std::fs::write(temp.index(), b"{not a list").unwrap();
+    std::fs::create_dir_all(temp.old_file().parent().unwrap()).unwrap();
+    std::fs::write(temp.old_file(), b"{not a list").unwrap();
     let e = store
         .save(
             &VaultEntry::new("a", Kind::Token),
@@ -166,8 +243,11 @@ fn a_list_that_cant_be_read_is_left_alone() {
         )
         .unwrap_err();
     assert!(e.to_string().contains("can't be read"), "{e}");
-    assert_eq!(std::fs::read(temp.index()).unwrap(), b"{not a list");
+    assert_eq!(std::fs::read(temp.old_file()).unwrap(), b"{not a list");
+    assert_eq!(temp.text(), None, "nothing is written beside it");
     assert!(store.entries().is_err());
+    assert!(store.remove("a").is_err());
+    assert!(store.set_expires("a", None).is_err());
 }
 
 #[test]
@@ -190,20 +270,20 @@ fn a_rename_that_failed_at_the_list_finishes_on_the_second_try() {
     store
         .save(&old, Some(value("the-claude-token-value")), None, "t")
         .unwrap();
-    // The list's folder can't be written: the item is, the list isn't. (Root writes anyway.)
-    #[cfg(unix)]
-    if unsafe { libc::geteuid() } != 0 {
-        use std::os::unix::fs::PermissionsExt;
-        let folder = temp.index().parent().unwrap().to_path_buf();
-        let mode = |m| std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(m));
-        mode(0o500).unwrap();
-        let failed = store.rename(&old, "claude-worker", "t");
-        mode(0o700).unwrap();
-        assert!(failed.is_err());
-        let keys: Vec<String> = item.values().as_object().unwrap().keys().cloned().collect();
-        assert_eq!(keys, ["claude-worker"]);
-        assert_eq!(store.entries().unwrap()[0].name, "sd-claude");
-    }
+    // The list can't be changed (a trigger refuses the update): the item is, the list isn't.
+    let db = crate::store::open(&temp.0).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_vault BEFORE UPDATE ON docs
+         BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    let failed = store.rename(&old, "claude-worker", "t");
+    assert!(failed.is_err());
+    let keys: Vec<String> = item.values().as_object().unwrap().keys().cloned().collect();
+    assert_eq!(keys, ["claude-worker"]);
+    assert_eq!(store.entries().unwrap()[0].name, "sd-claude");
+    db.execute_batch("DROP TRIGGER refuse_vault").unwrap();
+    drop(db);
 
     let renamed = store.rename(&old, "claude-worker", "t").unwrap();
     assert!(
@@ -225,7 +305,7 @@ fn a_rename_that_failed_at_the_list_finishes_on_the_second_try() {
 fn a_rename_with_no_value_anywhere_refuses() {
     let (temp, _item, store) = store("norename");
     let old = VaultEntry::new("sd-claude", Kind::Token);
-    super::list::write_index(&temp.index(), std::slice::from_ref(&old)).unwrap();
+    temp.index().write(std::slice::from_ref(&old)).unwrap();
     assert!(store.rename(&old, "claude-worker", "t").is_err());
     assert_eq!(store.entries().unwrap()[0].name, "sd-claude");
 }

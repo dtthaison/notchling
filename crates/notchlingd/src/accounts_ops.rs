@@ -2,7 +2,9 @@
 //! `notchling_engine::accounts::claude` and `notchling_engine::lanes`. Built and switched off:
 //! while `accounts` is off every op but the two list reads answers `forbidden` with
 //! [`ACCOUNTS_OFF`], and nothing reads the Keychain, a token or the network, or writes a file.
-//! The two reads then use the daemon's own files only (the saved accounts list, `lanes.json`).
+//! The two reads then use the daemon's own data only (the saved accounts list, a document in
+//! `notchling.db` or, until a save moves it in, `<data>/daemon/accounts.json`; and `lanes.json`),
+//! and write nothing, not even a database.
 //! Besides the check at the top of [`AccountsOps::call`], the store's Keychain runner and HTTP
 //! client are gated on the switch too ([`GatedSecurity`], [`GatedHttp`]), so a path that forgot
 //! the check still reaches nothing.
@@ -187,6 +189,7 @@ impl AccountsOps {
             }),
             now_ms: Arc::new(crate::acting_ops::now_ms),
             config_file: home.join(".claude.json"),
+            data_dir: layout.data_dir.clone(),
             list_file: layout.data_dir.join("daemon").join("accounts.json"),
             lanes: LaneStore::new(&home, &layout.data_dir),
         };

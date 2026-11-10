@@ -17,7 +17,8 @@
 //! | `vault.request.cancel` | app | `{id}` | `{answered}` |
 //! | `vault.pending` | app | `{}` | `{approvals: [..], requests: [..]}`, the pending events below |
 //!
-//! `Entry` is `vault.json`'s shape: `{name, kind, note, url?, howTo?, expires?, userVar,
+//! The list is the `daemon/vault` document in `notchling.db` (the daemon's own `vault.json`
+//! moves in once; the Swift app's stays its own); `Entry` is its shape: `{name, kind, note, url?, howTo?, expires?, userVar,
 //! secretVar, ask?, updated}`. No reply but `vault.use`'s carries a value, and no event ever does.
 //!
 //! **Approval.** `vault.use` of an entry marked ask-first publishes `vault.approval.pending {id,
@@ -160,7 +161,7 @@ impl VaultOps {
         }
     }
 
-    /// The daemon's: its own `vault.json` ([`Layout::vault_index`]), the system's Keychain item
+    /// The daemon's: its own vault list ([`Layout::vault_index`]), the system's Keychain item
     /// (never under a fixture root, whatever the switch says) and its audit log.
     pub fn for_daemon(layout: &Layout, switch: Arc<SwitchFlag>, room: Arc<dyn Room>) -> VaultOps {
         let keychain: Box<dyn VaultKeychain> = if layout.fixture {
@@ -200,7 +201,7 @@ impl VaultOps {
     }
 
     /// The names the `notchling-vault` skill's description lists (`github (api.github.com)`),
-    /// read from `vault.json` only while the vault is on: none while off, when nothing reads it.
+    /// read from the vault list only while the vault is on: none while off, when nothing reads it.
     pub fn skill_names(&self) -> Vec<String> {
         if !self.switch.is_on() {
             return Vec::new();

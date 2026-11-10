@@ -4,7 +4,8 @@
 //!   of id → `{username, secret}`, behind [`VaultKeychain`]. On macOS it goes through the Security
 //!   framework ([`super::keychain_mac`]), so the item trusts only the build that wrote it; that is
 //!   the opposite of the account logins' rule, on purpose. Elsewhere it is [`Unsupported`].
-//! - The list is a `vault.json` the store is given (the daemon's own, never the Swift app's).
+//! - The list is a [`VaultIndex`] the store is given: a document in `notchling.db` (the daemon's
+//!   own, never the Swift app's `vault.json`; the daemon's old `daemon/vault.json` moves in once).
 //! - Values are read once and kept in memory until [`VaultStore::forget`].
 //!
 //! Every change, and every Keychain call, holds one lock, so a save can't interleave with
@@ -15,9 +16,8 @@
 //! failures are fixed texts, and the item's JSON is never quoted.
 
 use super::entry::{Kind, VaultEntry, VaultValue};
-use super::list::{self, IndexError};
+use super::list::{self, IndexError, VaultIndex};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 /// The item's service and account.
@@ -138,7 +138,7 @@ struct Cache {
 
 /// The values and the list.
 pub struct VaultStore {
-    index: PathBuf,
+    index: VaultIndex,
     keychain: Box<dyn VaultKeychain>,
     /// The lock every change and every Keychain call holds.
     changing: Mutex<()>,
@@ -147,7 +147,7 @@ pub struct VaultStore {
 }
 
 impl VaultStore {
-    pub fn new(index: PathBuf, keychain: Box<dyn VaultKeychain>) -> VaultStore {
+    pub fn new(index: VaultIndex, keychain: Box<dyn VaultKeychain>) -> VaultStore {
         VaultStore {
             index,
             keychain,
@@ -156,7 +156,7 @@ impl VaultStore {
         }
     }
 
-    pub fn index_path(&self) -> &std::path::Path {
+    pub fn index(&self) -> &VaultIndex {
         &self.index
     }
 
@@ -184,7 +184,7 @@ impl VaultStore {
     /// The list; a file that can't be read is an error, not an empty list.
     pub fn entries(&self) -> Result<Vec<VaultEntry>, VaultError> {
         let _held = self.lock();
-        Ok(list::read_index(&self.index)?)
+        Ok(self.index.read()?)
     }
 
     /// The entry with this name (any case).
@@ -246,7 +246,7 @@ impl VaultStore {
     ) -> Result<Saved, VaultError> {
         let _held = self.lock();
         let generation = self.generation();
-        let mut index = list::read_index(&self.index)?;
+        let index = self.index.read()?;
         if let Some(problem) = list::problem(entry, &index, old) {
             return Err(VaultError::Problem(problem));
         }
@@ -282,11 +282,15 @@ impl VaultStore {
         }
         values.insert(id.clone(), stored.clone());
         self.store(generation, values)?;
-        index.retain(|e| e.id() != id && Some(e.id()) != old_id);
         let mut saved = entry.clone();
         saved.updated = now.to_string();
-        index.push(saved.clone());
-        list::write_index(&self.index, &index)?;
+        // Applied to the list as it is in the transaction, so a save by another process since the
+        // read above is kept.
+        self.index.update(|mut list| {
+            list.retain(|e| e.id() != id && Some(e.id()) != old_id);
+            list.push(saved.clone());
+            Ok(list)
+        })?;
         Ok(Saved {
             entry: saved,
             value_changed: changed(before.as_ref(), &stored),
@@ -303,34 +307,38 @@ impl VaultStore {
     pub fn remove(&self, name: &str) -> Result<bool, VaultError> {
         let _held = self.lock();
         let generation = self.generation();
-        let index = list::read_index(&self.index)?;
+        let index = self.index.read()?;
         let id = name.to_lowercase();
-        let left: Vec<VaultEntry> = index.iter().filter(|e| e.id() != id).cloned().collect();
-        if left.len() == index.len() {
+        if !index.iter().any(|e| e.id() == id) {
             return Ok(false);
         }
         let mut values = self.load(generation)?;
         if values.remove(&id).is_some() {
             self.store(generation, values)?;
         }
-        list::write_index(&self.index, &left)?;
+        self.index
+            .update(|list| Ok(list.into_iter().filter(|e| e.id() != id).collect()))?;
         Ok(true)
     }
 
     /// Turns "ask before each use" off for these ids (the approval's Always Allow).
     pub fn stop_asking(&self, ids: &BTreeSet<String>) -> Result<(), VaultError> {
         let _held = self.lock();
-        let index = list::read_index(&self.index)?;
-        let list: Vec<VaultEntry> = index
-            .into_iter()
-            .map(|mut e| {
-                if ids.contains(&e.id()) {
-                    e.ask = Some(false);
-                }
-                e
-            })
-            .collect();
-        Ok(list::write_index(&self.index, &list)?)
+        // nothing named here is saved: nothing to write, and no database to make for it
+        if !self.index.read()?.iter().any(|e| ids.contains(&e.id())) {
+            return Ok(());
+        }
+        Ok(self.index.update(|list| {
+            Ok(list
+                .into_iter()
+                .map(|mut e| {
+                    if ids.contains(&e.id()) {
+                        e.ask = Some(false);
+                    }
+                    e
+                })
+                .collect())
+        })?)
     }
 
     /// Sets or clears the expiry day of a saved secret; only that field changes. A bad day or a
@@ -344,14 +352,17 @@ impl VaultStore {
             }
         }
         let _held = self.lock();
-        let mut index = list::read_index(&self.index)?;
         let id = name.to_lowercase();
-        let Some(entry) = index.iter_mut().find(|e| e.id() == id) else {
+        let Some(entry) = self.index.read()?.into_iter().find(|e| e.id() == id) else {
             return Err(VaultError::NoSuchSecret(name.to_string()));
         };
         let changed = entry.expires.as_deref() != day;
-        entry.expires = day.map(str::to_string);
-        list::write_index(&self.index, &index)?;
+        self.index.update(|mut list| {
+            if let Some(entry) = list.iter_mut().find(|e| e.id() == id) {
+                entry.expires = day.map(str::to_string);
+            }
+            Ok(list)
+        })?;
         Ok(changed)
     }
 }

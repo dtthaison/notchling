@@ -21,8 +21,67 @@ fn a_sync_saves_the_live_login_and_asks_the_profile_once_per_token() {
     assert_eq!(
         w.store.saved_list(),
         snap.accounts,
-        "the list is in its file"
+        "the list is in its document"
     );
+    assert!(
+        !w.tmp.path("data/daemon/accounts.json").exists(),
+        "no file is written any more"
+    );
+}
+
+#[test]
+fn the_old_list_file_is_read_then_moved_into_the_database_by_the_first_save() {
+    let w = World::new("acc-import");
+    let old = w.tmp.write(
+        "data/daemon/accounts.json",
+        &serde_json::to_string(&[ClaudeAccount {
+            id: id(5),
+            email: email(5),
+            plan: "Pro".into(),
+            needs_login: false,
+        }])
+        .unwrap(),
+    );
+    assert_eq!(w.store.saved_list()[0].id, id(5));
+    assert!(old.exists(), "a read moves nothing");
+    assert!(
+        !crate::store::exists(&w.tmp.path("data")),
+        "and makes no database"
+    );
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    let snap = w.store.sync().unwrap();
+    let ids: Vec<_> = snap.accounts.iter().map(|a| a.id.clone()).collect();
+    assert_eq!(ids, [id(5), id(1)], "the old list's account is kept");
+    assert!(!old.exists(), "moved in");
+    assert_eq!(w.store.saved_list(), snap.accounts);
+}
+
+#[test]
+fn two_stores_saving_at_once_leave_one_readable_list() {
+    let w = World::new("acc-two-writers");
+    let list = |n: u8| {
+        vec![ClaudeAccount {
+            id: id(n),
+            email: email(n),
+            plan: "Pro".into(),
+            needs_login: false,
+        }]
+    };
+    std::thread::scope(|scope| {
+        for t in 1..=4u8 {
+            let store = &w.store;
+            let list = list(t);
+            scope.spawn(move || {
+                for _ in 0..10 {
+                    store.save_list(&list).unwrap();
+                }
+            });
+        }
+    });
+    let saved = w.store.saved_list();
+    assert_eq!(saved.len(), 1, "one writer's whole list, never a mix");
+    assert!((1..=4).any(|n| saved[0].id == id(n)));
 }
 
 #[test]
@@ -277,7 +336,11 @@ fn no_error_or_snapshot_carries_a_token() {
     texts.push(format!("{:?}", w.store.switch_to(&id(9))));
     texts.push(format!("{:?}", w.store.open_lane(&id(1))));
     texts.push(format!("{:?}", w.store.switch_lane("none", &id(2))));
-    texts.push(std::fs::read_to_string(w.tmp.path("data/daemon/accounts.json")).unwrap());
+    texts.push(
+        crate::store::doc(&w.tmp.path("data"), super::LIST_DOC)
+            .unwrap()
+            .unwrap(),
+    );
     for text in texts {
         assert!(
             !text.contains("test-access") && !text.contains("test-refresh"),

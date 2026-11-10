@@ -83,7 +83,10 @@ fn turning_the_vault_off_never_waits_for_a_keychain_read_and_the_use_answers_off
     let switch_ops = Arc::new(SwitchOps::new(switches.clone(), room.clone()));
     let vault = Arc::new(VaultOps::new(
         switches.vault.clone(),
-        VaultStore::new(dir.join("daemon/vault.json"), Box::new(item.clone())),
+        VaultStore::new(
+            notchling_engine::vault::list::VaultIndex::in_data(&dir),
+            Box::new(item.clone()),
+        ),
         room,
     ));
     set_vault(&switch_ops, true);

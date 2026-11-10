@@ -74,7 +74,7 @@ fn forget_never_waits_for_a_keychain_read_and_the_read_doesnt_refill_the_cache()
     let dir = temp("forget");
     let (item, gate) = GatedItem::new(r#"{"npm":{"username":"","secret":"fake-npm-0001"}}"#);
     let store = Arc::new(VaultStore::new(
-        dir.join("vault.json"),
+        super::list::VaultIndex::in_data(&dir),
         Box::new(item.clone()),
     ));
     let entry = VaultEntry::new("npm", Kind::Token);

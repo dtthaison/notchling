@@ -86,6 +86,7 @@ impl World {
             http: http.clone(),
             now_ms: Arc::new(move || now.load(Ordering::SeqCst)),
             config_file: tmp.path("home/.claude.json"),
+            data_dir: tmp.path("data"),
             list_file: tmp.path("data/daemon/accounts.json"),
             lanes: LaneStore::new(&tmp.path("home"), &tmp.path("data")),
         });
@@ -123,12 +124,7 @@ impl World {
             plan: "Max 5x".into(),
             needs_login: false,
         });
-        std::fs::create_dir_all(self.tmp.path("data/daemon")).ok();
-        std::fs::write(
-            self.tmp.path("data/daemon/accounts.json"),
-            serde_json::to_vec(&list).unwrap_or_default(),
-        )
-        .ok();
+        self.store.save_list(&list).unwrap();
     }
 
     pub fn answers_profile(&self, n: u8) {

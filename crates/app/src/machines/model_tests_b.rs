@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use notchling_engine::machines::registry::{write_lock, AdminAccess, RegistryFiles};
 use notchling_engine::vault::entry::{Kind, VaultEntry};
-use notchling_engine::vault::list::write_index;
+use notchling_engine::vault::list::VaultIndex;
 
 use super::data::Setup;
 use super::model::MachinesModel;
@@ -43,16 +43,9 @@ fn entry(name: &str, updated: &str) -> VaultEntry {
     e
 }
 
-/// Saves the vault's list as the daemon does, with a modified time of its own.
-fn save_list(path: &std::path::Path, entries: &[VaultEntry], at: u64) {
-    write_index(path, entries).unwrap();
-    let time = std::time::UNIX_EPOCH + Duration::from_secs(at);
-    std::fs::File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_modified(time)
-        .unwrap();
+/// Saves the vault's list as the daemon does: into the document in the data folder's database.
+fn save_list(index: &VaultIndex, entries: &[VaultEntry]) {
+    index.write(entries).unwrap();
 }
 
 #[test]
@@ -66,7 +59,7 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
         entry("claude-worker", "2026-11-01T00:00:00Z"),
         entry("unrelated", "2026-11-01T00:00:00Z"),
     ];
-    save_list(&list, &first, 1_800_000_000);
+    save_list(&list, &first);
     let mut model = MachinesModel::new(setup.parts());
     assert!(
         !model.watch_vault(),
@@ -79,7 +72,7 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
         entry("claude-worker", "2026-11-09T08:00:00Z"),
         entry("unrelated", "2026-11-01T00:00:00Z"),
     ];
-    save_list(&list, &renewed, 1_800_000_100);
+    save_list(&list, &renewed);
     assert!(model.watch_vault());
     let offers = model.update_offers();
     assert_eq!(offers.len(), 1);
@@ -95,7 +88,7 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
         entry("m1-github-issues", "2026-11-09T09:00:00Z"),
         entry("unrelated", "2026-11-01T00:00:00Z"),
     ];
-    save_list(&list, &added, 1_800_000_200);
+    save_list(&list, &added);
     assert!(model.watch_vault());
     let names: Vec<String> = model
         .update_offers()

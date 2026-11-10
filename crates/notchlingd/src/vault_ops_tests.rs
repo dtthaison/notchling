@@ -1,9 +1,10 @@
-//! The vault service against a fake Keychain item, a temp `vault.json` and a fake room: the
+//! The vault service against a fake Keychain item, a temp database and a fake room: the
 //! switch, the tiers, the approval and request protocols, and that no value reaches an error, an
 //! event or the audit log. Every value here is an obvious fake.
 
 use super::*;
 use crate::switches::VAULT;
+use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::KeychainError;
 use notchling_local_api::{AuditLog, ClientKind};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,8 +75,11 @@ impl Drop for Setup {
 }
 
 impl Setup {
-    fn index(&self) -> std::path::PathBuf {
-        self.dir.join("daemon/vault.json")
+    /// The list's text in the database (the daemon's list is a document in `notchling.db`).
+    fn list_text(&self) -> String {
+        notchling_engine::store::doc(&self.dir, notchling_engine::vault::list::INDEX_DOC)
+            .unwrap()
+            .unwrap_or_default()
     }
     fn audit(&self) -> String {
         std::fs::read_to_string(self.dir.join("audit.jsonl")).unwrap_or_default()
@@ -83,7 +87,7 @@ impl Setup {
     /// Everything that left the service other than a reply: events, the audit log, the list.
     fn outside(&self) -> String {
         let events = format!("{:?}", self.room.events.lock().unwrap());
-        let list = std::fs::read_to_string(self.index()).unwrap_or_default();
+        let list = self.list_text();
         format!("{events}\n{}\n{list}", self.audit())
     }
 }
@@ -96,7 +100,7 @@ pub(super) fn setup(tag: &str, on: bool) -> Setup {
     let room = Arc::new(FakeRoom::default());
     let switch = SwitchFlag::off(VAULT, VAULT_OFF);
     switch.set(on);
-    let store = VaultStore::new(dir.join("daemon/vault.json"), Box::new(item.clone()));
+    let store = VaultStore::new(VaultIndex::in_data(&dir), Box::new(item.clone()));
     let timing = VaultTiming {
         approval_wait: Duration::from_secs(10),
         request_wait: Duration::from_secs(10),
@@ -196,7 +200,11 @@ fn while_off_every_op_says_so_and_nothing_is_read_or_written() {
         "the Keychain item is never opened"
     );
     assert!(s.item.data.lock().unwrap().is_none());
-    assert!(!s.index().exists(), "no vault.json");
+    assert!(
+        !notchling_engine::store::exists(&s.dir),
+        "no vault list, no database"
+    );
+    assert!(!s.dir.join("daemon/vault.json").exists());
     assert!(s.room.events.lock().unwrap().is_empty());
     assert!(s.audit().contains("\"result\":\"off\""));
 }
@@ -586,7 +594,8 @@ fn saves_and_removes_say_why_without_the_value() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(s.index()).unwrap().permissions().mode();
+        let db = notchling_engine::store::db_path(&s.dir);
+        let mode = std::fs::metadata(db).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 }

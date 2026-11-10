@@ -22,6 +22,7 @@ use crate::accounts::book::{self, Saved};
 use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{plan_write, Keychain, KeychainError};
 use crate::accounts::procs::{Apps, Procs};
+use crate::docfile::DocFile;
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
     AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation, HttpClient,
@@ -56,8 +57,22 @@ pub struct AntigravityPaths {
     pub token_file: PathBuf,
     /// Where the Antigravity app would be installed (`/Applications`), for `is_available`.
     pub apps_dir: PathBuf,
-    /// The daemon's own folder for this store's list of saved accounts.
+    /// The daemon's own folder for this store: the file its list of saved accounts was before the
+    /// database (`antigravity.json`, moved in once).
     pub state_dir: PathBuf,
+    /// Notchling's data folder: the saved accounts are the `accounts/antigravity` document in the
+    /// `notchling.db` there.
+    pub data_dir: PathBuf,
+}
+
+impl AntigravityPaths {
+    fn book(&self) -> DocFile {
+        DocFile::new(
+            &self.data_dir,
+            book::ANTIGRAVITY_DOC,
+            self.state_dir.join("antigravity.json"),
+        )
+    }
 }
 
 #[derive(Default)]
@@ -87,9 +102,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl AntigravityStore {
-    /// Loads the saved account names from the daemon's own file; touches nothing else.
+    /// Loads the saved account names from the daemon's own list; touches nothing else.
     pub fn new(deps: AntigravityDeps, paths: AntigravityPaths) -> AntigravityStore {
-        let accounts = book::read_accounts(&paths.state_dir.join("antigravity.json"));
+        let accounts = book::read_accounts(&paths.book());
         AntigravityStore {
             deps,
             paths,
@@ -101,8 +116,8 @@ impl AntigravityStore {
         }
     }
 
-    fn book(&self) -> PathBuf {
-        self.paths.state_dir.join("antigravity.json")
+    fn book(&self) -> DocFile {
+        self.paths.book()
     }
 
     fn save_book(&self, accounts: &[Saved]) {

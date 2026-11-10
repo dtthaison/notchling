@@ -11,6 +11,7 @@ pub mod bridge;
 pub mod control;
 pub mod cost;
 pub mod delegate;
+pub mod docfile;
 pub mod install;
 pub mod lanes;
 pub mod limits;

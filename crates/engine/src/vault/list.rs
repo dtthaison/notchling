@@ -1,17 +1,19 @@
-//! The list in `vault.json` (Swift `SecretVault`): names, kinds, URLs, variables and notes, never
-//! values. Reading and writing it, checking an entry before a save, ranking entries for a task,
-//! the environment a command gets, and the text `secrets` prints.
+//! The vault's list (Swift `SecretVault`'s `vault.json`): names, kinds, URLs, variables and notes,
+//! never values. Reading and writing it ([`VaultIndex`]), checking an entry before a save, ranking
+//! entries for a task, the environment a command gets, and the text `secrets` prints.
 
 use super::entry::{valid_name, valid_var, Kind, VaultEntry, VaultValue};
 use super::expiry;
 use super::url;
+use crate::docfile::{DocFile, UNREADABLE};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Why the list couldn't be read or written. Never holds a value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndexError {
-    /// The file exists and isn't a list: a write-back would wipe it, so nothing is written.
+    /// The list (the document, or the old `vault.json` not moved in yet) exists and isn't a list:
+    /// a write-back would wipe it, so nothing is written.
     Unreadable,
     Write(String),
 }
@@ -43,27 +45,95 @@ pub fn encode(list: &[VaultEntry]) -> Vec<u8> {
     serde_json::to_vec_pretty(&list).unwrap_or_else(|_| b"[]".to_vec())
 }
 
-/// The list for a read-modify-write: empty only when there's no file yet. A file that exists but
-/// can't be read or isn't a list is an error, where a plain read would say empty.
-pub fn read_index(path: &Path) -> Result<Vec<VaultEntry>, IndexError> {
-    let data = match std::fs::read(path) {
-        Ok(data) => data,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err(IndexError::Unreadable),
-    };
-    serde_json::from_slice(&data)
-        .map(sorted)
-        .map_err(|_| IndexError::Unreadable)
+/// The document that holds the list in `<data>/notchling.db`.
+pub const INDEX_DOC: &str = "daemon/vault";
+
+/// Where the list is kept: the [`INDEX_DOC`] document in `<data>/notchling.db` (decision 0014; the
+/// list was the file `<data>/daemon/vault.json`, which moves in once, on the first change, and is
+/// read until then). No value is in it. A reader makes no database and moves nothing; a change
+/// is one transaction, so the daemon and the Machines tool never lose each other's save. An old
+/// file that can't be read, or isn't a list, stays where it is and nothing is written
+/// ([`IndexError::Unreadable`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VaultIndex(DocFile);
+
+impl VaultIndex {
+    /// The list of `data_dir`, with `old_file` as the file it was.
+    pub fn new(data_dir: &Path, old_file: PathBuf) -> VaultIndex {
+        VaultIndex(DocFile::new(data_dir, INDEX_DOC, old_file).strict())
+    }
+
+    /// The daemon's own: `<data_dir>/daemon/vault.json` as the old file, never the Swift app's
+    /// `<data_dir>/vault.json`.
+    pub fn in_data(data_dir: &Path) -> VaultIndex {
+        VaultIndex::new(data_dir, data_dir.join("daemon").join("vault.json"))
+    }
+
+    /// The list, sorted. Empty only when there is none yet; one that exists but can't be read or
+    /// isn't a list is an error.
+    pub fn read(&self) -> Result<Vec<VaultEntry>, IndexError> {
+        match self.0.read() {
+            Ok(None) => Ok(Vec::new()),
+            Ok(Some(text)) => serde_json::from_str(&text)
+                .map(sorted)
+                .map_err(|_| IndexError::Unreadable),
+            Err(_) => Err(IndexError::Unreadable),
+        }
+    }
+
+    /// Reads the list and writes what `change` makes of it, in one transaction (sorted, pretty,
+    /// keys sorted). An error from `change` writes nothing.
+    pub fn update(
+        &self,
+        change: impl FnOnce(Vec<VaultEntry>) -> Result<Vec<VaultEntry>, IndexError>,
+    ) -> Result<(), IndexError> {
+        self.0
+            .update(is_list, |row| {
+                let list = match row {
+                    None => Vec::new(),
+                    Some(text) => serde_json::from_str(&text)
+                        .map(sorted)
+                        .map_err(|_| UNREADABLE.to_owned())?,
+                };
+                let list = change(list).map_err(|e| match e {
+                    IndexError::Unreadable => UNREADABLE.to_owned(),
+                    IndexError::Write(why) => why,
+                })?;
+                String::from_utf8(encode(&list))
+                    .map(Some)
+                    .map_err(|e| e.to_string())
+            })
+            .map(|_| ())
+            .map_err(|why| {
+                if why == UNREADABLE {
+                    IndexError::Unreadable
+                } else {
+                    IndexError::Write(why)
+                }
+            })
+    }
+
+    /// Replaces the list.
+    pub fn write(&self, list: &[VaultEntry]) -> Result<(), IndexError> {
+        self.update(|_| Ok(list.to_vec()))
+    }
+
+    /// Something that differs whenever the list does, for a window to see that it changed: the
+    /// document's text hashed into the time (the database's own file changes with every setting
+    /// and draft, and its modified time lags a write sitting in the log) and its length. `None`
+    /// when there is no list or it can't be read.
+    pub fn stamp(&self) -> Option<(std::time::SystemTime, u64)> {
+        use std::hash::{Hash, Hasher};
+        let text = self.0.read().ok()??;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_nanos(hasher.finish());
+        Some((at, text.len() as u64))
+    }
 }
 
-/// Writes the list atomically, 0600, in a 0700 folder. A symlink where the file belongs is
-/// refused, not followed.
-pub fn write_index(path: &Path, list: &[VaultEntry]) -> Result<(), IndexError> {
-    let folder_error = |e: notchling_platform::Error| IndexError::Write(e.to_string());
-    if let Some(parent) = path.parent() {
-        notchling_platform::files::ensure_private_dir(parent).map_err(folder_error)?;
-    }
-    notchling_platform::files::write_private_no_follow(path, &encode(list)).map_err(folder_error)
+fn is_list(text: &str) -> bool {
+    serde_json::from_str::<Vec<VaultEntry>>(text).is_ok()
 }
 
 /// Why `entry` can't be saved into `list` in place of `old`, or `None`.

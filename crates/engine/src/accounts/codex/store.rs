@@ -17,6 +17,7 @@ use crate::accounts::book::{self, Saved};
 use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{Keychain, KeychainError};
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
+use crate::docfile::DocFile;
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
     AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, Confirmation, HttpClient,
@@ -57,13 +58,21 @@ pub struct CodexDeps {
 pub struct CodexPaths {
     /// `CODEX_HOME`, else `~/.codex`.
     pub home: PathBuf,
-    /// The daemon's own folder for this store: the list of saved accounts and the scratch homes.
+    /// The daemon's own folder for this store: the scratch homes, and the file the list of saved
+    /// accounts was before the database (`codex.json`, moved in once).
     pub state_dir: PathBuf,
+    /// Notchling's data folder: the saved accounts are the `accounts/codex` document in the
+    /// `notchling.db` there.
+    pub data_dir: PathBuf,
 }
 
 impl CodexPaths {
-    fn book(&self) -> PathBuf {
-        self.state_dir.join("codex.json")
+    fn book(&self) -> DocFile {
+        DocFile::new(
+            &self.data_dir,
+            book::CODEX_DOC,
+            self.state_dir.join("codex.json"),
+        )
     }
 
     fn scratch_root(&self) -> PathBuf {
@@ -104,7 +113,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl CodexStore {
-    /// Loads the saved account names from the daemon's own file; touches nothing else.
+    /// Loads the saved account names from the daemon's own list; touches nothing else.
     pub fn new(deps: CodexDeps, paths: CodexPaths) -> CodexStore {
         let accounts = book::read_accounts(&paths.book());
         CodexStore {

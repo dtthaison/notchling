@@ -9,7 +9,9 @@
 //! through the engine's runner:
 //! `ProcessRunner` only with `--live`, else `Refusing`, which answers each call with the off
 //! message and starts nothing. The vault's values are read only with `--vault`; the list of names
-//! (`<data>/daemon/vault.json`, no values) is read for the banners either way. A fixture root
+//! (the `daemon/vault` document in `<data>/notchling.db`, or the old `<data>/daemon/vault.json`
+//! until the daemon moves it in; no values) is read for the banners either way, and a read
+//! never writes. A fixture root
 //! turns both switches off whatever the flags say.
 
 use std::path::{Path, PathBuf};
@@ -28,6 +30,7 @@ use notchling_engine::machines::roots::{MachineRoots, VaultSecrets};
 use notchling_engine::machines::runner::{Call, Refusing, Runner, OFF};
 use notchling_engine::machines::step::{NoSecrets, Opener, SecretSource};
 use notchling_engine::vault::entry::VaultEntry;
+use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::store::{system_keychain, Unsupported, VaultStore};
 use notchling_engine::vault::url::renew_url;
 use notchling_engine::vault::VaultRequest;
@@ -102,9 +105,11 @@ impl Setup {
         MachineRoots::in_data(&self.data_dir)
     }
 
-    /// The daemon's own vault list (`<data>/daemon/vault.json`), never the Swift app's.
-    pub fn vault_index(&self) -> PathBuf {
-        self.data_dir.join("daemon").join("vault.json")
+    /// The daemon's own vault list (a document in `<data>/notchling.db`; the old
+    /// `<data>/daemon/vault.json` is read until the daemon moves it in), never the Swift app's.
+    /// Reading it makes no database, so a render over a fixture folder writes nothing.
+    pub fn vault_index(&self) -> VaultIndex {
+        VaultIndex::in_data(&self.data_dir)
     }
 
     /// The engine, the poller, the morning actions, the registry and the vault list.
@@ -209,7 +214,7 @@ fn open_url(runner: &dyn Runner, url: &str) {
 /// The vault as the window lists it: the names from the index, renames and renewals through the
 /// engine's secret source (which refuses while the vault is off).
 struct VaultFiles {
-    index: PathBuf,
+    index: VaultIndex,
     secrets: Arc<dyn SecretSource>,
     runner: Arc<dyn Runner>,
 }
@@ -225,9 +230,10 @@ impl VaultList for VaultFiles {
         self.secrets.rename(old, new)
     }
 
+    /// What differs whenever the list does: the list is a document, which has no modified time
+    /// of its own, so this is its text hashed (one small read; the window's tick calls it).
     fn stamp(&self) -> Option<VaultStamp> {
-        let meta = std::fs::metadata(&self.index).ok()?;
-        Some((meta.modified().ok()?, meta.len()))
+        self.index.stamp()
     }
 
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String> {
@@ -270,7 +276,10 @@ mod tests {
         assert!(!s.read_only, "a run saves");
         assert_eq!(
             s.vault_index(),
-            PathBuf::from("/f/notchling/daemon/vault.json")
+            VaultIndex::new(
+                Path::new("/f/notchling"),
+                PathBuf::from("/f/notchling/daemon/vault.json")
+            )
         );
         let render = Setup::for_render(None);
         assert!(render.fixture && !render.live && render.read_only);
@@ -317,7 +326,7 @@ mod tests {
     fn renew_opens_only_a_web_page_and_says_when_there_is_none() {
         let runner = Arc::new(ScriptedRunner::new());
         let files = VaultFiles {
-            index: PathBuf::from("/nonexistent/vault.json"),
+            index: VaultIndex::in_data(Path::new("/nonexistent")),
             secrets: Arc::new(NoSecrets),
             runner: runner.clone(),
         };

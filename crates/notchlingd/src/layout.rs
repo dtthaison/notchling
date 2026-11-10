@@ -12,6 +12,7 @@
 //!   daemon given a test socket writes nothing in the root.
 
 use notchling_engine::sessions::Roots;
+use notchling_engine::vault::list::VaultIndex;
 use notchling_local_api::lock::lock_path_for;
 use notchling_local_api::{AUDIT_NAME, SOCKET_NAME};
 use std::ffi::OsStr;
@@ -141,10 +142,11 @@ impl Layout {
         self.state_dir().join(AUDIT_NAME)
     }
 
-    /// The daemon's own vault list, `<data dir>/daemon/vault.json`: never the Swift app's
+    /// The daemon's own vault list: the `daemon/vault` document in `<data dir>/notchling.db` (the
+    /// file `<data dir>/daemon/vault.json` it was moves in once). Never the Swift app's
     /// `<data dir>/vault.json` until the maintainer hands the vault over.
-    pub fn vault_index(&self) -> PathBuf {
-        self.data_dir.join("daemon").join("vault.json")
+    pub fn vault_index(&self) -> VaultIndex {
+        VaultIndex::in_data(&self.data_dir)
     }
 
     /// The lock that keeps one daemon per real data folder, when it isn't the socket's own lock:

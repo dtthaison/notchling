@@ -5,8 +5,10 @@
 //! beside MCP logins) and the account's profile in `oauthAccount` of `~/.claude.json`. A switch
 //! replaces only those two pieces. Saved logins are Keychain items of their own (service
 //! `Notchling Accounts`, account `<id>`, the Swift app's, holding `{claudeAiOauth, oauthAccount}`),
-//! never on disk; the list of saved accounts (id, email, plan, needs-login: no token) is a file the
-//! caller names, the daemon's own until handover.
+//! never on disk; the list of saved accounts (id, email, plan, needs-login: no token) is the
+//! daemon's own until handover: the [`LIST_DOC`] document in `<data>/notchling.db` (decision 0014;
+//! it was the file `<data>/daemon/accounts.json`, which moves in once, on the first save, and is
+//! read until then).
 //!
 //! One lock serializes every operation, so a removal can't be undone by a sync that read the list
 //! before it (the Swift app's issue #7, which its `removedSince` stamps worked around).
@@ -29,6 +31,7 @@ use crate::accounts::http::{HttpClient, HttpRequest, PROFILE_URL};
 use crate::accounts::json_splice::set_top_level;
 use crate::accounts::keychain::Keys;
 use crate::accounts::{Login, Secret};
+use crate::docfile::DocFile;
 use crate::lanes::LaneStore;
 use profile::{
     access_token, account_id_from_config, account_id_from_profile, is_expired,
@@ -45,6 +48,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub const LIVE_SERVICE: &str = "Claude Code-credentials";
 /// Notchling's saved logins, one item per account id.
 pub const SAVED_SERVICE: &str = "Notchling Accounts";
+/// The document of the saved accounts list.
+pub const LIST_DOC: &str = "daemon/accounts";
 
 /// A Claude subscription Notchling can switch Claude Code to (the Swift `ClaudeAccount`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,7 +108,11 @@ pub struct ClaudeEnv {
     pub now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// `~/.claude.json`.
     pub config_file: PathBuf,
-    /// The saved accounts list (no tokens).
+    /// Notchling's data folder: the saved accounts list (no tokens) is the [`LIST_DOC`] document
+    /// in the `notchling.db` there.
+    pub data_dir: PathBuf,
+    /// The file the list was before the database (`<data>/daemon/accounts.json`); read while the
+    /// document is missing, moved in once by the first save.
     pub list_file: PathBuf,
     pub lanes: LaneStore,
 }
@@ -174,20 +183,28 @@ impl ClaudeAccounts {
         (self.env.now_ms)()
     }
 
-    /// The saved accounts list, from its file only: no Keychain, no network.
+    fn list_doc(&self) -> DocFile {
+        DocFile::new(&self.env.data_dir, LIST_DOC, self.env.list_file.clone())
+    }
+
+    /// The saved accounts list, from its document (else the old file) only: no Keychain, no
+    /// network, and nothing written, so a read while the switch is off makes no database.
     pub fn saved_list(&self) -> Vec<ClaudeAccount> {
-        std::fs::read(&self.env.list_file)
+        self.list_doc()
+            .read()
             .ok()
-            .and_then(|data| serde_json::from_slice(&data).ok())
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()
     }
 
     fn save_list(&self, list: &[ClaudeAccount]) -> Result<(), AccountError> {
-        if let Some(dir) = self.env.list_file.parent() {
-            notchling_platform::files::ensure_private_dir(dir).map_err(|e| err(e.to_string()))?;
-        }
-        let data = serde_json::to_vec(list).map_err(|e| err(e.to_string()))?;
-        notchling_platform::files::write_private_no_follow(&self.env.list_file, &data)
+        let text = serde_json::to_string(list).map_err(|e| err(e.to_string()))?;
+        self.list_doc()
+            .put(
+                |old| serde_json::from_str::<Vec<ClaudeAccount>>(old).is_ok(),
+                &text,
+            )
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 

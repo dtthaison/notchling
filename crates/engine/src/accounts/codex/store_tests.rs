@@ -50,6 +50,7 @@ impl Rig {
             CodexPaths {
                 home: root.join("codex"),
                 state_dir: root.join("state"),
+                data_dir: root.clone(),
             },
         );
         Rig {
@@ -287,13 +288,18 @@ fn a_saved_account_that_is_not_live_is_read_from_its_saved_copy() {
     let rig = Rig::new("saved-usage", FakeProcs::new(), FakeApps::new());
     two_accounts(&rig);
     rig.store.sync(false); // learns account 1 from the live file
-    let mut book = crate::accounts::book::read_accounts(&rig.root.join("state/codex.json"));
+    let file = crate::docfile::DocFile::new(
+        &rig.root,
+        crate::accounts::book::CODEX_DOC,
+        rig.root.join("state/codex.json"),
+    );
+    let mut book = crate::accounts::book::read_accounts(&file);
     book.push(crate::accounts::book::Saved {
         id: "user-2:ws-2".into(),
         email: "b@example.com".into(),
         plan: None,
     });
-    crate::accounts::book::write_accounts(&rig.root.join("state/codex.json"), &book);
+    crate::accounts::book::write_accounts(&file, &book);
     let rig2 = Rig::at(
         rig.root.clone(),
         rig.keychain.clone(),

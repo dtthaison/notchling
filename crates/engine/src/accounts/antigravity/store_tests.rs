@@ -43,6 +43,7 @@ impl Rig {
                 token_file: root.join("gemini/jetski-standalone-oauth-token"),
                 apps_dir: root.join("Applications"),
                 state_dir: root.join("state"),
+                data_dir: root.clone(),
             },
         );
         Rig {

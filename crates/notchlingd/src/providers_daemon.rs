@@ -55,7 +55,9 @@ impl ProviderStores {
     /// The daemon's stores. Under a fixture root (`NOTCHLING_DATA_ROOT`) every effect is a fake,
     /// so a dev run never touches the real Keychain, apps or processes; otherwise the real
     /// `/usr/bin/security`, apps, processes and HTTPS. The saved account names and Claude
-    /// Desktop's copies are the daemon's own, in `<data dir>/daemon/accounts`. `claude_accounts`
+    /// Desktop's copies are the daemon's own: the names are documents in `<data dir>/notchling.db`
+    /// (`accounts/codex`, `accounts/antigravity`; the files they were, in
+    /// `<data dir>/daemon/accounts`, move in once), Desktop's copies stay files there. `claude_accounts`
     /// is E8a's account list, which Desktop's rows are matched against.
     pub fn for_daemon(
         layout: &Layout,
@@ -121,6 +123,7 @@ impl ProviderStores {
             CodexPaths {
                 home: layout.codex_dir(),
                 state_dir: state_dir.clone(),
+                data_dir: layout.data_dir.clone(),
             },
         ));
         let gemini = layout
@@ -140,6 +143,7 @@ impl ProviderStores {
                 token_file: gemini.join("jetski-standalone-oauth-token"),
                 apps_dir,
                 state_dir,
+                data_dir: layout.data_dir.clone(),
             },
         ));
         ProviderStores {

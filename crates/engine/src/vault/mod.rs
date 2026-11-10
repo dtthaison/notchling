@@ -3,7 +3,7 @@
 //! | Part | Where |
 //! | --- | --- |
 //! | An entry, its value, a request's fields, what a request changes in a form | [`entry`] |
-//! | The list (`vault.json`, no values): read, write 0600, check, `find`, env, `describe` | [`list`] |
+//! | The list (the `daemon/vault` document in `notchling.db`, no values): read, change, stamp, check, `find`, env, `describe` | [`list`] |
 //! | Expiry days and their wording | [`expiry`] |
 //! | Which reminders are due, and what Renew opens | [`reminders`], [`url`] |
 //! | Hiding values in a byte stream | [`redact`] |

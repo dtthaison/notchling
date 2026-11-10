@@ -97,6 +97,7 @@ impl Rig {
             CodexPaths {
                 home: root.join("codex"),
                 state_dir: root.join("state"),
+                data_dir: root.clone(),
             },
         )));
         registry.register(Arc::new(AntigravityStore::new(
@@ -111,6 +112,7 @@ impl Rig {
                 token_file: root.join("gemini/jetski-standalone-oauth-token"),
                 apps_dir: root.join("Applications"),
                 state_dir: root.join("state"),
+                data_dir: root.clone(),
             },
         )));
         let ops = ProvidersOps::new(flag.clone(), registry, room.clone());
@@ -257,6 +259,7 @@ fn the_list_while_off_shows_the_saved_names_and_reads_no_login() {
             CodexPaths {
                 home: rig.root.join("codex"),
                 state_dir: rig.root.join("state"),
+                data_dir: rig.root.clone(),
             },
         )));
         ProvidersOps::new(rig.flag.clone(), registry, rig.room.clone())
