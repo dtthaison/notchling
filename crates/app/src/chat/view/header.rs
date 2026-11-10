@@ -115,6 +115,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         return bar
             .child(label("No session selected", TypeRole::Meta, Ink::TextMuted, a).flex_1())
             .child(details_button(view, a, cx))
+            .child(super::terminal::button(view, a, cx))
             .child(phone_button(view, a, cx))
             .part_at("Header", Corner::Bottom, a, cx);
     };
@@ -162,6 +163,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         ))
     })
     .child(details_button(view, a, cx))
+    .child(super::terminal::button(view, a, cx))
     .child(phone_button(view, a, cx))
     .part_at("Header", Corner::Bottom, a, cx)
 }

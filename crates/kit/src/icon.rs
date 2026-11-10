@@ -121,6 +121,9 @@ pub enum Icon {
     SlashBox,
     /// A task under way, half done (SF `circle.lefthalf.filled`).
     Halfway,
+    /// The terminal panel's Expand and Minimize.
+    Expand,
+    Shrink,
 }
 
 /// Where an icon sits decides its size.
@@ -145,7 +148,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 63] = [
+    pub const ALL: [Icon; 65] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -209,6 +212,8 @@ impl Icon {
         Icon::Paperclip,
         Icon::SlashBox,
         Icon::Halfway,
+        Icon::Expand,
+        Icon::Shrink,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -278,6 +283,8 @@ impl Icon {
             Icon::Paperclip => "paperclip",
             Icon::SlashBox => "square.slash",
             Icon::Halfway => "circle.lefthalf.filled",
+            Icon::Expand => "arrow.up.left.and.arrow.down.right",
+            Icon::Shrink => "arrow.down.right.and.arrow.up.left",
         }
     }
 
@@ -350,6 +357,8 @@ impl Icon {
             Icon::Paperclip => "⌁",
             Icon::SlashBox => "/",
             Icon::Halfway => "◐",
+            Icon::Expand => "⤢",
+            Icon::Shrink => "⤡",
         }
     }
 
@@ -411,6 +420,8 @@ impl Icon {
             Icon::Paperclip => "icons/paperclip.svg",
             Icon::SlashBox => "icons/square-slash.svg",
             Icon::Halfway => "icons/contrast.svg",
+            Icon::Expand => "icons/maximize-2.svg",
+            Icon::Shrink => "icons/minimize-2.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -460,13 +471,13 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 60] = icons![
+const SVGS: [(&str, &[u8]); 62] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
     "arrow-up",
-    "brain",
     "bot",
+    "brain",
     "check",
     "check-check",
     "chevron-down",
@@ -496,8 +507,10 @@ const SVGS: [(&str, &[u8]); 60] = icons![
     "key-round",
     "list-checks",
     "loader-circle",
+    "maximize-2",
     "message-circle-question",
     "messages-square",
+    "minimize-2",
     "minus",
     "octagon-x",
     "panel-left",

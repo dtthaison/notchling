@@ -24,6 +24,7 @@ mod row_menu;
 mod sheets;
 mod sidebar;
 mod tasks;
+mod terminal;
 mod tools;
 
 use std::collections::HashSet;
@@ -86,6 +87,8 @@ pub const DROP_ENV: &str = drop::PREVIEW_ENV;
 /// Set to `question` or `permission`, a render draws that card above the reply box, over the
 /// selected Claude Code session, with its controls live (`chat::prompts::Preview`).
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
+/// Set to `1` (or `expanded`), a render draws the terminal panel with two tabs over a sample screen.
+pub const TERMINAL_ENV: &str = terminal::RENDER_ENV;
 /// Set to `1`, a render draws the first sidebar row's right-click menu open.
 pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
@@ -192,6 +195,8 @@ pub struct ChatView {
     /// The page panel: an Artifact clicked in a conversation, in the Details Panel's place. The
     /// window's, not a session's, so picking another session keeps it.
     page: page_panel::State,
+    /// The terminal panel: its tabs, whether it shows, and whether it is expanded.
+    terminal: terminal::State,
     _appearance_changes: Subscription,
     /// Esc hides the part names, wherever the keys go.
     _parts_escape: Subscription,
@@ -230,6 +235,9 @@ impl ChatView {
             .and_then(|v| crate::chat::prompts::Preview::parse(&v));
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
+        if let Ok(how) = std::env::var(TERMINAL_ENV) {
+            view.render_terminal(how == "expanded", cx);
+        }
         if switch(ROW_MENU_ENV) {
             // The sessions load after this; the menu needs only an id.
             view.row_menu = Some(row_menu::RowMenu {
@@ -321,7 +329,7 @@ impl ChatView {
                 this.toggle_sidebar(cx);
                 return;
             }
-            if keys.key != "escape" {
+            if keys.key != "escape" || this.terminal_has_keys(window) {
                 return;
             }
             use crate::chat::escape::{escape, Escape, Open};
@@ -392,6 +400,7 @@ impl ChatView {
             sidebar_hidden: false,
             details_hidden: false,
             page: page_panel::State::default(),
+            terminal: terminal::State::default(),
             follow_sent: false,
             clock_second: 0,
             overlay_open: false,
@@ -685,6 +694,8 @@ impl Render for ChatView {
             .children(tasks::render(self, a, cx))
             .children(conversation::latest_pill(self, a, cx))
             .part_at("Conversation", Corner::Bottom, a, cx);
+        let terminal_expanded =
+            self.terminal.shown() && self.terminal.expanded && !self.page.is_open();
         let column = div()
             .id("chat-column")
             .group(drop::GROUP)
@@ -732,10 +743,14 @@ impl Render for ChatView {
                             .flex_1()
                             .min_h(px(0.0))
                             .flex()
-                            .child(column)
+                            // An expanded terminal takes the conversation's room too.
+                            .when(!terminal_expanded, |row| row.child(column))
                             .children(page_panel::render(self, a, window, cx))
+                            .children(terminal::render(self, a, window, cx))
                             .children(
-                                (!self.page.is_open() && !self.details_hidden)
+                                (!self.page.is_open()
+                                    && !self.terminal.shown()
+                                    && !self.details_hidden)
                                     .then(|| inspector::render(self, a, cx).into_any_element()),
                             ),
                         cx,

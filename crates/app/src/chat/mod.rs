@@ -32,5 +32,6 @@ pub mod reload;
 pub mod rows;
 pub mod sidebar;
 pub mod steps;
+pub mod terminal;
 #[cfg(target_os = "macos")]
 pub mod view;
