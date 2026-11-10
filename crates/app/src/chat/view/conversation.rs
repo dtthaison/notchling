@@ -606,21 +606,21 @@ fn row_with_opinions(
     let item = view.conversation.items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
     let element = row_element(view, row, id, live, a, cx);
+    let subjects = item.map(opinions::subjects).unwrap_or_default();
+    let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
+    // The Second Opinion buttons show on hover, at the right end of the message's row of actions.
+    let buttons = (!subjects.is_empty()).then(|| {
+        div().flex().gap(px(4.0)).children(
+            subjects
+                .into_iter()
+                .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, a, cx)),
+        )
+    });
     // Your messages and Claude's replies get their row of actions beneath.
-    let element = message_actions::with_actions(view, row, item, element, a, cx);
-    let Some(item) = item else {
-        return element;
-    };
-    let subjects = opinions::subjects(item);
-    if subjects.is_empty() {
+    let element = message_actions::with_actions(view, row, item, element, buttons, a, cx);
+    if anchors.is_empty() {
         return element;
     }
-    let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
-    let buttons = div().flex().gap(px(4.0)).children(
-        subjects
-            .into_iter()
-            .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, a, cx)),
-    );
     let cards = view
         .selected
         .as_deref()
@@ -630,7 +630,6 @@ fn row_with_opinions(
         .flex_col()
         .gap(px(4.0))
         .child(element)
-        .child(buttons)
         .children(cards)
         .into_any_element()
 }

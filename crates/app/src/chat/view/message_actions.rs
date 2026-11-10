@@ -118,6 +118,7 @@ fn actions_row(
     copied: bool,
     shown: bool,
     group: SharedString,
+    trailing: Option<Div>,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
@@ -144,7 +145,9 @@ fn actions_row(
         Role::Assistant => row
             .justify_start()
             .when(plan.copy, |d| d.child(copy_button(id, text, copied, a, cx)))
-            .children(time.map(|at| time_label(id, at, a, cx))),
+            .children(time.map(|at| time_label(id, at, a, cx)))
+            // Second Opinion, at the far right.
+            .when_some(trailing, |d, t| d.child(div().flex_1()).child(t)),
     }
     .part("Message Actions", a, cx)
 }
@@ -156,21 +159,23 @@ pub fn with_actions(
     row: &Row,
     item: Option<&ChatItem>,
     element: Div,
+    trailing: Option<Div>,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> AnyElement {
     let (role, text, queued) = match row {
         Row::User { text, queued, .. } => (Role::User, text, *queued),
         Row::Assistant { text } => (Role::Assistant, text, false),
-        _ => return element.into_any_element(),
+        _ => return hover_only(view, item, element, trailing, cx),
     };
     let Some(item) = item else {
         return element.into_any_element();
     };
     let date = item.date;
     let plan = message_meta::plan(role, queued, date.is_some(), text);
-    if !plan.any() {
-        return element.into_any_element();
+    // Only a reply's row carries Second Opinion; anywhere else it gets a row of its own.
+    if !plan.any() || (role == Role::User && trailing.is_some()) {
+        return hover_only(view, Some(item), element, trailing, cx);
     }
     let id = item.id.as_str();
     let group = SharedString::from(format!("msg-{id}"));
@@ -190,6 +195,7 @@ pub fn with_actions(
         copied,
         shown,
         group.clone(),
+        trailing,
         a,
         cx,
     );
@@ -206,5 +212,43 @@ pub fn with_actions(
         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.message_hover(&hover_id, *hovered, cx);
         }))
+        .into_any_element()
+}
+
+/// `element` with `trailing` (the Second Opinion buttons) on a row of its own beneath, shown only
+/// while the pointer is over the two, for a row that has no actions of its own to share.
+fn hover_only(
+    view: &ChatView,
+    item: Option<&ChatItem>,
+    element: Div,
+    trailing: Option<Div>,
+    cx: &mut Context<ChatView>,
+) -> AnyElement {
+    let Some(trailing) = trailing else {
+        return element.into_any_element();
+    };
+    let key = item.map(|i| i.id.as_str()).unwrap_or("row");
+    let group = SharedString::from(format!("opinion-{key}"));
+    let shown = view.actions_preview || parts_on(cx);
+    div()
+        .id(group.clone())
+        .group(group.clone())
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .child(element)
+        .child(
+            div()
+                .w_full()
+                .h(px(ROW_HEIGHT))
+                .flex()
+                .items_center()
+                .justify_end()
+                .when(!shown, |d| {
+                    d.opacity(0.0).group_hover(group, |s| s.opacity(1.0))
+                })
+                .child(trailing),
+        )
         .into_any_element()
 }
