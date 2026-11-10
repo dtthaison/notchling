@@ -516,15 +516,23 @@ fn user_row(
         (false, false) => "Your Message",
     };
     let note = if sending { "Sending…" } else { "Queued" };
+    // Under the bubble where its delivered mark, time and Copy go once it's in (same gray, same
+    // row height), so nothing moves when it lands.
+    let status = queued.then(|| {
+        div()
+            .h(px(super::message_actions::ROW_HEIGHT))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a))
+            .child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(4.0)))
+    });
     div()
         .w_full()
         .flex()
         .flex_col()
         .items_end()
         .gap(px(2.0))
-        .when(queued, |d| {
-            d.child(label(note, TypeRole::Meta, Ink::TextFaint, a))
-        })
         .child(
             div()
                 .max_w(relative(0.75))
@@ -546,6 +554,7 @@ fn user_row(
                 a,
             ))
         })
+        .children(status)
 }
 
 /// A row, drawn. `id` is the item's (the queued bubbles at the end have none), `live` whether this

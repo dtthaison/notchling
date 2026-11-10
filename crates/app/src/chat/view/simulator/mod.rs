@@ -275,6 +275,9 @@ impl ChatView {
         let renderer = cx.svg_renderer();
         cx.spawn(async move |this, cx| {
             let mut listed_at: Option<std::time::Instant> = None;
+            // The last frame's bytes, hashed: a screen that hasn't changed isn't drawn again, since
+            // every draw of the Chat window sets the cursor and fights AppKit's (it flickers).
+            let mut last: Option<(String, u64)> = None;
             loop {
                 let (open, relist) = this
                     .update(cx, |v, _| {
@@ -325,6 +328,10 @@ impl ChatView {
                     continue;
                 };
                 let (h, r, u) = (home.clone(), renderer.clone(), udid.clone());
+                let seen = last
+                    .as_ref()
+                    .filter(|(d, _)| *d == udid)
+                    .map(|(_, hash)| *hash);
                 let frame = cx
                     .background_executor()
                     .spawn(async move {
@@ -335,8 +342,18 @@ impl ChatView {
                             Duration::from_secs(10),
                         )?;
                         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+                        let hash = {
+                            use std::hash::{Hash, Hasher};
+                            let mut h = std::collections::hash_map::DefaultHasher::new();
+                            bytes.hash(&mut h);
+                            h.finish()
+                        };
+                        if seen == Some(hash) {
+                            return Ok((hash, None));
+                        }
                         gpui::Image::from_bytes(ImageFormat::Jpeg, bytes)
                             .to_image_data(r)
+                            .map(|image| (hash, Some(image)))
                             .map_err(|e| e.to_string())
                     })
                     .await;
@@ -346,7 +363,12 @@ impl ChatView {
                             return false;
                         }
                         match frame {
-                            Ok(image) => {
+                            Ok((hash, None)) => {
+                                last = Some((udid, hash));
+                                return true;
+                            }
+                            Ok((hash, Some(image))) => {
+                                last = Some((udid.clone(), hash));
                                 // The old frame leaves the GPU's atlas, or each one would stay. A
                                 // still being annotated holds its own handle and is kept.
                                 if let Some((_, old)) = v.simulator.frame.replace((udid, image)) {
@@ -361,7 +383,10 @@ impl ChatView {
                                 }
                             }
                             // The device shut down between two lists: the next list says so.
-                            Err(_) => listed_at = None,
+                            Err(_) => {
+                                listed_at = None;
+                                last = None;
+                            }
                         }
                         cx.notify();
                         true

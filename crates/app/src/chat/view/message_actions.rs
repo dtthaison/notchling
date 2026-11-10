@@ -23,7 +23,7 @@ use crate::chat::rows::Row;
 use crate::mac::gate;
 
 /// The row's height, the buttons' size plus a hair.
-const ROW_HEIGHT: f32 = 24.0;
+pub(super) const ROW_HEIGHT: f32 = 24.0;
 /// A button's box.
 const BUTTON: f32 = 22.0;
 /// The icons' size (points, as `icon` takes them).

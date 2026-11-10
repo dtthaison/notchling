@@ -69,15 +69,13 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .when(s.menu_open, |d| d.fill(Ink::Raised, a))
         .hover(move |st| st.bg(hsla(Ink::Raised.color(a))))
         .child(
-            div()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .child(label(&name, TypeRole::Label, Ink::Text, a).elide())
-                .when(!runtime.is_empty(), |d| {
-                    d.child(label(&runtime, TypeRole::Meta, Ink::TextMuted, a))
-                }),
+            label(&name, TypeRole::Label, Ink::Text, a)
+                .elide()
+                .min_w(px(0.0)),
         )
+        .when(!runtime.is_empty(), |d| {
+            d.child(label(&runtime, TypeRole::Meta, Ink::TextMuted, a).flex_shrink_0())
+        })
         .child(icon(Icon::ChevronDown, 11.0, Ink::TextMuted, a))
         .on_click(cx.listener(|this, _, _, cx| {
             this.simulator.menu_open = !this.simulator.menu_open;
@@ -825,7 +823,7 @@ pub fn button_in_header(
     gate::tip_text(
         icon_button(
             "simulator-button",
-            Icon::Phone,
+            Icon::Simulator,
             IconSize::Button.points(),
             kind,
             PartState::Rest,

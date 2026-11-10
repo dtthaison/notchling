@@ -136,6 +136,8 @@ pub enum Icon {
     Camera,
     /// A screen recording (SF `video`).
     Video,
+    /// The iOS Simulator panel: a tablet and a phone, apart from the phone pairing mark.
+    Simulator,
 }
 
 /// Where an icon sits decides its size.
@@ -160,7 +162,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 71] = [
+    pub const ALL: [Icon; 72] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -232,6 +234,7 @@ impl Icon {
         Icon::Home,
         Icon::Camera,
         Icon::Video,
+        Icon::Simulator,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -309,6 +312,7 @@ impl Icon {
             Icon::Home => "house",
             Icon::Camera => "camera",
             Icon::Video => "video",
+            Icon::Simulator => "ipad.and.iphone",
         }
     }
 
@@ -389,6 +393,7 @@ impl Icon {
             Icon::Home => "⌂",
             Icon::Camera => "◉",
             Icon::Video => "▶",
+            Icon::Simulator => "⌷",
         }
     }
 
@@ -458,6 +463,7 @@ impl Icon {
             Icon::Home => "icons/house.svg",
             Icon::Camera => "icons/camera.svg",
             Icon::Video => "icons/video.svg",
+            Icon::Simulator => "icons/tablet-smartphone.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -507,7 +513,7 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 68] = icons![
+const SVGS: [(&str, &[u8]); 69] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -568,6 +574,7 @@ const SVGS: [(&str, &[u8]); 68] = icons![
     "square",
     "square-slash",
     "square-terminal",
+    "tablet-smartphone",
     "text",
     "triangle-alert",
     "undo-2",
