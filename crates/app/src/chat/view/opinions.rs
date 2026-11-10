@@ -31,32 +31,55 @@ pub fn store(cx: &Context<ChatView>) -> Option<SecondOpinionStore> {
 }
 
 /// What a conversation item can have reviewed, each with the anchor its card sits under: a
-/// reply (the item.s id), or an edit.s diff (the call.s id).
+/// reply (the item's id), or a file's changes in a step group (the first edit's call id; several
+/// edits of one file are one review with all their diffs, so the group shows one button per file).
 pub fn subjects(item: &ChatItem) -> Vec<(String, Subject)> {
     match &item.kind {
         ItemKind::Assistant { text } if !text.trim().is_empty() => {
             vec![(item.id.clone(), Subject::Message(text.clone()))]
         }
-        ItemKind::Tools(calls) => calls
-            .iter()
-            .filter(|c| matches!(c.kind, ToolKind::Edit | ToolKind::Write) && !c.diff.is_empty())
-            .map(|c| {
+        ItemKind::Tools(calls) => {
+            let mut out: Vec<(String, Subject)> = Vec::new();
+            let edits = calls.iter().filter(|c| {
+                matches!(c.kind, ToolKind::Edit | ToolKind::Write) && !c.diff.is_empty()
+            });
+            for c in edits {
                 let path = c
                     .input
                     .lines()
                     .find(|l| l.starts_with('/'))
                     .unwrap_or(&c.title)
                     .to_owned();
-                (
-                    c.id.clone(),
-                    Subject::Change {
-                        path,
-                        diff: c.diff.clone(),
-                    },
-                )
-            })
-            .collect(),
+                let same = out.iter_mut().find_map(|(_, s)| match s {
+                    Subject::Change { path: p, diff } if *p == path => Some(diff),
+                    _ => None,
+                });
+                match same {
+                    Some(diff) => diff.extend(c.diff.iter().cloned()),
+                    None => out.push((
+                        c.id.clone(),
+                        Subject::Change {
+                            path,
+                            diff: c.diff.clone(),
+                        },
+                    )),
+                }
+            }
+            out
+        }
         _ => Vec::new(),
+    }
+}
+
+/// The button's title: the file's name too when the group changed more than one (`of` subjects),
+/// so the buttons say which is which.
+pub fn button_label(subject: &Subject, of: usize) -> String {
+    match subject {
+        Subject::Change { path, .. } if of > 1 => {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            format!("Second Opinion: {name}")
+        }
+        _ => "Second Opinion".to_owned(),
     }
 }
 
@@ -64,6 +87,7 @@ pub fn subjects(item: &ChatItem) -> Vec<(String, Subject)> {
 pub fn opinion_button(
     anchor: &str,
     subject: Subject,
+    of: usize,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> impl IntoElement {
@@ -78,9 +102,10 @@ pub fn opinion_button(
         },
     };
     let anchor = anchor.to_owned();
+    let title = button_label(&subject, of);
     let b = button(
         SharedString::from(format!("opinion-{anchor}")),
-        "Second Opinion",
+        &title,
         ButtonKind::Ghost,
         gate::state(control),
         a,
@@ -235,4 +260,67 @@ pub fn any_running(view: &ChatView, cx: &Context<ChatView>) -> bool {
             .iter()
             .any(|o| o.session == *session && o.status == Status::Running)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notchling_engine::transcript::model::{DiffKind, DiffLine, ToolCall};
+
+    fn edit(id: &str, path: &str, line: &str) -> ToolCall {
+        let mut call = ToolCall::new(
+            id,
+            "Edit",
+            ToolKind::Edit,
+            format!("Edited {path}"),
+            path.into(),
+        );
+        call.diff = vec![DiffLine {
+            kind: DiffKind::Add,
+            text: line.into(),
+            number: Some(1),
+        }];
+        call
+    }
+
+    fn group(calls: Vec<ToolCall>) -> ChatItem {
+        ChatItem {
+            id: "g".into(),
+            kind: ItemKind::Tools(calls),
+            date: None,
+        }
+    }
+
+    #[test]
+    fn two_edits_of_one_file_are_one_review_with_both_changes() {
+        let item = group(vec![
+            edit("c1", "/w/a.rs", "one"),
+            edit("c2", "/w/a.rs", "two"),
+        ]);
+        let found = subjects(&item);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "c1", "under the first edit");
+        match &found[0].1 {
+            Subject::Change { path, diff } => {
+                assert_eq!(path, "/w/a.rs");
+                assert_eq!(diff.iter().filter(|l| l.kind == DiffKind::Add).count(), 2);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(button_label(&found[0].1, found.len()), "Second Opinion");
+    }
+
+    #[test]
+    fn edits_of_two_files_name_their_file() {
+        let item = group(vec![
+            edit("c1", "/w/a.rs", "one"),
+            edit("c2", "/w/b.rs", "two"),
+        ]);
+        let found = subjects(&item);
+        assert_eq!(found.len(), 2);
+        assert_eq!(
+            button_label(&found[1].1, found.len()),
+            "Second Opinion: b.rs"
+        );
+    }
 }

@@ -647,10 +647,11 @@ fn row_with_opinions(
     let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
     // The Second Opinion buttons show on hover, at the right end of the message's row of actions.
     let buttons = (!subjects.is_empty()).then(|| {
+        let of = subjects.len();
         div().flex().gap(px(4.0)).children(
             subjects
                 .into_iter()
-                .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, a, cx)),
+                .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, of, a, cx)),
         )
     });
     // Your messages and Claude's replies get their row of actions beneath.
