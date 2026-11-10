@@ -271,6 +271,7 @@ impl ChatView {
             view.row_menu = Some(row_menu::RowMenu {
                 row_id: "render-session".into(),
                 at: gpui::point(px(120.0), px(110.0)),
+                confirm_remove: false,
             });
         }
         if let Ok(id) = std::env::var(PAGE_ENV) {

@@ -6,7 +6,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
+use gpui::{div, prelude::*, px, svg, Context, Div, SharedString, Stateful};
+use notchling_kit::icon::svg_box;
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, card, hsla, icon, label, KitStyled};
@@ -243,9 +244,45 @@ pub(super) fn menu_item(
     checked: bool,
     a: Appearance,
 ) -> Stateful<Div> {
-    menu_row(id, title, checked, Ink::Text, a)
+    // Like a macOS menu: the row under the pointer fills with the accent and its text turns white.
+    let group = SharedString::from(format!("{id}-hot"));
+    let on = Ink::OnAccent.color(a);
+    let row = div()
+        .id(id)
+        .group(group.clone())
+        .px(px(10.0))
+        .py(px(5.0))
+        .rounded(px(RADIUS_SM))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
         .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
+        .hover(move |s| s.bg(hsla(Ink::Accent.color(a))));
+    let tick = svg_tick(checked, group.clone(), a);
+    row.child(tick).child(
+        label(title, TypeRole::Label, Ink::Text, a)
+            .group_hover(group, move |s| s.text_color(hsla(on))),
+    )
+}
+
+/// The fixed slot before a title, with a tick that turns white with its row.
+fn svg_tick(checked: bool, group: SharedString, a: Appearance) -> Div {
+    let size = TypeRole::Label.spec().size;
+    let slot = div().w(px(14.0)).flex_shrink_0();
+    if !checked {
+        return slot;
+    }
+    let on = Ink::OnAccent.color(a);
+    match Icon::Check.svg() {
+        Some(path) => slot.child(
+            svg()
+                .path(path)
+                .size(px(svg_box(size)))
+                .text_color(hsla(Ink::Text.color(a)))
+                .group_hover(group, move |s| s.text_color(hsla(on))),
+        ),
+        None => slot.child(icon(Icon::Check, size, Ink::Text, a)),
+    }
 }
 
 /// An item the `accounts` switch holds off: faint, no click, the reason on hover.

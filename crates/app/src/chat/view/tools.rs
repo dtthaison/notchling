@@ -309,7 +309,7 @@ impl ChatView {
     }
 
     /// Sends `request` off the UI thread; `done` takes the answer.
-    fn spawn_send(
+    pub(super) fn spawn_send(
         &mut self,
         request: Request,
         done: impl FnOnce(&mut ChatView, Result<Value, String>, &mut Context<ChatView>) + 'static,
