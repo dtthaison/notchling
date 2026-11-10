@@ -15,7 +15,7 @@ use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
-use notchling_kit::metric::{SPINNER_MINI as MINI, SPINNER_SMALL as SMALL};
+use notchling_kit::metric::SPINNER_SMALL as SMALL;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, button_with, claude_mark, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
@@ -42,16 +42,6 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
         Icon::ChevronRight
     };
     icon(shape, points, Ink::TextFaint, a)
-}
-
-/// The mini spinner on a step group or step that is still running (Swift `controlSize(.mini)`).
-fn spinner(key: &str, a: Appearance) -> impl IntoElement {
-    kit_spinner(
-        SharedString::from(format!("spin-{key}")),
-        MINI,
-        Ink::Working,
-        a,
-    )
 }
 
 /// The live line after the last row (the Swift app's live row): a spinner, what the session is
@@ -328,7 +318,7 @@ fn step_row(
                 a,
             ))
         })
-        .when(running, |d| d.child(spinner(&step.id, a)))
+        // No spinner on a running step: the live line at the bottom says what's going on.
         .when(!running && step.is_error, |d| {
             d.child(icon(Icon::Failed, 11.0, Ink::Expired, a))
         })
@@ -343,12 +333,11 @@ fn step_row(
 }
 
 /// The chip over a run of calls (`ToolStepView`): the kinds' icons stacked, the summary, how many
-/// failed, a spinner while live, the chevron. Click to open.
+/// failed, the chevron. Click to open.
 fn step_chip(
     id: &str,
     steps: &[ToolRow],
     open: bool,
-    live: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
@@ -396,7 +385,6 @@ fn step_chip(
             a,
         ))
         .children(steps::failed_text(steps).map(|t| label(&t, TypeRole::Label, Ink::Expired, a)))
-        .when(live, |d| d.child(spinner(id, a)))
         .child(chevron(open, 9.0, a))
 }
 
@@ -414,7 +402,7 @@ fn step_group(
         .flex()
         .flex_col()
         .items_start()
-        .child(step_chip(id, steps, open, live, a, cx))
+        .child(step_chip(id, steps, open, a, cx))
         .when(open, |d| {
             d.child(
                 div()
