@@ -107,7 +107,8 @@ pub fn usage() -> String {
          notchling-machines --version | --help\n\n\
          Off until the maintainer hands Machines over: without --live no ssh or gh runs (every \
          check says so), and without --vault no secret value is read. It reads the Swift app's \
-         machines.json and writes only under <data>/daemon/machines/.\n\n\
+         machines.json and writes only its own machines and update offers in <data>/notchling.db, \
+         plus its audit log and scratch files under <data>/daemon/machines/.\n\n\
          --data-root <dir> (or NOTCHLING_DATA_ROOT) reads <dir>/notchling/machines.json instead of \
          the real folder, and never runs a process or opens the vault. A render without one reads \
          the fixture this build carries.\n\n\

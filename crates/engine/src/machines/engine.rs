@@ -71,8 +71,9 @@ pub struct Deps {
     pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// A private folder for files a Fix hands `gh`.
     pub scratch: PathBuf,
-    /// `pending-updates.json`; `None` keeps the offers in memory only.
-    pub offers_file: Option<PathBuf>,
+    /// The data folder whose `notchling.db` keeps the pending offers; `None` keeps them in memory
+    /// only.
+    pub offers_data: Option<PathBuf>,
     /// `audit.jsonl`: one line per Fix that ran (time, machine, step, outcome; never its output).
     pub audit: Option<PathBuf>,
 }

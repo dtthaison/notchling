@@ -70,7 +70,7 @@ fn engine(m: &Machine, runner: Arc<ScriptedRunner>) -> SetupEngine {
             mac: Arc::new(MacFacts::default),
             clock: Arc::new(|| T0),
             scratch: std::env::temp_dir(),
-            offers_file: None,
+            offers_data: None,
             audit: None,
         },
         catalog::standard(),

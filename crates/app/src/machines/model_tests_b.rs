@@ -60,9 +60,7 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
     let root = Scratch::new("vault-watch");
     let setup = Setup::for_run(Some(&root.0), false, false).unwrap();
     assert!(setup.fixture && !setup.vault, "no Keychain, no process");
-    assert!(
-        RegistryFiles::single(&setup.data_dir.join("machines.json")).save(&[with_job(mac("m1"))])
-    );
+    assert!(RegistryFiles::single(&setup.data_dir).save(&[with_job(mac("m1"))]));
     let list = setup.vault_index();
     let first = [
         entry("claude-worker", "2026-11-01T00:00:00Z"),
@@ -106,8 +104,10 @@ fn a_value_saved_in_the_vault_offers_the_update_without_reading_any_value() {
         .collect();
     assert_eq!(names, ["claude-worker", "m1-github-issues"]);
     assert_eq!(model.vault_entries.len(), 3);
-    // the offer is kept beside the tool's own files, names only
-    let kept = std::fs::read_to_string(setup.roots().offers_file()).unwrap();
+    // the offer is kept in the database, names only
+    let kept = notchling_engine::store::doc(&setup.data_dir, "machines/pending-updates")
+        .unwrap()
+        .expect("kept");
     assert!(kept.contains("m1-github-issues") && kept.contains("\"m1\""));
 }
 

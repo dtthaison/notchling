@@ -4,18 +4,24 @@
 //! `name`, `host` and `user`; everything else takes its default. v1 (plan C) was the bare array of
 //! machines with `python`, `sdPath`, `fileVault` and `repos` inline.
 //!
-//! The registry reads one file and writes another ([`RegistryFiles`]): until handover the Rust
-//! tool reads the Swift app's `machines.json` and never writes it; its own writes go to
-//! `<data>/daemon/machines/machines.json`, which it reads from then on. The first load of a v1
-//! file copies its bytes to `<write file>.v1-backup` (never over an existing backup; a stamped name
-//! when that one is taken) and writes v2. If the backup can't be written nothing is written. A file
-//! that exists but can't be read, isn't JSON, has another version, or has an unknown job kind is
-//! [`RegistryState::Unreadable`] and is never written over.
+//! The registry reads from one place and writes to another ([`RegistryFiles`]): until handover the
+//! Rust tool reads the Swift app's `machines.json` and never writes it; its own copy is the
+//! [`REGISTRY_DOC`] document in `<data>/notchling.db` (this tool alone rewrote it whole, so it
+//! moved into the database, decision 0014), changed in one transaction so the app and the daemon
+//! never lose each other's save. Its old file, `<data>/daemon/machines/machines.json`, moves in
+//! once. The first load of a v1 registry copies its bytes to `<old file>.v1-backup` (a file that
+//! stays; never over an existing backup, a stamped name when that one is taken) and writes v2. If
+//! the backup can't be written nothing is written. A registry that can't be read, isn't JSON, has
+//! another version, or has an unknown job kind is [`RegistryState::Unreadable`] and is never
+//! written over (an old file like that stays where it is). A render ([`RegistryFiles::read_only`])
+//! never imports, migrates or saves.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+
+use crate::store;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineOs {
@@ -332,41 +338,84 @@ enum Raw {
     V2(Vec<Machine>),
 }
 
-/// The file read and the file written. Equal after handover; until then the read file is the
-/// Swift app's, which is only ever read.
+/// The document in `notchling.db` that holds what `machines.json` used to (v2, as the file's text).
+pub const REGISTRY_DOC: &str = "machines/registry";
+
+/// Where the registry is read from and written to.
+///
+/// It is written to one place, the [`REGISTRY_DOC`] document in `<data>/notchling.db`
+/// (`crate::store`, one transaction per change). It is read from, in this order: that document;
+/// this tool's old file (`old_own`, `<data>/daemon/machines/machines.json`, moved into the
+/// document the first time it is read, unless it can't be read, which leaves it where it is and
+/// makes it the source); the Swift app's file (`swift`, only ever read, until handover).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegistryFiles {
-    /// The Rust tool's own file (`<data>/daemon/machines/machines.json`).
-    pub own: PathBuf,
-    /// The Swift app's file, read while the own file doesn't exist.
+    /// Notchling's data folder, where `notchling.db` is.
+    pub data_dir: PathBuf,
+    /// This tool's file before it kept the registry in the database; the v1 backup goes beside it.
+    pub old_own: PathBuf,
+    /// The Swift app's file, read while there is no document.
     pub swift: Option<PathBuf>,
+    /// A render: nothing is imported, migrated or saved, whatever is there.
+    pub read_only: bool,
 }
 
 impl RegistryFiles {
-    /// One file, read and written.
-    pub fn single(path: &Path) -> RegistryFiles {
+    /// The database in `data_dir` and the old file at `data_dir/machines.json`, no Swift file.
+    pub fn single(data_dir: &Path) -> RegistryFiles {
         RegistryFiles {
-            own: path.to_path_buf(),
+            data_dir: data_dir.to_path_buf(),
+            old_own: data_dir.join("machines.json"),
             swift: None,
+            read_only: false,
         }
     }
 
-    /// The file loads read: the own one once it exists, else the Swift app's.
-    pub fn source(&self) -> &Path {
+    /// What loads read, for a line in the window: the database while it holds the registry, else
+    /// the file read. Opens the database, so not for a frame.
+    pub fn source(&self) -> PathBuf {
+        if matches!(store::doc(&self.data_dir, REGISTRY_DOC), Ok(Some(_))) {
+            return store::db_path(&self.data_dir);
+        }
+        if file_exists(&self.old_own) {
+            return self.old_own.clone();
+        }
+        self.swift.clone().unwrap_or_else(|| self.old_own.clone())
+    }
+
+    /// Moves the old own file into the document, once. Best effort: a file that stays is read
+    /// as the source.
+    fn import_old(&self) {
+        if self.read_only {
+            return;
+        }
+        let _ = store::import_file(&self.data_dir, REGISTRY_DOC, &self.old_own, |text| {
+            !matches!(parse(text.as_bytes()), Raw::Unreadable(_))
+        });
+    }
+
+    /// The files, when there is no document: the old own file once it exists, else the Swift app's.
+    fn read_files(&self) -> Raw {
+        if file_exists(&self.old_own) {
+            return read(&self.old_own);
+        }
         match &self.swift {
-            Some(swift) if !self.own.exists() => swift,
-            _ => &self.own,
+            Some(swift) => read(swift),
+            None => Raw::Missing,
         }
     }
 
-    /// Where the pending update offers are kept, next to the own file.
-    pub fn offers_file(&self) -> PathBuf {
-        self.own.with_file_name("pending-updates.json")
+    fn raw(&self) -> Raw {
+        self.import_old();
+        match store::doc(&self.data_dir, REGISTRY_DOC) {
+            Ok(Some(text)) => parse(text.as_bytes()),
+            Ok(None) => self.read_files(),
+            Err(why) => Raw::Unreadable(why),
+        }
     }
 
     pub fn load(&self) -> RegistryState {
-        let source = self.source().to_path_buf();
-        match read(&source) {
+        match self.raw() {
             Raw::Missing => RegistryState::Missing,
             Raw::Unreadable(why) => RegistryState::Unreadable(why),
             Raw::V2(machines) => RegistryState::Loaded {
@@ -374,45 +423,85 @@ impl RegistryFiles {
                 migrated: false,
             },
             Raw::V1(machines, original) => {
-                let Some(backup) = write_backup(&original, &self.own) else {
-                    return RegistryState::Loaded {
-                        machines,
-                        migrated: false,
-                    };
+                let loaded = |migrated| RegistryState::Loaded {
+                    machines: machines.clone(),
+                    migrated,
                 };
-                if write(&machines, &self.own) {
-                    return RegistryState::Loaded {
-                        machines,
-                        migrated: true,
-                    };
+                if self.read_only {
+                    return loaded(false);
+                }
+                let Some(backup) = write_backup(&original, &self.old_own) else {
+                    return loaded(false);
+                };
+                if self.write_migrated(&machines) {
+                    return loaded(true);
                 }
                 // nothing was migrated: don't leave a stray copy
                 let _ = std::fs::remove_file(backup);
-                RegistryState::Loaded {
-                    machines,
-                    migrated: false,
-                }
+                loaded(false)
             }
         }
     }
 
-    /// `[]` for a missing and an unreadable file.
+    /// Writes the migrated v1 machines as v2, unless a v2 registry got there first.
+    fn write_migrated(&self, machines: &[Machine]) -> bool {
+        let Some(text) = serialize(machines) else {
+            return false;
+        };
+        store::update_doc(&self.data_dir, REGISTRY_DOC, |row| match row {
+            Some(old) => match parse(old.as_bytes()) {
+                Raw::V2(_) => Ok(Some(old)),
+                Raw::Unreadable(why) => Err(why),
+                Raw::V1(..) | Raw::Missing => Ok(Some(text)),
+            },
+            None => Ok(Some(text)),
+        })
+        .is_ok()
+    }
+
+    /// `[]` for a missing and an unreadable registry.
     pub fn all(&self) -> Vec<Machine> {
         self.load().machines()
     }
 
-    /// Writes v2 to the own file only when what loads read is missing or a readable v2 file. False
-    /// means nothing was written.
+    /// Writes v2 to the document only when what loads read is missing or a readable v2 registry,
+    /// checked in the same transaction as the write. False means nothing was written.
     pub fn save(&self, machines: &[Machine]) -> bool {
-        match read(self.source()) {
-            Raw::Missing | Raw::V2(_) => write(machines, &self.own),
-            Raw::V1(..) | Raw::Unreadable(_) => false,
+        if self.read_only {
+            return false;
         }
+        let Some(text) = serialize(machines) else {
+            return false;
+        };
+        self.import_old();
+        // a registry that is refused anyway makes no database
+        if !store::exists(&self.data_dir)
+            && matches!(self.read_files(), Raw::V1(..) | Raw::Unreadable(_))
+        {
+            return false;
+        }
+        store::update_doc(&self.data_dir, REGISTRY_DOC, |row| {
+            let raw = match row {
+                Some(old) => parse(old.as_bytes()),
+                None => self.read_files(),
+            };
+            match raw {
+                Raw::Missing | Raw::V2(_) => Ok(Some(text)),
+                Raw::V1(..) | Raw::Unreadable(_) => {
+                    Err("the registry is never written over".into())
+                }
+            }
+        })
+        .is_ok()
     }
 
     pub fn machine(&self, name: &str) -> Option<Machine> {
         self.all().into_iter().find(|m| m.name == name)
     }
+}
+
+fn file_exists(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
 }
 
 /// `<file>.v1-backup`.
@@ -423,29 +512,36 @@ pub fn backup_path(file: &Path) -> PathBuf {
 }
 
 fn read(path: &Path) -> Raw {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Raw::Missing,
-        Err(e) => return Raw::Unreadable(e.to_string()),
-    };
-    if let Ok(v1) = serde_json::from_slice::<Vec<MachineV1>>(&data) {
-        return Raw::V1(v1.into_iter().map(MachineV1::machine).collect(), data);
+    match std::fs::read(path) {
+        Ok(data) => parse(&data),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::Missing,
+        Err(e) => Raw::Unreadable(e.to_string()),
     }
-    let Ok(Value::Object(header)) = serde_json::from_slice::<Value>(&data) else {
+}
+
+/// A registry's bytes (a file's, or the document's text) as v1, v2 or unreadable.
+fn parse(data: &[u8]) -> Raw {
+    if let Ok(v1) = serde_json::from_slice::<Vec<MachineV1>>(data) {
+        return Raw::V1(
+            v1.into_iter().map(MachineV1::machine).collect(),
+            data.to_vec(),
+        );
+    }
+    let Ok(Value::Object(header)) = serde_json::from_slice::<Value>(data) else {
         return Raw::Unreadable("not a machines.json file".into());
     };
     let Some(version) = header.get("version").and_then(Value::as_i64) else {
         return Raw::Unreadable("not a machines.json file".into());
     };
     match version {
-        1 => match serde_json::from_slice::<FileV1>(&data) {
+        1 => match serde_json::from_slice::<FileV1>(data) {
             Ok(f) => Raw::V1(
                 f.machines.into_iter().map(MachineV1::machine).collect(),
-                data,
+                data.to_vec(),
             ),
             Err(e) => Raw::Unreadable(e.to_string()),
         },
-        2 => match serde_json::from_slice::<FileV2>(&data) {
+        2 => match serde_json::from_slice::<FileV2>(data) {
             Ok(f) => Raw::V2(
                 f.machines
                     .into_iter()
@@ -495,7 +591,8 @@ pub fn sort_keys(value: Value) -> Value {
     }
 }
 
-fn write(machines: &[Machine], path: &Path) -> bool {
+/// The v2 registry's text for `machines`.
+fn serialize(machines: &[Machine]) -> Option<String> {
     let settled: Vec<Machine> = machines
         .iter()
         .map(|m| {
@@ -504,17 +601,9 @@ fn write(machines: &[Machine], path: &Path) -> bool {
             m
         })
         .collect();
-    let Ok(list) = serde_json::to_value(&settled) else {
-        return false;
-    };
+    let list = serde_json::to_value(&settled).ok()?;
     let file = serde_json::json!({"version": 2, "machines": list});
-    let Some(dir) = path.parent() else {
-        return false;
-    };
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    notchling_platform::files::write_private_no_follow(path, &pretty_sorted(file)).is_ok()
+    String::from_utf8(pretty_sorted(file)).ok()
 }
 
 /// Copies the original bytes to `<file>.v1-backup`, or to `<file>.v1-backup-<unix seconds>` when

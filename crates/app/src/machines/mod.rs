@@ -8,8 +8,12 @@
 //! Until handover the tool is **off**: without `--live` every process goes to the engine's
 //! [`Refusing`](notchling_engine::machines::runner::Refusing) runner (no ssh, no `gh`), and without
 //! `--vault` it has no secret values ([`NoSecrets`](notchling_engine::machines::step::NoSecrets)).
-//! It reads the Swift app's `machines.json` and writes only under `<data>/daemon/machines/`
-//! ([`MachineRoots`](notchling_engine::machines::roots::MachineRoots)). A secret shows everywhere
+//! It reads the Swift app's `machines.json` and writes only its own documents in
+//! `<data>/notchling.db` (the machines and the pending update offers, `machines/registry` and
+//! `machines/pending-updates`; their old files move in once) and its audit log, merge worktrees,
+//! scratch and cache under `<data>/daemon/machines/`
+//! ([`MachineRoots`](notchling_engine::machines::roots::MachineRoots)). A render writes nothing
+//! at all. A secret shows everywhere
 //! as `[secret:<name>]`; the engine masks every text before the window sees it.
 //!
 //! The pure parts build and are tested on every system: [`cli`] (the binary's arguments), [`data`]

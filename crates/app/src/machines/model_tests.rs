@@ -157,7 +157,7 @@ pub(super) fn world_with_secrets(
         mac: Arc::new(MacFacts::default),
         clock: Arc::new(|| T0),
         scratch: std::env::temp_dir().join("notchling-machines-model-tests"),
-        offers_file: None,
+        offers_data: None,
         audit: None,
     };
     let engine = Arc::new(SetupEngine::new(deps, catalog::standard()));

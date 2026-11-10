@@ -109,9 +109,8 @@ fn send_again_is_only_for_the_machines_own_files() {
 
 #[test]
 fn the_pending_offer_survives_a_new_engine_and_holds_names_only() {
-    let dir = std::env::temp_dir().join(format!("notchling-offers-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let file = dir.join("pending-updates.json");
+    let tmp = super::fakes::TempDir::new("offers");
+    let dir = tmp.join("data");
     let make = |f: &std::path::Path| {
         let mut s = Setup::new(|_, _| vec![]);
         let mut m = mac("m1");
@@ -128,31 +127,86 @@ fn the_pending_offer_survives_a_new_engine_and_holds_names_only() {
                 })
                 .collect()
         });
-        s.offers_file = Some(f.to_path_buf());
+        s.offers_data = Some(f.to_path_buf());
         s.build()
     };
-    let w = make(&file);
+    let w = make(&dir);
     w.engine.vault_value_changed("m1-github-issues");
-    let text = std::fs::read_to_string(&file).unwrap();
+    let text = crate::store::doc(&dir, super::offers::OFFERS_DOC)
+        .unwrap()
+        .expect("the offer is a document");
     assert!(
         text.contains("\"version\": 1")
             && text.contains("m1-github-issues")
             && text.contains("\"m1\"")
     );
     assert!(!text.contains("fake-ghp-3333"));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-    }
-    let again = make(&file);
+    assert!(
+        !super::offers::old_offers_file(&dir).exists(),
+        "no file is made"
+    );
+    let again = make(&dir);
     assert_eq!(again.engine.update_offers().len(), 1);
     again.engine.forget("m1");
-    assert!(!file.exists(), "an empty offer removes the file");
-    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        crate::store::doc(&dir, super::offers::OFFERS_DOC).unwrap(),
+        None,
+        "an empty offer removes the document"
+    );
+}
+
+fn offers_world(data: &std::path::Path) -> World {
+    let mut s = Setup::new(|_, _| vec![]);
+    let mut m = mac("m1");
+    m.set_sd_worker(Some(SdWorkerSettings::new("m1")));
+    s.machines = vec![m];
+    s.usages = Arc::new(|ms| {
+        ms.iter()
+            .map(|m| SecretUsage {
+                name: format!("{}-github-issues", m.name),
+                machine: m.name.clone(),
+                remote_path: super::shell::GITHUB_TOKEN.into(),
+                format: SecretFormat::Raw,
+            })
+            .collect()
+    });
+    s.offers_data = Some(data.to_path_buf());
+    s.build()
+}
+
+const OLD_OFFERS: &str = r#"{"version":1,"offers":{"m1-github-issues":["m1"]}}"#;
+
+#[test]
+fn the_old_offers_file_moves_in_once_and_a_bad_one_stays() {
+    let tmp = super::fakes::TempDir::new("offers-import");
+    let dir = tmp.join("data");
+    let old = super::offers::old_offers_file(&dir);
+    std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+    std::fs::write(&old, OLD_OFFERS).unwrap();
+    let w = offers_world(&dir);
+    assert_eq!(w.engine.update_offers().len(), 1);
+    assert!(!old.exists(), "moved into the database");
+    assert!(crate::store::doc(&dir, super::offers::OFFERS_DOC)
+        .unwrap()
+        .is_some());
+
+    let bad = tmp.join("bad");
+    let bad_file = super::offers::old_offers_file(&bad);
+    std::fs::create_dir_all(bad_file.parent().unwrap()).unwrap();
+    std::fs::write(&bad_file, "{ not json").unwrap();
+    let w = offers_world(&bad);
+    assert!(w.engine.update_offers().is_empty());
+    assert!(bad_file.exists(), "left where it is");
+    assert!(!crate::store::exists(&bad), "and no database made for it");
+}
+
+#[test]
+fn an_empty_offer_makes_no_database() {
+    let tmp = super::fakes::TempDir::new("offers-empty");
+    let dir = tmp.join("data");
+    let w = offers_world(&dir);
+    w.engine.forget("m1");
+    assert!(!dir.exists(), "nothing to keep, nothing made");
 }
 
 #[test]

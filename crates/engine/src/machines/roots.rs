@@ -1,6 +1,8 @@
 //! Where Machines reads and writes, as parameters (decision: the Swift app owns the machines until
-//! handover). The Swift app's `machines.json` sits in the data folder and is only read; this tool
-//! writes its own copy, the pending offers and its scratch files under `<data>/daemon/machines/`.
+//! handover). The Swift app's `machines.json` sits in the data folder and is only read. This tool's
+//! own copy of it and the pending offers are documents in `<data>/notchling.db` (the files they
+//! used to be are in `<data>/daemon/machines/` and move in once); its audit log, merge worktrees,
+//! scratch files and cache stay files there.
 
 use super::registry::RegistryFiles;
 use super::step::SecretSource;
@@ -10,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineRoots {
+    /// Notchling's data folder: `notchling.db` is in it.
+    pub data_dir: PathBuf,
     /// The Swift app's file, read only.
     pub swift_file: PathBuf,
     /// This tool's folder.
@@ -20,21 +24,20 @@ impl MachineRoots {
     /// From Notchling's data folder (`~/Library/Application Support/Notchling`, or a fixture's).
     pub fn in_data(data: &Path) -> MachineRoots {
         MachineRoots {
+            data_dir: data.to_path_buf(),
             swift_file: data.join("machines.json"),
             own_dir: data.join("daemon").join("machines"),
         }
     }
 
-    /// The registry: this tool's own file once it saved one, until then the Swift app's.
+    /// The registry: this tool's own document once it saved one, until then the Swift app's file.
     pub fn registry(&self) -> RegistryFiles {
         RegistryFiles {
-            own: self.own_dir.join("machines.json"),
+            data_dir: self.data_dir.clone(),
+            old_own: self.own_dir.join("machines.json"),
             swift: Some(self.swift_file.clone()),
+            read_only: false,
         }
-    }
-
-    pub fn offers_file(&self) -> PathBuf {
-        self.own_dir.join("pending-updates.json")
     }
 
     /// One line per Fix that ran.
@@ -107,18 +110,15 @@ mod tests {
     fn the_swift_file_is_read_and_this_tool_writes_beside_the_daemon() {
         let r = MachineRoots::in_data(Path::new("/tmp/nl-root/notchling"));
         let reg = r.registry();
+        assert_eq!(reg.data_dir, Path::new("/tmp/nl-root/notchling"));
         assert_eq!(
-            reg.own,
+            reg.old_own,
             Path::new("/tmp/nl-root/notchling/daemon/machines/machines.json")
         );
         assert_eq!(
             reg.swift.as_deref(),
             Some(Path::new("/tmp/nl-root/notchling/machines.json"))
         );
-        assert_eq!(
-            r.offers_file(),
-            Path::new("/tmp/nl-root/notchling/daemon/machines/pending-updates.json")
-        );
-        assert_eq!(reg.offers_file(), r.offers_file());
+        assert!(!reg.read_only);
     }
 }

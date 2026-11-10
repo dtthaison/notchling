@@ -1,9 +1,11 @@
-//! `machines.json` v2, the one-time v1 migration and what is never overwritten (Swift
-//! `MachinesRegistryTests`). Files live in a private temp folder; nothing real is read.
+//! The registry: `machines.json` v2 kept as a document in `notchling.db`, the one-time v1
+//! migration, the old file moving in, and what is never overwritten (Swift `MachinesRegistryTests`).
+//! Files live in a private temp folder; nothing real is read.
 
 use super::fakes::TempDir;
 use super::registry::*;
-use std::path::Path;
+use crate::store;
+use std::path::{Path, PathBuf};
 
 fn repo() -> MachineRepo {
     MachineRepo {
@@ -40,58 +42,81 @@ fn sample() -> Vec<Machine> {
     ]
 }
 
-fn files(dir: &TempDir, name: &str) -> RegistryFiles {
-    RegistryFiles::single(&dir.join(name))
+/// A registry over the data folder `dir/<tag>`, its old own file there as `machines.json`, no
+/// Swift file.
+fn registry(dir: &TempDir, tag: &str) -> RegistryFiles {
+    RegistryFiles::single(&dir.join(tag))
+}
+
+/// The same, with the old own file's text written first.
+fn with_old_file(dir: &TempDir, tag: &str, text: &str) -> RegistryFiles {
+    let reg = registry(dir, tag);
+    write(&reg.old_own, text);
+    reg
 }
 
 fn write(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
 }
 
-fn names(dir: &TempDir) -> Vec<String> {
-    let mut list: Vec<String> = std::fs::read_dir(dir.path())
+/// The files in `dir`, without the database's.
+fn names(dir: &Path) -> Vec<String> {
+    let mut list: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with(store::DB_NAME))
         .collect();
     list.sort();
     list
 }
 
+fn doc(reg: &RegistryFiles) -> Option<String> {
+    store::doc(&reg.data_dir, REGISTRY_DOC).unwrap()
+}
+
+fn machine_names(machines: &[Machine]) -> Vec<&str> {
+    machines.iter().map(|m| m.name.as_str()).collect()
+}
+
 #[test]
 fn registry_round_trip() {
     let dir = TempDir::new("reg");
-    let reg = files(&dir, "sub/machines.json");
+    let reg = registry(&dir, "data");
     assert!(reg.save(&sample()));
     assert_eq!(reg.all(), sample());
     assert_eq!(reg.machine("vps-sing-1").unwrap().user, "agent");
     assert_eq!(reg.machine("m1").unwrap().python(), "python3");
     assert_eq!(reg.machine("nope"), None);
+    assert!(!reg.old_own.exists(), "no file is written");
 }
 
 #[test]
-fn a_missing_file_is_empty() {
+fn a_missing_registry_is_empty_and_reading_makes_no_database() {
     let dir = TempDir::new("reg");
-    let reg = files(&dir, "machines.json");
+    let reg = registry(&dir, "data");
     assert_eq!(reg.all(), Vec::<Machine>::new());
     assert_eq!(reg.load(), RegistryState::Missing);
+    assert!(!dir.join("data").exists());
 }
 
 #[test]
 fn bad_json_is_empty_not_a_crash() {
     let dir = TempDir::new("reg");
-    write(&dir.join("machines.json"), "{ not json");
-    assert_eq!(files(&dir, "machines.json").all(), Vec::<Machine>::new());
+    let reg = with_old_file(&dir, "data", "{ not json");
+    assert_eq!(reg.all(), Vec::<Machine>::new());
 }
 
 #[test]
 fn python_defaults_when_the_key_is_missing() {
     let dir = TempDir::new("reg");
-    write(
-        &dir.join("machines.json"),
+    let reg = with_old_file(
+        &dir,
+        "data",
         r#"[{"name":"m1","host":"m1","user":"sondoan","sdPath":"/x/sd.py","fileVault":true,"repos":[]}]"#,
     );
-    assert_eq!(files(&dir, "machines.json").all()[0].python(), "python3");
+    assert_eq!(reg.all()[0].python(), "python3");
 }
 
 // MARK: machines.json v2 and the one-time migration
@@ -116,18 +141,13 @@ const V1_OTHER: &str =
 #[test]
 fn v1_migrates_every_field_and_keeps_a_byte_identical_backup() {
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    write(&file, V1_TEXT);
-    let reg = files(&dir, "machines.json");
+    let reg = with_old_file(&dir, "data", V1_TEXT);
 
     let RegistryState::Loaded { machines, migrated } = reg.load() else {
         panic!("not loaded");
     };
     assert!(migrated);
-    assert_eq!(
-        machines.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
-        vec!["m1", "vps-sing-1"]
-    );
+    assert_eq!(machine_names(&machines), vec!["m1", "vps-sing-1"]);
     let (m1, vps) = (&machines[0], &machines[1]);
     assert_eq!((m1.host.as_str(), m1.user.as_str()), ("m1", "sondoan"));
     assert_eq!(m1.python(), "python3");
@@ -154,20 +174,22 @@ fn v1_migrates_every_field_and_keeps_a_byte_identical_backup() {
     );
 
     assert_eq!(
-        std::fs::read(backup_path(&file)).unwrap(),
+        std::fs::read(backup_path(&reg.old_own)).unwrap(),
         V1_TEXT.as_bytes()
     );
-    let text = std::fs::read_to_string(&file).unwrap();
+    let text = doc(&reg).unwrap();
     assert!(text.contains("\"version\": 2"), "{text}");
+    assert!(
+        !reg.old_own.exists(),
+        "the old file moved into the database"
+    );
     assert_eq!(reg.all(), machines);
 }
 
 #[test]
 fn migration_runs_once() {
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    write(&file, V1_TEXT);
-    let reg = files(&dir, "machines.json");
+    let reg = with_old_file(&dir, "data", V1_TEXT);
     let RegistryState::Loaded {
         machines: first,
         migrated: true,
@@ -183,42 +205,35 @@ fn migration_runs_once() {
         }
     );
     assert_eq!(
-        std::fs::read(backup_path(&file)).unwrap(),
+        std::fs::read(backup_path(&reg.old_own)).unwrap(),
         V1_TEXT.as_bytes()
     );
-    assert_eq!(
-        names(&dir),
-        vec!["machines.json", "machines.json.v1-backup"]
-    );
+    assert_eq!(names(&dir.join("data")), vec!["machines.json.v1-backup"]);
 }
 
 #[test]
-fn a_second_v1_file_gets_its_own_backup() {
+fn a_second_v1_registry_gets_its_own_backup() {
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    write(&file, V1_TEXT);
-    let reg = files(&dir, "machines.json");
+    let reg = with_old_file(&dir, "data", V1_TEXT);
     reg.load();
-    write(&file, V1_OTHER);
+    // the registry is gone (a removed document), and another v1 file turns up
+    store::update_doc(&reg.data_dir, REGISTRY_DOC, |_| Ok(None)).unwrap();
+    write(&reg.old_own, V1_OTHER);
 
     let RegistryState::Loaded { machines, migrated } = reg.load() else {
         panic!("second load");
     };
     assert!(migrated);
-    assert_eq!(
-        machines.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
-        vec!["z"]
-    );
-    assert_eq!(
-        std::fs::read(backup_path(&file)).unwrap(),
-        V1_TEXT.as_bytes()
-    );
-    let extra: Vec<String> = names(&dir)
+    assert_eq!(machine_names(&machines), vec!["z"]);
+    let backup = backup_path(&reg.old_own);
+    assert_eq!(std::fs::read(&backup).unwrap(), V1_TEXT.as_bytes());
+    let prefix = backup.file_name().unwrap().to_string_lossy().into_owned() + "-";
+    let extra: Vec<String> = names(&dir.join("data"))
         .into_iter()
-        .filter(|n| n.starts_with("machines.json.v1-backup-"))
+        .filter(|n| n.starts_with(&prefix))
         .collect();
     assert_eq!(extra.len(), 1);
-    let digits = extra[0].trim_start_matches("machines.json.v1-backup-");
+    let digits = extra[0].trim_start_matches(&prefix);
     assert!(!digits.is_empty());
     assert!(
         digits.chars().all(|c| c.is_ascii_digit() || c == '-'),
@@ -226,7 +241,7 @@ fn a_second_v1_file_gets_its_own_backup() {
         extra[0]
     );
     assert_eq!(
-        std::fs::read(dir.join(&extra[0])).unwrap(),
+        std::fs::read(dir.join("data").join(&extra[0])).unwrap(),
         V1_OTHER.as_bytes()
     );
 }
@@ -245,68 +260,61 @@ fn a_backup_that_cannot_be_written_stops_the_migration() {
         return;
     }
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    write(&file, V1_TEXT);
-    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
-    let reg = files(&dir, "machines.json");
+    let reg = with_old_file(&dir, "data", V1_TEXT);
+    let data = dir.join("data");
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o500)).unwrap();
     let RegistryState::Loaded { machines, migrated } = reg.load() else {
         panic!("not loaded");
     };
     assert!(!migrated);
-    assert_eq!(
-        machines.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
-        vec!["m1", "vps-sing-1"]
-    );
-    assert_eq!(std::fs::read(&file).unwrap(), V1_TEXT.as_bytes());
-    assert!(!backup_path(&file).exists());
+    assert_eq!(machine_names(&machines), vec!["m1", "vps-sing-1"]);
+    assert_eq!(std::fs::read(&reg.old_own).unwrap(), V1_TEXT.as_bytes());
+    assert!(!backup_path(&reg.old_own).exists());
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 #[cfg(unix)]
 #[test]
-fn an_unreadable_file_is_never_overwritten() {
+fn an_unreadable_registry_is_never_overwritten() {
     use std::os::unix::fs::PermissionsExt;
     let dir = TempDir::new("reg");
-    let bad = dir.join("bad.json");
-    write(&bad, "{ not json");
-    let reg = RegistryFiles::single(&bad);
+    let reg = with_old_file(&dir, "bad", "{ not json");
     assert!(matches!(reg.load(), RegistryState::Unreadable(_)));
     assert!(!reg.save(&sample()));
-    assert_eq!(std::fs::read(&bad).unwrap(), b"{ not json");
+    assert_eq!(std::fs::read(&reg.old_own).unwrap(), b"{ not json");
+    assert_eq!(doc(&reg), None);
+    assert_eq!(names(&dir.join("bad")), vec!["machines.json"]);
+    assert!(!store::exists(&reg.data_dir), "refusing made no database");
 
     if !is_root() {
-        let locked = dir.join("locked.json");
-        write(&locked, V1_TEXT);
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let reg = RegistryFiles::single(&locked);
+        let reg = with_old_file(&dir, "locked", V1_TEXT);
+        std::fs::set_permissions(&reg.old_own, std::fs::Permissions::from_mode(0o000)).unwrap();
         assert!(matches!(reg.load(), RegistryState::Unreadable(_)));
         assert_eq!(reg.all(), Vec::<Machine>::new());
         assert!(!reg.save(&sample()));
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(std::fs::read(&locked).unwrap(), V1_TEXT.as_bytes());
-        assert_eq!(names(&dir), vec!["bad.json", "locked.json"]);
+        std::fs::set_permissions(&reg.old_own, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&reg.old_own).unwrap(), V1_TEXT.as_bytes());
+        assert_eq!(names(&dir.join("locked")), vec!["machines.json"]);
     }
 }
 
 #[test]
 fn unknown_version_or_job_kind_is_unreadable() {
     let dir = TempDir::new("reg");
-    let v3 = (dir.join("v3.json"), r#"{"version":3,"machines":[]}"#);
-    let kind = (
-        dir.join("kind.json"),
-        r#"{"version":2,"machines":[{"name":"m","host":"m","user":"u","jobs":[{"kind":"triage-bot"}]}]}"#,
-    );
-    for (path, text) in [&v3, &kind] {
-        write(path, text);
-        let reg = RegistryFiles::single(path);
-        assert!(
-            matches!(reg.load(), RegistryState::Unreadable(_)),
-            "{}",
-            path.display()
-        );
+    let cases = [
+        ("v3", r#"{"version":3,"machines":[]}"#),
+        (
+            "kind",
+            r#"{"version":2,"machines":[{"name":"m","host":"m","user":"u","jobs":[{"kind":"triage-bot"}]}]}"#,
+        ),
+    ];
+    for (tag, text) in cases {
+        let reg = with_old_file(&dir, tag, text);
+        assert!(matches!(reg.load(), RegistryState::Unreadable(_)), "{tag}");
         assert!(!reg.save(&sample()));
-        assert_eq!(std::fs::read(path).unwrap(), text.as_bytes());
+        assert_eq!(std::fs::read(&reg.old_own).unwrap(), text.as_bytes());
+        assert_eq!(doc(&reg), None, "{tag}");
     }
-    assert_eq!(names(&dir), vec!["kind.json", "v3.json"]);
 }
 
 /// A Linux machine's admin can't be the worker account, so a file that doesn't say defaults it to
@@ -314,11 +322,12 @@ fn unknown_version_or_job_kind_is_unreadable() {
 #[test]
 fn a_linux_machine_without_an_admin_key_defaults_to_root_over_ssh() {
     let dir = TempDir::new("reg");
-    write(
-        &dir.join("machines.json"),
+    let reg = with_old_file(
+        &dir,
+        "data",
         r#"{"version":2,"machines":[{"name":"a","host":"a","user":"agent","os":"linux"},{"name":"b","host":"b","user":"u","os":"macos"},{"name":"c","host":"c","user":"u"},{"name":"d","host":"d","user":"u","os":"linux","admin":"sudo"}]}"#,
     );
-    let machines = files(&dir, "machines.json").all();
+    let machines = reg.all();
     assert_eq!(
         machines.iter().map(|m| m.admin()).collect::<Vec<_>>(),
         vec![
@@ -333,10 +342,9 @@ fn a_linux_machine_without_an_admin_key_defaults_to_root_over_ssh() {
 #[test]
 fn v2_fields_may_be_missing_except_name_host_user() {
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    let reg = RegistryFiles::single(&file);
-    write(
-        &file,
+    let reg = with_old_file(
+        &dir,
+        "plain",
         r#"{"version":2,"machines":[{"name":"vps","host":"vps.tail","user":"agent"}]}"#,
     );
     assert_eq!(
@@ -354,8 +362,9 @@ fn v2_fields_may_be_missing_except_name_host_user() {
     assert_eq!(m.claude_secret, "claude-worker");
     assert_eq!(m.admin(), AdminAccess::Sudo);
     // A job with no settings in it gets the defaults, with the secret named after the machine.
-    write(
-        &file,
+    let reg = with_old_file(
+        &dir,
+        "job",
         r#"{"version":2,"machines":[{"name":"vps","host":"h","user":"u","jobs":[{"kind":"sd-worker","sdWorker":{}}]}]}"#,
     );
     let m = reg.machine("vps").unwrap();
@@ -366,8 +375,7 @@ fn v2_fields_may_be_missing_except_name_host_user() {
 #[test]
 fn save_writes_when_missing_and_round_trips_v2() {
     let dir = TempDir::new("reg");
-    let file = dir.join("machines.json");
-    let reg = RegistryFiles::single(&file);
+    let reg = registry(&dir, "data");
     let mut worker = SdWorkerSettings::new("vps-sing-1");
     worker.python = "/usr/bin/python3.12".into();
     worker.sd_path = "/home/agent/sd/sd.py".into();
@@ -403,7 +411,7 @@ fn save_writes_when_missing_and_round_trips_v2() {
     );
     assert_eq!(reg.all(), vec![m.clone()]);
     assert_eq!(m.python(), "/usr/bin/python3.12");
-    let text = std::fs::read_to_string(&file).unwrap();
+    let text = doc(&reg).unwrap();
     assert!(text.contains("\"version\": 2"));
     // keys are sorted: admin before claudeSecret
     assert!(text.find("\"admin\"").unwrap() < text.find("\"claudeSecret\"").unwrap());
@@ -412,9 +420,9 @@ fn save_writes_when_missing_and_round_trips_v2() {
             && text.contains("\"sd-worker\"")
             && text.contains("\"linux\"")
     );
-    // A saved v2 file is saved again without a backup.
+    // A saved v2 registry is saved again without a backup.
     assert!(reg.save(&[m]));
-    assert!(!backup_path(&file).exists());
+    assert!(!backup_path(&reg.old_own).exists());
 }
 
 #[test]
@@ -438,29 +446,180 @@ fn the_sd_worker_setter_adds_replaces_and_removes_the_job() {
     assert!(m.jobs.is_empty());
 }
 
-// MARK: the Rust tool's own file next to the Swift app's
+// MARK: the Rust tool's own copy next to the Swift app's file
+
+/// A registry with a Swift file as well, in `dir/swift/machines.json`.
+fn with_swift(dir: &TempDir, text: &str) -> (RegistryFiles, PathBuf) {
+    let swift = dir.join("swift/machines.json");
+    write(&swift, text);
+    let reg = RegistryFiles {
+        data_dir: dir.join("data"),
+        old_own: dir.join("data/daemon/machines/machines.json"),
+        swift: Some(swift.clone()),
+        read_only: false,
+    };
+    (reg, swift)
+}
 
 /// Until handover the Swift app's file is only ever read: a v1 file there migrates into the tool's
-/// own file, and the Swift file's bytes stay as they were.
+/// own document, and the Swift file's bytes stay as they were.
 #[test]
 fn the_swift_apps_file_is_read_and_never_written() {
     let dir = TempDir::new("reg");
-    let swift = dir.join("swift/machines.json");
-    std::fs::create_dir_all(swift.parent().unwrap()).unwrap();
-    write(&swift, V1_TEXT);
-    let own = dir.join("own/machines.json");
-    let reg = RegistryFiles {
-        own: own.clone(),
-        swift: Some(swift.clone()),
-    };
+    let (reg, swift) = with_swift(&dir, V1_TEXT);
+    assert_eq!(reg.source(), swift);
     assert_eq!(reg.all().len(), 2, "read from the Swift app's file");
-    assert!(own.exists(), "migrated into the tool's own file");
+    assert!(doc(&reg).is_some(), "migrated into the tool's own document");
+    assert_eq!(reg.source(), store::db_path(&reg.data_dir));
     assert_eq!(std::fs::read(&swift).unwrap(), V1_TEXT.as_bytes());
     assert_eq!(
-        std::fs::read(backup_path(&own)).unwrap(),
+        std::fs::read(backup_path(&reg.old_own)).unwrap(),
         V1_TEXT.as_bytes()
     );
     assert!(reg.save(&sample()));
     assert_eq!(std::fs::read(&swift).unwrap(), V1_TEXT.as_bytes());
-    assert_eq!(reg.all(), sample(), "the own file wins once it exists");
+    assert_eq!(reg.all(), sample(), "the document wins once it exists");
+}
+
+#[test]
+fn a_v2_swift_file_is_read_and_saving_starts_the_documents() {
+    let dir = TempDir::new("reg");
+    let (reg, swift) = with_swift(
+        &dir,
+        r#"{"version":2,"machines":[{"name":"s","host":"s","user":"u"}]}"#,
+    );
+    assert_eq!(machine_names(&reg.all()), vec!["s"]);
+    assert_eq!(doc(&reg), None, "reading wrote nothing");
+    assert!(reg.save(&sample()));
+    assert_eq!(machine_names(&reg.all()), vec!["m1", "vps-sing-1"]);
+    assert!(std::fs::read_to_string(swift).unwrap().contains("\"s\""));
+}
+
+// MARK: the old own file moving into the database
+
+const OLD_V2: &str = r#"{"version":2,"machines":[{"name":"old","host":"old","user":"u"}]}"#;
+
+#[test]
+fn a_valid_old_own_file_moves_in_once() {
+    let dir = TempDir::new("reg");
+    let reg = with_old_file(&dir, "data", OLD_V2);
+    assert_eq!(machine_names(&reg.all()), vec!["old"]);
+    assert_eq!(doc(&reg).as_deref(), Some(OLD_V2));
+    assert!(!reg.old_own.exists());
+    assert!(!backup_path(&reg.old_own).exists());
+    assert_eq!(machine_names(&reg.all()), vec!["old"]);
+}
+
+#[test]
+fn an_unreadable_old_own_file_stays_and_is_read_as_the_source() {
+    let dir = TempDir::new("reg");
+    let (reg, swift) = with_swift(&dir, V1_TEXT);
+    write(&reg.old_own, "{ not json");
+    // the broken own file shadows the Swift app's, as the broken own file did before
+    assert!(matches!(reg.load(), RegistryState::Unreadable(_)));
+    assert!(!reg.save(&sample()));
+    assert_eq!(std::fs::read(&reg.old_own).unwrap(), b"{ not json");
+    assert_eq!(doc(&reg), None);
+    assert_eq!(reg.source(), reg.old_own);
+    assert_eq!(std::fs::read(swift).unwrap(), V1_TEXT.as_bytes());
+}
+
+#[test]
+fn an_existing_document_wins_over_the_old_own_file() {
+    let dir = TempDir::new("reg");
+    let reg = with_old_file(&dir, "data", OLD_V2);
+    let other = RegistryFiles {
+        old_own: dir.join("data/other.json"),
+        ..reg.clone()
+    };
+    assert!(other.save(&sample()));
+    assert_eq!(reg.all(), sample(), "the document, not the file");
+    assert!(
+        !reg.old_own.exists(),
+        "the file is dropped, its content lost"
+    );
+
+    // a broken old file doesn't shadow a document either, and stays
+    write(&reg.old_own, "{ not json");
+    assert_eq!(reg.all(), sample());
+    assert!(reg.save(&sample()[..1]));
+    assert_eq!(machine_names(&reg.all()), vec!["m1"]);
+    assert!(reg.old_own.exists());
+}
+
+#[test]
+fn a_render_never_imports_migrates_or_saves() {
+    let dir = TempDir::new("reg");
+    let (mut reg, swift) = with_swift(&dir, V1_TEXT);
+    reg.read_only = true;
+    write(&reg.old_own, OLD_V2);
+    assert_eq!(machine_names(&reg.all()), vec!["old"], "reads the old file");
+    assert!(!store::exists(&reg.data_dir));
+    assert!(reg.old_own.exists(), "not imported");
+    assert!(!reg.save(&sample()));
+
+    std::fs::remove_file(&reg.old_own).unwrap();
+    let RegistryState::Loaded { machines, migrated } = reg.load() else {
+        panic!("not loaded");
+    };
+    assert!(!migrated, "a v1 file is not migrated");
+    assert_eq!(machine_names(&machines), vec!["m1", "vps-sing-1"]);
+    assert!(!store::exists(&reg.data_dir));
+    assert!(!backup_path(&reg.old_own).exists());
+    assert_eq!(std::fs::read(swift).unwrap(), V1_TEXT.as_bytes());
+}
+
+// MARK: writers at once
+
+#[test]
+fn writers_at_once_never_corrupt_the_registry() {
+    let dir = TempDir::new("reg");
+    let reg = registry(&dir, "data");
+    let lists: Vec<Vec<Machine>> = (1..=4)
+        .map(|n| {
+            (0..n)
+                .map(|i| Machine::new(&format!("m{n}-{i}"), "h", "u"))
+                .collect()
+        })
+        .collect();
+    std::thread::scope(|scope| {
+        for list in &lists {
+            let reg = reg.clone();
+            scope.spawn(move || {
+                for _ in 0..10 {
+                    assert!(reg.save(list));
+                    assert!(matches!(reg.load(), RegistryState::Loaded { .. }));
+                }
+            });
+        }
+    });
+    let last = reg.all();
+    assert!(lists.contains(&last), "one writer's whole list won");
+}
+
+#[test]
+fn two_first_loads_of_a_v1_registry_migrate_it_once() {
+    let dir = TempDir::new("reg");
+    let reg = with_old_file(&dir, "data", V1_TEXT);
+    let results: Vec<RegistryState> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let reg = reg.clone();
+                scope.spawn(move || reg.load())
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for state in &results {
+        let RegistryState::Loaded { machines, .. } = state else {
+            panic!("not loaded: {state:?}");
+        };
+        assert_eq!(machine_names(machines), vec!["m1", "vps-sing-1"]);
+    }
+    assert!(doc(&reg).unwrap().contains("\"version\": 2"));
+    assert_eq!(
+        std::fs::read(backup_path(&reg.old_own)).unwrap(),
+        V1_TEXT.as_bytes()
+    );
+    assert_eq!(reg.all().len(), 2);
 }

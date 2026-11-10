@@ -1,14 +1,28 @@
 //! Renewed secrets (Swift `SetupEngine`'s update offer): a vault value changed, so the machines'
-//! files that hold it are offered an update. The offer is kept in `pending-updates.json` (version 1,
-//! vault names and machine names only, never a value, mode 0600). Sending happens only through a
-//! confirmed plan ([`super::engine_fix::PlanKind::SendAgain`], [`super::engine_fix::PlanKind::Update`]).
+//! files that hold it are offered an update. The offer is kept in the [`OFFERS_DOC`] document of
+//! `<data>/notchling.db` (version 1, vault names and machine names only, never a value; it used
+//! to be `<data>/daemon/machines/pending-updates.json`, which moves in once). Sending happens only
+//! through a confirmed plan ([`super::engine_fix::PlanKind::SendAgain`],
+//! [`super::engine_fix::PlanKind::Update`]).
 
 use super::engine::{lock, SetupEngine};
 use super::registry::Machine;
 use super::step::{FixOutcome, StepId};
 use super::usage::SecretUsage;
+use crate::store;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+/// The document that holds the pending offers.
+pub const OFFERS_DOC: &str = "machines/pending-updates";
+
+/// The file the offers were kept in before the database.
+pub fn old_offers_file(data: &Path) -> PathBuf {
+    data.join("daemon")
+        .join("machines")
+        .join("pending-updates.json")
+}
 
 #[derive(Serialize, Deserialize)]
 struct OfferFile {
@@ -55,31 +69,35 @@ pub fn parse_offers(data: &[u8], usages: &[SecretUsage]) -> BTreeMap<String, Vec
 
 impl SetupEngine {
     pub(super) fn load_offers(&self) {
-        let Some(path) = &self.deps.offers_file else {
+        let Some(data) = &self.deps.offers_data else {
             return;
         };
-        let Ok(data) = std::fs::read(path) else {
+        let _ = store::import_file(data, OFFERS_DOC, &old_offers_file(data), |text| {
+            serde_json::from_str::<OfferFile>(text).is_ok_and(|f| f.version == 1)
+        });
+        let Ok(Some(text)) = store::doc(data, OFFERS_DOC) else {
             return;
         };
         let usages = (self.catalog.usages)(&self.current_machines());
-        lock(&self.state).offers = parse_offers(&data, &usages);
+        lock(&self.state).offers = parse_offers(text.as_bytes(), &usages);
     }
 
     pub(super) fn save_offers(&self) {
-        let Some(path) = &self.deps.offers_file else {
+        let Some(data) = &self.deps.offers_data else {
             return;
         };
+        let old = old_offers_file(data);
         let offers = lock(&self.state).offers.clone();
-        match offer_bytes(&offers) {
+        let written = match offer_bytes(&offers).and_then(|b| String::from_utf8(b).ok()) {
+            // nothing to keep: forget the document, but never make a database to do it
             None => {
-                let _ = std::fs::remove_file(path);
+                !store::exists(data) || store::update_doc(data, OFFERS_DOC, |_| Ok(None)).is_ok()
             }
-            Some(bytes) => {
-                if let Some(dir) = path.parent() {
-                    let _ = notchling_platform::files::ensure_private_dir(dir);
-                }
-                let _ = notchling_platform::files::write_private_no_follow(path, &bytes);
-            }
+            Some(text) => store::put_doc(data, OFFERS_DOC, &text).is_ok(),
+        };
+        if written {
+            // an old file left behind would come back as the offers
+            let _ = std::fs::remove_file(old);
         }
     }
 

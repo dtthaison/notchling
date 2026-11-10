@@ -44,7 +44,8 @@ pub trait Registry: Send + Sync {
     }
     /// `false`: not saved (the file can't be read and is never written over).
     fn save(&self, machines: &[Machine]) -> bool;
-    /// The file read, for the window's notes.
+    /// Where it was read from (the database or a file), for the window's notes. May open the
+    /// database: the model asks once per read, never per frame.
     fn path(&self) -> String;
     /// Where a v1 file's bytes went.
     fn backup(&self) -> String;
@@ -61,7 +62,7 @@ impl Registry for RegistryFiles {
         self.source().display().to_string()
     }
     fn backup(&self) -> String {
-        backup_path(&self.own).display().to_string()
+        backup_path(&self.old_own).display().to_string()
     }
 }
 
@@ -157,6 +158,9 @@ pub struct MachinesModel {
     pub(super) pending: Option<PendingAdmin>,
     pub tab: Tab,
     pub registry: RegistryState,
+    /// Where the registry was read from, kept as of the last read: asking the registry costs a
+    /// database open, and the view wants it every frame.
+    registry_path: String,
     pub machines: Vec<Machine>,
     pub vault_entries: Vec<VaultEntry>,
     /// The list's stamp and each name's `updated` when last looked at (`model_vault`).
@@ -195,6 +199,7 @@ impl MachinesModel {
             pending: None,
             tab: Tab::Machines,
             registry: RegistryState::Missing,
+            registry_path: String::new(),
             machines: Vec::new(),
             vault_entries: Vec::new(),
             vault_stamp: None,
@@ -230,6 +235,7 @@ impl MachinesModel {
 
     fn refresh_machines(&mut self) {
         self.registry = self.parts.registry.load();
+        self.registry_path = self.parts.registry.path();
         match &self.registry {
             RegistryState::Loaded { machines, migrated } => {
                 self.machines = machines.clone();
@@ -247,7 +253,7 @@ impl MachinesModel {
     }
 
     pub fn registry_path(&self) -> String {
-        self.parts.registry.path()
+        self.registry_path.clone()
     }
 
     pub fn can_add(&self) -> bool {

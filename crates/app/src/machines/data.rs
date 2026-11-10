@@ -1,8 +1,12 @@
 //! Where `notchling-machines` reads and writes, and the engine's parts for a run or a render.
 //!
 //! The data folder is Chat's (`DataRoot`: `--data-root`, `NOTCHLING_DATA_ROOT`, else the real
-//! one). In it the Swift app's `machines.json` is only read; this tool's own files go under
-//! `<data>/daemon/machines/` (`MachineRoots`). Every process goes through the engine's runner:
+//! one). In it the Swift app's `machines.json` is only read; this tool's own copy of it and its
+//! pending update offers are documents in `<data>/notchling.db` (the files they used to be, under
+//! `<data>/daemon/machines/`, move in once), and its audit log, merge worktrees, scratch and cache
+//! stay files there (`MachineRoots`). A render opens nothing for writing: it neither imports,
+//! migrates nor saves, so a checked-in fixture folder gets no database. Every process goes
+//! through the engine's runner:
 //! `ProcessRunner` only with `--live`, else `Refusing`, which answers each call with the off
 //! message and starts nothing. The vault's values are read only with `--vault`; the list of names
 //! (`<data>/daemon/vault.json`, no values) is read for the banners either way. A fixture root
@@ -19,6 +23,7 @@ use notchling_engine::machines::mac_facts;
 use notchling_engine::machines::merge::MergePlan;
 use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::process::ProcessRunner;
+use notchling_engine::machines::registry::RegistryFiles;
 use notchling_engine::machines::roots::{MachineRoots, VaultSecrets};
 use notchling_engine::machines::runner::{Call, Refusing, Runner, OFF};
 use notchling_engine::machines::step::{NoSecrets, Opener, SecretSource};
@@ -43,6 +48,9 @@ pub struct Setup {
     pub vault: bool,
     /// A fixture root: never a process, never the vault.
     pub fixture: bool,
+    /// A render: it imports, migrates and saves nothing (a fixture folder is checked in, and the
+    /// database would land in it).
+    pub read_only: bool,
 }
 
 /// Seconds since 1970.
@@ -72,7 +80,10 @@ impl Setup {
                 ),
             },
         };
-        Setup::of(root, false, false)
+        Setup {
+            read_only: true,
+            ..Setup::of(root, false, false)
+        }
     }
 
     fn of(root: DataRoot, live: bool, vault: bool) -> Setup {
@@ -83,6 +94,7 @@ impl Setup {
             live: live && !fixture,
             vault: vault && !fixture,
             fixture,
+            read_only: false,
         }
     }
 
@@ -98,7 +110,10 @@ impl Setup {
     /// The engine, the poller, the morning actions, the registry and the vault list.
     pub fn parts(&self) -> Parts {
         let roots = self.roots();
-        let registry = Arc::new(roots.registry());
+        let registry = Arc::new(RegistryFiles {
+            read_only: self.read_only,
+            ..roots.registry()
+        });
         let runner: Arc<dyn Runner> = if self.live {
             Arc::new(ProcessRunner)
         } else {
@@ -130,7 +145,7 @@ impl Setup {
             mac: Arc::new(move || mac_facts::load(&home)),
             clock: Arc::new(now_secs),
             scratch: roots.scratch(),
-            offers_file: Some(roots.offers_file()),
+            offers_data: (!self.read_only).then(|| self.data_dir.clone()),
             audit: Some(roots.audit_file()),
         };
         let engine = Arc::new(SetupEngine::new(deps, catalog::standard()));
@@ -248,15 +263,17 @@ mod tests {
             Some(Path::new("/f/notchling/machines.json"))
         );
         assert_eq!(
-            s.roots().registry().own,
+            s.roots().registry().old_own,
             PathBuf::from("/f/notchling/daemon/machines/machines.json")
         );
+        assert_eq!(s.roots().registry().data_dir, PathBuf::from("/f/notchling"));
+        assert!(!s.read_only, "a run saves");
         assert_eq!(
             s.vault_index(),
             PathBuf::from("/f/notchling/daemon/vault.json")
         );
         let render = Setup::for_render(None);
-        assert!(render.fixture && !render.live);
+        assert!(render.fixture && !render.live && render.read_only);
         assert!(render.data_dir.ends_with("fixtures/machines/notchling"));
     }
 

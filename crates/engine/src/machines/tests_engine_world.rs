@@ -135,7 +135,7 @@ pub struct Setup {
     pub steps: super::engine::StepList,
     pub usages: super::engine::UsageList,
     pub deliver: super::engine::Deliver,
-    pub offers_file: Option<PathBuf>,
+    pub offers_data: Option<PathBuf>,
     pub audit: Option<PathBuf>,
     /// Rules tried before the batch answer.
     pub runner: ScriptedRunner,
@@ -153,7 +153,7 @@ impl Setup {
             steps: Arc::new(steps),
             usages: Arc::new(|_| Vec::new()),
             deliver: Arc::new(|_, _| FixOutcome::ok("")),
-            offers_file: None,
+            offers_data: None,
             audit: None,
             runner: ScriptedRunner::new(),
             toggle: None,
@@ -196,7 +196,7 @@ impl Setup {
             mac: Arc::new(MacFacts::default),
             clock: Arc::new(move || *lock(&c)),
             scratch: std::env::temp_dir(),
-            offers_file: self.offers_file,
+            offers_data: self.offers_data,
             audit: self.audit,
         };
         let catalog = Catalog {
