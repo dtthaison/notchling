@@ -233,7 +233,7 @@ fn exited(s: &Session) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use notchling_engine::sessions::{Agent, AgentTarget};
 

@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod claude_picker;
+pub mod closed;
 pub mod codex_list;
 pub mod composer;
 pub mod data;

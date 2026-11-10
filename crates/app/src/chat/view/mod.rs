@@ -171,6 +171,8 @@ pub struct ChatView {
     phone_dot: bool,
     /// A session the search panel asked for that isn't listed yet: selected when it appears.
     pending_session: Option<PendingSession>,
+    /// Codex and Antigravity rows closed in Chat (`chat::closed`), kept in the settings file.
+    closed: std::collections::HashMap<String, f64>,
     /// The accounts store the header's meters and account menu read, and the switch feed.
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
@@ -244,6 +246,7 @@ impl ChatView {
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         view.slash_preview = std::env::var(SLASH_ENV).ok();
+        view.load_closed();
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
             view.render_terminal(how == "expanded", cx);
         }
@@ -423,6 +426,7 @@ impl ChatView {
             phone: None,
             phone_dot: false,
             pending_session: None,
+            closed: std::collections::HashMap::new(),
             _appearance_changes: changes,
             _parts_escape: parts_escape,
         };
@@ -499,13 +503,15 @@ impl ChatView {
     ) {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
-        self.sessions = loaded.sessions;
+        let all = loaded.sessions;
         self.prompt.files = loaded.requests;
-        // The search panel's session, now that the list has it, or never.
+        // The search panel's session, now that the list has it (closed or not), or never.
         if let Some(pending) = self.pending_session.as_mut() {
-            match pending.after_load(&self.sessions, now_ms()) {
+            match pending.after_load(&all, now_ms()) {
                 Pending::Found(id) => {
                     self.pending_session = None;
+                    self.reopen_row(&id);
+                    self.sessions = self.open_rows(all);
                     self.select(&id, cx);
                     return;
                 }
@@ -513,9 +519,24 @@ impl ChatView {
                 Pending::GaveUp => self.pending_session = None,
             }
         }
+        self.sessions = self.open_rows(all);
         if self.selected == asked {
             let was = self.selected.take();
             self.selected = loaded.selected;
+            // The loader picks from every row; a closed one gives way to the first one shown.
+            if let Some(sel) = self.selected.clone() {
+                if !self.sessions.iter().any(|s| s.agent.id == sel) {
+                    self.selected = crate::chat::sidebar::sections(&self.sessions, self.now_ms)
+                        .into_iter()
+                        .flat_map(|s| s.rows)
+                        .map(|r| r.id)
+                        .next();
+                    if self.selected.is_some() {
+                        self.scroll_to_end = true;
+                        self.reload_now(cx);
+                    }
+                }
+            }
             if self.selected != was {
                 self.show_draft(cx);
             }
@@ -597,7 +618,7 @@ impl ChatView {
         self.start_load(cx);
     }
 
-    fn select(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(super) fn select(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.selected.as_deref() == Some(id) {
             return;
         }
