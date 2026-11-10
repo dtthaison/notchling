@@ -21,6 +21,7 @@ mod page_panel;
 mod phone;
 mod prompts;
 mod row_menu;
+mod select;
 mod sheets;
 mod sidebar;
 mod simulator;
@@ -661,6 +662,7 @@ impl ChatView {
             return;
         }
         self.selected = Some(id.to_owned());
+        select::clear();
         self.mark_used(id);
         self.conversation = Conversation::default();
         self.subagents.clear();
@@ -809,10 +811,20 @@ impl Render for ChatView {
             // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
             // draws takes it back, or typing would go on reaching the page.
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
-            // The command list's keys, before the reply box moves its caret on Up and Down.
-            .capture_key_down(
-                cx.listener(|this, event, window, cx| this.capture_slash_key(event, window, cx)),
-            )
+            // ⌘C with text selected in the conversation copies it (`select`); a press anywhere
+            // else lets that go, so the reply box's own ⌘C isn't taken. Then the command list's
+            // keys, before the reply box moves its caret on Up and Down.
+            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                let (k, m) = (&event.keystroke, &event.keystroke.modifiers);
+                if k.key == "c" && m.platform && !m.shift && !m.alt && !m.control {
+                    if let Some(text) = select::copied() {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+                this.capture_slash_key(event, window, cx)
+            }))
             .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(

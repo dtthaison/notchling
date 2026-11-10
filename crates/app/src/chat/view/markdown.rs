@@ -33,9 +33,19 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
             links.push((start..full.len(), url.clone()));
         }
     }
+    let plain_text = full.clone();
     let styled = StyledText::new(SharedString::from(full)).with_runs(runs);
+    let text_layout = styled.layout().clone();
+    let select_key = format!("{key}-text");
     if links.is_empty() {
-        return styled.into_any_element();
+        return super::select::selectable(
+            select_key,
+            plain_text,
+            text_layout,
+            styled.into_any_element(),
+            a,
+        )
+        .into_any_element();
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
     let layout = styled.layout().clone();
@@ -50,7 +60,7 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
     // The pointing hand over links comes from the clickable text; the click itself is ours, on
     // listeners that are there every frame (`LinkPress`).
     let text = InteractiveText::new(id.clone(), styled).on_click(hand, |_, _, _| {});
-    div()
+    let linked = div()
         .id(id)
         .on_mouse_down(MouseButton::Left, move |event, _, _| {
             PRESS.with(|p| p.borrow_mut().down(&down_key, pressed(event.position)));
@@ -61,8 +71,15 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
                 super::page_panel::follow_link(url, window, cx);
             }
         })
-        .child(text)
-        .into_any_element()
+        .child(text);
+    super::select::selectable(
+        select_key,
+        plain_text,
+        text_layout,
+        linked.into_any_element(),
+        a,
+    )
+    .into_any_element()
 }
 
 thread_local! {
@@ -158,8 +175,15 @@ pub fn mono_box(key: &str, title: &str, text: &str, error: bool, a: Appearance) 
                 .pb(px(10.0))
                 .kit_type(TypeRole::Mono)
                 .ink(Ink::Text, a)
-                .child(text.to_owned()),
+                .child(plain(&format!("{key}-text"), text, a)),
         )
+}
+
+/// Text in its parent's style, selectable under `key` (`select`).
+pub fn plain(key: &str, text: &str, a: Appearance) -> AnyElement {
+    let styled = StyledText::new(SharedString::from(text.to_owned()));
+    let layout = styled.layout().clone();
+    super::select::selectable(key, text, layout, styled.into_any_element(), a).into_any_element()
 }
 
 fn heading(key: &str, level: usize, text: &str, first: bool, a: Appearance) -> Div {
@@ -286,7 +310,7 @@ fn code(key: &str, language: &str, text: &str, a: Appearance) -> Div {
                 .p(px(12.0))
                 .kit_type(TypeRole::Mono)
                 .ink(Ink::Text, a)
-                .child(text.to_owned()),
+                .child(plain(&format!("{key}-code"), text, a)),
         )
 }
 

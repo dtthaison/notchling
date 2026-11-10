@@ -502,6 +502,7 @@ fn thinking(
 }
 
 fn user_row(
+    id: &str,
     text: &str,
     images: usize,
     queued: bool,
@@ -543,7 +544,7 @@ fn user_row(
                 .kit_type(TypeRole::Body)
                 .ink(Ink::Text, a)
                 .when(queued, |d| d.opacity(0.6))
-                .child(text.to_owned())
+                .child(super::markdown::plain(&format!("{id}-mine"), text, a))
                 .part_at(name, Corner::TopTrailing, a, cx),
         )
         .when(images > 0, |d| {
@@ -573,7 +574,7 @@ fn row_element(
             images,
             queued,
             sending,
-        } => user_row(text, *images, *queued, *sending, a, cx),
+        } => user_row(id, text, *images, *queued, *sending, a, cx),
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => div().w_full().flex().items_start().child(
@@ -690,7 +691,9 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         }))
         .flex()
         .flex_col()
-        .gap(px(ROW_GAP));
+        .gap(px(ROW_GAP))
+        // First, so each frame's texts are noted afresh before the rows place theirs.
+        .child(super::select::listener());
     if view.loading {
         // The picked session's conversation is on its way; the previous one's would mislead.
         return column;

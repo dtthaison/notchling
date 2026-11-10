@@ -31,6 +31,7 @@ pub mod page_panel;
 pub mod prompts;
 pub mod reload;
 pub mod rows;
+pub mod selection;
 pub mod sidebar;
 pub mod simulator;
 pub mod slash_menu;
