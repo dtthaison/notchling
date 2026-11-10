@@ -159,7 +159,7 @@ fn permission(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     )
 }
 
-/// The status line under the card: the error, "Sending…", what waits, or why the box is off.
+/// The status line under the card: the error, what waits, or why the box is off.
 /// Shown once, here, as a sentence; the box itself carries no tooltip for it.
 fn status(
     view: &ChatView,
@@ -171,7 +171,8 @@ fn status(
         // The daemon's "asking you something" refusal points at the card when one is up.
         (error_text(error, view.prompt.is_shown()), Ink::Needs)
     } else if view.tools.sending {
-        ("Sending…".to_owned(), Ink::TextMuted)
+        // The message's own bubble says "Sending…"; the line here would only repeat it.
+        return None;
     } else if let Some(n) = view
         .selected
         .as_deref()
