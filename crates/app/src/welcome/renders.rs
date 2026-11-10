@@ -1,20 +1,14 @@
-//! The views for `--render` (part U10): first run, About and the handover checklist, over made-up
-//! data. Nothing is read from the real Mac and nothing is called.
+//! The views for `--render` (part U10): first run and About, over made-up data. Nothing is read from the real Mac and nothing is called.
 
 use serde_json::json;
 
 use super::about::{self, About};
 use super::facts::{HookFacts, SwiftApp};
 use super::first_run::FirstRun;
-use super::handover::{confirm, Confirm, Control, State};
-use super::switches::{Known, States};
 use super::updates::Outcome;
-use crate::acting::Acting;
-use crate::phone::bridge::Snapshot;
-use crate::phone::wire::BridgeState;
 use crate::views::ViewSpec;
 
-pub const VIEWS: [ViewSpec; 5] = [
+pub const VIEWS: [ViewSpec; 3] = [
     ViewSpec {
         name: "first-run",
         size: (640.0, 980.0),
@@ -30,16 +24,6 @@ pub const VIEWS: [ViewSpec; 5] = [
         size: (460.0, 560.0),
         about: "About: version, build, license, links, and the update line with releases off (made-up build)",
     },
-    ViewSpec {
-        name: "handover",
-        size: (820.0, 1760.0),
-        about: "the handover checklist: who owns each area, what turning it over means, the steps (made-up state)",
-    },
-    ViewSpec {
-        name: "handover-confirm",
-        size: (820.0, 1760.0),
-        about: "the handover checklist with the confirmation for turning the phone bridge on (made-up state)",
-    },
 ];
 
 /// What a render shows.
@@ -48,8 +32,6 @@ pub enum Shown {
     FirstRun,
     FirstRunSwiftHook,
     About,
-    Handover,
-    HandoverConfirm,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -57,8 +39,6 @@ pub fn shown(name: &str) -> Option<Shown> {
         "first-run" => Shown::FirstRun,
         "first-run-swift-hook" => Shown::FirstRunSwiftHook,
         "about" => Shown::About,
-        "handover" => Shown::Handover,
-        "handover-confirm" => Shown::HandoverConfirm,
         _ => return None,
     })
 }
@@ -125,39 +105,10 @@ pub fn update_outcome() -> Outcome {
     Outcome::Off
 }
 
-/// The handover state for a render: acting on, accounts on, everything else off, the Swift hook in.
-pub fn handover_state() -> State {
-    State {
-        swift: SwiftApp::Running,
-        acting: Acting::On,
-        bridge: Snapshot {
-            attached: true,
-            state: BridgeState::Off,
-            fingerprint: None,
-            pairing: None,
-            devices: Vec::new(),
-            tunnel: None,
-            error: None,
-        },
-        switches: Known::States(States {
-            accounts: true,
-            vault: false,
-            install: false,
-        }),
-        hook: Some(swift_plan()),
-    }
-}
-
-/// The dialog shown by `handover-confirm`.
-pub fn pending_confirm() -> Confirm {
-    confirm(Control::Bridge, true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::welcome::first_run::HookBlock;
-    use crate::welcome::handover::{rows, Owner};
 
     #[test]
     fn every_view_has_its_data() {
@@ -181,11 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn the_handover_render_mixes_owners() {
-        let rows = rows(&handover_state());
-        let owners: Vec<Owner> = rows.iter().map(|r| r.owner).collect();
-        assert!(owners.contains(&Owner::Notchling) && owners.contains(&Owner::Swift));
-        assert!(pending_confirm().turn_on);
+    fn the_about_render_is_made_up() {
         assert_eq!(update_outcome(), Outcome::Off);
         assert_eq!(about_model().version, "0.1.0");
     }

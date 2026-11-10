@@ -1,4 +1,4 @@
-//! The windows for first run, About and Handover (part U11, macOS): one of each, opened from the
+//! The windows for first run and About (part U11, macOS): one of each, opened from the
 //! Notchling menu and brought forward when already open; the first-run window also opens by itself,
 //! once. Each is a titled window, so it counts toward the Dock icon (`mac::shell::note_titled`).
 
@@ -13,13 +13,12 @@ use notchling_engine::control::RealLauncher;
 use super::defaults::DefaultsTool;
 use super::facts::{SwiftProbe, SystemProbe};
 use super::first_run::FirstRun;
-use super::handover_view::{HandoverView, Services};
 use super::hooks::Hooks;
 use super::own::{Flags, FIRST_RUN_KEY};
 use super::updates::{CurlFetcher, NoFeed, KILL_SWITCH};
 use super::view::{live_about, AboutEnv, AboutView, FirstRunEnv, FirstRunView};
 use crate::chat::data::DataRoot;
-use crate::mac::shell::{note_titled, AppActions, AppBridge, AppSwitchFeed};
+use crate::mac::shell::note_titled;
 
 /// What the windows need to know about the running app. Not set in a render.
 pub struct WelcomeSetup {
@@ -34,14 +33,12 @@ impl Global for WelcomeSetup {}
 pub enum Which {
     FirstRun,
     About,
-    Handover,
 }
 
 #[derive(Default)]
 struct Windows {
     first_run: Option<WindowHandle<FirstRunView>>,
     about: Option<WindowHandle<AboutView>>,
-    handover: Option<WindowHandle<HandoverView>>,
 }
 
 impl Global for Windows {}
@@ -91,7 +88,6 @@ pub fn open(cx: &mut App, which: Which) {
     match which {
         Which::FirstRun => open_first_run(cx),
         Which::About => open_about(cx),
-        Which::Handover => open_handover(cx),
     }
 }
 
@@ -132,34 +128,6 @@ fn open_about(cx: &mut App) {
         live_about(env)
     });
     cx.default_global::<Windows>().about = handle;
-}
-
-fn open_handover(cx: &mut App) {
-    let existing = cx.default_global::<Windows>().handover;
-    if raise(cx, existing) {
-        return;
-    }
-    let (Some(actions), Some(bridge), Some(switches)) = (
-        cx.try_global::<AppActions>().map(|g| g.0.clone()),
-        cx.try_global::<AppBridge>().map(|g| g.0.clone()),
-        cx.try_global::<AppSwitchFeed>().map(|g| g.0.clone()),
-    ) else {
-        eprintln!("the Handover window needs the running app's daemon connections");
-        return;
-    };
-    let hooks = Arc::new(Hooks::for_run(root(cx).as_ref()));
-    let probe: Arc<dyn SwiftProbe> = Arc::new(SystemProbe::default());
-    let services = Arc::new(Services {
-        actions,
-        bridge,
-        switches,
-        hooks,
-        probe,
-    });
-    let handle = open_titled(cx, "Handover", (820.0, 900.0), |_, cx| {
-        HandoverView::live(services, cx)
-    });
-    cx.default_global::<Windows>().handover = handle;
 }
 
 fn open_first_run(cx: &mut App) {

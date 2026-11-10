@@ -45,8 +45,6 @@ pub enum Command {
     About,
     /// Notchling > Welcome: the first-run view again.
     Welcome,
-    /// Notchling > Handover: the checklist.
-    Handover,
     Quit,
 }
 
@@ -114,11 +112,10 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
         },
         action("Settings…", Command::Settings, Some(','), false),
         Entry::Submenu {
-            title: "About and Handover".to_owned(),
+            title: "About".to_owned(),
             items: vec![
                 action("About Notchling", Command::About, None, false),
                 action("Welcome…", Command::Welcome, None, false),
-                action("Handover…", Command::Handover, None, false),
             ],
         },
         Entry::Separator,
@@ -162,7 +159,7 @@ mod tests {
                 "Open Chat",
                 "Keep Mac Awake",
                 "Settings…",
-                "About and Handover",
+                "About",
                 "-",
                 "Quit Notchling"
             ]

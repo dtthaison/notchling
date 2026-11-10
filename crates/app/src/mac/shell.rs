@@ -68,7 +68,7 @@ impl Global for AppPairing {}
 
 /// Milestone 6's switch feed (the `settings.switch` events, and the vault's pending prompts),
 /// shared by the Accounts window, the vault sheet and the prompt windows. The welcome window's
-/// `AppSwitches` polls the same switches for the handover checklist. Not set in a render.
+/// `AppSwitches` polls the same switches for Settings. Not set in a render.
 pub struct AppSwitchFeed(pub Arc<crate::switches::feed::SwitchFeed>);
 
 impl Global for AppSwitchFeed {}
@@ -243,7 +243,6 @@ fn handle(command: Command, cx: &mut App) {
         }
         Command::About => welcome_window::open(cx, Which::About),
         Command::Welcome => welcome_window::open(cx, Which::FirstRun),
-        Command::Handover => welcome_window::open(cx, Which::Handover),
         Command::SetAwake(mode) => {
             let shell = cx.global_mut::<Shell>();
             shell.state.awake = mode;

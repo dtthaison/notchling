@@ -28,7 +28,7 @@ fn line(e: &ClientError) -> String {
     }
 }
 
-/// The arguments both ops take: the hooks only (the skills are the Handover view's business).
+/// The arguments both ops take: the hooks only (the skills are installed apart).
 fn args() -> Value {
     json!({"what": [PROMPT_HOOKS, PAGE_HOOKS]})
 }

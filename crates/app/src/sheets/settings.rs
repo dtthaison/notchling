@@ -1,12 +1,15 @@
-//! The Settings sheet, pure (part U8, the Swift `SettingsPage`): the Milestone 1 settings keys in
-//! the Swift app's sections, each row reading the store (or the key's default), after the daemon's
-//! acting switch shown read-only with its state. Launch at login is the system's login item, not a
-//! key, so it waits for its part.
+//! The Settings sheet, pure (part U8, the Swift `SettingsPage`): the daemon's switches first (acting,
+//! the phone bridge, logins, the vault, install), then the Milestone 1 settings keys in the Swift
+//! app's sections, each row reading the store (or the key's default). The switches are the daemon's,
+//! not keys: each is off at every daemon start, and only a click here (or Turn Back On in the
+//! restart notice) turns one on. Launch at login is the system's login item, not a key, so it waits
+//! for its part.
 
 use notchling_engine::settings::spec;
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
+use crate::switches::restart::Area;
 
 /// How a row is changed.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,7 +26,55 @@ pub enum Field {
     Stepper { value: i64, min: i64, max: i64 },
     /// Shown, never changed here.
     ReadOnly { value: String, note: Option<String> },
+    /// One of the daemon's switches; `on` is `None` while no daemon answered (drawn disabled).
+    Daemon { area: Area, on: Option<bool> },
 }
+
+/// The daemon's switches as the app last knew them; `None` while no daemon answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Daemon {
+    pub acting: Acting,
+    pub bridge: Option<bool>,
+    pub accounts: Option<bool>,
+    pub vault: Option<bool>,
+    pub install: Option<bool>,
+}
+
+impl Daemon {
+    /// Nothing known: no daemon.
+    pub fn detached() -> Daemon {
+        Daemon {
+            acting: Acting::Detached,
+            bridge: None,
+            accounts: None,
+            vault: None,
+            install: None,
+        }
+    }
+
+    fn on(&self, area: Area) -> Option<bool> {
+        match area {
+            Area::Acting => match self.acting {
+                Acting::On => Some(true),
+                Acting::Off => Some(false),
+                Acting::Detached => None,
+            },
+            Area::Bridge => self.bridge,
+            Area::Accounts => self.accounts,
+            Area::Vault => self.vault,
+            Area::Install => self.install,
+        }
+    }
+}
+
+/// The daemon's switch rows, in order, with their titles.
+const DAEMON_ROWS: [(Area, &str); 5] = [
+    (Area::Acting, "Act on Sessions"),
+    (Area::Bridge, "Phone Bridge"),
+    (Area::Accounts, "Logins and Lanes"),
+    (Area::Vault, "Secret Vault"),
+    (Area::Install, "Install Hooks and Skills"),
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
@@ -88,7 +139,7 @@ fn choice(
 }
 
 /// The sheet's sections over `read` (the store's raw values) and acting as the app knows it.
-pub fn sections(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Section> {
+pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
     let mut show_notch = toggle(read, "hideNotch", "Show agents in the notch");
     if let Field::Toggle { on, inverted } = &mut show_notch.field {
         *on = !*on;
@@ -128,17 +179,20 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Sec
     vec![
         Section {
             title: "Daemon",
-            rows: vec![Row {
-                key: "",
-                title: "Acting on sessions",
-                field: Field::ReadOnly {
-                    value: acting.word().to_owned(),
-                    note: acting.message().map(str::to_owned),
-                },
-            }],
+            rows: DAEMON_ROWS
+                .iter()
+                .map(|(area, title)| Row {
+                    key: "",
+                    title,
+                    field: Field::Daemon {
+                        area: *area,
+                        on: daemon.on(*area),
+                    },
+                })
+                .collect(),
             footer: Some(
-                "Only the maintainer turns acting on, with the daemon's settings.set_acting. \
-                 Until then the Swift app answers, replies and starts sessions.",
+                "Each is off whenever the daemon starts. After a restart a notice offers to turn \
+                 back on the ones you had on.",
             ),
         },
         Section {
@@ -213,18 +267,24 @@ pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
             };
             Some((row.key, json!((value + step).clamp(*min, *max))))
         }
-        Field::ReadOnly { .. } => None,
+        Field::ReadOnly { .. } | Field::Daemon { .. } => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acting::OFF_MESSAGE;
     use std::collections::HashMap;
 
+    fn with(acting: Acting) -> Daemon {
+        Daemon {
+            acting,
+            ..Daemon::detached()
+        }
+    }
+
     fn rows_of(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Row> {
-        sections(read, acting)
+        sections(read, &with(acting))
             .into_iter()
             .flat_map(|s| s.rows)
             .collect()
@@ -302,26 +362,56 @@ mod tests {
     }
 
     #[test]
-    fn acting_shows_read_only_with_its_state() {
-        let daemon = sections(&|_| None, Acting::Off).remove(0);
-        assert_eq!(daemon.title, "Daemon");
-        let acting = &daemon.rows[0];
+    fn the_daemons_switches_come_first_with_what_it_said() {
+        let daemon = Daemon {
+            acting: Acting::On,
+            bridge: Some(false),
+            accounts: Some(true),
+            vault: None,
+            install: Some(false),
+        };
+        let first = sections(&|_| None, &daemon).remove(0);
+        assert_eq!(first.title, "Daemon");
+        let fields: Vec<Field> = first.rows.iter().map(|r| r.field.clone()).collect();
         assert_eq!(
-            acting.field,
-            Field::ReadOnly {
-                value: "Off".into(),
-                note: Some(OFF_MESSAGE.into())
+            fields,
+            [
+                Field::Daemon {
+                    area: Area::Acting,
+                    on: Some(true)
+                },
+                Field::Daemon {
+                    area: Area::Bridge,
+                    on: Some(false)
+                },
+                Field::Daemon {
+                    area: Area::Accounts,
+                    on: Some(true)
+                },
+                Field::Daemon {
+                    area: Area::Vault,
+                    on: None
+                },
+                Field::Daemon {
+                    area: Area::Install,
+                    on: Some(false)
+                },
+            ]
+        );
+        assert_eq!(change(&first.rows[0], ""), None, "not a settings key");
+        let off = sections(&|_| None, &with(Acting::Off)).remove(0);
+        assert_eq!(
+            off.rows[0].field,
+            Field::Daemon {
+                area: Area::Acting,
+                on: Some(false)
             }
         );
-        assert_eq!(change(acting, "+1"), None, "never changed here");
-        let on = sections(&|_| None, Acting::On).remove(0);
-        assert_eq!(
-            on.rows[0].field,
-            Field::ReadOnly {
-                value: "On".into(),
-                note: None
-            }
-        );
+        let none = sections(&|_| None, &Daemon::detached()).remove(0);
+        assert!(none
+            .rows
+            .iter()
+            .all(|r| matches!(r.field, Field::Daemon { on: None, .. })));
     }
 
     #[test]

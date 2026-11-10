@@ -1,6 +1,7 @@
 //! The Settings sheet and the banners over GPUI (parts U8 and U7, macOS). Settings writes Notchling's
-//! own `settings.json` (never Claude Code's); acting shows read-only. A render has no store: its
-//! rows show the defaults and a click changes only what is drawn.
+//! own `settings.json` (never Claude Code's); the daemon's switches go to the daemon, through the
+//! same calls the restart notice's Turn Back On makes. A render has no store and no daemon: its rows
+//! show the defaults and a click changes only what is drawn.
 
 use std::path::Path;
 
@@ -17,8 +18,11 @@ use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::{Map, Value};
 
 use super::banner::Banners;
-use super::settings::{change, sections, Field, Row};
+use super::settings::{change, sections, Daemon, Field, Row};
 use super::view::{sheet_header, Acts, Dismiss};
+use crate::mac::shell::{AppActions, AppBridge, AppSwitchFeed};
+use crate::switches::restart::{Area, LiveTurnOn};
+use crate::switches::Switch;
 
 /// The Settings sheet.
 pub struct SettingsView {
@@ -28,6 +32,8 @@ pub struct SettingsView {
     acts: Acts,
     /// A write that failed, shown at the bottom.
     error: Option<String>,
+    /// A daemon switch being changed: its row draws busy, and no second click goes out.
+    busy: Option<Area>,
 }
 
 impl EventEmitter<Dismiss> for SettingsView {}
@@ -45,7 +51,64 @@ impl SettingsView {
             values,
             acts,
             error: None,
+            busy: None,
         }
+    }
+
+    /// The daemon's switches as the app's feeds last heard them (no call here).
+    fn daemon(&self, cx: &Context<Self>) -> Daemon {
+        let mut daemon = Daemon::detached();
+        daemon.acting = self.acts.acting();
+        if let Some(bridge) = cx.try_global::<AppBridge>() {
+            let snapshot = bridge.0.snapshot();
+            daemon.bridge = snapshot.attached.then(|| snapshot.state.is_on());
+        }
+        if let Some(feed) = cx.try_global::<AppSwitchFeed>() {
+            let s = feed.0.switches();
+            if s.attached {
+                daemon.accounts = Some(s.is_on(Switch::Accounts));
+                daemon.vault = Some(s.is_on(Switch::Vault));
+                daemon.install = Some(s.is_on(Switch::Install));
+            }
+        }
+        daemon
+    }
+
+    /// Turns a daemon switch on or off, off the main thread.
+    fn set_switch(&mut self, area: Area, on: bool, cx: &mut Context<Self>) {
+        if self.busy.is_some() {
+            return;
+        }
+        let (Some(actions), Some(bridge), Some(feed)) = (
+            cx.try_global::<AppActions>().map(|g| g.0.clone()),
+            cx.try_global::<AppBridge>().map(|g| g.0.clone()),
+            cx.try_global::<AppSwitchFeed>().map(|g| g.0.clone()),
+        ) else {
+            return;
+        };
+        let live = LiveTurnOn {
+            actions,
+            bridge,
+            feed,
+        };
+        self.busy = Some(area);
+        self.error = None;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { live.set(area, on) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.busy = None;
+                if let Err(e) = result {
+                    view.error = Some(e);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     fn apply(&mut self, row: &Row, option: &str, cx: &mut Context<Self>) {
@@ -121,6 +184,19 @@ impl SettingsView {
                         .on_click(cx.listener(move |this, _, _, cx| this.apply(&up, "+1", cx))),
                     )
             }
+            Field::Daemon { area, on } => {
+                let (area, on) = (*area, *on);
+                match on {
+                    Some(on) if self.busy != Some(area) => {
+                        div().child(switch(id("daemon"), on, a).on_click(
+                            cx.listener(move |this, _, _, cx| this.set_switch(area, !on, cx)),
+                        ))
+                    }
+                    Some(on) => div().opacity(0.5).child(switch(id("daemon"), on, a)),
+                    // No daemon answered: nothing to change.
+                    None => div().opacity(0.4).child(switch(id("daemon"), false, a)),
+                }
+            }
             Field::ReadOnly { value, .. } => div()
                 .px(px(8.0))
                 .h(px(20.0))
@@ -153,7 +229,7 @@ impl Render for SettingsView {
         let a = window_appearance(window);
         let values = self.values.clone();
         let read = move |key: &str| values.get(key).cloned();
-        let acting = self.acts.acting();
+        let daemon = self.daemon(cx);
         let done = button(
             "settings-done",
             "Done",
@@ -172,7 +248,7 @@ impl Render for SettingsView {
             .flex_col()
             .gap(px(14.0));
         let mut n = 0;
-        for section in sections(&read, acting) {
+        for section in sections(&read, &daemon) {
             let mut rows = card(a).flex().flex_col();
             for (k, row) in section.rows.iter().enumerate() {
                 n += 1;

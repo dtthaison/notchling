@@ -4,7 +4,7 @@
 //! switch on by itself: a switch the user chose on that a (restarted) daemon has off is only
 //! offered back by the restart notice ([`super::restart`]); only [`SwitchFeed::choose`], from a
 //! click in this app, sends `settings.set_switch`. It is the one owner of the three Milestone 6
-//! switches' state in the app (the handover checklist reads it too). The views poll it: the
+//! switches' state in the app (Settings reads it too). The views poll it: the
 //! [`Switches`] every control is
 //! drawn from, a counter per area that says "ask again" ([`Changes`]), the vault's pending
 //! approvals and request forms (the daemon asks the person only while an app follows `vault`), and

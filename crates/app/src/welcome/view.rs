@@ -1,5 +1,5 @@
-//! The first-run and About views over GPUI (part U11, macOS), and the pieces they and the handover
-//! view share. Every call to the daemon, to `defaults` and to the network runs on the background
+//! The first-run and About views over GPUI (part U11, macOS). Every call to the daemon, to
+//! `defaults` and to the network runs on the background
 //! executor. A render has fixed models and nothing behind it.
 
 use std::path::PathBuf;
@@ -331,7 +331,7 @@ impl Render for FirstRunView {
                     .child(self.settings_card(a, cx))
                     .child(self.hook_card(a, cx))
                     .child(label(
-                        "Open this again from the Notchling menu, under Welcome. Handover is where each area is turned over.",
+                        "Open this again from the Notchling menu, under Welcome. The daemon's switches are in Settings.",
                         TypeRole::Meta,
                         Ink::TextFaint,
                         a,
@@ -534,8 +534,5 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
                 )
             })
             .into(),
-        Shown::Handover | Shown::HandoverConfirm => {
-            return super::handover_view::build_render(name, cx)
-        }
     })
 }

@@ -4,7 +4,7 @@
 //! {on: true}`, and it comes back off at every start. The app never turns it back on by itself:
 //! [`Bridge::refresh`] only reads. The user's choice (`bridgeOn` in the app's own `settings.json`)
 //! decides only whether the restart notice offers it ([`crate::switches::restart`]); only
-//! [`Bridge::choose`], from the Phone panel's switch or the handover's confirmation, sends
+//! [`Bridge::choose`], from the Phone panel's switch or Settings' switch, sends
 //! `bridge.set`.
 //!
 //! Every call blocks, so the caller makes it off the UI thread. A [`Bridge`] keeps a

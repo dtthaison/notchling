@@ -94,20 +94,6 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
             )
             .on_click(cx.listener(|this, _, _, cx| this.open_vault_sheet(cx))),
         )
-        // Here as well as in the menu bar, whose item a full menu bar hides behind the notch.
-        .child(
-            footer_button(
-                "handover",
-                Icon::Handover,
-                "Handover",
-                "Handover: turn each area over from the Swift app to this one",
-                a,
-                cx,
-            )
-            .on_click(|_, _, cx| {
-                crate::welcome::window::open(cx, crate::welcome::window::Which::Handover)
-            }),
-        )
         .child(parts)
         .children(note.map(|note| {
             label(note, TypeRole::Meta, Ink::TextFaint, a).part_at(

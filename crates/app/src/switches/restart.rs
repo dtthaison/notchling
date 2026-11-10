@@ -239,16 +239,23 @@ pub struct LiveTurnOn {
     pub feed: Arc<SwitchFeed>,
 }
 
-impl TurnOn for LiveTurnOn {
-    fn turn_on(&self, area: Area) -> Result<(), String> {
+impl LiveTurnOn {
+    /// Turns `area` on or off (Settings' switches). Blocking.
+    pub fn set(&self, area: Area, on: bool) -> Result<(), String> {
         let switch = match area {
-            Area::Acting => return self.actions.choose(true).map(|_| ()),
-            Area::Bridge => return self.bridge.choose(true),
+            Area::Acting => return self.actions.choose(on).map(|_| ()),
+            Area::Bridge => return self.bridge.choose(on),
             Area::Accounts => Switch::Accounts,
             Area::Vault => Switch::Vault,
             Area::Install => Switch::Install,
         };
-        self.feed.choose(switch, true).map(|_| ())
+        self.feed.choose(switch, on).map(|_| ())
+    }
+}
+
+impl TurnOn for LiveTurnOn {
+    fn turn_on(&self, area: Area) -> Result<(), String> {
+        self.set(area, true)
     }
 }
 

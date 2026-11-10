@@ -1,6 +1,6 @@
 //! What the app finds out about its surroundings before it says anything: whether the Swift app is
 //! here, and what `install.plan` says about Claude Code's hooks. Both are plain data the first-run
-//! and handover views draw from; nothing here changes anything.
+//! view draws from; nothing here changes anything.
 
 use std::path::PathBuf;
 
