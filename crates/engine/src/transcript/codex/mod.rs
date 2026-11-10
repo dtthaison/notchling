@@ -419,7 +419,10 @@ impl LineParser for Parser {
 
 fn cursors() -> &'static Cursors<Parser, Conversation> {
     static CURSORS: OnceLock<Cursors<Parser, Conversation>> = OnceLock::new();
-    CURSORS.get_or_init(|| Cursors::new(CHAT_TAIL_BYTES, 30, Parser::conversation))
+    // Image tool results are megabytes of base64 Chat doesn't draw; they mustn't push the prompt out.
+    CURSORS.get_or_init(|| {
+        Cursors::new(CHAT_TAIL_BYTES, 30, Parser::conversation).long_lines_free(64_000_000)
+    })
 }
 
 /// A Codex session file as Chat's conversation, read incrementally like a Claude transcript.
