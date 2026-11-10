@@ -369,8 +369,8 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
                 label(&s.command, TypeRole::Mono, Ink::TextMuted, a)
                     .line_height(px(ROW_LINE))
                     .w_full()
-                    .line_clamp(2)
-                    .elide(),
+                    .elide()
+                    .line_clamp(2),
             )
             .child(
                 label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),

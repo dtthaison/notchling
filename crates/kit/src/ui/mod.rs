@@ -97,9 +97,11 @@ pub trait KitStyled: Styled + Sized {
     /// `nowrap` too, and a nowrap text keeps its first (max-content) measurement, so the ellipsis
     /// never draws and the text is clipped mid-word at the edge; without `nowrap` the definite
     /// width is measured again and the text is cut to it. The element needs a definite width (a
-    /// `flex_1` item with `min_w(0)`, or `w_full`), as with `truncate()`.
+    /// `flex_1` item with `min_w(0)`, or `w_full`), as with `truncate()`. Without `nowrap` a text
+    /// with spaces wraps instead of being cut, so it is held to one line (`line_clamp(1)`); a
+    /// `line_clamp(n)` after this lets it run to `n` lines before the ellipsis.
     fn elide(self) -> Self {
-        self.overflow_hidden().text_ellipsis()
+        self.overflow_hidden().text_ellipsis().line_clamp(1)
     }
 
     /// A part's look in one state: fill, edge (the focus ring wins over the border), text, opacity.
