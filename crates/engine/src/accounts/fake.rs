@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 /// An in-memory Keychain that speaks the three `security` commands Notchling uses:
 /// `find-generic-password -s -a -w`, `delete-generic-password -s -a`, and `-i` with an
-/// `add-generic-password -U -a "…" -s "…" -X "<hex>"` line on stdin.
+/// `add-generic-password -U -a "…" -s "…" -X "<hex>"` (or `-w "<text>"`) line on stdin.
 #[derive(Default)]
 pub struct MemoryKeychain {
     items: Mutex<BTreeMap<(String, String), String>>,
@@ -71,12 +71,32 @@ impl MemoryKeychain {
         Some(line[start..end].to_string())
     }
 
+    /// The text after `-w "`, read as `security -i` reads it: a backslash makes the next character
+    /// stand for itself.
+    fn text(line: &str) -> Option<String> {
+        let start = line.find("-w \"")? + 4;
+        let mut out = String::new();
+        let mut chars = line[start..].chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => out.push(chars.next()?),
+                '"' => return Some(out),
+                c => out.push(c),
+            }
+        }
+        None
+    }
+
     fn add(&self, line: &str) -> i32 {
-        let (Some(account), Some(service), Some(value)) = (
-            Self::quoted(line, "-a"),
-            Self::quoted(line, "-s"),
-            Self::quoted(line, "-X"),
-        ) else {
+        let (Some(account), Some(service)) = (Self::quoted(line, "-a"), Self::quoted(line, "-s"))
+        else {
+            return 1;
+        };
+        if let Some(text) = Self::text(line) {
+            self.put(&service, &account, &text);
+            return 0;
+        }
+        let Some(value) = Self::quoted(line, "-X") else {
             return 1;
         };
         let bytes: Option<Vec<u8>> = (0..value.len())

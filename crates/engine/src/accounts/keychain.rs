@@ -3,10 +3,12 @@
 //! changes on every rebuild would lose access to items made through the Security framework.
 //!
 //! A value goes in as hex on stdin through `security -i`, so it never shows in the process list.
-//! `security -i` reads a command into a 4 KB line; the Swift app put a longer value on argv
-//! instead, where `ps` shows it. A token never goes on a command line here: a long value in one of
-//! Notchling's own items is split over several ([`super::chunked`] has the format), and one in an
-//! item another tool reads (Claude Code's own login) is refused ([`KeychainError::TooLong`]).
+//! `security -i` reads a command into a 4 KB line (a longer one is cut, checked on macOS 26); the
+//! Swift app put a longer value on argv instead, where `ps` shows it. A token never goes on a
+//! command line here: a long value in one of Notchling's own items is split over several
+//! ([`super::chunked`] has the format). One in an item another tool reads (Claude Code's own login,
+//! which holds its MCP logins too and so often passes 2 KB) goes as quoted text, half the length
+//! of hex ([`text_line`]); only one too long even so is refused ([`KeychainError::TooLong`]).
 //!
 //! Every call goes through a [`SecurityRunner`]. The daemon's is [`SystemSecurity`] (macOS only;
 //! elsewhere it answers `Unsupported`); tests use fakes, and never the real Keychain.
@@ -139,7 +141,10 @@ impl Keys {
     }
 
     fn write_item(&self, service: &str, account: &str, value: &str) -> Result<(), KeychainError> {
-        let line = add_line(service, account, value)?;
+        let line = match add_line(service, account, value) {
+            Err(KeychainError::TooLong) => text_line(service, account, value)?,
+            line => line?,
+        };
         let out = self
             .runner
             .run(&strings(&["-i"]), Some(line.expose().as_bytes()))?;
@@ -220,6 +225,26 @@ pub fn add_line(service: &str, account: &str, value: &str) -> Result<Secret, Key
         "add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{}\"\n",
         hex(value.as_bytes())
     );
+    if line.len() >= MAX_LINE {
+        return Err(KeychainError::TooLong);
+    }
+    Ok(Secret::new(line))
+}
+
+/// The `security -i` line that stores `value` as text, for one too long as hex:
+/// `add-generic-password -U -a "<account>" -s "<service>" -w "<value>"` with each `\` and `"`
+/// escaped by a backslash, which `security -i` reads back to the same bytes (checked on macOS 26
+/// with quotes, backslashes, `$`, `#`, `;`, `|` and non-ASCII text). A value with a control
+/// character (a newline would end the line) or too long even so is [`KeychainError::TooLong`].
+pub fn text_line(service: &str, account: &str, value: &str) -> Result<Secret, KeychainError> {
+    check_name(service)?;
+    check_name(account)?;
+    if value.chars().any(char::is_control) {
+        return Err(KeychainError::TooLong);
+    }
+    let quoted = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let line =
+        format!("add-generic-password -U -a \"{account}\" -s \"{service}\" -w \"{quoted}\"\n");
     if line.len() >= MAX_LINE {
         return Err(KeychainError::TooLong);
     }

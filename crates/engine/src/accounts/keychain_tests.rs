@@ -41,7 +41,8 @@ fn the_line_is_the_swift_apps() {
 #[test]
 fn a_value_too_long_for_the_line_is_refused_not_put_on_argv() {
     let chain = Arc::new(MemoryKeychain::new());
-    let long = "x".repeat(MAX_LINE / 2);
+    // Too long even as text, so neither line form takes it.
+    let long = "x".repeat(MAX_LINE);
     assert_eq!(
         keys(&chain).write("svc", "acct", &long),
         Err(KeychainError::TooLong)
@@ -125,4 +126,62 @@ fn errors_and_outputs_never_print_a_value() {
         .unwrap_err()
         .to_string()
         .contains("fixture root"));
+}
+
+/// Claude Code's login with its MCP logins beside it: too long as hex (two characters a byte),
+/// short enough as text. Quotes, backslashes and other text JSON can hold are in it.
+fn long_login() -> String {
+    let note = r#"a \"q\" b\\c $HOME #x; é"#;
+    format!(
+        r#"{{"claudeAiOauth":{{"accessToken":"test-secret"}},"mcpOAuth":{{"note":"{note}","pad":"{}"}}}}"#,
+        "p".repeat(2_800)
+    )
+}
+
+#[test]
+fn a_login_too_long_as_hex_goes_as_quoted_text_on_stdin() {
+    let value = long_login();
+    assert!(serde_json::from_str::<serde_json::Value>(&value).is_ok());
+    assert!(
+        add_line("Claude Code-credentials", "me", &value).is_err(),
+        "hex is too long"
+    );
+    let chain = Arc::new(MemoryKeychain::new());
+    keys(&chain)
+        .write("Claude Code-credentials", "me", &value)
+        .unwrap();
+    assert_eq!(
+        chain.get("Claude Code-credentials", "me").as_deref(),
+        Some(value.as_str())
+    );
+    for call in chain.calls() {
+        let joined = call.join(" ");
+        assert!(!joined.contains("test-secret"), "never on argv: {joined}");
+    }
+}
+
+#[test]
+fn the_text_line_escapes_quotes_and_backslashes_only() {
+    let line = text_line("svc", "acct", r#"a"b\c $d é"#).unwrap();
+    assert_eq!(
+        line.expose(),
+        "add-generic-password -U -a \"acct\" -s \"svc\" -w \"a\\\"b\\\\c $d é\"\n"
+    );
+    assert_eq!(format!("{line:?}"), "[secret]");
+}
+
+#[test]
+fn a_value_with_a_control_character_never_goes_as_text() {
+    // A newline would end the line early: such a value goes as hex or not at all.
+    assert_eq!(
+        text_line("svc", "acct", "a\nb").map(|_| ()),
+        Err(KeychainError::TooLong)
+    );
+    let chain = Arc::new(MemoryKeychain::new());
+    let long = format!("{}\n", "x".repeat(2_500));
+    assert_eq!(
+        keys(&chain).write("svc", "acct", &long),
+        Err(KeychainError::TooLong)
+    );
+    assert!(chain.calls().is_empty(), "nothing ran");
 }
