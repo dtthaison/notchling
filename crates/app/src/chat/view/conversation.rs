@@ -14,7 +14,7 @@ use gpui::{
 use notchling_engine::sessions::agent::AgentGroup;
 use notchling_engine::transcript::model::{DiffKind, DiffLine};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::SPINNER_SMALL as SMALL;
+use notchling_kit::metric::SPINNER_MINI;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
@@ -47,15 +47,19 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
 /// The live line after the last row (the Swift app's live row): a spinner, what the session is
 /// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. The
 /// view redraws it once a second while it shows (`ChatView::tick`).
-fn activity_row(activity: &Activity, a: Appearance, cx: &Context<ChatView>) -> Div {
+/// The activity line, just above the reply box: one line, its words cut with an ellipsis before
+/// the counts beside them.
+pub(super) fn activity_row(activity: &Activity, a: Appearance, cx: &Context<ChatView>) -> Div {
     div()
         .w_full()
+        .min_w(px(0.0))
         .flex()
         .items_center()
-        .gap(px(8.0))
-        .child(kit_spinner("spin-activity", SMALL, Ink::Working, a))
+        .gap(px(6.0))
+        .child(kit_spinner("spin-activity", SPINNER_MINI, Ink::Working, a).flex_shrink_0())
         .child(
             label(&activity.text, TypeRole::Meta, Ink::TextMuted, a)
+                .flex_shrink()
                 .min_w(px(0.0))
                 .elide(),
         )
@@ -678,12 +682,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
             }
             _ => "No transcript yet for this session",
         };
-        return column
-            .child(label(note, TypeRole::Meta, Ink::TextMuted, a))
-            .children(
-                view.activity_line()
-                    .map(|activity| activity_row(&activity, a, cx)),
-            );
+        return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
     // The newest step group of a working session stays open with its running call spinning (the
     // Swift app's `liveTools`): the session works, and the last item is that group.
@@ -697,13 +696,9 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
                 Some(Row::Tools(_))
             )
     });
-    let column = column.children(
+    column.children(
         rows.iter()
             .enumerate()
             .map(|(i, row)| row_with_opinions(view, i, row, last_tools == Some(i), a, cx)),
-    );
-    column.children(
-        view.activity_line()
-            .map(|activity| activity_row(&activity, a, cx)),
     )
 }

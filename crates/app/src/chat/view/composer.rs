@@ -20,7 +20,7 @@ use gpui::{
     KeyDownEvent, PathPromptOptions, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_SMALL};
+use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_MINI};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::typescale::sentence;
 use notchling_kit::ui::{
@@ -611,7 +611,7 @@ fn action_button(
         // A message is going out: the small spinner where the arrow goes, as the Swift disc.
         Action::Sending => (
             "sending",
-            kit_spinner("send-spin", SPINNER_SMALL, Ink::TextMuted, a).into_any_element(),
+            kit_spinner("send-spin", SPINNER_MINI, Ink::TextMuted, a).into_any_element(),
             PartState::Disabled,
             "Send Button",
         ),
@@ -870,6 +870,13 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .pb(px(SIDE_PADDING))
         .children(super::prompts::card(view, a, window, cx))
         .children(permission(view, a, cx))
+        // What the session is doing, right over the box rather than at the end of the messages.
+        .children(view.activity_line().map(|activity| {
+            div()
+                .mx(px(SIDE_PADDING))
+                .pb(px(6.0))
+                .child(super::conversation::activity_row(&activity, a, cx))
+        }))
         .child(card)
         .child(footer)
         .children(pop_up(view, a, cx))
