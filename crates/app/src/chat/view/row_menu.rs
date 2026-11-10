@@ -188,15 +188,16 @@ impl ChatView {
         }
     }
 
-    /// The rows the sidebar shows: Claude Code's, and the Codex and Antigravity ones used here
-    /// (`chat::used`; the selected one too) that weren't closed since. A fixture or a render, with
+    /// The rows the sidebar shows: Claude Code's, and the Codex and Antigravity ones used here or
+    /// working or recent (`chat::used`; the selected one too) that weren't closed since. A fixture or a render, with
     /// no settings to remember uses in, shows every row.
     pub(super) fn open_rows(&self, all: Vec<Session>) -> Vec<Session> {
         let remembers = self.root.fixture.is_none();
+        let now_s = now_ms() as f64 / 1000.0;
         all.into_iter()
             .filter(|s| {
                 !remembers
-                    || used::shown(s, &self.used)
+                    || used::shown(s, &self.used, now_s)
                     || self.selected.as_deref() == Some(s.agent.id.as_str())
             })
             .filter(|s| !closed::is_closed(s, &self.closed))

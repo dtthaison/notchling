@@ -1,10 +1,13 @@
 //! Codex and Antigravity sessions used in Chat (`chatUsedSessions`: row id to when, in seconds).
 //! Most of these tools' sessions are made elsewhere: agents hand jobs over with `--delegate`, and
-//! the tools' own terminals make more. So the Sidebar shows one only once it was used here (opened,
-//! started, sent to); Search finds every one, and opening it from there counts as using it.
-//! Claude Code sessions always show.
+//! the tools' own terminals make more. So the Sidebar shows one that was used here (opened, started,
+//! sent to), and one made elsewhere only while it works and for an hour after (a hand-off, so it
+//! can be watched); Search finds every one, and opening it from there counts as using it. Claude
+//! Code sessions always show.
 
 use std::collections::HashMap;
+
+use notchling_engine::sessions::AgentGroup;
 
 use super::closed::closable;
 use super::data::Session;
@@ -13,15 +16,23 @@ use super::data::Session;
 pub const KEY: &str = "chatUsedSessions";
 /// How long a use is remembered, in seconds (the rows themselves go after 14 days).
 const KEEP_S: f64 = 30.0 * 24.0 * 3600.0;
+/// How long a row made elsewhere stays after its last change, in seconds.
+pub const RECENT_S: f64 = 3600.0;
 
 /// A draft (`codex-new:`, `agy-new:`): being started here.
 pub fn is_draft(id: &str) -> bool {
     id.starts_with("codex-new:") || id.starts_with("agy-new:")
 }
 
-/// Whether the Sidebar shows `session`: any Claude Code row, a draft, or one used here.
-pub fn shown(session: &Session, used: &HashMap<String, f64>) -> bool {
-    !closable(session.tool) || is_draft(&session.agent.id) || used.contains_key(&session.agent.id)
+/// Whether the Sidebar shows `session` at `now_s`: any Claude Code row, a draft, one used here, or
+/// one working, waiting on an answer or changed in the last [`RECENT_S`].
+pub fn shown(session: &Session, used: &HashMap<String, f64>, now_s: f64) -> bool {
+    let agent = &session.agent;
+    !closable(session.tool)
+        || is_draft(&agent.id)
+        || used.contains_key(&agent.id)
+        || agent.group != AgentGroup::Completed
+        || now_s - agent.since_ms as f64 / 1000.0 < RECENT_S
 }
 
 /// Records a use of `id` at `now_s`, forgetting uses older than a month. False when nothing
@@ -51,21 +62,47 @@ mod tests {
     use super::*;
     use crate::chat::data::Tool;
     use crate::chat::sidebar::tests::session;
-    use notchling_engine::sessions::AgentGroup;
 
     fn row(id: &str, tool: Tool) -> Session {
         session(id, AgentGroup::Completed, None, tool)
     }
 
+    fn shown_now(session: &Session, used: &HashMap<String, f64>) -> bool {
+        shown(session, used, session.agent.since_ms as f64 / 1000.0 + 2.0 * RECENT_S)
+    }
+
+    #[test]
+    fn a_hand_off_shows_while_it_works_and_an_hour_after() {
+        let used = HashMap::new();
+        let now = 10_000_000.0;
+        let mut working = row("codex:d", Tool::Codex);
+        working.agent.group = AgentGroup::Working;
+        assert!(shown(&working, &used, now), "working now, made elsewhere");
+        let mut asks = row("agy:d", Tool::Antigravity);
+        asks.agent.group = AgentGroup::NeedsInput;
+        assert!(shown(&asks, &used, now), "waiting on an answer");
+        let mut done = row("codex:e", Tool::Codex);
+        done.agent.since_ms = ((now - RECENT_S + 60.0) * 1000.0) as i64;
+        assert!(shown(&done, &used, now), "ended within the hour");
+        done.agent.since_ms = ((now - RECENT_S - 60.0) * 1000.0) as i64;
+        assert!(
+            !shown(&done, &used, now),
+            "ended over an hour ago, never used here"
+        );
+    }
+
     #[test]
     fn only_rows_used_here_show_and_claude_code_always_does() {
         let mut used = HashMap::new();
-        assert!(shown(&row("abc", Tool::Claude), &used));
-        assert!(!shown(&row("codex:a", Tool::Codex), &used));
-        assert!(!shown(&row("agy:b", Tool::Antigravity), &used));
-        assert!(shown(&row("codex-new:1", Tool::Codex), &used), "a draft");
+        assert!(shown_now(&row("abc", Tool::Claude), &used));
+        assert!(!shown_now(&row("codex:a", Tool::Codex), &used));
+        assert!(!shown_now(&row("agy:b", Tool::Antigravity), &used));
+        assert!(
+            shown_now(&row("codex-new:1", Tool::Codex), &used),
+            "a draft"
+        );
         assert!(mark(&mut used, "codex:a", 100.0));
-        assert!(shown(&row("codex:a", Tool::Codex), &used));
+        assert!(shown_now(&row("codex:a", Tool::Codex), &used));
         assert!(!mark(&mut used, "codex:a", 200.0), "already today");
         assert!(!mark(&mut used, "abc", 200.0));
         assert!(!mark(&mut used, "agy-new:1", 200.0));
