@@ -259,8 +259,8 @@ impl ChatView {
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
             view.render_terminal(how == "expanded", cx);
         }
-        if std::env::var_os(SIMULATOR_ENV).is_some() {
-            view.render_simulator();
+        if let Ok(how) = std::env::var(SIMULATOR_ENV) {
+            view.render_simulator(&how, cx);
         }
         if switch(ROW_MENU_ENV) {
             // The sessions load after this; the menu needs only an id.

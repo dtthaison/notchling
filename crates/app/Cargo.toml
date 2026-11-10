@@ -37,10 +37,10 @@ raw-window-handle = "=0.6.2"
 # would still walk from here (it filters each edge by target on its own) and which brings the
 # unmaintained proc-macro-error. The WebKit backend on macOS needs no feature.
 wry = { version = "=0.57.1", default-features = false }
-
-# The render tests read the PNG back. The version GPUI's `image` already locks, so no second copy.
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+# The simulator panel saves an annotated screenshot as a PNG, and the render tests read one back:
+# the version GPUI's `image` already locks, so no second copy.
 png = "=0.17.16"
+
 
 # The phone panel's readers are tested on the engine bridge's real replies, over a test certificate.
 [dev-dependencies]

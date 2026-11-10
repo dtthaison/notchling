@@ -124,6 +124,18 @@ pub enum Icon {
     /// The terminal panel's Expand and Minimize.
     Expand,
     Shrink,
+    /// The simulator panel's zoom: bigger (SF `plus.magnifyingglass`).
+    ZoomIn,
+    /// Smaller (SF `minus.magnifyingglass`).
+    ZoomOut,
+    /// As big as the room lets it (SF `viewfinder`).
+    ZoomFit,
+    /// The simulator's Home button (SF `house`).
+    Home,
+    /// A screenshot (SF `camera`).
+    Camera,
+    /// A screen recording (SF `video`).
+    Video,
 }
 
 /// Where an icon sits decides its size.
@@ -148,7 +160,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 65] = [
+    pub const ALL: [Icon; 71] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -214,6 +226,12 @@ impl Icon {
         Icon::Halfway,
         Icon::Expand,
         Icon::Shrink,
+        Icon::ZoomIn,
+        Icon::ZoomOut,
+        Icon::ZoomFit,
+        Icon::Home,
+        Icon::Camera,
+        Icon::Video,
     ];
 
     /// The SF Symbol name (AppKit, the phone's mapping).
@@ -285,6 +303,12 @@ impl Icon {
             Icon::Halfway => "circle.lefthalf.filled",
             Icon::Expand => "arrow.up.left.and.arrow.down.right",
             Icon::Shrink => "arrow.down.right.and.arrow.up.left",
+            Icon::ZoomIn => "plus.magnifyingglass",
+            Icon::ZoomOut => "minus.magnifyingglass",
+            Icon::ZoomFit => "viewfinder",
+            Icon::Home => "house",
+            Icon::Camera => "camera",
+            Icon::Video => "video",
         }
     }
 
@@ -359,6 +383,12 @@ impl Icon {
             Icon::Halfway => "◐",
             Icon::Expand => "⤢",
             Icon::Shrink => "⤡",
+            Icon::ZoomIn => "⊕",
+            Icon::ZoomOut => "⊖",
+            Icon::ZoomFit => "⛶",
+            Icon::Home => "⌂",
+            Icon::Camera => "◉",
+            Icon::Video => "▶",
         }
     }
 
@@ -422,6 +452,12 @@ impl Icon {
             Icon::Halfway => "icons/contrast.svg",
             Icon::Expand => "icons/maximize-2.svg",
             Icon::Shrink => "icons/minimize-2.svg",
+            Icon::ZoomIn => "icons/zoom-in.svg",
+            Icon::ZoomOut => "icons/zoom-out.svg",
+            Icon::ZoomFit => "icons/scan-search.svg",
+            Icon::Home => "icons/house.svg",
+            Icon::Camera => "icons/camera.svg",
+            Icon::Video => "icons/video.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -471,13 +507,14 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 62] = icons![
+const SVGS: [(&str, &[u8]); 68] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
     "arrow-up",
     "bot",
     "brain",
+    "camera",
     "check",
     "check-check",
     "chevron-down",
@@ -502,6 +539,7 @@ const SVGS: [(&str, &[u8]); 62] = icons![
     "folder",
     "gauge",
     "git-branch",
+    "house",
     "globe",
     "info",
     "key-round",
@@ -520,6 +558,7 @@ const SVGS: [(&str, &[u8]); 62] = icons![
     "plus",
     "puzzle",
     "rotate-cw",
+    "scan-search",
     "search",
     "send",
     "settings",
@@ -532,8 +571,11 @@ const SVGS: [(&str, &[u8]); 62] = icons![
     "text",
     "triangle-alert",
     "undo-2",
+    "video",
     "wrench",
     "x",
+    "zoom-in",
+    "zoom-out",
 ];
 
 /// An embedded icon's SVG by its asset path (the GPUI asset source serves these).
