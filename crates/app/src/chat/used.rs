@@ -68,7 +68,11 @@ mod tests {
     }
 
     fn shown_now(session: &Session, used: &HashMap<String, f64>) -> bool {
-        shown(session, used, session.agent.since_ms as f64 / 1000.0 + 2.0 * RECENT_S)
+        shown(
+            session,
+            used,
+            session.agent.since_ms as f64 / 1000.0 + 2.0 * RECENT_S,
+        )
     }
 
     #[test]

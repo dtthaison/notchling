@@ -11,7 +11,9 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
 cargo build --release --locked -p notchling-app -p notchling-notchlingd
-TARGET="${CARGO_TARGET_DIR:-target}/release"
+# Where cargo put it: a shared `build.target-dir` in ~/.cargo/config.toml moves it out of `target/`,
+# and copying from there would bundle whatever older build was left behind.
+TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release"
 NAME="Notchling Next"
 APP="build/$NAME.app"
 VERSION=$(cargo pkgid -p notchling-app | sed 's/.*[#@]//')
