@@ -276,6 +276,13 @@ impl Hover {
         self.away().then_some(Wait::Close(self.epoch))
     }
 
+    /// A click on the ring: opens the card now, or closes it when it is open. Either way a wait
+    /// already running is cancelled through the new epoch.
+    pub fn click(&mut self) {
+        self.epoch += 1;
+        self.shown = !self.shown;
+    }
+
     /// The open wait ran: opens the card if the pointer stayed on the ring. Returns whether it did.
     pub fn open_if_still(&mut self, epoch: u64) -> bool {
         let open = self.epoch == epoch && self.ring && !self.shown;
@@ -492,6 +499,27 @@ mod tests {
         assert!(!h.open_if_still(epoch));
         assert!(!h.open(false));
         assert_eq!(OPEN_MS, 1500);
+    }
+
+    #[test]
+    fn a_click_opens_the_card_at_once_and_a_second_closes_it() {
+        let mut h = Hover::default();
+        let Some(Wait::Open(epoch)) = h.ring(true) else {
+            panic!("entering the ring waits to open");
+        };
+        h.click();
+        assert!(h.open(false), "open without waiting");
+        assert!(!h.open_if_still(epoch), "the wait no longer matters");
+        assert!(h.open(false));
+        h.click();
+        assert!(!h.open(false), "a second click closes it");
+        // Opened by a click, it still closes after the grace once the pointer leaves.
+        h.click();
+        let Some(Wait::Close(epoch)) = h.ring(false) else {
+            panic!("away from both waits to close");
+        };
+        assert!(h.close_if_still(epoch));
+        assert!(!h.open(false));
     }
 
     #[test]

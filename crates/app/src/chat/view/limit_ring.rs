@@ -327,6 +327,11 @@ pub(super) fn ring(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -
     .px(px(0.0))
     .rounded(px(RADIUS_SM))
     .on_hover(cx.listener(|this, inside: &bool, _, cx| this.limit_hover(true, *inside, cx)))
+    // A click opens the card at once (or closes it), without the hover's wait.
+    .on_click(cx.listener(|this, _, _, cx| {
+        this.limit_ring.hover.click();
+        cx.notify();
+    }))
     .part_at("Limit Ring", Corner::Top, a, cx);
     Some(
         div()
