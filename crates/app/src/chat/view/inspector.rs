@@ -25,6 +25,9 @@ use crate::chat::inspector::{
 const WIDTH: f32 = 260.0;
 /// A row's mark sits in a box this wide, so the text lines up whatever the mark.
 const MARK_BOX: f32 = 14.0;
+/// One line of a row's text. The icon box is this tall too, so the icon sits centred on the first
+/// line; left to GPUI's default (about 1.6 times the 11 pt type) the text sat lower than the icon.
+const ROW_LINE: f32 = 16.0;
 
 /// Which sections each window has folded, and whether its subagent list shows every finished one.
 #[derive(Default)]
@@ -237,7 +240,7 @@ fn spinner(key: &str, a: Appearance) -> impl IntoElement {
 fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
     let holder = div()
         .w(px(MARK_BOX))
-        .h(px(MARK_BOX))
+        .h(px(ROW_LINE))
         .flex_shrink_0()
         .flex()
         .items_center()
@@ -257,7 +260,7 @@ fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
         .child(
             div()
                 .w(px(MARK_BOX))
-                .h(px(16.0))
+                .h(px(ROW_LINE))
                 .flex_shrink_0()
                 .flex()
                 .items_center()
@@ -268,7 +271,7 @@ fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(label(text, TypeRole::Meta, Ink::Text, a)),
+                .child(label(text, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE))),
         )
 }
 
@@ -318,7 +321,7 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(label(&task.subject, TypeRole::Meta, ink, a)),
+                .child(label(&task.subject, TypeRole::Meta, ink, a).line_height(px(ROW_LINE))),
         )
 }
 
@@ -335,15 +338,19 @@ fn subagent_row(index: usize, s: &SubagentRow, a: Appearance) -> Div {
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
-                .child(label(&s.description, TypeRole::Meta, Ink::Text, a))
-                .child(label(&s.detail, TypeRole::Meta, Ink::TextFaint, a)),
+                .child(
+                    label(&s.description, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE)),
+                )
+                .child(
+                    label(&s.detail, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
+                ),
         )
 }
 
 fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
-        text = text.child(label(&s.title, TypeRole::Meta, Ink::Text, a));
+        text = text.child(label(&s.title, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE)));
     }
     div()
         .flex()
@@ -351,8 +358,12 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance) -> Div {
         .gap(px(7.0))
         .child(mark_box(s.mark, &format!("shell-{index}"), a))
         .child(
-            text.child(label(&s.command, TypeRole::Mono, Ink::TextMuted, a))
-                .child(label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)),
+            text.child(
+                label(&s.command, TypeRole::Mono, Ink::TextMuted, a).line_height(px(ROW_LINE)),
+            )
+            .child(
+                label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
+            ),
         )
 }
 
