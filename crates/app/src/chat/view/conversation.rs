@@ -649,11 +649,17 @@ fn row_with_opinions(
     // The Second Opinion buttons show on hover, at the right end of the message's row of actions.
     let buttons = (!subjects.is_empty()).then(|| {
         let of = subjects.len();
-        div().flex().gap(px(4.0)).children(
-            subjects
-                .into_iter()
-                .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, of, a, cx)),
-        )
+        div()
+            .min_w(px(0.0))
+            .flex()
+            .flex_wrap()
+            .justify_end()
+            .gap(px(4.0))
+            .children(
+                subjects
+                    .into_iter()
+                    .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, of, a, cx)),
+            )
     });
     // Your messages and Claude's replies get their row of actions beneath.
     let element = message_actions::with_actions(view, row, item, element, buttons, a, cx);

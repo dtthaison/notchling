@@ -85,7 +85,7 @@ fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) ->
 }
 
 /// An image file's width and height, read once from the first bytes of the file.
-fn image_shape(path: &str) -> Option<(u32, u32)> {
+pub(super) fn image_shape(path: &str) -> Option<(u32, u32)> {
     if let Some(known) = SHAPES.with(|s| s.borrow().get(path).copied()) {
         return known;
     }

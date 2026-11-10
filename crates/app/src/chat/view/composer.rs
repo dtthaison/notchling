@@ -17,8 +17,8 @@
 //! line, and only there.
 
 use gpui::{
-    deferred, div, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths,
-    KeyDownEvent, PathPromptOptions, SharedString, Stateful, Window,
+    deferred, div, img, point, prelude::*, px, relative, BoxShadow, Context, Div, ExternalPaths,
+    KeyDownEvent, ObjectFit, PathPromptOptions, SharedString, Stateful, Window,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, RADIUS_SM, SIDE_PADDING, SPINNER_MINI};
@@ -754,6 +754,49 @@ fn add_button(
 }
 
 /// How full the session's context is (the latest request's tokens against the model's window).
+/// How tall a picture named in the draft shows over the text.
+const THUMB_HEIGHT: f32 = 64.0;
+
+/// The pictures the draft names (a dropped screenshot, a pasted path), small over the text, so
+/// what goes with the message can be seen; a click opens one beside the chat. A path that no longer
+/// exists shows nothing.
+fn thumbnails(draft: &str, a: Appearance) -> Option<Div> {
+    let paths: Vec<_> = crate::chat::drops::image_words(draft)
+        .into_iter()
+        .filter(|p| p.is_file())
+        .collect();
+    if paths.is_empty() {
+        return None;
+    }
+    let row = div()
+        .flex()
+        .flex_wrap()
+        .gap(px(6.0))
+        .px(px(TEXT_PAD_LEADING))
+        .pt(px(4.0))
+        .children(paths.into_iter().map(|path| {
+            let text = path.to_string_lossy().into_owned();
+            let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
+            let width = (THUMB_HEIGHT * w as f32 / h.max(1) as f32).clamp(32.0, 200.0);
+            let to = text.clone();
+            div()
+                .id(SharedString::from(format!("composer-thumb-{text}")))
+                .w(px(width))
+                .h(px(THUMB_HEIGHT))
+                .rounded(px(RADIUS_SM))
+                .border(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .overflow_hidden()
+                .cursor_pointer()
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    super::page_panel::follow_link(&to, window, cx)
+                })
+                .child(img(path).size_full().object_fit(ObjectFit::Cover))
+        }));
+    Some(row)
+}
+
 fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let session = view.selected_session()?;
     let h = crate::chat::header::header(session, &view.conversation, &view.root.home);
@@ -836,6 +879,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
             blur_radius: px(14.0),
             spread_radius: px(0.0),
         }])
+        .children(thumbnails(view.tools.editor.read(cx).text(), a))
         .child(text_area)
         .child(bottom)
         .when(control.enabled, |c| {

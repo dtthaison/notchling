@@ -94,6 +94,73 @@ pub fn paths_text(paths: &[impl AsRef<Path>]) -> String {
         .join(" ")
 }
 
+/// The images a draft names, each once, in order: the words of `text` read as the shell reads
+/// them (single quotes, a backslash before one character), kept when one is an absolute path ending
+/// in an image kind. What [`paths_text`] writes reads back here, so a dropped picture shows over the
+/// box; a quote left open ends nothing. Trailing punctuation after a bare path is not part of it.
+pub fn image_words(text: &str) -> Vec<PathBuf> {
+    const KINDS: [&str; 8] = [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
+    ];
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut keep = |word: &mut String, bare_end: bool| {
+        if bare_end {
+            while word.ends_with([',', '.', ';', ':', '!', '?', ')']) {
+                word.pop();
+            }
+        }
+        let lower = word.to_lowercase();
+        if word.starts_with('/') && KINDS.iter().any(|k| lower.ends_with(k)) {
+            let path = PathBuf::from(word.as_str());
+            if !out.contains(&path) {
+                out.push(path);
+            }
+        }
+        word.clear();
+    };
+    let mut word = String::new();
+    // Whether the word's last piece was outside quotes, so its punctuation may be trimmed.
+    let mut bare = false;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                let mut closed = false;
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        closed = true;
+                        break;
+                    }
+                    word.push(q);
+                }
+                if !closed {
+                    return out;
+                }
+                bare = false;
+            }
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    word.push(next);
+                }
+                bare = false;
+            }
+            c if c.is_whitespace() => {
+                if !word.is_empty() {
+                    keep(&mut word, bare);
+                }
+            }
+            c => {
+                word.push(c);
+                bare = true;
+            }
+        }
+    }
+    if !word.is_empty() {
+        keep(&mut word, bare);
+    }
+    out
+}
+
 /// Puts the paths at the caret (over the selection), with a space before them unless the caret
 /// follows one or starts the text, and one after so typing goes on. `false` when there was
 /// nothing to put.
@@ -129,6 +196,25 @@ mod tests {
         assert_eq!(quoted(Path::new("/tmp/it's.txt")), r"'/tmp/it'\''s.txt'");
         assert_eq!(quoted(Path::new("/tmp/$HOME")), "'/tmp/$HOME'");
         assert_eq!(quoted(Path::new("/tmp/ảnh.png")), "/tmp/ảnh.png");
+    }
+
+    #[test]
+    fn the_image_paths_in_the_text_are_read_back_as_the_shell_reads_them() {
+        let text = "look at '/Users/me/Screen Shot.png' and /tmp/a.JPG, not /tmp/notes.md \
+                    or rel/b.png; '/tmp/it'\\''s.webp' twice /tmp/a.JPG 'unclosed /tmp/c.png";
+        assert_eq!(
+            image_words(text),
+            vec![
+                PathBuf::from("/Users/me/Screen Shot.png"),
+                PathBuf::from("/tmp/a.JPG"),
+                PathBuf::from("/tmp/it's.webp"),
+            ]
+        );
+        let dropped = [
+            PathBuf::from("/tmp/Shot 1.png"),
+            PathBuf::from("/tmp/x.gif"),
+        ];
+        assert_eq!(image_words(&paths_text(&dropped)), dropped.to_vec());
     }
 
     fn scratch(tag: &str) -> PathBuf {

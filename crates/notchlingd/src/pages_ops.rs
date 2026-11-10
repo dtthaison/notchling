@@ -122,8 +122,7 @@ impl PagesSetup {
             writable: layout.fixture,
             roots,
             codex_sessions: codex_home.join("sessions"),
-            cache: (!layout.socket_given)
-                .then(|| layout.data_dir.join("daemon").join("search.db")),
+            cache: (!layout.socket_given).then(|| layout.data_dir.join("daemon").join("search.db")),
         }
     }
 }

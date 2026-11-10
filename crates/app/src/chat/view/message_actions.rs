@@ -125,7 +125,7 @@ fn actions_row(
     let time = date.filter(|_| plan.time);
     let row = div()
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .min_h(px(ROW_HEIGHT))
         .flex()
         .items_center()
         .gap(px(2.0))
@@ -147,7 +147,9 @@ fn actions_row(
             .when(plan.copy, |d| d.child(copy_button(id, text, copied, a, cx)))
             .children(time.map(|at| time_label(id, at, a, cx)))
             // Second Opinion, at the far right.
-            .when_some(trailing, |d, t| d.child(div().flex_1()).child(t)),
+            .when_some(trailing, |d, t| {
+                d.child(div().flex_1().min_w(px(0.0)).flex().justify_end().child(t))
+            }),
     }
     .part("Message Actions", a, cx)
 }
@@ -241,7 +243,7 @@ fn hover_only(
         .child(
             div()
                 .w_full()
-                .h(px(ROW_HEIGHT))
+                .min_h(px(ROW_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_end()
