@@ -330,13 +330,15 @@ impl Element for Selectable {
             let len = s.notes[order].text.len();
             range_in(start, end, order, len)
         });
+        // Over the text, not behind it: inline code paints its own background, which hid a wash
+        // drawn first.
+        child.paint(window, cx);
         if let Some(range) = selected {
             let wash = hsla(Ink::Accent.color(self.a).with_alpha(0.32));
             for rect in rects(&self.layout, range) {
                 window.paint_quad(fill(rect, wash));
             }
         }
-        child.paint(window, cx);
     }
 }
 
@@ -365,13 +367,17 @@ fn rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
         ) else {
             break;
         };
-        // The last character of a line: its width from the line height's share, as the next
-        // character's start is on the line below.
-        let right = match there {
-            Some(p) if p.y == here.y => p.x,
-            _ => here.x + height * 0.3,
-        };
-        push(here.y, here.x, right);
+        let blank = text[index..].starts_with(char::is_whitespace);
+        match there {
+            Some(p) if p.y == here.y => push(here.y, here.x, p.x),
+            // A soft wrap: GPUI puts the first character of the new line at the end of the line
+            // above (the same index ends one line and starts the next). The next character's start
+            // on the new line is where this one ends, and it begins at the text's left edge.
+            Some(p) if p.y > here.y && !blank => push(p.y, layout.bounds().left(), p.x),
+            // The last character of a line (a space or a newline before a wrap, or the text's
+            // end): its width from the line height's share.
+            _ => push(here.y, here.x, here.x + height * 0.3),
+        }
         index = next;
     }
     rows.into_iter()
