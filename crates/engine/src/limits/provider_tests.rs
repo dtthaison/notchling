@@ -185,18 +185,17 @@ fn the_default_modes_are_the_swift_apps() {
 }
 
 #[test]
-fn a_mode_the_provider_does_not_allow_is_refused_and_the_default_reads() {
+fn antigravity_takes_every_mode() {
     let r = rig(
         Fake::new(&[]),
         Setup::antigravity(),
         LimitMode::NotifyAndSwitch,
         true,
     );
-    assert!(r
-        .config
+    r.config
         .set_mode(&ANTIGRAVITY, LimitMode::NotifyAndSwitch)
-        .is_err());
-    assert_eq!(r.watcher.mode(), LimitMode::Notify);
+        .unwrap();
+    assert_eq!(r.watcher.mode(), LimitMode::NotifyAndSwitch);
     r.config.set_mode(&ANTIGRAVITY, LimitMode::Off).unwrap();
     assert_eq!(r.watcher.mode(), LimitMode::Off);
 }

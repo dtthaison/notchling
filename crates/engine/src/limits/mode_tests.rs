@@ -41,11 +41,12 @@ fn the_switch_point_is_held_to_80_to_99() {
 }
 
 #[test]
-fn antigravity_never_switches() {
+fn antigravity_and_codex_may_switch() {
     let config = LimitConfig::in_memory();
     assert!(config
         .set_mode(&ANTIGRAVITY, LimitMode::NotifyAndSwitch)
-        .is_err());
+        .is_ok());
+    assert_eq!(config.mode(&ANTIGRAVITY), LimitMode::NotifyAndSwitch);
     assert!(config.set_mode(&CODEX, LimitMode::NotifyAndSwitch).is_ok());
     assert_eq!(config.mode(&CODEX), LimitMode::NotifyAndSwitch);
 }

@@ -214,7 +214,7 @@ fn with_accounts_off_no_store_is_ever_touched() {
         Arc::new(Untouchable),
         Box::new(|| panic!("the process list was read")),
     );
-    ops.set_antigravity(Arc::new(Untouchable));
+    ops.set_antigravity(Arc::new(Untouchable), Box::new(|| true));
     for i in 0..5 {
         assert!(!ops.tick_at(NOW + f64::from(i) * 400.0), "nothing ran");
     }
@@ -353,10 +353,6 @@ fn set_mode_checks_everything_before_it_writes() {
     );
     for (args, why) in [
         (
-            json!({"provider": "antigravity", "mode": "notifyAndSwitch"}),
-            "never switches",
-        ),
-        (
             json!({"provider": "claude", "mode": "sometimes"}),
             "unknown mode",
         ),
@@ -380,7 +376,7 @@ fn set_mode_checks_everything_before_it_writes() {
         ),
         (json!({"provider": "claude", "mode": 1}), "not a string"),
         (
-            json!({"provider": "antigravity", "mode": "notifyAndSwitch", "switch_at": 85}),
+            json!({"provider": "antigravity", "mode": "sometimes", "switch_at": 85}),
             "all or nothing",
         ),
     ] {
@@ -396,10 +392,14 @@ fn set_mode_checks_everything_before_it_writes() {
     assert_eq!(status["providers"][2]["mode"], json!("notify"));
     assert_eq!(
         status["providers"][2]["modes"],
-        json!(["off", "notify"]),
-        "Antigravity offers Off and Notify"
+        json!(["off", "notify", "notifyAndSwitch"]),
+        "Antigravity offers every mode"
     );
     assert_eq!(ops.config().mode(&ANTIGRAVITY), LimitMode::Notify);
+    assert_eq!(
+        set(json!({"provider": "antigravity", "mode": "notifyAndSwitch"})).unwrap()["mode"],
+        json!("notifyAndSwitch")
+    );
 }
 
 #[test]

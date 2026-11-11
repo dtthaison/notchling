@@ -2,8 +2,9 @@
 //!
 //! The keys are the Swift app's (`limitMode`, `limitSwitchAt`, `codexLimitMode`,
 //! `antigravityLimitMode`, in [`crate::settings::KEYS`]) with the same defaults: Claude Code
-//! Notify and Switch, Codex Notify, Antigravity Notify (Off or Notify only: a switch restarts the
-//! app, and its limits exist only while it runs). The daemon keeps its own copy of these four
+//! Notify and Switch, Codex Notify, Antigravity Notify. Antigravity's Notify and Switch is
+//! the maintainer's choice of 2026-11-11 (agents delegate work to `agy`); the Swift app had Off
+//! or Notify only. The daemon keeps its own copy of these four
 //! values in a document of its own (`daemon/limits` in `notchling.db`); it never writes the Swift app's `UserDefaults`.
 
 use super::logic::{DEFAULT_SWITCH_AT, SWITCH_RANGE};
@@ -55,7 +56,6 @@ pub const ALL_MODES: [LimitMode; 3] = [
     LimitMode::Notify,
     LimitMode::NotifyAndSwitch,
 ];
-pub const NO_SWITCH_MODES: [LimitMode; 2] = [LimitMode::Off, LimitMode::Notify];
 
 /// A provider whose limits are watched: its setting key, the modes it allows and its default.
 #[derive(Clone, Copy, Debug)]
@@ -85,7 +85,7 @@ pub const ANTIGRAVITY: WatchedProvider = WatchedProvider {
     id: "antigravity",
     label: "Antigravity",
     key: "antigravityLimitMode",
-    modes: &NO_SWITCH_MODES,
+    modes: &ALL_MODES,
     default: LimitMode::Notify,
 };
 pub const PROVIDERS: [WatchedProvider; 3] = [CLAUDE, CODEX, ANTIGRAVITY];

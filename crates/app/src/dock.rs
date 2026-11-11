@@ -23,6 +23,7 @@ pub fn policy_for(titled_windows: usize) -> Policy {
 /// An item of the main menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainItem {
+    Settings,
     Quit,
     Undo,
     Redo,
@@ -38,6 +39,7 @@ pub enum MainItem {
 impl MainItem {
     pub fn title(self) -> &'static str {
         match self {
+            MainItem::Settings => "Settings…",
             MainItem::Quit => "Quit Notchling",
             MainItem::Undo => "Undo",
             MainItem::Redo => "Redo",
@@ -54,6 +56,7 @@ impl MainItem {
     /// The key binding, in GPUI's keystroke form.
     pub fn key(self) -> Option<&'static str> {
         match self {
+            MainItem::Settings => Some("cmd-,"),
             MainItem::Quit => Some("cmd-q"),
             MainItem::Undo => Some("cmd-z"),
             MainItem::Redo => Some("cmd-shift-z"),
@@ -81,7 +84,7 @@ pub fn main_menu() -> Vec<MainMenu> {
     vec![
         MainMenu {
             name: "Notchling",
-            items: vec![MainItem::Quit],
+            items: vec![MainItem::Settings, MainItem::Separator, MainItem::Quit],
         },
         MainMenu {
             name: "Edit",

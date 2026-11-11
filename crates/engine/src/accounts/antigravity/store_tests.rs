@@ -366,3 +366,47 @@ fn a_restart_confirmation_only_while_antigravity_runs() {
         "Restart Antigravity?"
     );
 }
+
+#[test]
+fn an_automatic_switch_leaves_a_closed_antigravity_closed() {
+    let rig = Rig::new("background", FakeApps::new());
+    rig.set_live(&fake_login("1", "a@example.com", "ta"));
+    rig.save("2", &fake_login("2", "b@example.com", "tb"));
+    rig.store.switch_in_background("2").unwrap();
+    assert!(rig.live().unwrap().contains("tb"));
+    assert!(
+        !rig.apps.events().iter().any(|e| e.starts_with("open ")),
+        "{:?}",
+        rig.apps.events()
+    );
+}
+
+#[test]
+fn idle_only_with_antigravity_closed_and_no_agy() {
+    let ps = "/bin/zsh\n/Users/x/.local/bin/agy acp\n";
+    assert!(crate::accounts::antigravity::store::agy_running(ps));
+    assert!(crate::accounts::antigravity::store::agy_running(
+        "agy --version"
+    ));
+    assert!(!crate::accounts::antigravity::store::agy_running(
+        "/bin/zsh -c echo agy\n/usr/bin/agyle"
+    ));
+    let busy = Rig::with_procs(
+        "idle-agy",
+        FakeProcs::new().answer("/bin/ps -axo command=", ps),
+        FakeApps::new(),
+    );
+    assert!(!busy.store.idle_for_auto_switch());
+    let quiet = Rig::with_procs(
+        "idle-none",
+        FakeProcs::new().answer("/bin/ps -axo command=", "/bin/zsh\n"),
+        FakeApps::new(),
+    );
+    assert!(quiet.store.idle_for_auto_switch());
+    let open = Rig::with_procs(
+        "idle-open",
+        FakeProcs::new().answer("/bin/ps -axo command=", "/bin/zsh\n"),
+        FakeApps::new().running(BUNDLE_IDS[0]),
+    );
+    assert!(!open.store.idle_for_auto_switch());
+}

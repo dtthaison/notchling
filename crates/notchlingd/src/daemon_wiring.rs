@@ -366,10 +366,20 @@ impl Wired {
             Arc::new(ProviderLimits::new(on.clone(), stores.codex.clone())),
             Box::new(move || idle_on.is_on() && idle_for_auto_switch(&codex_store.running_work())),
         );
-        limits.set_antigravity(Arc::new(ProviderLimits::new(
-            on,
-            stores.antigravity.clone(),
-        )));
+        let (agy_switch, agy_idle) = (stores.antigravity.clone(), stores.antigravity.clone());
+        let agy_on = on.clone();
+        limits.set_antigravity(
+            Arc::new(
+                ProviderLimits::new(on, stores.antigravity.clone()).with_switch(Box::new(
+                    move |id| {
+                        agy_switch
+                            .switch_in_background(id)
+                            .map_err(|e| e.message().to_string())
+                    },
+                )),
+            ),
+            Box::new(move || agy_on.is_on() && agy_idle.idle_for_auto_switch()),
+        );
 
         let vault = Arc::new(VaultOps::for_daemon(
             layout,

@@ -52,10 +52,11 @@ impl Layout {
                 (home.join(".claude"), data, false)
             }
         };
-        let socket_given = socket.is_some();
-        let socket = socket
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| data_dir.join(SOCKET_NAME));
+        // The app always names the socket; naming the usual one is not choosing another, so the
+        // daemon still keeps its documents (the limit settings, the caches) in the data folder.
+        let usual = data_dir.join(SOCKET_NAME);
+        let socket_given = socket.is_some_and(|s| s != usual);
+        let socket = socket.map(Path::to_path_buf).unwrap_or(usual);
         Some(Layout {
             claude_dir,
             data_dir,
@@ -252,6 +253,18 @@ mod tests {
             l.roots().lanes_file,
             PathBuf::from("/r/notchling/lanes.json")
         );
+    }
+
+    #[test]
+    fn naming_the_usual_socket_is_not_choosing_another() {
+        let l = Layout::resolve(
+            Some(Path::new("/r/notchling/notchlingd.sock")),
+            Some(OsStr::new("/r")),
+            real,
+        )
+        .unwrap();
+        assert_eq!(l.socket, PathBuf::from("/r/notchling/notchlingd.sock"));
+        assert!(!l.socket_given);
     }
 
     #[test]

@@ -9,6 +9,7 @@ use crate::dock::{main_menu, MainItem, Policy};
 actions!(
     notchling,
     [
+        OpenSettings,
         Quit,
         Minimize,
         CloseWindow,
@@ -54,6 +55,7 @@ pub fn set_main_menu(cx: &mut App, policy: Policy) {
 fn menu_item(item: MainItem) -> MenuItem {
     let title = item.title();
     match item {
+        MainItem::Settings => MenuItem::action(title, OpenSettings),
         MainItem::Quit => MenuItem::action(title, Quit),
         MainItem::Undo => MenuItem::os_action(title, Undo, OsAction::Undo),
         MainItem::Redo => MenuItem::os_action(title, Redo, OsAction::Redo),
@@ -71,6 +73,7 @@ fn menu_item(item: MainItem) -> MenuItem {
 /// focused text view once there is one (U1).
 pub fn register(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &OpenSettings, cx| super::shell::open_chat_settings(cx));
     cx.on_action(|_: &Minimize, cx| {
         if let Some(window) = cx.active_window() {
             window
@@ -95,6 +98,7 @@ pub fn register(cx: &mut App) {
 
 fn binding(key: &str, item: MainItem) -> KeyBinding {
     match item {
+        MainItem::Settings => KeyBinding::new(key, OpenSettings, None),
         MainItem::Quit | MainItem::Separator => KeyBinding::new(key, Quit, None),
         MainItem::Undo => KeyBinding::new(key, Undo, None),
         MainItem::Redo => KeyBinding::new(key, Redo, None),

@@ -194,6 +194,11 @@ impl ChatView {
     }
 
     /// Settings over Notchling's own store; a fixture root has none.
+    /// The Settings sheet, from ⌘, or the menu bar.
+    pub fn show_settings(&mut self, cx: &mut Context<Self>) {
+        self.open_settings(cx);
+    }
+
     pub(super) fn open_settings(&mut self, cx: &mut Context<Self>) {
         let data_dir = self
             .root

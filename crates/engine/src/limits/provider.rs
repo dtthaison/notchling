@@ -4,7 +4,8 @@
 //! fetched, never renews a token, and a switch is the provider's own `switch_to`.
 //!
 //! Codex switches only while nothing would be interrupted (`can_switch_now`: no `codex` process,
-//! the ChatGPT app closed); Antigravity is Off or Notify only, since a switch restarts the app.
+//! the ChatGPT app closed); Antigravity only while it is closed and no `agy` runs, and its
+//! switch then leaves the app closed.
 
 use super::claude::{Announce, Observed};
 use super::logic::{
@@ -43,7 +44,8 @@ impl Setup {
         Setup {
             provider: ANTIGRAVITY,
             primary_group: None,
-            busy_text: String::new(),
+            busy_text: "Antigravity or an agy session is running, so Notchling won't switch now."
+                .into(),
         }
     }
 }

@@ -186,3 +186,27 @@ fn claude_usage_is_read_per_account_with_its_reasons_and_the_refreshing_flag() {
     assert!(!still_refreshing(&json!({"reports": {}})));
     assert_eq!(parse_claude_usage(&Value::Null), ClaudeUsage::default());
 }
+
+#[test]
+fn the_settings_limit_rows_reach_the_daemon_as_set_mode() {
+    let call = Call::limits_setting("antigravityLimitMode", &json!("notifyAndSwitch")).unwrap();
+    assert_eq!(call.op, "limits.set_mode");
+    assert_eq!(
+        call.args,
+        json!({"provider": "antigravity", "mode": "notifyAndSwitch"})
+    );
+    assert_eq!(
+        Call::limits_setting("codexLimitMode", &json!("off"))
+            .unwrap()
+            .args,
+        json!({"provider": "codex", "mode": "off"})
+    );
+    assert_eq!(
+        Call::limits_setting("limitSwitchAt", &json!(92))
+            .unwrap()
+            .args,
+        json!({"provider": "claude", "switch_at": 92})
+    );
+    assert!(Call::limits_setting("hideNotch", &json!(true)).is_none());
+    assert!(Call::limits_setting("limitMode", &json!(3)).is_none());
+}

@@ -215,11 +215,25 @@ impl ClaudeSource for ClaudeLimits {
 pub struct ProviderLimits {
     accounts: Arc<SwitchFlag>,
     provider: Arc<dyn AccountProvider>,
+    /// The watcher's own switch, when it differs from the provider's (Antigravity's leaves a
+    /// closed app closed).
+    switch: Option<SwitchFn>,
 }
+
+type SwitchFn = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 impl ProviderLimits {
     pub fn new(accounts: Arc<SwitchFlag>, provider: Arc<dyn AccountProvider>) -> ProviderLimits {
-        ProviderLimits { accounts, provider }
+        ProviderLimits {
+            accounts,
+            provider,
+            switch: None,
+        }
+    }
+
+    pub fn with_switch(mut self, switch: SwitchFn) -> ProviderLimits {
+        self.switch = Some(switch);
+        self
     }
 }
 
@@ -283,6 +297,9 @@ impl ProviderSource for ProviderLimits {
 
     fn switch_to(&self, id: &str) -> Result<(), String> {
         self.accounts.check().map_err(|e| e.message)?;
+        if let Some(switch) = &self.switch {
+            return switch(id);
+        }
         self.provider
             .switch_to(id)
             .map_err(|e| e.message().to_string())

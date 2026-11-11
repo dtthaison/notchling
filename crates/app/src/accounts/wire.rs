@@ -107,6 +107,38 @@ impl Call {
         )
     }
 
+    /// The Settings sheet's limit rows, for the daemon that acts on them (`limits.set_mode`):
+    /// `limitMode`, `codexLimitMode` and `antigravityLimitMode` set a provider's mode,
+    /// `limitSwitchAt` the switch point. Anything else is none.
+    pub fn limits_setting(key: &str, value: &Value) -> Option<Call> {
+        let provider = match key {
+            "limitMode" => "claude",
+            "codexLimitMode" => "codex",
+            "antigravityLimitMode" => "antigravity",
+            "limitSwitchAt" => {
+                let at = value.as_i64()?;
+                return Some(Call::new(
+                    "limits.set_mode",
+                    json!({ "provider": "claude", "switch_at": at }),
+                ));
+            }
+            _ => return None,
+        };
+        let mode = value.as_str()?;
+        Some(Call::new(
+            "limits.set_mode",
+            json!({ "provider": provider, "mode": mode }),
+        ))
+    }
+
+    /// The keys [`Call::limits_setting`] knows.
+    pub const LIMIT_KEYS: [&'static str; 4] = [
+        "limitMode",
+        "codexLimitMode",
+        "antigravityLimitMode",
+        "limitSwitchAt",
+    ];
+
     pub fn limits_status() -> Call {
         Call::new("limits.status", json!({}))
     }

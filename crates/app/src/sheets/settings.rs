@@ -145,18 +145,16 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
         *on = !*on;
         *inverted = true;
     }
-    let switching = ["limitMode", "codexLimitMode"].iter().any(|k| {
-        value(read, k).and_then(|v| v.as_str().map(str::to_owned)) == Some("notifyAndSwitch".into())
-    });
+    let switching = ["limitMode", "codexLimitMode", "antigravityLimitMode"]
+        .iter()
+        .any(|k| {
+            value(read, k).and_then(|v| v.as_str().map(str::to_owned))
+                == Some("notifyAndSwitch".into())
+        });
     let mut limits = vec![
         choice(read, "limitMode", "Claude Code", &LIMIT_MODES),
         choice(read, "codexLimitMode", "Codex", &LIMIT_MODES),
-        choice(
-            read,
-            "antigravityLimitMode",
-            "Antigravity",
-            &LIMIT_MODES[..2],
-        ),
+        choice(read, "antigravityLimitMode", "Antigravity", &LIMIT_MODES),
     ];
     if switching {
         let (min, max) = spec("limitSwitchAt")
@@ -358,7 +356,7 @@ mod tests {
             panic!()
         };
         assert_eq!(selected, "notify");
-        assert_eq!(options.len(), 2, "Antigravity only notifies");
+        assert_eq!(options.len(), 3, "Antigravity switches too");
     }
 
     #[test]

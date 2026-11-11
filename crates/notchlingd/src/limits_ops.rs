@@ -284,14 +284,20 @@ impl LimitsOps {
         });
     }
 
-    /// Feeds Antigravity's watcher: Off or Notify only, at the default switch point.
-    pub fn set_antigravity(&self, source: Arc<dyn ProviderSource>) {
+    /// Feeds Antigravity's watcher, at Claude's switch point like Codex. `idle` says nothing
+    /// would be interrupted by a switch (Antigravity closed, no `agy` running).
+    pub fn set_antigravity(
+        &self,
+        source: Arc<dyn ProviderSource>,
+        idle: Box<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        let config = self.config.clone();
         let watcher = ProviderLimitWatcher::new(
             source.clone(),
             Setup::antigravity(),
             self.config.clone(),
-            Box::new(|| notchling_engine::limits::logic::DEFAULT_SWITCH_AT),
-            Box::new(|| true),
+            Box::new(move || config.switch_at()),
+            idle,
             self.announcer(),
         );
         self.put(Slot::Provider {

@@ -129,6 +129,33 @@ impl AntigravityStore {
         BUNDLE_IDS.iter().any(|b| self.deps.apps.is_running(b))
     }
 
+    /// Nothing would be interrupted by an automatic switch: Antigravity is closed and no `agy`
+    /// runs (a Chat session, a delegated job), since a running `agy` keeps the login it started
+    /// with and may write it back.
+    pub fn idle_for_auto_switch(&self) -> bool {
+        if self.is_running() {
+            return false;
+        }
+        let Some(ps) = self.deps.procs.capture(
+            "/bin/ps",
+            &["-axo", "command="],
+            std::time::Duration::from_secs(10),
+        ) else {
+            return false;
+        };
+        !agy_running(&ps)
+    }
+
+    /// The limit watcher's switch: like [`AccountProvider::switch_to`], but Antigravity is not
+    /// opened when it wasn't running.
+    pub fn switch_in_background(&self, id: &str) -> Result<(), AccountError> {
+        let _op = lock(&self.op);
+        lock(&self.inner).busy = true;
+        let result = self.switch_locked(id, false);
+        lock(&self.inner).busy = false;
+        result
+    }
+
     // MARK: The login
 
     /// The login Antigravity would restore from: its Keychain item, else the file mirror.
@@ -277,7 +304,9 @@ impl AntigravityStore {
             })
     }
 
-    fn switch_locked(&self, id: &str) -> Result<(), AccountError> {
+    /// `open_closed`: open Antigravity afterwards even when it wasn't running (a switch the user
+    /// asked for ends with it open; an automatic one leaves a closed app closed).
+    fn switch_locked(&self, id: &str, open_closed: bool) -> Result<(), AccountError> {
         let active = self.capture();
         // Already in use: the live login may be newer than the saved copy (renewed), so keep it.
         if active.as_deref() == Some(id) {
@@ -310,7 +339,7 @@ impl AntigravityStore {
         }
         // Always end with Antigravity open on the switched-to account, even if it wasn't running.
         let active_now = lock(&self.inner).active.clone();
-        if active_now.as_deref() != Some(id) || !reopen.is_empty() {
+        if (open_closed && active_now.as_deref() != Some(id)) || !reopen.is_empty() {
             let open = if reopen.is_empty() {
                 vec![BUNDLE_IDS[0].to_string()]
             } else {
@@ -407,7 +436,7 @@ impl AccountProvider for AntigravityStore {
     fn switch_to(&self, id: &str) -> Result<(), AccountError> {
         let _op = lock(&self.op);
         lock(&self.inner).busy = true;
-        let result = self.switch_locked(id);
+        let result = self.switch_locked(id, true);
         lock(&self.inner).busy = false;
         result
     }
@@ -509,4 +538,13 @@ impl AntigravityStore {
         self.open_apps(&open);
         Ok(())
     }
+}
+
+/// Whether `ps -axo command=` lists an `agy` process (the CLI, `agy acp` included).
+pub fn agy_running(ps: &str) -> bool {
+    ps.lines().any(|line| {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|program| program.rsplit('/').next() == Some("agy"))
+    })
 }

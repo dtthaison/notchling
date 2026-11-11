@@ -143,6 +143,15 @@ impl Accounts {
         }
     }
 
+    /// Tells the daemon a limit setting from the Settings sheet (the daemon keeps its own copy
+    /// and acts on it). Blocking; a key that isn't a limit setting is nothing to send.
+    pub fn send_limit_setting(&self, key: &str, value: &Value) -> Result<(), String> {
+        let Some(call) = Call::limits_setting(key, value) else {
+            return Ok(());
+        };
+        self.call(&call).map(|_| ()).map_err(|e| e.to_string())
+    }
+
     pub fn is_live(&self) -> bool {
         self.transport.is_some()
     }

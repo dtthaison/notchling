@@ -20,7 +20,7 @@ use serde_json::{Map, Value};
 use super::banner::Banners;
 use super::settings::{change, sections, Daemon, Field, Row};
 use super::view::{sheet_header, Acts, Dismiss};
-use crate::mac::shell::{AppActions, AppBridge, AppSwitchFeed};
+use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
 
@@ -123,6 +123,17 @@ impl SettingsView {
             }
         }
         self.error = None;
+        // A limit row is acted on by the daemon, which keeps its own copy.
+        if let Some(accounts) = cx.try_global::<AppAccounts>().map(|g| g.0.clone()) {
+            let (key, sent) = (key.to_owned(), value.clone());
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(e) = accounts.send_limit_setting(&key, &sent) {
+                        eprintln!("settings: {key} didn't reach the daemon ({e})");
+                    }
+                })
+                .detach();
+        }
         self.values.insert(key.to_owned(), value);
         cx.notify();
     }

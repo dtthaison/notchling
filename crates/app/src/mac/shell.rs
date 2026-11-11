@@ -161,9 +161,13 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
                 }),
             );
         }
-        cx.set_global(AppAccounts(Arc::new(
-            crate::accounts::store::Accounts::for_run(root.as_ref()),
-        )));
+        let accounts = Arc::new(crate::accounts::store::Accounts::for_run(root.as_ref()));
+        cx.set_global(AppAccounts(accounts.clone()));
+        if accounts.is_live() {
+            if let Some(root) = root.as_ref() {
+                send_limit_settings(accounts, root.data_dir.join("settings.json"));
+            }
+        }
         let vault = Arc::new(crate::vault::store::Vault::for_run(root.as_ref()));
         cx.set_global(AppVault(vault.clone()));
         if feed.is_live() {
@@ -244,10 +248,33 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
     0
 }
 
+/// Tells the daemon the limit settings the Settings sheet saved, once it answers: it keeps its own
+/// copy, which a choice made while it was down, or before it kept one, never reached.
+fn send_limit_settings(accounts: Arc<crate::accounts::store::Accounts>, file: PathBuf) {
+    std::thread::spawn(move || {
+        let Ok(settings) = notchling_engine::settings::Settings::open(&file) else {
+            return;
+        };
+        let values = settings.values().clone();
+        let keys = crate::accounts::wire::Call::LIMIT_KEYS;
+        for _ in 0..30 {
+            let sent = keys.iter().all(|key| match values.get(*key) {
+                Some(value) => accounts.send_limit_setting(key, value).is_ok(),
+                None => true,
+            });
+            if sent {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
+}
+
 /// What a menu entry does. Settings opens Chat until its own part lands.
 fn handle(command: Command, cx: &mut App) {
     match command {
-        Command::OpenChat | Command::Settings => open_chat(cx),
+        Command::OpenChat => open_chat(cx),
+        Command::Settings => open_chat_settings(cx),
         Command::Accounts => {
             crate::accounts::window::open(cx, None);
         }
@@ -328,6 +355,14 @@ pub fn open_chat_session(cx: &mut App, target: SessionRef) {
         handle
             .update(cx, |view, _, cx| view.show_session(target, cx))
             .ok();
+    }
+}
+
+/// Opens Chat with the Settings sheet (⌘, and the menu bar's Settings…).
+pub fn open_chat_settings(cx: &mut App) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        handle.update(cx, |view, _, cx| view.show_settings(cx)).ok();
     }
 }
 
