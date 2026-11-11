@@ -2,7 +2,6 @@
 //! off) and `install.apply` (a dry run while `install` is off, answering the plan and the off
 //! message). The app never edits `settings.json` itself.
 
-use notchling_engine::install::{PAGE_HOOKS, PROMPT_HOOKS};
 use notchling_local_api::{ClientError, SOCKET_NAME};
 use serde_json::{json, Value};
 
@@ -28,9 +27,10 @@ fn line(e: &ClientError) -> String {
     }
 }
 
-/// The arguments both ops take: the hooks only (the skills are installed apart).
+/// The arguments both ops take: no `what`, so every part, the hooks and the `notchling-*` skills.
+/// Nothing else installs the skills, and skills left from the Swift app call its binary.
 fn args() -> Value {
-    json!({"what": [PROMPT_HOOKS, PAGE_HOOKS]})
+    json!({})
 }
 
 impl Hooks {
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_and_apply_ask_for_the_hooks_only() {
+    fn plan_and_apply_ask_for_every_part_hooks_and_skills() {
         let (hooks, f) = fake(Ok(envelope(false, false)));
         let plan = hooks.plan().unwrap();
         let applied = hooks.apply().unwrap();
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(seen[0].0, "install.plan");
         assert_eq!(seen[1].0, "install.apply");
         for (_, args) in seen.iter() {
-            assert_eq!(args, &json!({"what": ["prompt_hooks", "page_hooks"]}));
+            assert!(args.get("what").is_none(), "no list: the daemon does every part");
         }
     }
 
