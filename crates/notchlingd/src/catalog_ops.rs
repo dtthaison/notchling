@@ -14,8 +14,8 @@
 //! ```json
 //! {"tool": "claude", "fetchedAt": 1794150245.0,
 //!  "models": [{"id": "claude-opus-5-5", "name": "Opus 5.5", "tier": "current",
-//!              "contextWindow": 400000, "efforts": ["low", "medium", "high"],
-//!              "defaultEffort": null, "price": {"input": 5.0, "output": 25.0, "cacheRead": 0.5},
+//!              "contextWindow": 400000, "efforts": ["low", "medium", "high", "xhigh", "max"],
+//!              "defaultEffort": null, "price": {"input": 4.0, "output": 20.0, "cacheRead": 0.2},
 //!              "borrowed": false}]}
 //! ```
 //!
@@ -39,7 +39,13 @@
 //!   to standard error by its status alone, never its body or the token. Chat asks at start, every hour and when
 //!   a Claude picker menu opens, so the list is fetched about once a day while Chat runs.
 //! - The user's `catalog.json` (beside the socket) fixes prices, windows and names, entry by
-//!   entry; it never adds a model to what a session may start on.
+//!   entry; it never adds a model to what a session may start on. It is read once, when the
+//!   daemon starts, so an edit applies at the next start (and the cost cache then reprices the
+//!   models whose price changed). Its shape is the data file's, per tool (`claude`, `codex`,
+//!   `antigravity`): `prices` (a list of `{"match": "fable-5-3", "input": 9.0, "output": 45.0,
+//!   "cache_read": 0.3}` in dollars per million tokens; a Claude key may be bare or the full
+//!   `claude-` id, another tool's is its whole id), `windows` and `names` (objects keyed by the
+//!   full model id). An entry that doesn't parse, or a negative price, is skipped alone.
 //! - The same catalog is read elsewhere in the daemon: `cost.summary`'s prices (`cost_ops`), the
 //!   `session.new --model` check (`control_ops`, through [`CatalogService::is_allowed`]: the
 //!   built-in models plus the live lists, a Claude id in the shape `[a-z][a-z0-9.-]*` with an
