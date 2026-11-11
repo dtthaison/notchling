@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use notchling_engine::sessions::{Agent, Monitor};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::snapshot::{self, PendingQuestion};
-use notchling_engine::transcript::subagents::Subagent;
+use notchling_engine::transcript::subagents::{self, Subagent};
 
 use super::data::{DataRoot, Session, Tool};
 use crate::notch::requests::{self, HookRequest};
@@ -24,6 +24,9 @@ pub struct Loaded {
     pub selected: Option<String>,
     pub conversation: Conversation,
     pub subagents: Vec<Subagent>,
+    /// The transcript of the subagent Chat has open ([`Loader::subagent_path`]), by that path, read
+    /// again with every load so a running one follows.
+    pub subagent: Option<(String, Conversation)>,
     /// The selected Claude Code session's unanswered AskUserQuestion, from its transcript tail.
     pub question: Option<PendingQuestion>,
     /// The Swift hook's held prompts by session id (`requests/`), read only while the daemon's
@@ -43,6 +46,8 @@ pub struct Loader {
     /// Read the Swift hook's `requests/` folder too: set while the daemon's held prompts aren't
     /// followed (no daemon, or this isn't the app tier), as the notch does.
     pub files_prompts: bool,
+    /// The file of the subagent Chat shows in place of the conversation, read with each load.
+    pub subagent_path: Option<String>,
 }
 
 impl Loader {
@@ -52,6 +57,7 @@ impl Loader {
             locator: root.new_locator(),
             agy: root.new_agy_list(),
             files_prompts: false,
+            subagent_path: None,
             root,
         }
     }
@@ -133,11 +139,16 @@ impl Loader {
             }
             None => (Conversation::default(), Vec::new()),
         };
+        let subagent = self
+            .subagent_path
+            .as_ref()
+            .map(|path| (path.clone(), subagents::read(path)));
         Loaded {
             sessions,
             selected,
             conversation,
             subagents,
+            subagent,
             question,
             requests,
             now_ms,
@@ -247,5 +258,29 @@ mod tests {
             loaded.conversation.items.is_empty(),
             "the daemon's, not the files'"
         );
+    }
+
+    #[test]
+    fn an_open_subagent_is_read_with_each_load_and_none_when_nothing_is_open() {
+        let s = crate::testutil::Scratch::new("loader-subagent");
+        let session = terminal_world(&s);
+        let line = "{\"type\":\"user\",\"isSidechain\":true,\"timestamp\":\"2026-11-08T08:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"look around\"}}\n";
+        let file = s.write(
+            "claude/projects/-work-app/term-1/subagents/agent-a1.jsonl",
+            line,
+        );
+        assert!(session.exists());
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+
+        assert!(loader.load(None, 1_000).subagent.is_none());
+
+        let path = file.to_string_lossy().into_owned();
+        loader.subagent_path = Some(path.clone());
+        let loaded = loader.load(None, 2_000);
+        let (read_path, conversation) = loaded.subagent.expect("the open subagent is read");
+        assert_eq!(read_path, path);
+        assert_eq!(conversation.items.len(), 1);
+        // And it is listed, so the header has its row.
+        assert_eq!(loaded.subagents.len(), 1);
     }
 }

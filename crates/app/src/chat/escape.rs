@@ -10,6 +10,8 @@ pub struct Open {
     pub menu: bool,
     /// A sheet (Accounts, Settings, New Session…), the phone popover or the account menu.
     pub popup: bool,
+    /// A subagent's transcript is shown in place of the conversation.
+    pub subagent: bool,
     /// The selected session's turn runs.
     pub working: bool,
 }
@@ -20,6 +22,8 @@ pub enum Escape {
     HideParts,
     CloseMenu,
     ClosePopup,
+    /// Back to the session's conversation.
+    CloseSubagent,
     Stop,
     Nothing,
 }
@@ -31,6 +35,8 @@ pub fn escape(open: Open) -> Escape {
         Escape::CloseMenu
     } else if open.popup {
         Escape::ClosePopup
+    } else if open.subagent {
+        Escape::CloseSubagent
     } else if open.working {
         Escape::Stop
     } else {
@@ -58,6 +64,7 @@ mod tests {
             parts: true,
             menu: true,
             popup: true,
+            subagent: true,
             working: true,
         };
         assert_eq!(escape(all), Escape::HideParts);
@@ -68,6 +75,22 @@ mod tests {
             }),
             Escape::CloseMenu
         );
+    }
+
+    #[test]
+    fn esc_in_a_subagent_goes_back_and_never_stops_the_turn_behind_it() {
+        let open = Open {
+            subagent: true,
+            working: true,
+            ..Open::default()
+        };
+        assert_eq!(escape(open), Escape::CloseSubagent);
+        // A popup over it closes first.
+        let over = Open {
+            popup: true,
+            ..open
+        };
+        assert_eq!(escape(over), Escape::ClosePopup);
     }
 
     #[test]

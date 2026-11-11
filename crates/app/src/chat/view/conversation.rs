@@ -12,7 +12,7 @@ use gpui::{
     SharedString, Stateful,
 };
 use notchling_engine::sessions::agent::AgentGroup;
-use notchling_engine::transcript::model::{DiffKind, DiffLine};
+use notchling_engine::transcript::model::{DiffKind, DiffLine, ToolKind};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
@@ -320,6 +320,11 @@ fn step_row(
         Ink::TextMuted
     };
     let id = step.id.clone();
+    // An Agent call whose subagent is listed opens that subagent's transcript.
+    let subagent = (step.kind == ToolKind::Agent)
+        .then(|| crate::chat::subagent_view::for_step(&view.subagents, &step.id))
+        .flatten()
+        .map(|agent| agent.id.clone());
     let line = div()
         .id(SharedString::from(format!("step-{}", step.id)))
         .w_full()
@@ -348,6 +353,18 @@ fn step_row(
                 .min_w(px(0.0))
                 .elide(),
         )
+        .children(subagent.map(|agent_id| {
+            div()
+                .id(SharedString::from(format!("step-open-{}", step.id)))
+                .flex_shrink_0()
+                .cursor_pointer()
+                .child(label("Open", TypeRole::Label, Ink::AccentText, a))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // The row itself folds and opens on a click; this one is only Open.
+                    cx.stop_propagation();
+                    this.open_subagent(&agent_id, cx);
+                }))
+        }))
         .when(step.added + step.removed > 0, |d| {
             d.child(label(
                 &format!("+{}", step.added),
@@ -696,10 +713,14 @@ fn row_with_opinions(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> AnyElement {
-    let item = view.conversation.items.get(i);
+    let item = view.shown_conversation().items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
     let element = row_element(view, row, id, live, a, cx);
-    let subjects = item.map(opinions::subjects).unwrap_or_default();
+    // A subagent's transcript is only read: no second opinions on it.
+    let subjects = item
+        .filter(|_| view.open_subagent.is_none())
+        .map(opinions::subjects)
+        .unwrap_or_default();
     let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
     // The Second Opinion buttons show on hover, at the right end of the message's row of actions.
     let buttons = (!subjects.is_empty()).then(|| {
@@ -735,7 +756,14 @@ fn row_with_opinions(
 }
 
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
-    let rows = with_outgoing(rows(&view.conversation), &view.outgoing_texts());
+    let shown = view.shown_conversation();
+    // What was typed to the session isn't waiting in a subagent's transcript.
+    let outgoing = if view.open_subagent.is_some() {
+        Vec::new()
+    } else {
+        view.outgoing_texts()
+    };
+    let rows = with_outgoing(rows(shown), &outgoing);
     let column = div()
         .id("conversation")
         .flex_1()
@@ -755,6 +783,11 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         .gap(px(ROW_GAP))
         // First, so each frame's texts are noted afresh before the rows place theirs.
         .child(super::select::listener());
+    if let Some(open) = &view.open_subagent {
+        if open.conversation.is_none() {
+            return column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a));
+        }
+    }
     if view.loading {
         // The picked session's conversation is on its way; the previous one's would mislead.
         return column;
@@ -781,22 +814,24 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
                     _ => "Antigravity sessions load through the daemon while acting is on.",
                 }
             }
+            _ if view.open_subagent.is_some() => "No transcript yet for this subagent",
             _ => "No transcript yet for this session",
         };
         return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
     // The newest step group of a working session stays open with its running call spinning (the
     // Swift app's `liveTools`): the session works, and the last item is that group.
-    let working = view
-        .selected_session()
-        .is_some_and(|s| s.agent.group == AgentGroup::Working);
-    let last_tools = view.conversation.items.len().checked_sub(1).filter(|_| {
-        working
-            && matches!(
-                rows.get(view.conversation.items.len() - 1),
-                Some(Row::Tools(_))
-            )
-    });
+    let working = match &view.open_subagent {
+        Some(open) => open.agent.is_running(),
+        None => view
+            .selected_session()
+            .is_some_and(|s| s.agent.group == AgentGroup::Working),
+    };
+    let last_tools = shown
+        .items
+        .len()
+        .checked_sub(1)
+        .filter(|_| working && matches!(rows.get(shown.items.len() - 1), Some(Row::Tools(_))));
     column.children(
         rows.iter()
             .enumerate()

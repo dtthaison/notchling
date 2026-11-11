@@ -12,7 +12,7 @@ use gpui::{
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
-use notchling_kit::metric::{METER_BAR, SIDE_PADDING};
+use notchling_kit::metric::{METER_BAR, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::ui::{
     hsla, icon, label, scrollable, spinner as kit_spinner, KitPart, KitStyled,
 };
@@ -67,6 +67,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> imp
         folder,
         a,
         chat: cx.entity().downgrade(),
+        agent_ids: view.subagents.iter().map(|s| s.id.clone()).collect(),
     }
 }
 
@@ -76,8 +77,10 @@ struct Panel {
     /// The session's folder as shown (`~/…`), and as a path.
     folder: Option<(String, String)>,
     a: Appearance,
-    /// For a row's actions (Output).
+    /// For a row's actions (Output, opening a subagent).
     chat: WeakEntity<ChatView>,
+    /// The agent id of each subagent row, oldest first (what a click opens).
+    agent_ids: Vec<String>,
 }
 
 impl RenderOnce for Panel {
@@ -124,7 +127,13 @@ impl RenderOnce for Panel {
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0));
             for index in &listing.rows {
-                list = list.child(subagent_row(*index, &i.subagents[*index], a));
+                list = list.child(subagent_row(
+                    *index,
+                    &i.subagents[*index],
+                    a,
+                    &self.chat,
+                    &self.agent_ids,
+                ));
             }
             match listing.fold {
                 Fold::More(n) => {
@@ -333,8 +342,31 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         )
 }
 
-fn subagent_row(index: usize, s: &SubagentRow, a: Appearance) -> Div {
+/// A subagent: a click opens its transcript in place of the conversation. The row has the
+/// pointing hand and the kit's hover wash, like a step in the conversation.
+fn subagent_row(
+    index: usize,
+    s: &SubagentRow,
+    a: Appearance,
+    chat: &WeakEntity<ChatView>,
+    ids: &[String],
+) -> Stateful<Div> {
+    let (chat, agent) = (chat.clone(), ids.get(index).cloned());
     div()
+        .id(SharedString::from(format!("subagent-{index}")))
+        // The wash reaches past the text a little, so it doesn't hug the letters.
+        .mx(px(-4.0))
+        .px(px(4.0))
+        .py(px(2.0))
+        .rounded(px(RADIUS_SM))
+        .cursor_pointer()
+        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
+        .on_click(move |_, _, cx| {
+            if let Some(agent) = &agent {
+                chat.update(cx, |this, cx| this.open_subagent(agent, cx))
+                    .ok();
+            }
+        })
         .flex()
         .items_start()
         .gap(px(7.0))

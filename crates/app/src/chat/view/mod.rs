@@ -27,6 +27,7 @@ mod shell_probe;
 mod sidebar;
 mod simulator;
 mod slash_menu;
+mod subagent;
 mod tasks;
 mod terminal;
 mod tool;
@@ -118,6 +119,10 @@ pub struct ChatView {
     selected: Option<String>,
     conversation: Conversation,
     subagents: Vec<Subagent>,
+    /// The subagent shown read-only in place of the conversation (opened from the Details Panel or
+    /// an Agent step). Kept here, not in the load, so it outlives every reload; cleared by Back,
+    /// Esc, ⌘[ and picking another session.
+    open_subagent: Option<crate::chat::subagent_view::Open>,
     now_ms: i64,
     /// `None` while a load has it on the background executor.
     loader: Option<Loader>,
@@ -370,6 +375,15 @@ impl ChatView {
                 this.toggle_sidebar(cx);
                 return;
             }
+            // ⌘[ goes back from a subagent, as in the Swift app.
+            if keys.key == "["
+                && keys.modifiers.platform
+                && window.is_window_active()
+                && this.open_subagent.is_some()
+            {
+                this.close_subagent(cx);
+                return;
+            }
             if keys.key != "escape" || this.terminal_has_keys(window) {
                 return;
             }
@@ -381,6 +395,7 @@ impl ChatView {
                     || this.phone.is_some()
                     || this.account_menu
                     || this.row_menu.is_some(),
+                subagent: this.open_subagent.is_some(),
                 working: this.selected_working(),
             };
             match escape(open) {
@@ -397,6 +412,7 @@ impl ChatView {
                     this.row_menu = None;
                     cx.notify();
                 }
+                Escape::CloseSubagent => this.close_subagent(cx),
                 Escape::Stop => this.stop(cx),
                 Escape::Nothing => {}
             }
@@ -419,6 +435,7 @@ impl ChatView {
             selected: None,
             conversation: Conversation::default(),
             subagents: Vec::new(),
+            open_subagent: None,
             now_ms: 0,
             load_again: false,
             loading: true,
@@ -532,6 +549,7 @@ impl ChatView {
         let (claude, live) = (view.agents, view.tools);
         // The Swift hook's files are read only while the daemon's held prompts aren't followed.
         loader.files_prompts = view.prompts.is_none();
+        loader.subagent_path = self.open_subagent.as_ref().map(|o| o.agent.path.clone());
         cx.spawn(async move |this, cx| {
             let (loader, loaded) = cx
                 .background_executor()
@@ -617,6 +635,7 @@ impl ChatView {
                 }
             }
             if self.selected != was {
+                self.open_subagent = None;
                 self.show_draft(cx);
             }
             // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
@@ -631,6 +650,9 @@ impl ChatView {
                 self.conversation_scroll.scroll_to_bottom();
             }
             self.subagents = loaded.subagents;
+            if let Some(open) = self.open_subagent.as_mut() {
+                open.apply(&self.subagents, loaded.subagent);
+            }
             self.prompt.transcript = loaded.question;
         } else {
             self.load_again = true;
@@ -729,6 +751,7 @@ impl ChatView {
         self.mark_used(id);
         self.conversation = Conversation::default();
         self.subagents.clear();
+        self.open_subagent = None;
         self.prompt.transcript = None;
         self.loading = true;
         self.scroll_to_end = true;
@@ -838,7 +861,8 @@ impl Render for ChatView {
                 parts: parts_on(cx),
             });
         // Files from Finder land anywhere on the middle column while the box can take them.
-        let takes_drops = self.composer_control(cx).enabled;
+        let in_subagent = self.open_subagent.is_some();
+        let takes_drops = !in_subagent && self.composer_control(cx).enabled;
         let conversation = div()
             .relative()
             .flex_1()
@@ -851,7 +875,16 @@ impl Render for ChatView {
             // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
             .children(conversation::latest_pill(self, a, cx))
-            .part_at("Conversation", Corner::Bottom, a, cx);
+            .part_at(
+                if in_subagent {
+                    "Subagent View"
+                } else {
+                    "Conversation"
+                },
+                Corner::Bottom,
+                a,
+                cx,
+            );
         let terminal_expanded =
             self.terminal.shown() && self.terminal.expanded && !self.page.is_open();
         let column = div()
@@ -863,8 +896,10 @@ impl Render for ChatView {
             .h_full()
             .flex()
             .flex_col()
+            .children(subagent::header(self, a, cx))
             .child(conversation)
-            .child(composer::render(self, a, window, cx))
+            // A subagent's transcript is read-only: no reply box under it.
+            .children((!in_subagent).then(|| composer::render(self, a, window, cx)))
             .when(takes_drops, |column| {
                 column.on_drop::<ExternalPaths>(cx.listener(
                     |this, paths: &ExternalPaths, w, cx| {

@@ -38,6 +38,8 @@ const LIST_MAX_HEIGHT: f32 = 260.0;
 /// Whether the conversation has a bar, so it leaves room for it.
 pub fn shown(view: &ChatView) -> bool {
     !view.conversation.tasks.is_empty()
+        // The session's tasks aren't the subagent's.
+        && view.open_subagent.is_none()
         && view
             .selected
             .as_ref()

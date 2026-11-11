@@ -39,6 +39,7 @@ pub mod sidebar;
 pub mod simulator;
 pub mod slash_menu;
 pub mod steps;
+pub mod subagent_view;
 pub mod tasks_bar;
 pub mod terminal;
 pub mod used;

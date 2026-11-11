@@ -115,7 +115,7 @@ impl TaskSummary {
     }
 }
 
-fn subagent_row(agent: &Subagent) -> SubagentRow {
+pub fn subagent_row(agent: &Subagent) -> SubagentRow {
     let (status, word, mark) = match agent.status {
         SubagentStatus::Running => (Status::Working, "Running", Mark::Spinner),
         SubagentStatus::Completed => (Status::Done, "Done", Mark::Icon(Icon::Done, Ink::Done)),
