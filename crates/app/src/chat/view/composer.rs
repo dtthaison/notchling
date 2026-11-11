@@ -746,7 +746,12 @@ fn tile(
 
 fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let session = view.selected_session()?;
-    let h = crate::chat::header::header(session, &view.conversation, &view.root.home);
+    let h = crate::chat::header::header(
+        session,
+        &view.conversation,
+        &view.root.home,
+        view.claude_catalog(),
+    );
     let context = h.context?;
     Some(
         super::header::chip(&format!("Context {context}"), a).part_at(

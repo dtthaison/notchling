@@ -5,6 +5,7 @@
 //! adds one function here that returns its menus, and the picks it understands in
 //! `ChatView::pick`; nothing in the drawing changes. Pure, so every system tests it.
 
+use notchling_engine::catalog::ModelInfo;
 use notchling_engine::tools::agy::ConfigOption;
 
 use super::claude_picker;
@@ -95,22 +96,27 @@ fn claude_rows(rows: Vec<claude_picker::Row>) -> Vec<Row> {
         .map(|r| Row {
             value: r.value.to_owned(),
             title: r.title,
-            detail: String::new(),
+            detail: r.tip,
             selected: r.selected,
         })
         .collect()
 }
 
-/// A Claude Code session: its model and effort, picked as `/model` and `/effort` replies.
-pub fn claude(model: Option<&str>, effort: Option<&str>) -> Vec<Menu> {
+/// A Claude Code session: its model and effort, picked as `/model` and `/effort` replies. The
+/// models and the efforts the model in use offers come from `catalog` (the built-in one while it
+/// is empty).
+pub fn claude(model: Option<&str>, effort: Option<&str>, catalog: &[ModelInfo]) -> Vec<Menu> {
+    let in_use = model.and_then(|id| claude_picker::find(catalog, id));
+    let efforts = claude_picker::efforts(effort, in_use);
+    let no_levels = efforts.is_empty().then(|| claude_picker::NO_EFFORTS.into());
     vec![
         Menu {
             id: MODEL.into(),
             glyph: Glyph::Model,
-            label: claude_picker::model_label(model),
+            label: claude_picker::model_label(model, catalog),
             tip: claude_picker::MODEL_TIP.into(),
-            rows: claude_rows(claude_picker::models(model)),
-            more: claude_rows(claude_picker::older_models(model)),
+            rows: claude_rows(claude_picker::models(model, catalog)),
+            more: claude_rows(claude_picker::older_models(model, catalog)),
             note: None,
             empty: None,
             enabled: true,
@@ -120,10 +126,10 @@ pub fn claude(model: Option<&str>, effort: Option<&str>) -> Vec<Menu> {
             glyph: Glyph::Effort,
             label: claude_picker::effort_label(effort),
             tip: claude_picker::EFFORT_TIP.into(),
-            rows: claude_rows(claude_picker::efforts(effort)),
+            rows: claude_rows(efforts),
             more: Vec::new(),
             note: None,
-            empty: None,
+            empty: no_levels,
             enabled: true,
         },
     ]
@@ -337,7 +343,7 @@ mod tests {
 
     #[test]
     fn every_tool_has_a_model_and_an_effort_picker_with_the_same_parts() {
-        let claude = claude(Some("claude-opus-5-5"), Some("high"));
+        let claude = claude(Some("claude-opus-5-5"), Some("high"), &[]);
         let codex = codex(&CodexPicker::default());
         let agy = antigravity(&[], false, false);
         for menus in [&claude, &codex, &agy] {
@@ -350,6 +356,30 @@ mod tests {
         assert_eq!(claude[0].label, "Opus 5.5");
         assert_eq!(claude[1].label, "High");
         assert!(!claude[0].more.is_empty());
+    }
+
+    #[test]
+    fn claude_menus_follow_the_catalog_and_the_model_in_use() {
+        use notchling_engine::catalog::{Catalog, LiveModel, Tool as CatalogTool};
+        let live = LiveModel {
+            id: "claude-fable-5-3".into(),
+            name: Some("Claude Fable 5.3".into()),
+            ..LiveModel::default()
+        };
+        let catalog = Catalog::built_in().models(CatalogTool::Claude, &[live]);
+        let menus = claude(Some("claude-fable-5-3"), Some("high"), &catalog);
+        // The borrowed price rides in the row's detail line.
+        let fable = menus[0].rows.iter().find(|r| r.title == "Fable 5.3");
+        assert!(fable.is_some_and(|r| r.detail.contains("Fable 5.2")));
+        assert_eq!(menus[0].label, "Fable 5.3");
+        assert_eq!(menus[1].rows.len(), 5);
+        assert!(menus[1].empty.is_none());
+        // Haiku 4.5 has no effort levels: the menu says so.
+        let menus = claude(Some("claude-haiku-4-5"), None, &catalog);
+        assert!(menus[1].rows.is_empty());
+        assert_eq!(menus[1].empty.as_deref(), Some(claude_picker::NO_EFFORTS));
+        // Before the daemon answers (no catalog) the built-in list shows.
+        assert_eq!(claude(None, None, &[])[0].rows.len(), 4);
     }
 
     #[test]

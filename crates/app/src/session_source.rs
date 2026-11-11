@@ -24,12 +24,13 @@
 //! root (`--data-root`, `NOTCHLING_DATA_ROOT`) and every render read files only: [`config_for`]
 //! gives them no configuration, so no socket is touched and nothing is started.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::sessions::Agent;
 use notchling_local_api::{
     ensure_daemon, ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event, Started,
@@ -173,6 +174,8 @@ struct State {
     agents: Option<Vec<Agent>>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
+    /// What `catalog.get` last said, per tool; empty until the daemon has answered.
+    catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     answered: HashSet<String>,
     link: Link,
     generation: u64,
@@ -189,6 +192,14 @@ impl Shared {
         if state.link != link || state.agents != agents {
             state.link = link;
             state.agents = agents;
+            state.generation += 1;
+        }
+    }
+
+    fn set_catalog(&self, tool: CatalogTool, models: Vec<ModelInfo>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.catalog.get(&tool) != Some(&models) {
+            state.catalog.insert(tool, models);
             state.generation += 1;
         }
     }
@@ -263,6 +274,7 @@ impl SessionSource {
                     agents: None,
                     prompts: None,
                     tools: ToolLive::default(),
+                    catalog: HashMap::new(),
                     answered: HashSet::new(),
                     link,
                     generation: 0,
@@ -305,6 +317,13 @@ impl SessionSource {
             link: state.link,
             generation: state.generation,
         }
+    }
+
+    /// The models the daemon listed for `tool` (`catalog.get`), or none until it has answered.
+    /// Never waits on the socket.
+    pub fn catalog(&self, tool: CatalogTool) -> Vec<ModelInfo> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.catalog.get(&tool).cloned().unwrap_or_default()
     }
 
     /// The held prompts and what was answered, without cloning the rest of the view: what Chat
@@ -447,13 +466,51 @@ fn held_change(list: &mut Vec<Value>, event: &Event) {
 /// Applies `sessions.changed` and the prompt events until the connection ends or the source is
 /// dropped.
 fn follow(mut client: Client, shared: &Shared) {
+    // The model list at start; a daemon without `catalog.get` (an older one) leaves Chat on the
+    // built-in list.
+    if read_catalog(&mut client, shared).is_err() {
+        return;
+    }
     while !shared.stopped() {
         match client.next_event(Duration::from_millis(250)) {
-            Ok(Some(event)) => shared.apply(event),
+            Ok(Some(event)) => {
+                let changed = event.event == topics::CATALOG_CHANGED
+                    && event.data.get("tool").and_then(Value::as_str)
+                        == Some(CatalogTool::Claude.name());
+                shared.apply(event);
+                if changed && read_catalog(&mut client, shared).is_err() {
+                    return;
+                }
+            }
             Ok(None) => {}
             Err(_) => return,
         }
     }
+}
+
+/// `catalog.get` for Claude Code, kept for Chat's pickers. An error from the daemon (no such op)
+/// or an answer that isn't a model list changes nothing; only a lost connection is an `Err`.
+fn read_catalog(client: &mut Client, shared: &Shared) -> Result<(), ClientError> {
+    match client.call(
+        ops::CATALOG_GET,
+        serde_json::json!({ "tool": CatalogTool::Claude.name() }),
+    ) {
+        Ok(reply) => {
+            if let Some(models) = parse_catalog(&reply) {
+                shared.set_catalog(CatalogTool::Claude, models);
+            }
+            Ok(())
+        }
+        Err(ClientError::Api(_) | ClientError::Protocol(_)) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// The `models` of a `catalog.get` reply; `None` when there are none to read or the list is empty
+/// (Chat then keeps what it has, or the built-in list).
+pub fn parse_catalog(reply: &Value) -> Option<Vec<ModelInfo>> {
+    let models: Vec<ModelInfo> = serde_json::from_value(reply.get("models")?.clone()).ok()?;
+    (!models.is_empty()).then_some(models)
 }
 
 /// Waits `total`, in short slices so a dropped source ends the thread promptly.

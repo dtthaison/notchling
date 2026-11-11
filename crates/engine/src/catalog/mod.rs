@@ -113,6 +113,9 @@ pub struct ModelInfo {
     /// The price and window are those of the newest known model of its family, since this one is
     /// newer than any the catalog has heard of.
     pub borrowed: bool,
+    /// The known model it borrows from (`claude-fable-5-2` for a live Fable 5.3), when `borrowed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub borrowed_from: Option<String>,
 }
 
 /// A price and what it is for: a Claude id prefix (`match`) or a whole Codex/Antigravity id (`id`).
@@ -422,6 +425,7 @@ impl Catalog {
                 default_effort: l.default_effort.clone(),
                 price: self.price(tool, &l.id),
                 borrowed: false,
+                borrowed_from: None,
             })
             .collect()
     }
@@ -477,6 +481,7 @@ impl Catalog {
                 .cloned()
                 .or_else(|| l.and_then(|l| l.name.clone()))
                 .unwrap_or_else(|| display_name(id));
+            let borrowed = self.price_borrowed(Tool::Claude, id);
             ModelInfo {
                 id: id.clone(),
                 name,
@@ -491,7 +496,11 @@ impl Catalog {
                 },
                 default_effort: l.and_then(|l| l.default_effort.clone()),
                 price: self.price(Tool::Claude, id),
-                borrowed: self.price_borrowed(Tool::Claude, id),
+                borrowed,
+                borrowed_from: borrowed
+                    .then(|| self.borrow_source(&model_key(id).to_lowercase()))
+                    .flatten()
+                    .map(str::to_owned),
             }
         };
         let now = current.iter().map(|id| info(id, Tier::Current));

@@ -73,6 +73,17 @@ fn failing_starter(calls: &Arc<AtomicUsize>) -> Starter {
 }
 
 #[test]
+fn a_catalog_reply_is_read_for_its_models_and_an_empty_or_odd_one_is_ignored() {
+    use notchling_engine::catalog::{Catalog, Tool};
+    let models = Catalog::built_in().models(Tool::Claude, &[]);
+    let reply = serde_json::json!({"tool": "claude", "models": models, "fetchedAt": 1.0});
+    assert_eq!(parse_catalog(&reply), Some(models));
+    assert_eq!(parse_catalog(&serde_json::json!({"models": []})), None);
+    assert_eq!(parse_catalog(&serde_json::json!({"models": "x"})), None);
+    assert_eq!(parse_catalog(&serde_json::json!({})), None);
+}
+
+#[test]
 fn backoff_doubles_and_never_passes_ten_seconds() {
     let b = Backoff::default();
     let secs: Vec<u64> = (0..6).map(|n| b.delay(n).as_secs()).collect();
@@ -272,6 +283,86 @@ mod over_a_socket {
         running.0.publish("sessions", "sessions.changed", &next);
         let view = wait_for(&source, "the change", |v| ids(v) == ["c"]);
         assert!(view.generation > before);
+        stop(running);
+    }
+
+    /// The two ops plus `catalog.get`, over a model list the test sets, on the `tools` topic too.
+    struct CatalogFake {
+        list: Value,
+        models: Arc<Mutex<Value>>,
+    }
+
+    impl Handler for CatalogFake {
+        fn spec(&self, op: &str) -> Option<OpSpec> {
+            matches!(op, "sessions.list" | "catalog.get").then_some(OpSpec::AGENT)
+        }
+
+        fn call(&self, _: &Caller, op: &str, _: &Value) -> Result<Value, ApiError> {
+            Ok(match op {
+                "catalog.get" => serde_json::json!({
+                    "tool": "claude",
+                    "models": self.models.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+                    "fetchedAt": 1.0,
+                }),
+                _ => self.list.clone(),
+            })
+        }
+
+        fn topics(&self) -> &[&str] {
+            &["sessions", "tools"]
+        }
+    }
+
+    #[test]
+    fn it_asks_for_the_claude_catalog_at_start_and_again_on_catalog_changed() {
+        use notchling_engine::catalog::{Catalog, Tool};
+        let built_in = Catalog::built_in().models(Tool::Claude, &[]);
+        let scratch = Scratch::new("ss-catalog");
+        let socket = scratch.path().join(SOCKET_NAME);
+        let models = Arc::new(Mutex::new(
+            serde_json::to_value(&built_in[..2]).expect("models"),
+        ));
+        let server = Server::bind(
+            ServerConfig {
+                socket: socket.clone(),
+                allowlist: Allowlist::empty(),
+                audit: None,
+                version: "test".into(),
+                limits: Limits::default(),
+            },
+            Arc::new(CatalogFake {
+                list: serde_json::to_value(vec![agent("a")]).expect("rows"),
+                models: models.clone(),
+            }),
+        )
+        .expect("bind");
+        let running = server.spawn().expect("serve");
+        let source = SessionSource::start(config(&socket, None));
+        assert!(
+            source.catalog(Tool::Claude).is_empty(),
+            "nothing before it answers"
+        );
+
+        let end = Instant::now() + Duration::from_secs(10);
+        while source.catalog(Tool::Claude).len() != 2 {
+            assert!(Instant::now() < end, "waited for the first catalog");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(source.catalog(Tool::Claude), built_in[..2]);
+
+        *models.lock().unwrap_or_else(|e| e.into_inner()) =
+            serde_json::to_value(&built_in[..3]).expect("models");
+        running.0.publish(
+            "tools",
+            "catalog.changed",
+            &serde_json::json!({"tool": "claude"}),
+        );
+        while source.catalog(Tool::Claude).len() != 3 {
+            assert!(Instant::now() < end, "waited for the changed catalog");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // A tool Chat doesn't read has nothing.
+        assert!(source.catalog(Tool::Codex).is_empty());
         stop(running);
     }
 

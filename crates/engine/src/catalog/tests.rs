@@ -278,6 +278,11 @@ fn a_newer_family_model_from_the_live_list_becomes_current_and_borrows() {
     );
     let f = m.iter().find(|x| x.id == "claude-fable-5-3").unwrap();
     assert!(f.borrowed);
+    assert_eq!(f.borrowed_from.as_deref(), Some("claude-fable-5-2"));
+    assert!(m
+        .iter()
+        .filter(|x| x.id != "claude-fable-5-3")
+        .all(|x| x.borrowed_from.is_none()));
     assert_eq!(f.price.as_ref().unwrap().input, 8.0);
     assert_eq!(f.name, "Claude Fable 5.3");
     assert_eq!(

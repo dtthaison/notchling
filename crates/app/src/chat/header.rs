@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use notchling_engine::catalog::ModelInfo;
 use notchling_engine::transcript::model::Conversation;
 use notchling_kit::Status;
 
@@ -28,7 +29,12 @@ pub struct Header {
 }
 
 /// The header for a session and its conversation.
-pub fn header(session: &Session, conversation: &Conversation, home: &Path) -> Header {
+pub fn header(
+    session: &Session,
+    conversation: &Conversation,
+    home: &Path,
+    catalog: &[ModelInfo],
+) -> Header {
     let agent = &session.agent;
     let tool = session.tool.name();
     let host = if agent.host.is_empty() {
@@ -44,6 +50,7 @@ pub fn header(session: &Session, conversation: &Conversation, home: &Path) -> He
         context: context_text(
             conversation.facts.context_tokens,
             conversation.facts.model.as_deref(),
+            catalog,
         ),
         model: conversation.facts.model.as_deref().map(model_name),
         host,
@@ -99,7 +106,7 @@ mod tests {
             }],
             ..Conversation::default()
         };
-        let h = header(&session(), &c, Path::new("/Users/me"));
+        let h = header(&session(), &c, Path::new("/Users/me"), &[]);
         assert_eq!(h.title, "fix the bug");
         assert_eq!(h.folder, "~/work/notchling");
         assert_eq!(h.status, Status::Working);
@@ -112,7 +119,7 @@ mod tests {
 
     #[test]
     fn empty_conversation_has_no_context() {
-        let h = header(&session(), &Conversation::default(), Path::new("/x"));
+        let h = header(&session(), &Conversation::default(), Path::new("/x"), &[]);
         assert_eq!(h.context, None);
         assert_eq!(h.model, None);
         assert_eq!(h.folder, "/Users/me/work/notchling");

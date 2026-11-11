@@ -15,6 +15,7 @@ use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscrip
 struct SavedDrafts(HashMap<String, String>);
 
 impl Global for SavedDrafts {}
+use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use serde_json::Value;
@@ -589,6 +590,14 @@ impl ChatView {
         if let Some(tool) = self.selected_session().map(|s| s.tool) {
             super::tool::of(tool).pick(self, menu, value, cx);
         }
+    }
+
+    /// Claude Code's models from the daemon; empty until it has answered, which the pickers and the
+    /// meter read as the built-in list.
+    pub(super) fn claude_catalog(&self) -> &[ModelInfo] {
+        self.catalog
+            .get(&CatalogTool::Claude)
+            .map_or(&[], Vec::as_slice)
     }
 
     /// The model the selected row shows: the pick not yet in the transcript, else the transcript's.

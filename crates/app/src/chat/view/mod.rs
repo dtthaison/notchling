@@ -32,7 +32,7 @@ mod terminal;
 mod tool;
 mod tools;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -40,6 +40,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use gpui::{
     div, prelude::*, px, Context, Entity, ExternalPaths, Render, ScrollHandle, Subscription, Window,
 };
+use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 use notchling_kit::labels::Corner;
@@ -134,6 +135,10 @@ pub struct ChatView {
     seen_generation: u64,
     /// What the sidebar footer says about the daemon ("Daemon not running", "Daemon not trusted").
     daemon_note: Option<&'static str>,
+    /// The models each tool offers, as the daemon's `catalog.get` last said; a tool with no entry
+    /// (no daemon, or it hasn't answered) shows the built-in list. The Model Picker, Effort Picker
+    /// and Context Meter read it.
+    catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
     /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
@@ -418,6 +423,7 @@ impl ChatView {
             gate: ReloadGate::default(),
             seen_generation: source.generation(),
             daemon_note: source.view().note(),
+            catalog: HashMap::from([(CatalogTool::Claude, source.catalog(CatalogTool::Claude))]),
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
@@ -713,6 +719,10 @@ impl ChatView {
                 self.daemon_note = note;
             }
             self.sync_tools(cx);
+            self.catalog.insert(
+                CatalogTool::Claude,
+                self.source.catalog(CatalogTool::Claude),
+            );
             cx.notify();
         }
         let dot = self.bridge_on();

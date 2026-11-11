@@ -86,7 +86,11 @@ impl ChatTool for Claude {
     }
 
     fn menus(&self, view: &ChatView, _session: &Session) -> Vec<Menu> {
-        pickers::claude(view.claude_model(), view.claude_effort())
+        pickers::claude(
+            view.claude_model(),
+            view.claude_effort(),
+            view.claude_catalog(),
+        )
     }
 
     fn pick(&self, view: &mut ChatView, menu: &str, value: &str, cx: &mut Context<ChatView>) {

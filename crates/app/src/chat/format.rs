@@ -2,6 +2,10 @@
 
 use std::path::Path;
 
+use notchling_engine::catalog::ModelInfo;
+
+use super::claude_picker;
+
 /// "now", "5m", "2h", "3d"; empty for an unknown time (0, the Swift app's `distantPast`).
 pub fn age(now_ms: i64, since_ms: i64) -> String {
     if since_ms <= 0 {
@@ -73,21 +77,24 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
-/// The model's context window in Claude Code, where it's known (Opus 5.5's /context says 400k).
-/// Others give `None`, and the header shows the count alone rather than guess a percentage.
-pub fn context_window(model: Option<&str>) -> Option<u64> {
-    model
-        .filter(|m| m.starts_with("claude-opus-5-5"))
-        .map(|_| 400_000)
+/// The model's context window in Claude Code, where the catalog knows it (Opus 5.5's /context
+/// says 400k). Others give `None`, and the header shows the count alone rather than guess a
+/// percentage. An empty `catalog` (the daemon hasn't answered) is the built-in one.
+pub fn context_window(model: Option<&str>, catalog: &[ModelInfo]) -> Option<u64> {
+    claude_picker::find(catalog, model?)?.context_window
 }
 
 /// The header's context text: "148.8k / 400k · 37%" when the window is known, else "148.8k".
 /// `None` when nothing has been counted yet.
-pub fn context_text(context_tokens: u64, model: Option<&str>) -> Option<String> {
+pub fn context_text(
+    context_tokens: u64,
+    model: Option<&str>,
+    catalog: &[ModelInfo],
+) -> Option<String> {
     if context_tokens == 0 {
         return None;
     }
-    Some(match context_window(model) {
+    Some(match context_window(model, catalog) {
         Some(window) => format!(
             "{} / {} · {}%",
             tokens(context_tokens),
@@ -157,20 +164,39 @@ mod tests {
         assert_eq!(tokens(1_200_000), "1.2M");
     }
 
+    fn catalog() -> Vec<ModelInfo> {
+        use notchling_engine::catalog::{Catalog, Tool};
+        Catalog::built_in().models(Tool::Claude, &[])
+    }
+
     #[test]
     fn context_only_for_known_windows() {
-        assert_eq!(context_window(Some("claude-opus-5-5")), Some(400_000));
-        assert_eq!(context_window(Some("claude-sonnet-5-5")), None);
-        assert_eq!(context_window(None), None);
+        let c = catalog();
+        assert_eq!(context_window(Some("claude-opus-5-5"), &c), Some(400_000));
+        assert_eq!(context_window(Some("claude-sonnet-5-5"), &c), None);
+        assert_eq!(context_window(None, &c), None);
         assert_eq!(
-            context_text(148_800, Some("claude-opus-5-5")).as_deref(),
+            context_text(148_800, Some("claude-opus-5-5"), &c).as_deref(),
             Some("148.8k / 400k · 37%")
         );
         assert_eq!(
-            context_text(148_800, Some("claude-sonnet-5-5")).as_deref(),
+            context_text(148_800, Some("claude-sonnet-5-5"), &c).as_deref(),
             Some("148.8k")
         );
-        assert_eq!(context_text(0, Some("claude-opus-5-5")), None);
+        assert_eq!(context_text(0, Some("claude-opus-5-5"), &c), None);
+    }
+
+    #[test]
+    fn the_window_sees_through_a_suffix_and_falls_back_to_the_built_in_catalog() {
+        // The daemon hasn't answered: the built-in list stands in.
+        assert_eq!(
+            context_window(Some("claude-opus-5-5[1m]"), &[]),
+            Some(400_000)
+        );
+        assert_eq!(
+            context_window(Some("claude-opus-5-5-20261001"), &catalog()),
+            Some(400_000)
+        );
     }
 
     #[test]

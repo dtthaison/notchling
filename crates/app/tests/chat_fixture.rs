@@ -157,7 +157,7 @@ fn header_and_inspector_read_the_facts() {
         .find(|s| s.agent.name == "fix the bug")
         .expect("fix the bug");
     let c = root.conversation(fix);
-    let h = header(fix, &c, &root.home);
+    let h = header(fix, &c, &root.home, &[]);
     assert_eq!(h.title, "fix the bug");
     assert_eq!(h.status, Status::Needs);
     assert_eq!(h.status_word, "Needs input");
@@ -193,7 +193,7 @@ fn a_codex_row_reads_its_rollout() {
     assert!(rows
         .iter()
         .any(|r| matches!(r, Row::Tools(t) if t.iter().any(|t| t.is_error))));
-    let h = header(codex, &c, &root.home);
+    let h = header(codex, &c, &root.home, &[]);
     assert_eq!(h.host, "Codex · Codex");
     assert_eq!(h.model.as_deref(), Some("Gpt 6"));
     assert_eq!(h.context.as_deref(), Some("1.9k"));

@@ -123,7 +123,12 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             .child(phone_button(view, a, cx))
             .part_at("Header", Corner::Bottom, a, cx);
     };
-    let h = header(session, &view.conversation, &view.root.home);
+    let h = header(
+        session,
+        &view.conversation,
+        &view.root.home,
+        view.claude_catalog(),
+    );
     bar.child(
         label(&h.title, TypeRole::Heading, Ink::Text, a)
             .flex_1()

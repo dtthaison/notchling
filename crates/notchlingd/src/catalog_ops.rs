@@ -15,6 +15,7 @@
 //!              "borrowed": false}]}
 //! ```
 //!
+//! - A `borrowed` model also has `borrowedFrom`, the known model whose price and window it uses.
 //! - An unknown or missing `tool` is `bad_request`.
 //! - Where each list comes from (the spec's table): Claude's is Anthropic's `GET /v1/models`, read
 //!   with the main login's token and cached for a day, else the data file's; Codex's is the
