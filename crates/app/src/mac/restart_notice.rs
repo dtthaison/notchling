@@ -1,8 +1,10 @@
-//! The window for the restart notice: while the daemon has switches off that this app saw on (or
-//! the person chose on), a small card near the top of the screen says so with Turn Back On. It
+//! After a daemon restart, turns back on the switches this app saw on (or the person chose on).
+//! Only one that failed to come back gets the window: a small card near the top of the screen that
+//! says so with Turn Back On. It
 //! never takes the focus or brings the app forward: nothing waits on it, and a key pressed in
 //! another app must not land in it. Closing it is Not Now.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,20 +13,41 @@ use gpui::{
     WindowKind, WindowOptions,
 };
 
-use crate::switches::restart::{RestartNotice, TurnOn};
+use crate::switches::restart::{restore, Area, RestartNotice, TurnOn};
 use crate::switches::restart_view::{window_size, RestartNoticeView};
 
 /// How often the notice is looked at.
 const TICK: Duration = Duration::from_secs(1);
 
-/// Starts the loop that opens the notice window when something is offered and closes it when
-/// nothing is.
+/// Starts the loop that turns offered switches back on, once each, and opens the notice window for
+/// the ones that stayed off, closing it when nothing is offered.
 pub fn watch(cx: &mut App, notice: Arc<RestartNotice>, turn_on: Arc<dyn TurnOn>) {
     cx.spawn(async move |cx| {
         let mut window: Option<WindowHandle<RestartNoticeView>> = None;
+        // Tried by itself since last seen on: a failure is asked about, never retried in a loop.
+        let mut tried: BTreeSet<Area> = BTreeSet::new();
         loop {
             cx.background_executor().timer(TICK).await;
-            let offered = !notice.state().offer().is_empty();
+            let offer = notice.state().offer();
+            tried.retain(|a| offer.contains(a));
+            let fresh: Vec<Area> = offer
+                .iter()
+                .filter(|a| !tried.contains(a))
+                .copied()
+                .collect();
+            if !fresh.is_empty() {
+                tried.extend(fresh.iter().copied());
+                let (n, t) = (notice.clone(), turn_on.clone());
+                let failed = cx
+                    .background_executor()
+                    .spawn(async move { restore(&fresh, t.as_ref(), &n) })
+                    .await;
+                if !failed.is_empty() {
+                    eprintln!("restart: not turned back on: {}", failed.join("; "));
+                }
+                continue;
+            }
+            let offered = !offer.is_empty();
             let (n, t) = (notice.clone(), turn_on.clone());
             let gone = window.take();
             match cx.update(move |cx| sync(cx, gone, offered, n, t)) {

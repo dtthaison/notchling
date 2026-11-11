@@ -1,13 +1,15 @@
-//! What the app offers after the daemon restarted with switches the user had on.
+//! What the app does after the daemon restarted with switches the user had on.
 //!
 //! Every switch (`acting`, the phone bridge, `accounts`, `vault`, `install`) is off at every daemon
-//! start, and the app never turns one back on by itself: a file any agent can write must not be
-//! able to hand out the vault or the logins. Instead, when a switch this app saw on (or the
-//! remembered choice in the app's `settings.json` says on) reads off, [`Restart`] offers it: one
-//! notice, "Notchling restarted: Sessions, Vault are off", with Turn Back On, which opens one
-//! confirmation naming each switch. Only that confirmation sends anything ([`turn_back_on`]).
+//! start. When a switch this app saw on (or the remembered choice in the app's `settings.json`
+//! says on) reads off, the app turns it back on by itself ([`restore`]), as the Swift app kept
+//! its own on: the maintainer's choice of 2026-11-11, once the Swift app retired. The daemon
+//! still starts with each one off, so only this app (the app tier) can turn one on. A switch
+//! that fails to come back is offered in a notice, "Notchling restarted: Vault is off", with Turn
+//! Back On, which opens one confirmation naming each switch ([`turn_back_on`]).
 //!
-//! The remembered choice only decides whether the notice is offered; it never acts.
+//! A switch the user turned off here stays off: [`Restart::chose`] quiets it, and the remembered
+//! choice says off.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -259,6 +261,21 @@ impl TurnOn for LiveTurnOn {
     }
 }
 
+/// Turns `areas` back on by itself after a restart, each through its own op, and tells `notice`
+/// of each one that came back, so only the ones that failed stay offered. The failures.
+pub fn restore(areas: &[Area], with: &dyn TurnOn, notice: &RestartNotice) -> Vec<String> {
+    areas
+        .iter()
+        .filter_map(|a| match with.turn_on(*a) {
+            Ok(()) => {
+                notice.chose(*a, true);
+                None
+            }
+            Err(e) => Some(format!("{}: {e}", a.title())),
+        })
+        .collect()
+}
+
 /// The user confirmed: turns on exactly `areas`, each through its own op. The failures, each
 /// with its area's word.
 pub fn turn_back_on(areas: &[Area], with: &dyn TurnOn) -> Vec<String> {
@@ -309,6 +326,23 @@ mod tests {
         let failed = turn_back_on(&confirm.areas, &recorder);
         assert_eq!(*recorder.0.lock().unwrap(), Area::ALL.to_vec());
         assert_eq!(failed, ["Install: app tier only"]);
+    }
+
+    #[test]
+    fn a_restart_turns_back_on_what_was_on_and_offers_only_what_failed() {
+        let notice = RestartNotice::default();
+        for area in Area::ALL {
+            notice.observe(area, Said::Off, true);
+        }
+        let recorder = Recorder(Mutex::new(Vec::new()));
+        let failed = restore(&notice.state().offer(), &recorder, &notice);
+        assert_eq!(*recorder.0.lock().unwrap(), Area::ALL.to_vec());
+        assert_eq!(failed, ["Install: app tier only"]);
+        assert_eq!(notice.state().offer(), [Area::Install]);
+        // Turned off here: a later restart leaves it off.
+        notice.chose(Area::Vault, false);
+        notice.observe(Area::Vault, Said::Off, false);
+        assert!(!notice.state().offer().contains(&Area::Vault));
     }
 
     #[test]

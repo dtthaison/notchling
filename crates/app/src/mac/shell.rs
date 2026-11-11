@@ -99,10 +99,18 @@ const BRIDGE_POLL: Duration = Duration::from_secs(5);
 /// Runs the app until Quit; the exit code. `data_root` (else `NOTCHLING_DATA_ROOT`) is a fixture
 /// root instead of the real folders; Chat and the notch read the same one.
 pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
+    let data_root_is_real =
+        data_root.is_none() && std::env::var_os("NOTCHLING_DATA_ROOT").is_none();
     let root = DataRoot::for_run(data_root.as_deref());
     let notch = root.as_ref().map(DataRoot::notch_source);
     // The kit's icons are SVG assets.
     let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
+    // Opening the app again (Finder, Spotlight, the Dock) while it runs shows Chat, as the Swift
+    // app did.
+    app.on_reopen(|cx| {
+        open_chat(cx);
+        cx.activate(true);
+    });
     app.run(move |cx: &mut App| {
         // The tools' app icons, for every window that draws a tool (Chat, Search).
         crate::mac::app_icons::install();
@@ -226,7 +234,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         }
         // Once, the first time: who owns what, and the Swift app's settings.
         welcome_window::open_first_run_once(cx);
-        if open_chat_now {
+        // Chat is the app's window: it opens at every launch, as the Swift app's did. A fixture
+        // run opens it only when asked, so a dev run stays out of the way.
+        if open_chat_now || data_root_is_real {
             open_chat(cx);
             cx.activate(true);
         }

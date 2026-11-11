@@ -195,11 +195,16 @@ impl Render for RestartNoticeView {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(icon(Icon::Permission, TypeRole::Title.spec().size, Ink::Needs, a))
+                            .child(icon(
+                                Icon::Permission,
+                                TypeRole::Title.spec().size,
+                                Ink::Needs,
+                                a,
+                            ))
                             .child(label(&banner, TypeRole::Heading, Ink::Text, a)),
                     )
                     .child(label(
-                        "The daemon starts with every switch off, and this app never turns one back on by itself.",
+                        "Notchling tried to turn these back on after it restarted, and couldn't.",
                         TypeRole::Meta,
                         Ink::TextMuted,
                         a,
