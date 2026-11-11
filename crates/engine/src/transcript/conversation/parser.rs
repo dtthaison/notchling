@@ -1,6 +1,7 @@
 //! The Chat conversation, built one transcript line at a time so a cursor can keep the state between
 //! reads.
 
+use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::model::*;
@@ -34,7 +35,7 @@ pub struct Parser {
     thinking_at: Option<usize>,
     thinking_seconds: BTreeMap<String, f64>,
     /// Claude Code's input queue (its queue-operation lines), task notifications included, oldest first.
-    queue: Vec<String>,
+    queue: Queue,
     /// Reading a subagent's transcript: its lines are all marked sidechain.
     pub include_sidechain: bool,
 }
@@ -124,7 +125,7 @@ impl Parser {
             "system" => self.system(&obj, date),
             "assistant" => self.assistant(&obj, date),
             "user" => self.user(&obj, date),
-            "queue-operation" => self.queue_operation(&obj),
+            "queue-operation" => self.queue.operation(&obj),
             "attachment" => self.attachment(&obj, date),
             _ => {}
         }
@@ -343,6 +344,9 @@ impl Parser {
     }
 
     fn user(&mut self, obj: &Value, date: Option<Timestamp>) {
+        if let Some(message) = obj.get("message") {
+            self.queue.user_line(message);
+        }
         if obj.get("isMeta").and_then(Value::as_bool) == Some(true) {
             return;
         }
@@ -462,25 +466,6 @@ impl Parser {
         apply_task_result(&name, result, &mut self.c);
     }
 
-    fn queue_operation(&mut self, obj: &Value) {
-        let content = str_of(obj, "content").unwrap_or("").to_string();
-        match str_of(obj, "operation") {
-            Some("enqueue") => self.queue.push(content),
-            Some("dequeue") => {
-                if !self.queue.is_empty() {
-                    self.queue.remove(0);
-                }
-            }
-            // popAll: Up in the input box took the queued messages back to edit (one line each).
-            Some("remove" | "popAll") => {
-                if let Some(i) = self.queue.iter().position(|q| *q == content) {
-                    self.queue.remove(i);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn attachment(&mut self, obj: &Value, date: Option<Timestamp>) {
         // A message sent while it worked is taken in mid-turn as an attachment, with no user line.
         let Some(a) = obj.get("attachment") else {
@@ -538,6 +523,7 @@ impl Parser {
             .fold(0u64, |sum, n| sum.saturating_add(*n));
         c.queued = self
             .queue
+            .items()
             .iter()
             .filter_map(|q| match user_item(q, 0) {
                 Some(ItemKind::User { text, .. }) => Some(text),

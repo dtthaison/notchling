@@ -2,6 +2,7 @@
 //! queued messages, finished subagents and background shells of a session transcript.
 
 mod parser;
+mod queue;
 mod tools;
 mod user;
 

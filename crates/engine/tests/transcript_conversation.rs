@@ -257,6 +257,43 @@ fn dequeued_leaves_the_queue() {
     assert_eq!(c.items.last().map(|i| i.kind.clone()), Some(user("fifth")));
 }
 
+/// Claude Code 2.1.322 (2026-11-11): a dequeue took the newest entry, a subagent's notification,
+/// before two older shell ones, which it then removed. Read as "the oldest went", one stale entry
+/// stayed, every later dequeue took the wrong one, and the next prompt you sent stayed "Queued"
+/// after it was answered.
+#[test]
+fn a_dequeue_is_the_entry_the_next_user_line_names() {
+    let c = read_lines_as_file(&[
+        USER,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-11T16:15:12.489Z","content":"<task-notification>\n<task-id>bx58scrt5</task-id>\n</task-notification>"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-11T16:15:15.163Z","content":"<task-notification>\n<task-id>bphsofi5u</task-id>\n</task-notification>"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-11T16:15:17.136Z","content":"<task-notification>\n<task-id>ac4a89276a567d6e4</task-id>\n</task-notification>"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-11T16:15:17.138Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>ac4a89276a567d6e4</task-id>\n</task-notification>"},"timestamp":"2026-11-11T16:15:17.142Z"}"#,
+        r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-11-11T16:15:17.151Z","content":"<task-notification>\n<task-id>bx58scrt5</task-id>\n</task-notification>"}"#,
+        r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-11-11T16:15:17.151Z","content":"<task-notification>\n<task-id>bphsofi5u</task-id>\n</task-notification>"}"#,
+        // Later: your prompt is queued, dequeued, the turn before it ends, then its user line.
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-11T17:02:07.716Z","content":"do we have any way to make the movie correctly"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-11T17:02:08.847Z"}"#,
+        r#"{"type":"system","subtype":"turn_duration","durationMs":2531659,"timestamp":"2026-11-11T17:02:08.836Z"}"#,
+        r#"{"type":"user","message":{"role":"user","content":"do we have any way to make the movie correctly"},"timestamp":"2026-11-11T17:02:08.900Z"}"#,
+    ]);
+    assert_eq!(c.queued, Vec::<String>::new());
+}
+
+#[test]
+fn a_dequeue_with_no_user_line_naming_another_takes_the_oldest() {
+    let c = read_lines_as_file(&[
+        USER,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-04T04:27:12.000Z","content":"first"}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-04T04:27:13.000Z","content":"second"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-04T04:27:32.000Z"}"#,
+        // A tool result names no prompt.
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"timestamp":"2026-11-04T04:27:33.000Z"}"#,
+    ]);
+    assert_eq!(c.queued, ["second"]);
+}
+
 #[test]
 fn message_starting_with_a_paste_shows() {
     let c = read_lines_as_file(&[
