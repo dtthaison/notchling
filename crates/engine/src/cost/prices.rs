@@ -2,6 +2,9 @@
 
 use serde_json::Value;
 
+// The catalog owns it now; cost and the sources still ask here.
+pub use crate::catalog::model_key;
+
 /// Dollars per million tokens: input, output, cache read. Cache writes are 1.25x input for five
 /// minutes and 2x for an hour. Checked in order, so longer ids come first.
 const PRICES: &[(&str, f64, f64, f64)] = &[
@@ -76,25 +79,6 @@ pub fn cost(model: &str, usage: &Value) -> f64 {
         dollars *= 2.0;
     }
     dollars / 1_000_000.0
-}
-
-/// "claude-opus-5-5[1m]" and "claude-haiku-4-5-20251001" are "claude-opus-5-5" and
-/// "claude-haiku-4-5".
-pub fn model_key(model: &str) -> String {
-    let mut id = model;
-    if let Some(i) = id.find('[') {
-        id = &id[..i];
-    }
-    if let Some(i) = id.len().checked_sub(9) {
-        let (head, tail) = id.split_at_checked(i).unwrap_or((id, ""));
-        let dated = tail.len() == 9
-            && tail.starts_with('-')
-            && tail[1..].bytes().all(|b| b.is_ascii_digit());
-        if dated {
-            return head.to_string();
-        }
-    }
-    id.to_string()
 }
 
 /// "claude-opus-5-5" is "Opus 5.5". Other tools' models ("gpt-6.1-sol", "Gemini 4 Argon") are

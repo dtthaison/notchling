@@ -8,6 +8,7 @@
 
 pub mod accounts;
 pub mod bridge;
+pub mod catalog;
 pub mod control;
 pub mod cost;
 pub mod delegate;
