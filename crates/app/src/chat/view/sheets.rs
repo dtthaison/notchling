@@ -24,7 +24,7 @@ use crate::mac::shell::{AppActions, AppVault};
 use crate::sheets::new_session::{accounts, draft_session, folders, NewSession};
 use crate::sheets::second_opinion_view::SecondOpinionView;
 use crate::sheets::settings_view::SettingsView;
-use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft};
+use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft, StartedJob};
 use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
 use crate::vault::view::VaultSheetView;
@@ -143,6 +143,10 @@ impl ChatView {
         let entity = cx.new(|_| NewSessionView::new(model, acts, handle));
         cx.subscribe(&entity, |this, _, e: &StartDraft, cx| {
             this.open_draft(&e.provider, &e.folder, cx)
+        })
+        .detach();
+        cx.subscribe(&entity, |this, _, e: &StartedJob, cx| {
+            this.show_started_job(&e.job, cx)
         })
         .detach();
         self.show(entity, cx);

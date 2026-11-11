@@ -139,6 +139,47 @@ pub fn row_for(sessions: &[Session], target: &SessionRef) -> Option<String> {
     found.map(|s| s.agent.id.clone())
 }
 
+/// The sidebar row of the background job New Session just started (`session.new`'s `jobId`, the
+/// short id `claude --bg` printed), once the list has it.
+pub fn row_for_job(sessions: &[Session], job: &str) -> Option<String> {
+    sessions
+        .iter()
+        .filter(|s| s.tool == Tool::Claude)
+        .find(|s| {
+            matches!(&s.agent.target, notchling_engine::sessions::AgentTarget::Job(j) if j == job)
+        })
+        .map(|s| s.agent.id.clone())
+}
+
+/// A job New Session started, waited for until the sidebar lists it. A new job takes a few loads
+/// to show (its host writes its state after it starts), so it waits longer than a search hit,
+/// then gives up: a row found much later must not take the selection from whatever is open.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingJob {
+    pub job: String,
+    expires_ms: i64,
+}
+
+impl PendingJob {
+    pub const WAIT_MS: i64 = 30_000;
+
+    pub fn new(job: &str, now_ms: i64) -> PendingJob {
+        PendingJob {
+            job: job.to_owned(),
+            expires_ms: now_ms.saturating_add(Self::WAIT_MS),
+        }
+    }
+
+    /// A load finished, listing `sessions`.
+    pub fn after_load(&self, sessions: &[Session], now_ms: i64) -> Pending {
+        match row_for_job(sessions, &self.job) {
+            Some(id) => Pending::Found(id),
+            None if now_ms >= self.expires_ms => Pending::GaveUp,
+            None => Pending::Waiting,
+        }
+    }
+}
+
 /// A conversation the search panel asked Chat to show that the sidebar doesn't list yet. It waits
 /// for the loads that follow, and gives up after a couple of them or a few seconds: a session
 /// that never turns up (it was deleted, or is older than the sidebar reaches) must not be
@@ -451,6 +492,30 @@ pub(crate) mod tests {
             tool,
             session_id: id.into(),
         }
+    }
+
+    /// New Session closed and left the old session open: the started job was never selected.
+    #[test]
+    fn a_started_job_is_selected_once_the_sidebar_lists_it() {
+        let pending = PendingJob::new("6ce4c19c", 1_000);
+        let other = session("6220cc2b", AgentGroup::Completed, None, Tool::Claude);
+        assert_eq!(
+            pending.after_load(std::slice::from_ref(&other), 2_000),
+            Pending::Waiting
+        );
+        let mut started = session("6ce4c19c", AgentGroup::Completed, None, Tool::Claude);
+        started.agent.id = "be50d36a-4348-4ba6-ab58-96959399a893".into();
+        assert_eq!(
+            pending.after_load(&[other.clone(), started], 3_000),
+            Pending::Found("be50d36a-4348-4ba6-ab58-96959399a893".into())
+        );
+        // A Codex row with the same text is not it, and a job that never shows is let go.
+        let codex = session("6ce4c19c", AgentGroup::Completed, None, Tool::Codex);
+        assert_eq!(pending.after_load(&[codex], 2_000), Pending::Waiting);
+        assert_eq!(
+            pending.after_load(&[other], 1_000 + PendingJob::WAIT_MS),
+            Pending::GaveUp
+        );
     }
 
     #[test]

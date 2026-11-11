@@ -55,7 +55,7 @@ use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
 use crate::chat::follow::{self, Scroll};
 use crate::chat::message_meta;
 use crate::chat::reload::{watch_config, ReloadGate};
-use crate::chat::sidebar::{row_for, Pending, PendingSession};
+use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
 use crate::phone::bridge::Bridge;
 use crate::phone::view::PhonePanelView;
 use crate::search::wire::SessionRef;
@@ -187,6 +187,8 @@ pub struct ChatView {
     phone_dot: bool,
     /// A session the search panel asked for that isn't listed yet: selected when it appears.
     pending_session: Option<PendingSession>,
+    /// The job New Session just started: selected when the sidebar lists it.
+    pending_job: Option<PendingJob>,
     /// Codex and Antigravity rows closed in Chat (`chat::closed`), kept in the settings file.
     closed: std::collections::HashMap<String, f64>,
     /// What the Tasks bar saw of each session's list (`chat::tasks_bar`), by row id.
@@ -458,6 +460,7 @@ impl ChatView {
             phone: None,
             phone_dot: false,
             pending_session: None,
+            pending_job: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),
             tasks_seen: std::collections::HashMap::new(),
@@ -481,6 +484,22 @@ impl ChatView {
         self.sessions
             .iter()
             .find(|s| Some(&s.agent.id) == self.selected.as_ref())
+    }
+
+    /// Opens the job New Session started: now when the sidebar lists it, else at the load that
+    /// does (`chat::sidebar::row_for_job`).
+    pub(super) fn show_started_job(&mut self, job: &str, cx: &mut Context<Self>) {
+        match crate::chat::sidebar::row_for_job(&self.sessions, job) {
+            Some(id) => {
+                self.pending_job = None;
+                self.select(&id, cx);
+            }
+            None => {
+                self.pending_job = Some(PendingJob::new(job, now_ms()));
+                self.gate.changed();
+                cx.notify();
+            }
+        }
     }
 
     /// Shows a conversation the search panel found: selects its row when it is listed, else
@@ -560,6 +579,18 @@ impl ChatView {
                 }
                 Pending::Waiting => {}
                 Pending::GaveUp => self.pending_session = None,
+            }
+        }
+        if let Some(pending) = self.pending_job.clone() {
+            match pending.after_load(&all, now_ms()) {
+                Pending::Found(id) => {
+                    self.pending_job = None;
+                    self.sessions = self.open_rows(all);
+                    self.select(&id, cx);
+                    return;
+                }
+                Pending::Waiting => {}
+                Pending::GaveUp => self.pending_job = None,
             }
         }
         self.sessions = self.open_rows(all);

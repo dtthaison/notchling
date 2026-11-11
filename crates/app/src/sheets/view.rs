@@ -40,6 +40,11 @@ pub struct StartDraft {
     pub folder: String,
 }
 
+/// New Session started a Claude Code job (`session.new`'s `jobId`): Chat opens it once listed.
+pub struct StartedJob {
+    pub job: String,
+}
+
 /// The accounts store New Session makes lanes and switches logins through.
 #[derive(Clone)]
 pub struct AccountsHandle {
@@ -162,6 +167,7 @@ pub struct NewSessionView {
 
 impl EventEmitter<Dismiss> for NewSessionView {}
 impl EventEmitter<StartDraft> for NewSessionView {}
+impl EventEmitter<StartedJob> for NewSessionView {}
 
 impl NewSessionView {
     pub fn new(model: NewSession, acts: Acts, accounts: Option<AccountsHandle>) -> NewSessionView {
@@ -183,9 +189,19 @@ impl NewSessionView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { actions.send(&request).map(|_| ()) })
+                .spawn(async move { actions.send(&request) })
                 .await;
+            let job = result
+                .as_ref()
+                .ok()
+                .and_then(|v| v.get("jobId"))
+                .and_then(|j| j.as_str())
+                .map(str::to_owned);
+            let result = result.map(|_| ());
             this.update(cx, |view, cx| {
+                if let Some(job) = job {
+                    cx.emit(StartedJob { job });
+                }
                 if let Some(next) = done(&mut view.model, result) {
                     view.send(
                         next,
