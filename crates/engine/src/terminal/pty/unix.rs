@@ -11,6 +11,7 @@ use super::{PtyCommand, PtyError, ReadOutcome, Signal, StartStep};
 use std::ffi::{CStr, CString};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -18,7 +19,8 @@ use std::time::{Duration, Instant};
 /// types. Dropping it ends the child (SIGTERM, SIGKILL after two seconds) and closes the pty.
 #[derive(Debug)]
 pub struct Pty {
-    master: libc::c_int,
+    /// -1 once hung up ([`Pty::hang_up`]); reads and writes after that fail with EBADF.
+    master: AtomicI32,
     pid: libc::pid_t,
     /// The exit status once reaped, so the pid is never signalled after it may have been reused.
     status: Mutex<Option<i32>>,
@@ -353,7 +355,7 @@ impl Pty {
             });
         }
         Ok(Pty {
-            master: master.into_raw(),
+            master: AtomicI32::new(master.into_raw()),
             pid,
             status: Mutex::new(None),
         })
@@ -367,7 +369,7 @@ impl Pty {
     fn try_read(&self, buf: &mut [u8]) -> Result<Option<ReadOutcome>, PtyError> {
         loop {
             // SAFETY: buf is valid for buf.len() bytes and master stays open while self lives.
-            let n = unsafe { libc::read(self.master, buf.as_mut_ptr().cast(), buf.len()) };
+            let n = unsafe { libc::read(self.fd(), buf.as_mut_ptr().cast(), buf.len()) };
             if n > 0 {
                 return Ok(Some(ReadOutcome::Data(n as usize)));
             }
@@ -391,7 +393,7 @@ impl Pty {
     fn wait_ready(&self, events: libc::c_short, ms: libc::c_int) -> Result<bool, PtyError> {
         loop {
             let mut pfd = libc::pollfd {
-                fd: self.master,
+                fd: self.fd(),
                 events,
                 revents: 0,
             };
@@ -454,7 +456,7 @@ impl Pty {
         while offset < bytes.len() {
             let rest = &bytes[offset..];
             // SAFETY: rest is valid for rest.len() bytes.
-            let n = unsafe { libc::write(self.master, rest.as_ptr().cast(), rest.len()) };
+            let n = unsafe { libc::write(self.fd(), rest.as_ptr().cast(), rest.len()) };
             if n > 0 {
                 offset += n as usize;
                 continue;
@@ -490,7 +492,7 @@ impl Pty {
             ws_ypixel: 0,
         };
         // SAFETY: size is a valid winsize for TIOCSWINSZ.
-        if unsafe { libc::ioctl(self.master, libc::TIOCSWINSZ, &size) } != 0 {
+        if unsafe { libc::ioctl(self.fd(), libc::TIOCSWINSZ, &size) } != 0 {
             return Err(PtyError::Io(last_error()));
         }
         Ok(())
@@ -563,6 +565,22 @@ impl Pty {
     }
 
     /// SIGTERM, then SIGKILL if it is still there after `grace`; returns the exit status.
+    /// The master's descriptor, or -1 once hung up.
+    fn fd(&self) -> libc::c_int {
+        self.master.load(Ordering::Acquire)
+    }
+
+    /// Closes the master, once. A child quitting with output nobody read waits in exit for the tty
+    /// to drain, and no signal ends that wait; closing the master hangs the tty up and drops what
+    /// was queued, so the child can finish and be reaped.
+    fn hang_up(&self) {
+        let fd = self.master.swap(-1, Ordering::AcqRel);
+        if fd >= 0 {
+            // SAFETY: fd was ours, and the swap means it is closed exactly once.
+            unsafe { libc::close(fd) };
+        }
+    }
+
     pub fn terminate(&self, grace: Duration) -> Option<i32> {
         if let Ok(Some(code)) = self.try_wait() {
             return Some(code);
@@ -576,6 +594,8 @@ impl Pty {
                 Err(_) => return None,
             }
         }
+        // Still here after the grace: maybe stuck draining the tty, which SIGKILL can't end.
+        self.hang_up();
         let _ = self.signal(Signal::Kill);
         self.wait().ok()
     }
@@ -583,11 +603,8 @@ impl Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        // The master closes first: a child quitting with output nobody read waits in exit for the
-        // tty to drain, and no signal ends that wait. Closing the master hangs the tty up and
-        // drops what was queued, so the child can finish and be reaped.
-        // SAFETY: master is ours and closed once, here.
-        unsafe { libc::close(self.master) };
+        // The master closes first, for the reason in `hang_up`.
+        self.hang_up();
         self.terminate(Duration::from_secs(2));
     }
 }

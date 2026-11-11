@@ -363,6 +363,26 @@ mod unix {
         );
     }
 
+    /// The same child, ended the usual way: `Terminal::close` (every hidden attach and Trust
+    /// Folder's pty) signals, then waits. It waited forever with the master still open, and hung
+    /// `folder.trust` for a lane again on 2026-11-11 after the drop fix above.
+    #[test]
+    fn closing_a_terminal_ends_a_child_stuck_on_unread_output() {
+        let scratch = Scratch::new("pty-drain-close");
+        let script = "trap '' TERM HUP; i=0; while [ $i -lt 4000 ]; do \
+                      echo 'line of output nobody reads'; i=$((i+1)); done; exit 0";
+        let terminal = Terminal::spawn(&sh(script, &scratch)).expect("sh starts");
+        std::thread::sleep(Duration::from_millis(500));
+        let (done, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(terminal.close());
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+            "closing the terminal hung on its child"
+        );
+    }
+
     #[test]
     fn a_nul_in_an_argument_is_refused() {
         let mut command = PtyCommand::new("/bin/sh");
