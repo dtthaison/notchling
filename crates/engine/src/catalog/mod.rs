@@ -70,6 +70,19 @@ pub struct Price {
     pub over: Option<Over>,
 }
 
+impl Price {
+    /// Every rate a finite number, none below 0 (a free model is 0, never negative).
+    fn sane(&self) -> bool {
+        let ok = |x: f64| x.is_finite() && x >= 0.0;
+        ok(self.input)
+            && ok(self.output)
+            && ok(self.cache_read)
+            && self
+                .over
+                .is_none_or(|o| ok(o.tokens) && ok(o.input) && ok(o.output) && ok(o.cache_read))
+    }
+}
+
 /// The prices once a prompt (input, cache read and cache write) is over `tokens`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,13 +203,38 @@ fn family_version(id: &str) -> Option<(String, Vec<u64>)> {
     Some((family.to_string(), version))
 }
 
-/// The newest of `ids` in `family`.
+/// Whether every segment of a Claude id after its family is a number (`claude-opus-5-6`, not
+/// `claude-opus-6-preview`): only such an id can be its family's current model.
+fn plain_release(id: &str) -> bool {
+    let rest: Vec<&str> = id
+        .strip_prefix("claude-")
+        .map(|r| r.split('-').skip(1).collect())
+        .unwrap_or_default();
+    !rest.is_empty() && rest.iter().all(|p| p.parse::<u64>().is_ok())
+}
+
+/// Anthropic's list names its models "Claude Opus 5.5"; Notchling calls them "Opus 5.5" in Chat
+/// and on the phone alike.
+fn plain_name(name: &str) -> String {
+    name.strip_prefix("Claude ").unwrap_or(name).to_string()
+}
+
+/// The entries of a Claude live list that can be models: a non-empty id in the shape one is
+/// started with. A live list comes from a file on disk too (the cache, Claude Code's config), so
+/// nothing else in it reaches the allowlist.
+fn claude_usable(live: &[LiveModel]) -> impl Iterator<Item = &LiveModel> {
+    live.iter()
+        .filter(|l| !l.id.is_empty() && startable_shape(&l.id))
+}
+
+/// The newest plain release (`plain_release`) of `ids` in `family`: a variant such as
+/// `claude-opus-6-preview` is no family's newest, so it neither displaces nor holds back a release.
 fn newest_known<'a>(
     ids: impl Iterator<Item = &'a String>,
     family: &str,
 ) -> Option<(&'a str, Vec<u64>)> {
     let mut best: Option<(&str, Vec<u64>)> = None;
-    for id in ids {
+    for id in ids.filter(|id| plain_release(id)) {
         let Some((f, v)) = family_version(id) else {
             continue;
         };
@@ -253,7 +291,14 @@ impl Catalog {
                     continue;
                 };
                 entry.key = entry.key.trim().to_lowercase();
-                if entry.key.is_empty() {
+                // Claude's prices match the id without `claude-`, so a full id names the same
+                // model as the bare one (the windows and names take full ids).
+                if tool == Tool::Claude {
+                    if let Some(bare) = entry.key.strip_prefix("claude-") {
+                        entry.key = bare.to_string();
+                    }
+                }
+                if entry.key.is_empty() || !entry.price.sane() {
                     continue;
                 }
                 match data.prices.iter_mut().find(|p| p.key == entry.key) {
@@ -382,9 +427,11 @@ impl Catalog {
         };
         if tool == Tool::Claude {
             self.known().for_each(|id| add(id.clone()));
-            for l in live {
+            for l in claude_usable(live) {
                 add(model_key(&l.id));
+                add(l.id.clone());
             }
+            return out;
         }
         for l in live {
             add(l.id.clone());
@@ -445,7 +492,7 @@ impl Catalog {
         let mut current = self.current.clone();
         let mut older = self.older.clone();
         let mut by_id: HashMap<String, &LiveModel> = HashMap::new();
-        for l in live {
+        for l in claude_usable(live) {
             let id = model_key(&l.id);
             if by_id.contains_key(&id) {
                 continue;
@@ -455,8 +502,10 @@ impl Catalog {
                 continue;
             }
             // A model newer than all its family's known ones takes the family's place in current;
-            // the model it displaces becomes the newest of the older ones.
+            // the model it displaces becomes the newest of the older ones. Only a plain release
+            // does: `claude-opus-6-preview` is listed with the older ones.
             let place = family_version(&id)
+                .filter(|_| plain_release(&id))
                 .filter(|(family, version)| {
                     newest_known(current.iter().chain(&older), family)
                         .is_some_and(|(_, known)| *version > known)
@@ -481,6 +530,7 @@ impl Catalog {
                 .get(&id.to_lowercase())
                 .cloned()
                 .or_else(|| l.and_then(|l| l.name.clone()))
+                .map(|n| plain_name(&n))
                 .unwrap_or_else(|| display_name(id));
             let borrowed = self.price_borrowed(Tool::Claude, id);
             ModelInfo {

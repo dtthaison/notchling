@@ -89,13 +89,10 @@ pub fn effort_title(level: &str) -> String {
     }
 }
 
-/// The row's name: the catalog's, without the "Claude " Anthropic's own list puts in front.
+/// The row's name: the catalog's (which leaves off the "Claude " Anthropic's own list puts in
+/// front, for the phone too).
 fn title_of(model: &ModelInfo) -> String {
-    model
-        .name
-        .strip_prefix("Claude ")
-        .unwrap_or(&model.name)
-        .to_owned()
+    model.name.clone()
 }
 
 /// What a row says when its price and window are another model's.

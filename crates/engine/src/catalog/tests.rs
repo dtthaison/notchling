@@ -284,7 +284,7 @@ fn a_newer_family_model_from_the_live_list_becomes_current_and_borrows() {
         .filter(|x| x.id != "claude-fable-5-3")
         .all(|x| x.borrowed_from.is_none()));
     assert_eq!(f.price.as_ref().unwrap().input, 8.0);
-    assert_eq!(f.name, "Claude Fable 5.3");
+    assert_eq!(f.name, "Fable 5.3", "Anthropic's \"Claude \" is left off");
     assert_eq!(
         m.iter().find(|x| x.tier == Tier::Older).unwrap().id,
         "claude-fable-5-2"
@@ -409,4 +409,113 @@ fn tool_parses_its_names() {
     assert_eq!(Tool::parse("codex"), Some(Tool::Codex));
     assert_eq!(Tool::parse("antigravity"), Some(Tool::Antigravity));
     assert_eq!(Tool::parse("gemini"), None);
+}
+
+#[test]
+fn an_override_price_keyed_by_the_full_claude_id_is_that_models() {
+    let file = temp_file(
+        "full-id",
+        r#"{"claude": {"prices": [
+            {"id": "claude-fable-5-3", "input": 9.0, "output": 45.0, "cache_read": 0.3},
+            {"match": "Claude-Opus-5-5", "input": 6.0, "output": 30.0, "cache_read": 0.6}]}}"#,
+    );
+    let c = Catalog::load(&file);
+    let fable = c.price(Tool::Claude, "claude-fable-5-3").unwrap();
+    assert_eq!((fable.input, fable.output), (9.0, 45.0));
+    assert!(!c.price_borrowed(Tool::Claude, "claude-fable-5-3"));
+    assert_eq!(c.price(Tool::Claude, "claude-opus-5-5").unwrap().input, 6.0);
+}
+
+#[test]
+fn a_negative_override_price_is_skipped_and_zero_is_a_price() {
+    let file = temp_file(
+        "negative",
+        r#"{"claude": {"prices": [
+            {"match": "opus-5-5", "input": -4.0, "output": 20.0, "cache_read": 0.2},
+            {"match": "sonnet-5", "input": 2.0, "output": 10.0, "cache_read": 0.2,
+             "over": {"tokens": 1000, "input": -1.0, "output": 1.0, "cache_read": 1.0}},
+            {"match": "haiku-5-5", "input": 0.0, "output": 0.0, "cache_read": 0.0}]}}"#,
+    );
+    let c = Catalog::load(&file);
+    let built_in = Catalog::built_in();
+    assert_eq!(
+        c.price(Tool::Claude, "claude-opus-5-5"),
+        built_in.price(Tool::Claude, "claude-opus-5-5")
+    );
+    assert_eq!(
+        c.price(Tool::Claude, "claude-sonnet-5-5"),
+        built_in.price(Tool::Claude, "claude-sonnet-5-5")
+    );
+    let free = c.price(Tool::Claude, "claude-haiku-5-5").unwrap();
+    assert_eq!((free.input, free.output, free.cache_read), (0.0, 0.0, 0.0));
+}
+
+#[test]
+fn only_a_plain_release_takes_its_familys_place() {
+    let c = Catalog::built_in();
+    let models = c.models(
+        Tool::Claude,
+        &[live("claude-opus-6-preview"), live("claude-opus-5-6")],
+    );
+    let current: Vec<&str> = models
+        .iter()
+        .filter(|m| m.tier == Tier::Current)
+        .map(|m| m.id.as_str())
+        .collect();
+    assert!(current.contains(&"claude-opus-5-6"), "{current:?}");
+    assert!(!current.contains(&"claude-opus-6-preview"), "{current:?}");
+    let preview = models
+        .iter()
+        .find(|m| m.id == "claude-opus-6-preview")
+        .expect("listed");
+    assert_eq!(preview.tier, Tier::Older);
+    // Alone, the preview still doesn't displace Opus 5.5.
+    let alone = c.models(Tool::Claude, &[live("claude-opus-6-preview")]);
+    assert!(alone
+        .iter()
+        .any(|m| m.id == "claude-opus-5-5" && m.tier == Tier::Current));
+}
+
+#[test]
+fn anthropics_claude_prefix_is_left_off_names() {
+    let c = Catalog::built_in();
+    let mut fable = live("claude-fable-5-3");
+    fable.name = Some("Claude Fable 5.3".into());
+    let mut opus = live("claude-opus-5-5");
+    opus.name = Some("Claude Opus 5.5".into());
+    let models = c.models(Tool::Claude, &[fable, opus]);
+    let name = |id: &str| {
+        models
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.name.clone())
+            .unwrap()
+    };
+    assert_eq!(name("claude-fable-5-3"), "Fable 5.3");
+    assert_eq!(name("claude-opus-5-5"), "Opus 5.5");
+}
+
+#[test]
+fn a_live_claude_id_that_is_empty_or_misshapen_is_dropped() {
+    let c = Catalog::built_in();
+    let live = [
+        live(""),
+        live("claude-evil-1 --flag"),
+        live("Claude-Upper-1"),
+        live("claude-fable-5-3"),
+    ];
+    let allowed = c.allowed(Tool::Claude, &live);
+    assert!(!allowed.iter().any(|a| a.is_empty()), "{allowed:?}");
+    assert!(!allowed.iter().any(|a| a.contains(' ') || a.contains('U')));
+    assert!(allowed.contains(&"claude-fable-5-3".to_string()));
+    let ids: Vec<String> = c
+        .models(Tool::Claude, &live)
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert!(
+        !ids.iter().any(|id| id.is_empty() || id.contains(' ')),
+        "{ids:?}"
+    );
+    assert!(!c.is_allowed(Tool::Claude, &live, ""));
 }
