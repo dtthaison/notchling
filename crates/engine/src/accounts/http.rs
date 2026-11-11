@@ -41,6 +41,8 @@ pub struct HttpRequest {
     pub bearer: Option<Secret>,
     /// Sent as JSON.
     pub body: Option<Value>,
+    /// Extra headers, written after the fixed ones (`anthropic-version` on the model list).
+    pub headers: Vec<(&'static str, String)>,
 }
 
 impl fmt::Debug for HttpRequest {
@@ -57,7 +59,14 @@ impl HttpRequest {
             url: url.into(),
             bearer: Some(token.clone()),
             body: None,
+            headers: Vec::new(),
         }
+    }
+
+    /// The same request with one more header.
+    pub fn with_header(mut self, name: &'static str, value: &str) -> HttpRequest {
+        self.headers.push((name, value.to_string()));
+        self
     }
 
     pub fn post(url: &str, body: Value) -> HttpRequest {
@@ -66,6 +75,7 @@ impl HttpRequest {
             url: url.into(),
             bearer: None,
             body: Some(body),
+            headers: Vec::new(),
         }
     }
 }
@@ -156,6 +166,9 @@ pub fn request_bytes(request: &HttpRequest, host: &str, path: &str) -> Vec<u8> {
     );
     if let Some(token) = &request.bearer {
         head.push_str(&format!("Authorization: Bearer {}\r\n", token.expose()));
+    }
+    for (name, value) in &request.headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
     }
     if request.body.is_some() {
         head.push_str(&format!(
@@ -280,6 +293,15 @@ mod tests {
         assert!(bytes.contains("Authorization: Bearer test-access-token\r\n"));
         assert!(bytes.contains("anthropic-beta: oauth-2025-04-20\r\n"));
         assert!(!format!("{get:?}").contains("test-access-token"));
+        assert!(!bytes.contains("anthropic-version"));
+        let extra = get.clone().with_header("anthropic-version", "2023-06-01");
+        let bytes = String::from_utf8(request_bytes(
+            &extra,
+            "api.anthropic.com",
+            "/api/oauth/profile",
+        ))
+        .unwrap();
+        assert!(bytes.contains("anthropic-version: 2023-06-01\r\n"));
         let post = HttpRequest::post(TOKEN_URL, json!({"refresh_token": "test-refresh-token"}));
         let bytes = String::from_utf8(request_bytes(
             &post,

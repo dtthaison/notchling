@@ -13,6 +13,9 @@ use serde_json::Value;
 
 use crate::cost::prices::display_name;
 
+pub mod claude_live;
+pub mod live_cache;
+
 const BUILT_IN: &str = include_str!("../../data/catalog.json");
 
 /// The one Claude model with no effort levels.
@@ -492,5 +495,9 @@ impl Catalog {
     }
 }
 
+#[cfg(test)]
+mod claude_live_tests;
+#[cfg(test)]
+mod live_cache_tests;
 #[cfg(test)]
 mod tests;

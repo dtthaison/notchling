@@ -174,6 +174,7 @@ impl SecurityRunner for PanicKeychain {
 pub struct ScriptedHttp {
     script: Mutex<Vec<(String, HttpResponse)>>,
     seen: Mutex<Vec<(String, Option<String>)>>,
+    headers: Mutex<Vec<Vec<(String, String)>>>,
 }
 
 impl ScriptedHttp {
@@ -196,6 +197,15 @@ impl ScriptedHttp {
     pub fn seen(&self) -> Vec<(String, Option<String>)> {
         self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
+
+    /// The extra headers (`HttpRequest::headers`) of each request so far, in the order of
+    /// [`ScriptedHttp::seen`].
+    pub fn seen_headers(&self) -> Vec<Vec<(String, String)>> {
+        self.headers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
 }
 
 impl HttpClient for ScriptedHttp {
@@ -204,6 +214,13 @@ impl HttpClient for ScriptedHttp {
             request.url.clone(),
             request.bearer.as_ref().map(|b| b.expose().to_string()),
         ));
+        self.headers.lock().unwrap_or_else(|e| e.into_inner()).push(
+            request
+                .headers
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.clone()))
+                .collect(),
+        );
         let mut script = self.script.lock().unwrap_or_else(|e| e.into_inner());
         match script
             .iter()
