@@ -441,14 +441,26 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         // others while the pointer is over them.
         let group = SharedString::from(format!("term-tab-{i}"));
         let is_active = i == active;
-        let button = tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
-            .h(px(20.0))
-            .w(px(20.0))
-            .hover(move |s| s.bg(hsla(Ink::Text.color(a).with_alpha(0.14))))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.close_terminal(i, window, cx);
-            }));
+        // No tooltip of its own: one inside the tab's tooltip made the two take turns while the
+        // pointer rested on the ×, redrawing each time, and the cursor flickered.
+        let button = icon_button(
+            gpui::ElementId::Name(format!("term-close-{i}").into()),
+            Icon::Close,
+            IconSize::Button.points(),
+            ButtonKind::Ghost,
+            PartState::Rest,
+            a,
+        )
+        .flex_shrink_0()
+        .px(px(0.0))
+        .cursor_pointer()
+        .h(px(20.0))
+        .w(px(20.0))
+        .hover(move |s| s.bg(hsla(Ink::Text.color(a).with_alpha(0.14))))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            cx.stop_propagation();
+            this.close_terminal(i, window, cx);
+        }));
         // Rounded as the tab: GPUI clips children to the tab's rectangle, not its corners.
         let patch = div()
             .h_full()
