@@ -68,6 +68,14 @@ pub trait Sources: Send + Sync {
     fn commands(&self, _session: &Session) -> Vec<Command> {
         Vec::new()
     }
+    /// The Claude models a new session may start on now (the catalog's current ones).
+    fn models(&self) -> Vec<ModelChoice> {
+        Vec::new()
+    }
+    /// Whether a session may start on this model id, by the catalog's own check.
+    fn model_allowed(&self, _id: &str) -> bool {
+        false
+    }
     /// `~/.claude/projects`, for the recent folders.
     fn projects_dir(&self) -> Option<PathBuf> {
         None
@@ -94,6 +102,12 @@ pub trait Acting: Send + Sync {
         response: &PromptResponse,
     ) -> Result<(), BridgeFailure>;
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure>;
+    /// A new session on a model id the catalog allows (`session.new`'s `modelId`).
+    fn new_session_with_model(&self, _cwd: &Path, _model_id: &str) -> Result<(), BridgeFailure> {
+        Err(BridgeFailure::invalid(
+            "Backend này không chọn được model theo id.",
+        ))
+    }
     fn take_over(
         &self,
         session: &Session,
@@ -126,6 +140,9 @@ impl Acting for ActingOff {
         off()
     }
     fn new_session(&self, _: &Path, _: Option<&str>) -> Result<(), BridgeFailure> {
+        off()
+    }
+    fn new_session_with_model(&self, _: &Path, _: &str) -> Result<(), BridgeFailure> {
         off()
     }
     fn take_over(&self, _: &Session, _: bool) -> Result<TakeoverOutcome, BridgeFailure> {
@@ -358,6 +375,18 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure> {
         self.acting.new_session(cwd, model)
+    }
+
+    fn models(&self) -> Vec<ModelChoice> {
+        self.sources.models()
+    }
+
+    fn model_allowed(&self, id: &str) -> bool {
+        self.sources.model_allowed(id)
+    }
+
+    fn new_session_with_model(&self, cwd: &Path, model_id: &str) -> Result<(), BridgeFailure> {
+        self.acting.new_session_with_model(cwd, model_id)
     }
 
     fn take_over(

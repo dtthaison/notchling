@@ -7,8 +7,8 @@
 
 use super::connection::Connection;
 use super::model::{
-    BridgeViz, ChatMessage, ChatPage, Command, PendingPrompt, PhoneOptions, PromptResponse,
-    Session, TakeoverOutcome,
+    BridgeViz, ChatMessage, ChatPage, Command, ModelChoice, PendingPrompt, PhoneOptions,
+    PromptResponse, Session, TakeoverOutcome,
 };
 use super::wire::BridgeFailure;
 use std::path::Path;
@@ -86,6 +86,24 @@ pub trait BridgeBackend: Send + Sync {
 
     /// `cwd` is already checked: an existing folder inside home, symlinks resolved.
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure>;
+
+    /// The Claude models a new session may start on now (current ones), for `sessions.list`. A
+    /// backend with no catalog lists none, and the phone keeps its short names.
+    fn models(&self) -> Vec<ModelChoice> {
+        Vec::new()
+    }
+
+    /// Whether `id` is a model a session may start on, by the same check the start itself makes.
+    fn model_allowed(&self, _id: &str) -> bool {
+        false
+    }
+
+    /// Like `new_session`, on a model id `model_allowed` accepted.
+    fn new_session_with_model(&self, _cwd: &Path, _model_id: &str) -> Result<(), BridgeFailure> {
+        Err(BridgeFailure::invalid(
+            "Backend này không chọn được model theo id.",
+        ))
+    }
 
     /// Resumes a view-only session in an owned pty (stopping the original first if asked).
     fn take_over(

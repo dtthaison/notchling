@@ -31,7 +31,7 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `hello` | `token` | `device {id, name}`, `version` |
 | `pair` | `code`, `device {name, platform?}` | `token`, `deviceId`, `version` |
 | `ping` | | `time` |
-| `sessions.list` | | `sessions` |
+| `sessions.list` | | `sessions`, `models?` |
 | `chat.get` | `sessionId`, `subagentId?`, `limit?`, `before?`, `after?` | `messages`, `hasMore`, `reset?` |
 | `viz.get` | `sessionId`, `entity?` | `suggested`, `webURL?`, `webCandidates?`, `flow?`, `diagram?`, `chart?`, `entity?` |
 | `web.snapshot` | `sessionId`, `width?`, `url?` | `binary`, `bytes`, `format`, `url`; and `sent` |
@@ -42,7 +42,7 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `session.image.end` | `uploadId` | `sent` |
 | `commands.list` | `sessionId` | `commands` |
 | `prompt.answer` | `requestId`, `allow?`, `choice?`, `text?` | `answered` |
-| `session.new` | `cwd`, `model?` | `started` |
+| `session.new` | `cwd`, `model?`, `modelId?` | `started` |
 | `chat.image` | `sessionId`, `imageId`, `maxWidth?` | `binary`, `bytes`, `format`, `imageId`; and `sent` |
 | `session.takeover` | `sessionId`, `stopOriginal?` | `sessionId`, `resumed`, `stoppedPid?` |
 | `projects.recent` | | `projects` |

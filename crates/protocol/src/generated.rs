@@ -705,6 +705,7 @@ pub struct PromptAnswerRequest {
 
 /// Starts a Claude Code session in a folder inside the Mac's home.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionNewRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
@@ -714,6 +715,9 @@ pub struct SessionNewRequest {
     /// default, opus, sonnet or haiku.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 /// A JPEG of a picture in the chat. The Mac answers with JSON, then a binary IMG1 frame.
@@ -874,6 +878,17 @@ pub struct SessionsListResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionsListResponseData {
     pub sessions: Vec<Session>,
+    /// The Claude models a new session may start on now, current ones only, as the Mac's catalog lists them. Absent from an older Mac; the phone then offers its short names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<SessionsListResponseDataModelsItem>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionsListResponseDataModelsItem {
+    /// What `modelId` of session.new takes.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
 }
 
 /// A page of messages, oldest first.

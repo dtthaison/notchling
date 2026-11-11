@@ -204,6 +204,14 @@ fn takeover_wire(state: &TakeoverState) -> wire::Takeover {
     }
 }
 
+/// A model the phone may start a session on: what `session.new`'s `modelId` takes, and the name
+/// to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub id: String,
+    pub name: String,
+}
+
 /// What a takeover did: the session to switch to, and the original's pid if it was stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeoverOutcome {

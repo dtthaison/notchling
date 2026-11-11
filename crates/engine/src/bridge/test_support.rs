@@ -99,7 +99,10 @@ pub struct FakeState {
     pub takeover: Option<Result<TakeoverOutcome, BridgeFailure>>,
     pub sent: Vec<(String, String)>,
     pub responses: Vec<(String, PromptResponse)>,
+    /// A started session's folder and its model: the short name, or the id of a `modelId`.
     pub new_sessions: Vec<(PathBuf, Option<String>)>,
+    /// The models the backend lists and allows.
+    pub models: Vec<ModelChoice>,
     pub phone_starts: Vec<PhoneOptions>,
     pub interrupted: Vec<String>,
     pub takeovers: Vec<(String, bool)>,
@@ -170,6 +173,19 @@ impl BridgeBackend for FakeBackend {
         self.with(|s| {
             s.new_sessions
                 .push((cwd.to_path_buf(), model.map(String::from)))
+        });
+        Ok(())
+    }
+    fn models(&self) -> Vec<ModelChoice> {
+        self.with(|s| s.models.clone())
+    }
+    fn model_allowed(&self, id: &str) -> bool {
+        self.with(|s| s.models.iter().any(|m| m.id == id))
+    }
+    fn new_session_with_model(&self, cwd: &Path, model_id: &str) -> Result<(), BridgeFailure> {
+        self.with(|s| {
+            s.new_sessions
+                .push((cwd.to_path_buf(), Some(model_id.to_string())))
         });
         Ok(())
     }

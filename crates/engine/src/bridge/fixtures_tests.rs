@@ -209,6 +209,15 @@ fn queries(run: &mut Run) {
         none(),
         Some("SessionsListResponse"),
     );
+    // With a catalog behind the bridge, the list carries the current models.
+    phone.rig.backend.with(|s| s.models = models());
+    run.round_trip(
+        &phone,
+        "SessionsListRequest",
+        none(),
+        Some("SessionsListResponse.models"),
+    );
+    phone.rig.backend.with(|s| s.models.clear());
     run.round_trip(&phone, "ChatGetRequest", none(), Some("ChatGetResponse"));
     run.round_trip(
         &phone,
@@ -333,11 +342,26 @@ fn actions(run: &mut Run) {
         json!({ "cwd": project }),
         None,
     );
-    let models: Vec<Option<String>> = phone
+    phone.rig.backend.with(|s| s.models = models());
+    run.round_trip(
+        &phone,
+        "SessionNewRequest.model-id",
+        json!({ "cwd": project }),
+        None,
+    );
+    let started: Vec<Option<String>> = phone
         .rig
         .backend
         .with(|s| s.new_sessions.iter().map(|n| n.1.clone()).collect());
-    assert_eq!(models, [Some("opus".to_string()), None]);
+    // `modelId` wins over the `model` the same request carries.
+    assert_eq!(
+        started,
+        [
+            Some("opus".to_string()),
+            None,
+            Some("claude-fable-5-2".to_string())
+        ]
+    );
 
     run.round_trip(
         &phone,

@@ -174,6 +174,19 @@ fn step(name: &str, output: Option<&str>, diff: Option<Vec<&str>>) -> wire::Tool
     }
 }
 
+pub fn models() -> Vec<ModelChoice> {
+    [
+        ("claude-fable-5-2", "Fable 5.2"),
+        ("claude-opus-5-5", "Opus 5.5"),
+    ]
+    .into_iter()
+    .map(|(id, name)| ModelChoice {
+        id: id.into(),
+        name: name.into(),
+    })
+    .collect()
+}
+
 pub fn chat() -> Vec<ChatMessage> {
     use wire::ChatRole::*;
     let mut first = msg(1, User, "The app crashes on launch. Can you look?", -300.0);

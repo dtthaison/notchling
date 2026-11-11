@@ -82,6 +82,8 @@ mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
 #[cfg(test)]
+mod bridge_models_tests;
+#[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;

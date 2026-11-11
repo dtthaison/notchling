@@ -1729,6 +1729,7 @@ class SessionNewRequest {
     this.op = 'session.new',
     required this.cwd,
     this.model,
+    this.modelId,
   });
 
   factory SessionNewRequest.fromJson(JsonMap json) => SessionNewRequest(
@@ -1736,6 +1737,7 @@ class SessionNewRequest {
     op: _need(json, 'op', _asString),
     cwd: _need(json, 'cwd', _asString),
     model: _maybe(json, 'model', _asString),
+    modelId: _maybe(json, 'modelId', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1743,6 +1745,7 @@ class SessionNewRequest {
     'op': op,
     'cwd': cwd,
     if (model != null) 'model': model,
+    if (modelId != null) 'modelId': modelId,
   };
 
   final Object? id;
@@ -1753,6 +1756,9 @@ class SessionNewRequest {
 
   /// default, opus, sonnet or haiku.
   final String? model;
+
+  /// A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it.
+  final String? modelId;
 }
 
 /// A JPEG of a picture in the chat. The Mac answers with JSON, then a binary IMG1 frame.
@@ -2145,17 +2151,46 @@ class SessionsListResponse {
 class SessionsListResponseData {
   const SessionsListResponseData({
     required this.sessions,
+    this.models,
   });
 
   factory SessionsListResponseData.fromJson(JsonMap json) => SessionsListResponseData(
     sessions: _need(json, 'sessions', (Object? v) => _asList<Session>(v, (Object? e) => Session.fromJson(_asMap(e)))),
+    models: _maybe(json, 'models', (Object? v) => _asList<SessionsListResponseDataModelsItem>(v, (Object? e) => SessionsListResponseDataModelsItem.fromJson(_asMap(e)))),
   );
 
   JsonMap toJson() => <String, Object?>{
     'sessions': <Object?>[for (final Session e in sessions) e.toJson()],
+    if (models != null) 'models': <Object?>[for (final SessionsListResponseDataModelsItem e in models!) e.toJson()],
   };
 
   final List<Session> sessions;
+
+  /// The Claude models a new session may start on now, current ones only, as the Mac's catalog lists them. Absent from an older Mac; the phone then offers its short names.
+  final List<SessionsListResponseDataModelsItem>? models;
+}
+
+class SessionsListResponseDataModelsItem {
+  const SessionsListResponseDataModelsItem({
+    required this.id,
+    required this.name,
+  });
+
+  factory SessionsListResponseDataModelsItem.fromJson(JsonMap json) => SessionsListResponseDataModelsItem(
+    id: _need(json, 'id', _asString),
+    name: _need(json, 'name', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+  };
+
+  /// What `modelId` of session.new takes.
+  final String id;
+
+  /// The name to show.
+  final String name;
 }
 
 /// A page of messages, oldest first.

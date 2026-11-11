@@ -357,13 +357,24 @@ impl Router {
         connection: &Arc<Connection>,
     ) -> Result<Value, BridgeFailure> {
         let cwd = require(body, "cwd")?;
+        // `modelId` (from the `models` of sessions.list) wins over the old short `model`; the
+        // backend's own check decides, so no second list can disagree with the start.
+        let model_id = match body.get("modelId") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(id)) if self.backend.model_allowed(id) => Some(id.as_str()),
+            Some(_) => return Err(BridgeFailure::invalid("Model không hợp lệ.")),
+        };
         let model = string(body, "model");
-        if model.is_some_and(|m| !MODELS.contains(&m)) {
+        if model_id.is_none() && model.is_some_and(|m| !MODELS.contains(&m)) {
             return Err(BridgeFailure::invalid("Model không hợp lệ."));
         }
         let folder = validated_folder(cwd, &self.home)?;
-        self.backend
-            .new_session(&folder, model.filter(|m| *m != "default"))?;
+        match model_id {
+            Some(id) => self.backend.new_session_with_model(&folder, id)?,
+            None => self
+                .backend
+                .new_session(&folder, model.filter(|m| *m != "default"))?,
+        }
         self.audit(connection, "newSession", None, None);
         Ok(json!({"started": true}))
     }

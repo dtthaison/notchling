@@ -8,7 +8,8 @@ use crate::prompts::{Kind, Prompt};
 use notchling_engine::bridge::agents;
 use notchling_engine::bridge::live::{Acting, Sources};
 use notchling_engine::bridge::model::{
-    Control, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session, TakeoverOutcome,
+    Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session,
+    TakeoverOutcome,
 };
 use notchling_engine::bridge::BridgeFailure;
 use notchling_engine::catalog::{Tier as ModelTier, Tool};
@@ -115,6 +116,23 @@ impl Sources for DaemonSources {
 
     fn projects_dir(&self) -> Option<PathBuf> {
         Some(self.projects_dir.clone())
+    }
+
+    fn models(&self) -> Vec<ModelChoice> {
+        self.acting
+            .catalog()
+            .models(Tool::Claude)
+            .into_iter()
+            .filter(|m| m.tier == ModelTier::Current)
+            .map(|m| ModelChoice {
+                id: m.id,
+                name: m.name,
+            })
+            .collect()
+    }
+
+    fn model_allowed(&self, id: &str) -> bool {
+        self.acting.catalog().is_allowed(Tool::Claude, id)
     }
 
     fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool {
@@ -252,6 +270,12 @@ impl Acting for DaemonActing {
         if let Some(full) = model.and_then(|short| model_id(short, self.ops.catalog())) {
             args["flags"] = json!(["--model", full]);
         }
+        self.call(ops::SESSION_NEW, args).map(|_| ())
+    }
+
+    /// The id goes to `session.new` as it is, so the daemon's own catalog check applies again.
+    fn new_session_with_model(&self, cwd: &Path, model_id: &str) -> Result<(), BridgeFailure> {
+        let args = json!({"folder": cwd.to_string_lossy(), "flags": ["--model", model_id]});
         self.call(ops::SESSION_NEW, args).map(|_| ())
     }
 

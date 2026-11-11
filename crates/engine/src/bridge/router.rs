@@ -267,7 +267,17 @@ impl Router {
                     .iter()
                     .map(|s| s.to_wire())
                     .collect();
-                Ok(json!({"sessions": wire::object(&list)}))
+                let mut data = json!({"sessions": wire::object(&list)});
+                let models = self.backend.models();
+                if !models.is_empty() {
+                    data["models"] = Value::Array(
+                        models
+                            .iter()
+                            .map(|m| json!({"id": m.id, "name": m.name}))
+                            .collect(),
+                    );
+                }
+                Ok(data)
             }
             "chat.get" => self.chat_get(body),
             "viz.get" => self.viz_get(body),

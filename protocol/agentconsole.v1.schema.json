@@ -1417,6 +1417,10 @@
             "sonnet",
             "haiku"
           ]
+        },
+        "modelId": {
+          "type": "string",
+          "description": "A model id from the `models` of sessions.list, such as claude-opus-5-5 (a [1m] or date suffix is accepted). Wins over `model` when both are sent; the Mac answers invalid for an id it doesn't list. An older Mac ignores it."
         }
       },
       "required": [
@@ -1706,6 +1710,28 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/Session"
+              }
+            },
+            "models": {
+              "type": "array",
+              "description": "The Claude models a new session may start on now, current ones only, as the Mac's catalog lists them. Absent from an older Mac; the phone then offers its short names.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "What `modelId` of session.new takes."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The name to show."
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": true
               }
             }
           },

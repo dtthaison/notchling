@@ -574,6 +574,118 @@ fn session_new_checks_the_folder_and_model() {
     assert!(validated_folder("/", &home).is_err());
 }
 
+fn with_models(rig: &Rig) {
+    rig.backend.with(|s| {
+        s.models = vec![
+            ModelChoice {
+                id: "claude-opus-5-5".into(),
+                name: "Opus 5.5".into(),
+            },
+            ModelChoice {
+                id: "claude-fable-5-2".into(),
+                name: "Fable 5.2".into(),
+            },
+        ]
+    });
+}
+
+#[test]
+fn sessions_list_carries_the_models_only_when_the_backend_has_some() {
+    let rig = Rig::new();
+    let (connection, io, _) = rig.login("test-phone");
+    rig.send(&connection, r#"{"id":1,"op":"sessions.list"}"#);
+    assert!(data(&io.last_json()).get("models").is_none());
+
+    with_models(&rig);
+    rig.send(&connection, r#"{"id":2,"op":"sessions.list"}"#);
+    assert_eq!(
+        data(&io.last_json())["models"],
+        json!([
+            {"id": "claude-opus-5-5", "name": "Opus 5.5"},
+            {"id": "claude-fable-5-2", "name": "Fable 5.2"}
+        ])
+    );
+}
+
+#[test]
+fn a_model_id_from_the_list_starts_that_model() {
+    let rig = Rig::new();
+    with_models(&rig);
+    let project = rig.home().join("work/app");
+    std::fs::create_dir_all(&project).expect("project");
+    let (connection, io, _) = rig.login("test-phone");
+    let cwd = project.to_string_lossy().into_owned();
+
+    // `modelId` wins over `model` when both are sent.
+    rig.send(
+        &connection,
+        &format!(
+            r#"{{"id":1,"op":"session.new","cwd":"{cwd}","model":"sonnet","modelId":"claude-fable-5-2"}}"#
+        ),
+    );
+    assert!(is_ok(&io.last_json()));
+    rig.send(
+        &connection,
+        &format!(r#"{{"id":2,"op":"session.new","cwd":"{cwd}","modelId":"claude-opus-5-5"}}"#),
+    );
+    assert!(is_ok(&io.last_json()));
+    let models: Vec<_> = rig
+        .backend
+        .with(|s| s.new_sessions.iter().map(|n| n.1.clone()).collect());
+    assert_eq!(
+        models,
+        [
+            Some("claude-fable-5-2".to_string()),
+            Some("claude-opus-5-5".to_string())
+        ]
+    );
+}
+
+#[test]
+fn an_unknown_model_id_is_invalid() {
+    let rig = Rig::new();
+    with_models(&rig);
+    let project = rig.home().join("work/app");
+    std::fs::create_dir_all(&project).expect("project");
+    let (connection, io, _) = rig.login("test-phone");
+    let cwd = project.to_string_lossy().into_owned();
+
+    for bad in [
+        r#""claude-evil-1""#,
+        r#""claude-opus-5-5 --flag""#,
+        r#""""#,
+        "7",
+    ] {
+        // A good short name beside a bad id must not start anything either.
+        rig.send(
+            &connection,
+            &format!(
+                r#"{{"id":1,"op":"session.new","cwd":"{cwd}","model":"opus","modelId":{bad}}}"#
+            ),
+        );
+        assert_eq!(codes(&io).as_deref(), Some("invalid"), "{bad}");
+    }
+    assert!(rig.backend.with(|s| s.new_sessions.is_empty()));
+}
+
+#[test]
+fn an_old_phone_sending_model_opus_still_works() {
+    let rig = Rig::new();
+    let project = rig.home().join("work/app");
+    std::fs::create_dir_all(&project).expect("project");
+    let (connection, io, _) = rig.login("test-phone");
+    let cwd = project.to_string_lossy().into_owned();
+    rig.send(
+        &connection,
+        &format!(r#"{{"id":1,"op":"session.new","cwd":"{cwd}","model":"opus"}}"#),
+    );
+    assert!(is_ok(&io.last_json()));
+    let models: Vec<_> = rig
+        .backend
+        .with(|s| s.new_sessions.iter().map(|n| n.1.clone()).collect());
+    assert_eq!(models, [Some("opus".to_string())]);
+}
+
 #[test]
 fn projects_recent_and_unknown_ops() {
     let rig = Rig::new();
