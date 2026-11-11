@@ -49,15 +49,12 @@ pub const AGY_BUSY: &str = "Antigravity is still on the last turn. Send again wh
 pub const EXITED: &str = "This session has exited.";
 
 /// A pop-up over the composer.
-pub enum Picker {
-    Codex(CodexPicker),
-    Agy,
-    /// A Claude Code session's Model menu; `more` is its More Models list open.
-    ClaudeModel {
-        more: bool,
-    },
-    /// A Claude Code session's Effort menu.
-    ClaudeEffort,
+/// The picker menu open under the reply box (`chat::pickers`): its id, and for a menu with older
+/// rows whether they show.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Picker {
+    pub menu: String,
+    pub more: bool,
 }
 
 /// What Chat keeps about acting on the other tools.
@@ -91,6 +88,8 @@ pub struct ChatTools {
     /// Antigravity prompts answered here, hidden until the daemon resolves them.
     pub answered: HashSet<String>,
     pub picker: Option<Picker>,
+    /// Codex's models from its cache, read when a Codex picker first needs them.
+    pub codex_models: Option<Vec<models::Model>>,
     /// A model or effort picked for a Claude Code row, shown until its transcript says so.
     pub model_hints: HashMap<String, Hint>,
     pub effort_hints: HashMap<String, Hint>,
@@ -135,6 +134,7 @@ impl ChatTools {
             starting: HashMap::new(),
             answered: HashSet::new(),
             picker: None,
+            codex_models: None,
             model_hints: HashMap::new(),
             effort_hints: HashMap::new(),
             stopping: None,
@@ -609,41 +609,88 @@ impl ChatView {
         held_prompt(&prompts, id, &self.tools.answered)
     }
 
-    /// Opens or closes the picker the selected row has: Codex's models, Antigravity's options.
-    pub(super) fn toggle_picker(&mut self, cx: &mut Context<Self>) {
-        if self.tools.picker.is_some() {
-            self.tools.picker = None;
-            cx.notify();
-            return;
-        }
+    /// The selected row's pickers, from its tool (`chat::pickers`): the same parts for every tool.
+    pub(super) fn menus(&self) -> Vec<crate::chat::pickers::Menu> {
+        use crate::chat::pickers;
         let Some(session) = self.selected_session() else {
-            return;
+            return Vec::new();
         };
-        let id = session.agent.id.clone();
-        self.tools.picker = match session.tool {
-            Tool::Codex => Some(Picker::Codex(CodexPicker::new(
-                models::load(&self.root.codex_dir),
-                self.tools.picks.get(&id).cloned().unwrap_or_default(),
-                &self.conversation.facts,
-            ))),
-            Tool::Antigravity => Some(Picker::Agy),
-            Tool::Claude => None,
-        };
+        let id = &session.agent.id;
+        match session.tool {
+            Tool::Claude => pickers::claude(self.claude_model(), self.claude_effort()),
+            Tool::Codex => pickers::codex(&self.codex_picker()),
+            Tool::Antigravity => pickers::antigravity(
+                &self.tools.agy_config,
+                !is_draft(id),
+                self.tools.agy.as_ref().is_some_and(|a| a.loading),
+            ),
+        }
+    }
+
+    /// The selected Codex row's model and effort: its pick over what its last turn ran with.
+    fn codex_picker(&self) -> CodexPicker {
+        let id = self.selected.clone().unwrap_or_default();
+        CodexPicker::new(
+            self.tools.codex_models.clone().unwrap_or_default(),
+            self.tools.picks.get(&id).cloned().unwrap_or_default(),
+            &self.conversation.facts,
+        )
+    }
+
+    /// Opens or closes a picker's menu (any other closes). Codex's models are read on the way.
+    pub(super) fn toggle_menu(&mut self, menu: &str, cx: &mut Context<Self>) {
+        let open = self.tools.picker.as_ref().is_some_and(|p| p.menu == menu);
+        if !open
+            && self
+                .selected_session()
+                .is_some_and(|s| s.tool == Tool::Codex)
+        {
+            self.tools.codex_models = Some(models::load(&self.root.codex_dir));
+        }
+        self.tools.picker = (!open).then(|| Picker {
+            menu: menu.to_owned(),
+            more: false,
+        });
         cx.notify();
     }
 
-    /// Opens or closes a Claude Code session's Model or Effort menu (the other closes).
-    pub(super) fn toggle_claude_picker(&mut self, kind: Kind, cx: &mut Context<Self>) {
-        let open = matches!(
-            (&self.tools.picker, kind),
-            (Some(Picker::ClaudeModel { .. }), Kind::Model)
-                | (Some(Picker::ClaudeEffort), Kind::Effort)
-        );
-        self.tools.picker = (!open).then_some(match kind {
-            Kind::Model => Picker::ClaudeModel { more: false },
-            Kind::Effort => Picker::ClaudeEffort,
-        });
-        cx.notify();
+    /// A pick in any picker menu, handed to the selected row's tool: a Claude Code reply
+    /// (`/model`, `/effort`), Codex's next-turn pick, or an Antigravity option.
+    pub(super) fn pick(&mut self, menu: &str, value: &str, cx: &mut Context<Self>) {
+        use crate::chat::pickers::{agy_option, EFFORT, MODEL, RESET};
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        match session.tool {
+            Tool::Claude => {
+                let kind = if menu == EFFORT {
+                    Kind::Effort
+                } else {
+                    Kind::Model
+                };
+                self.pick_claude(kind, value, cx);
+            }
+            Tool::Codex => {
+                let mut picker = self.codex_picker();
+                match menu {
+                    MODEL if value == RESET => picker.reset(),
+                    MODEL => picker.choose_model(value),
+                    _ => {
+                        let model = picker
+                            .pick
+                            .model
+                            .clone()
+                            .or_else(|| picker.running_model.clone())
+                            .unwrap_or_default();
+                        picker.choose_effort(&model, value);
+                    }
+                }
+                self.keep_pick(&picker);
+                self.tools.picker = None;
+                cx.notify();
+            }
+            Tool::Antigravity => self.set_agy_option(agy_option(menu), value, cx),
+        }
     }
 
     /// The model the selected row shows: the pick not yet in the transcript, else the transcript's.
@@ -674,7 +721,7 @@ impl ChatView {
 
     /// A pick in the Model or Effort menu: `/model <id>` or `/effort <level>` goes to the session
     /// as a reply (`session.reply`), as the reply box would send it. The box's own text stays.
-    pub(super) fn pick_claude(&mut self, kind: Kind, value: &'static str, cx: &mut Context<Self>) {
+    pub(super) fn pick_claude(&mut self, kind: Kind, value: &str, cx: &mut Context<Self>) {
         self.tools.picker = None;
         if self.tools.sending || !self.composer_control(cx).enabled {
             cx.notify();

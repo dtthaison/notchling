@@ -29,18 +29,15 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
-use super::tools::Picker;
 use super::ChatView;
 use crate::chat::claude_picker::{self, Kind};
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
 use crate::chat::data::Tool;
+use crate::chat::pickers;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
-use crate::tools::agy_options;
 use crate::tools::requests::is_draft;
-use crate::tools::view::{
-    agy_card, agy_options_card, codex_picker_card, pick_row, pop_up as menu_card, PickerAction,
-};
+use crate::tools::view::{agy_card, pick_row, pop_up as menu_card};
 
 /// The text grows to this many lines, then scrolls (the Swift `ReplyMeasurer.maxLines`).
 pub const MAX_LINES: usize = 8;
@@ -74,68 +71,6 @@ fn placeholder(view: &ChatView) -> &'static str {
         Some(s) if s.tool == Tool::Antigravity => "Message Antigravity…",
         _ => "Reply…",
     }
-}
-
-/// The picker button's label: the Codex pick, or Antigravity's current options.
-fn picker_label(view: &ChatView) -> Option<String> {
-    let session = view.selected_session()?;
-    let id = &session.agent.id;
-    match session.tool {
-        Tool::Codex => Some(match &view.tools.picker {
-            Some(Picker::Codex(p)) => p.label(),
-            _ => {
-                let pick = view.tools.picks.get(id).cloned().unwrap_or_default();
-                crate::tools::codex_picker::CodexPicker::new(
-                    Vec::new(),
-                    pick,
-                    &view.conversation.facts,
-                )
-                .label()
-            }
-        }),
-        Tool::Antigravity => Some(agy_options::label(
-            &view.tools.agy_config,
-            !is_draft(id),
-            view.tools.agy.as_ref().is_some_and(|a| a.loading),
-        )),
-        Tool::Claude => None,
-    }
-}
-
-/// The pop-up over the composer, when open: its bottom edge on the composer's top.
-fn pop_up(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
-    let gate = view.acting(cx).control();
-    let card = match &view.tools.picker {
-        Some(Picker::Codex(picker)) => codex_picker_card(picker, a, cx, |this, action, cx| {
-            if let Some(Picker::Codex(picker)) = &mut this.tools.picker {
-                match action {
-                    PickerAction::Model(slug) => picker.choose_model(&slug),
-                    PickerAction::Effort(slug, effort) => picker.choose_effort(&slug, &effort),
-                    PickerAction::Reset => picker.reset(),
-                }
-                let picked = picker.clone();
-                this.keep_pick(&picked);
-            }
-            cx.notify();
-        }),
-        Some(Picker::Agy) => agy_options_card(
-            &view.tools.agy_config,
-            gate,
-            a,
-            cx,
-            |this, option, value, cx| this.set_agy_option(option, value, cx),
-        ),
-        // Claude Code's two menus open from their own buttons (`claude_pickers`).
-        Some(Picker::ClaudeModel { .. }) | Some(Picker::ClaudeEffort) | None => return None,
-    };
-    Some(
-        div()
-            .absolute()
-            .bottom(relative(1.0))
-            .left(px(SIDE_PADDING))
-            .child(card)
-            .part_at("Picker Menu", Corner::TopTrailing, a, cx),
-    )
 }
 
 /// The Antigravity permission the daemon holds for the row, above the box.
@@ -199,89 +134,32 @@ fn status(
     )
 }
 
-/// The picker button under the card, for a Codex or Antigravity session.
-fn picker(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<impl IntoElement> {
-    let title = picker_label(view)?;
-    let has_options = matches!(
-        view.selected_session().map(|s| s.tool),
-        Some(Tool::Codex) | Some(Tool::Antigravity)
-    ) && !(view.tools.agy_config.is_empty()
-        && view
-            .selected_session()
-            .is_some_and(|s| s.tool == Tool::Antigravity));
-    let state = if has_options {
-        PartState::Rest
-    } else {
-        PartState::Disabled
-    };
-    let kind = if view.tools.picker.is_some() {
-        ButtonKind::Secondary
-    } else {
-        ButtonKind::Ghost
-    };
-    let tip = view
-        .selected_session()
-        .filter(|s| s.tool == Tool::Antigravity)
-        .map(|s| agy_options::tip(!is_draft(&s.agent.id)));
-    // Meta type in the muted ink with a chevron, as the Swift pickers under its composer.
-    let ink = if has_options {
-        Ink::TextMuted
-    } else {
-        Ink::TextFaint
-    };
-    // The Swift names: Codex's picker and Antigravity's options are two parts there.
-    let part = match view.selected_session().map(|s| s.tool) {
-        Some(Tool::Antigravity) => "Antigravity Options",
-        _ => "Codex Model Picker",
-    };
-    let title = div()
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .child(label(&title, TypeRole::Meta, ink, a))
-        .child(icon(Icon::ChevronDown, 7.0, ink, a));
-    let b = button_with("picker", title, kind, state, a)
-        .h(px(20.0))
-        .px(px(6.0));
-    let b = gate::tip(
-        b,
-        crate::acting::Control {
-            enabled: true,
-            tooltip: tip,
-        },
-        a,
-    );
-    Some(
-        b.when(has_options, |b| {
-            b.on_click(cx.listener(|this, _, _, cx| this.toggle_picker(cx)))
-        })
-        .part_at(part, Corner::Top, a, cx),
-    )
-}
-
-/// Which Claude Code menu is open: the one clicked, or the one a render forces.
-fn claude_open(view: &ChatView) -> Option<Kind> {
+/// Which picker menu is open: the one clicked, or the one a render forces.
+fn open_menu(view: &ChatView) -> Option<(String, bool)> {
     match &view.tools.picker {
-        Some(Picker::ClaudeModel { .. }) => Some(Kind::Model),
-        Some(Picker::ClaudeEffort) => Some(Kind::Effort),
-        _ => view.composer.preview.picker,
+        Some(p) => Some((p.menu.clone(), p.more)),
+        None => view
+            .composer
+            .preview
+            .picker
+            .map(|kind| (pickers::id_of(kind).to_owned(), false)),
     }
 }
 
-/// One row of a Claude Code menu.
-fn claude_row(
+/// One row of a picker menu.
+fn menu_row(
     id: String,
-    row: &claude_picker::Row,
-    kind: Kind,
+    menu: &str,
+    row: &pickers::Row,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
-    let value = row.value;
-    pick_row(id, &row.title, "", row.selected, a)
-        .on_click(cx.listener(move |this, _, _, cx| this.pick_claude(kind, value, cx)))
+    let (menu, value) = (menu.to_owned(), row.value.clone());
+    pick_row(id, &row.title, &row.detail, row.selected, a)
+        .on_click(cx.listener(move |this, _, _, cx| this.pick(&menu, &value, cx)))
 }
 
-/// The More Models row: opens the older models under it.
+/// The More Models row: opens the rows under it.
 fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
     div()
         .id("model-more")
@@ -312,56 +190,60 @@ fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<D
             a,
         ))
         .on_click(cx.listener(|this, _, _, cx| {
-            if let Some(Picker::ClaudeModel { more }) = &mut this.tools.picker {
-                *more = !*more;
+            if let Some(picker) = &mut this.tools.picker {
+                picker.more = !picker.more;
                 cx.notify();
             }
         }))
 }
 
-/// The Model or Effort menu, over its button and the layer that closes it on an outside click
-/// (both `deferred`, as the + menu).
-fn claude_menu(
-    view: &ChatView,
-    kind: Kind,
+/// A picker's menu, over its button and the layer that closes it on an outside click (both
+/// `deferred`, as the + menu). The same for every tool (`chat::pickers`).
+fn picker_menu(
+    menu: &pickers::Menu,
+    more: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> impl IntoElement {
-    let more = matches!(view.tools.picker, Some(Picker::ClaudeModel { more: true }));
     let mut card = menu_card(a)
-        .id("claude-menu")
-        .w(px(200.0))
+        .id("picker-menu")
+        .w(px(if menu.rows.iter().any(|r| !r.detail.is_empty()) {
+            300.0
+        } else {
+            220.0
+        }))
+        .max_h(px(420.0))
+        .overflow_y_scroll()
         .gap(px(2.0))
         .shadow_lg()
         .occlude();
-    match kind {
-        Kind::Model => {
-            let current = view.claude_model();
-            for (i, row) in claude_picker::models(current).iter().enumerate() {
-                card = card.child(claude_row(format!("model-{i}"), row, kind, a, cx));
-            }
-            card = card
-                .child(div().h(px(1.0)).w_full().bg(hsla(Ink::Hairline.color(a))))
-                .child(more_row(more, a, cx));
-            if more {
-                for (i, row) in claude_picker::older_models(current).iter().enumerate() {
-                    card = card.child(claude_row(format!("older-{i}"), row, kind, a, cx));
-                }
-            }
+    if menu.rows.is_empty() {
+        if let Some(empty) = &menu.empty {
+            card = card.child(label(empty, TypeRole::Meta, Ink::TextMuted, a).px(px(8.0)));
         }
-        Kind::Effort => {
-            for (i, row) in claude_picker::efforts(view.claude_effort())
-                .iter()
-                .enumerate()
-            {
-                card = card.child(claude_row(format!("effort-{i}"), row, kind, a, cx));
+    }
+    for (i, row) in menu.rows.iter().enumerate() {
+        card = card.child(menu_row(format!("{}-{i}", menu.id), &menu.id, row, a, cx));
+    }
+    if !menu.more.is_empty() {
+        card = card
+            .child(div().h(px(1.0)).w_full().bg(hsla(Ink::Hairline.color(a))))
+            .child(more_row(more, a, cx));
+        if more {
+            for (i, row) in menu.more.iter().enumerate() {
+                card = card.child(menu_row(
+                    format!("{}-more-{i}", menu.id),
+                    &menu.id,
+                    row,
+                    a,
+                    cx,
+                ));
             }
         }
     }
-    let name = match kind {
-        Kind::Model => "Model Menu",
-        Kind::Effort => "Effort Menu",
-    };
+    if let Some(note) = &menu.note {
+        card = card.child(label(note, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)));
+    }
     deferred(
         div()
             .absolute()
@@ -370,7 +252,7 @@ fn claude_menu(
             .pb(px(MENU_GAP))
             .child(
                 div()
-                    .id("claude-menu-click-away")
+                    .id("picker-menu-click-away")
                     .absolute()
                     .top(px(-4000.0))
                     .left(px(-4000.0))
@@ -381,38 +263,28 @@ fn claude_menu(
                         cx.notify();
                     })),
             )
-            .child(card.part_at(name, Corner::TopTrailing, a, cx)),
+            .child(card.part_at(&menu.menu_part(), Corner::TopTrailing, a, cx)),
     )
     .with_priority(1)
 }
 
-/// One Claude Code picker button: the cpu or gauge icon, the label and a chevron in the Meta
-/// type and the muted ink, a ghost button (the Swift `ModelPicker` / `EffortPicker`).
-fn claude_picker(
+/// One picker button: its icon, the current choice and a chevron in the Meta type and the muted
+/// ink, a ghost button; the same for every tool.
+fn picker_button(
     view: &ChatView,
-    kind: Kind,
+    menu: &pickers::Menu,
     control: crate::acting::Control,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
-    let (glyph, title, part, tip, id) = match kind {
-        Kind::Model => (
-            Icon::Cpu,
-            claude_picker::model_label(view.claude_model()),
-            "Model Picker",
-            claude_picker::MODEL_TIP,
-            "model-picker",
-        ),
-        Kind::Effort => (
-            Icon::Gauge,
-            claude_picker::effort_label(view.claude_effort()),
-            "Effort Picker",
-            claude_picker::EFFORT_TIP,
-            "effort-picker",
-        ),
+    let glyph = match menu.glyph {
+        pickers::Glyph::Model => Icon::Cpu,
+        pickers::Glyph::Effort => Icon::Gauge,
+        pickers::Glyph::Other => Icon::Settings,
     };
-    let open = claude_open(view) == Some(kind);
-    let enabled = control.enabled;
+    let open = open_menu(view);
+    let is_open = open.as_ref().is_some_and(|(id, _)| *id == menu.id);
+    let enabled = control.enabled && menu.enabled;
     let ink = if enabled {
         Ink::TextMuted
     } else {
@@ -423,12 +295,12 @@ fn claude_picker(
         .items_center()
         .gap(px(4.0))
         .child(icon(glyph, 9.0, ink, a))
-        .child(label(&title, TypeRole::Meta, ink, a))
+        .child(label(&menu.label, TypeRole::Meta, ink, a))
         .child(icon(Icon::ChevronDown, 7.0, ink, a));
     let b = button_with(
-        id,
+        SharedString::from(format!("picker-{}", menu.id)),
         content,
-        if open {
+        if is_open {
             ButtonKind::Secondary
         } else {
             ButtonKind::Ghost
@@ -442,45 +314,42 @@ fn claude_picker(
     )
     .h(px(20.0))
     .px(px(6.0));
-    // The acting reason when off, else what the picker does.
-    let b = gate::tip(
-        b,
-        crate::acting::Control {
-            enabled: true,
-            tooltip: Some(control.tooltip.unwrap_or(tip)),
-        },
-        a,
-    );
+    // The acting reason when acting is off, else what the picker does (or why it can't yet).
+    let tip = control
+        .tooltip
+        .map(str::to_owned)
+        .unwrap_or_else(|| menu.tip.clone());
+    let b = gate::tip_text(b, SharedString::from(tip), a);
+    let id = menu.id.clone();
     let b = b
         .when(enabled, |b| {
-            b.on_click(cx.listener(move |this, _, _, cx| this.toggle_claude_picker(kind, cx)))
+            b.on_click(cx.listener(move |this, _, _, cx| this.toggle_menu(&id, cx)))
         })
-        .part_at(part, Corner::Top, a, cx);
+        .part_at(&menu.part(), Corner::Top, a, cx);
+    let more = open.map(|(_, more)| more).unwrap_or(false);
     div()
         .relative()
         .flex_shrink_0()
         .child(b)
-        .children(open.then(|| claude_menu(view, kind, a, cx)))
+        .children(is_open.then(|| picker_menu(menu, more, a, cx)))
 }
 
-/// The Model and Effort pickers under the card, for a Claude Code session.
-fn claude_pickers(
+/// The pickers under the card: Model, Effort and any other choice the session's tool offers.
+fn pickers_row(
     view: &ChatView,
     control: crate::acting::Control,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Option<Div> {
-    if view.selected_session()?.tool != Tool::Claude {
+    let menus = view.menus();
+    if menus.is_empty() {
         return None;
     }
-    Some(
-        div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(claude_picker(view, Kind::Model, control, a, cx))
-            .child(claude_picker(view, Kind::Effort, control, a, cx)),
-    )
+    let mut row = div().flex().items_center().gap(px(8.0));
+    for menu in &menus {
+        row = row.child(picker_button(view, menu, control, a, cx));
+    }
+    Some(row)
 }
 
 /// What a render can force, since nothing types, works or clicks in a picture.
@@ -990,8 +859,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .flex()
         .items_center()
         .gap(px(8.0))
-        .children(picker(view, a, cx))
-        .children(claude_pickers(view, control, a, cx))
+        .children(pickers_row(view, control, a, cx))
         .child(
             div()
                 .flex_1()
@@ -1027,7 +895,6 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         }))
         .child(card)
         .child(footer)
-        .children(pop_up(view, a, cx))
         .children(super::slash_menu::render(view, a, cx))
 }
 
