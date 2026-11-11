@@ -63,6 +63,11 @@ pub struct Cell {
     /// Dollars, at the model's `priced_at` price.
     pub cost: f64,
     pub tokens: Tokens,
+    /// Moved over from a version 2 cache, which kept a day per account and model, not per
+    /// project and channel: the split over projects and channels is a share, not where the
+    /// requests ran. A reprice then covers that account's model for the whole day at once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub moved: bool,
 }
 
 /// "account\tchannel\tmodel\tproject", the key of a day's cells.
@@ -271,6 +276,7 @@ impl Cache {
                     for (p, ps) in &proj_share {
                         let cell = cells.entry(cell_key(account, ch, model, p)).or_default();
                         cell.cost += cost * cs * ps;
+                        cell.moved = true;
                         // Version 2 kept cache writes as one number; they read as five-minute ones.
                         for (sum, n) in cell.tokens.iter_mut().zip(t) {
                             *sum += n * ts * ps;

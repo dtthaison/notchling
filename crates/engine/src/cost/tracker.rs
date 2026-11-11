@@ -345,8 +345,22 @@ impl Tracker {
             return false;
         };
         for (day, cells) in cache.cells.iter_mut() {
+            let moved: HashSet<(String, String)> = cells
+                .iter()
+                .filter(|(_, c)| c.moved)
+                .map(|(k, _)| {
+                    let (account, _, model, _) = cell_parts(k);
+                    (account.to_string(), model.to_string())
+                })
+                .collect();
+            for (account, model) in &moved {
+                reprice_moved(cells, day, account, model, &recount);
+            }
             for (k, cell) in cells.iter_mut() {
-                let (_, channel, model, _) = cell_parts(k);
+                let (account, channel, model, _) = cell_parts(k);
+                if moved.contains(&(account.to_string(), model.to_string())) {
+                    continue;
+                }
                 let Some(&(then, now)) = recount.changed.get(&price_key(tool_of(channel), model))
                 else {
                     continue;
@@ -727,13 +741,24 @@ fn repriced(
     then: Option<Option<Price>>,
     now: Option<Price>,
 ) -> f64 {
-    let Some(now) = now else {
-        return 0.0;
-    };
+    covered.new + uncovered(cell, covered, then, now).1
+}
+
+/// What of `cell` no transcript on disk still holds: its tokens, and its dollars at the price
+/// `now` (scaled from its old dollars when the old price is known, else from the tokens).
+fn uncovered(
+    cell: &Cell,
+    covered: &Covered,
+    then: Option<Option<Price>>,
+    now: Option<Price>,
+) -> (Tokens, f64) {
     let mut gone = [0.0; 5];
     for (i, g) in gone.iter_mut().enumerate() {
         *g = (cell.tokens[i] - covered.tokens[i]).max(0.0);
     }
+    let Some(now) = now else {
+        return (gone, 0.0);
+    };
     let rest = match then.flatten() {
         Some(old) => {
             let left = (cell.cost - covered.old).max(0.0);
@@ -746,7 +771,88 @@ fn repriced(
         }
         None => prices::estimate(&now, &gone),
     };
-    covered.new + rest
+    (gone, rest)
+}
+
+/// Prices again one account's model on one day whose cells came from a version 2 cache. Those
+/// cells split the day over projects and channels by share, not by where the requests ran, so
+/// coverage is taken for the whole day of that model: what the transcripts on disk hold goes to
+/// the cells it really belongs to, exactly, and only the rest (the requests whose transcripts are
+/// gone) stays spread over the old cells by their token share. A day fully covered is exact
+/// from then on and no longer marked as moved over.
+fn reprice_moved(
+    cells: &mut BTreeMap<String, Cell>,
+    day: &str,
+    account: &str,
+    model: &str,
+    recount: &Recount,
+) {
+    let mine = |k: &str| {
+        let (a, _, m, _) = cell_parts(k);
+        a == account && m == model
+    };
+    let keys: Vec<String> = cells.keys().filter(|k| mine(k)).cloned().collect();
+    let Some(&(then, now)) = keys.first().and_then(|k| {
+        recount
+            .changed
+            .get(&price_key(tool_of(cell_parts(k).1), model))
+    }) else {
+        return;
+    };
+    let mut total = Cell::default();
+    for k in &keys {
+        let c = cells[k];
+        total.cost += c.cost;
+        for (sum, t) in total.tokens.iter_mut().zip(c.tokens) {
+            *sum += t;
+        }
+    }
+    let found: Vec<(&String, &Covered)> = recount
+        .covered
+        .iter()
+        .filter(|((d, k), _)| d == day && mine(k))
+        .map(|((_, k), c)| (k, c))
+        .collect();
+    let mut all = Covered::default();
+    for (_, c) in &found {
+        all.old += c.old;
+        all.new += c.new;
+        for (sum, t) in all.tokens.iter_mut().zip(c.tokens) {
+            *sum += t;
+        }
+    }
+    let (gone, rest) = uncovered(&total, &all, then, now);
+    let gone_sum: f64 = gone.iter().sum();
+    // Tokens are whole numbers: less than half a token left is rounding, not a lost transcript.
+    let moved = gone_sum >= 0.5;
+    let weight = |c: &Cell| c.tokens.iter().sum::<f64>();
+    let weights: f64 = keys.iter().map(|k| weight(&cells[k])).sum();
+    for k in &keys {
+        let share = if weights > 0.0 {
+            weight(&cells[k]) / weights
+        } else {
+            1.0 / keys.len() as f64
+        };
+        let cell = cells.get_mut(k).expect("listed");
+        if moved {
+            cell.cost = rest * share;
+            for (t, g) in cell.tokens.iter_mut().zip(gone) {
+                *t = g * share;
+            }
+        } else {
+            *cell = Cell::default();
+        }
+        cell.moved = moved;
+    }
+    for (k, c) in found {
+        let cell = cells.entry(k.clone()).or_default();
+        cell.cost += c.new;
+        for (sum, t) in cell.tokens.iter_mut().zip(c.tokens) {
+            *sum += t;
+        }
+        cell.moved = moved;
+    }
+    cells.retain(|k, c| !mine(k) || weight(c) >= 0.5 || c.cost.abs() > 1e-9);
 }
 
 /// Four token counts (no one-hour cache writes) as five.

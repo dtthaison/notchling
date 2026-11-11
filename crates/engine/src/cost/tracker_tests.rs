@@ -886,54 +886,5 @@ fn a_borrowed_model_named_current_later_is_priced_again() {
     near(month(&t.ranged(NOW), Window::All), 50.0);
 }
 
-/// A version 2 cache holding one day, forty days ago, of $20 of Opus 5.5 output over projects
-/// "demo" and "other" on account "acct", counted at the prices with fingerprint `prices`.
-fn v2_cache(prices: &str) -> String {
-    let day = day_key(((NOW - 40.0 * DAY) / DAY).floor() as i64);
-    serde_json::json!({
-        "version": 2,
-        "prices": prices,
-        "files": {},
-        "models": {&day: {"acct\tclaude-opus-5-5": 20.0}},
-        "projects": {&day: {"acct\tdemo": 15.0, "acct\tother": 5.0}},
-        "channels": {&day: {"acct\tClaude Code": 20.0}},
-        "tokens": {&day: {"acct\tclaude-opus-5-5": [0.0, 1_000_000.0, 0.0, 0.0]}},
-        "channel_tokens": {&day: {"acct\tClaude Code": 1_000_000.0}},
-        "unpriced": {},
-        "seen": {&day: ""}
-    })
-    .to_string()
-}
-
-#[test]
-fn a_version_2_cache_moves_over_with_the_days_it_counted() {
-    let tmp = TempDir::new("cost-v2");
-    let data = tmp.path("data");
-    store::put_doc(&data, CACHE_DOC, &v2_cache(&catalog().prices_hash())).unwrap();
-    let mut t = claude_tracker(&tmp);
-    t.refresh(NOW);
-    let r = t.ranged(NOW);
-    let s = &r.overall[&Window::All];
-    near(s.month, 20.0);
-    let projects: Vec<_> = s
-        .projects
-        .iter()
-        .map(|p| (p.name.as_str(), p.cost))
-        .collect();
-    assert_eq!(projects, [("demo", 15.0), ("other", 5.0)]);
-    assert_eq!(s.channels[0].name, CLAUDE_CODE);
-    near(s.model_detail[0].output, 1_000_000.0);
-    t.save_now(NOW);
-    assert_eq!(Cache::load(&data, &catalog()).version, CURRENT);
-
-    // Counted at other prices: the day is priced again from its tokens, at today's.
-    let tmp = TempDir::new("cost-v2-other-prices");
-    store::put_doc(&tmp.path("data"), CACHE_DOC, &v2_cache("0000000000000000")).unwrap();
-    let doubled = overridden(
-        &tmp,
-        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 40.0, "cache_read": 0.2}]}}"#,
-    );
-    let mut t = tracker_with(&tmp, doubled);
-    t.refresh(NOW);
-    near(month(&t.ranged(NOW), Window::All), 40.0);
-}
+#[path = "tracker_v2_tests.rs"]
+mod v2;
