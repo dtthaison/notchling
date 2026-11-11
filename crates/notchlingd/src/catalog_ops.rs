@@ -50,7 +50,7 @@ use notchling_engine::accounts::claude::ClaudeAccounts;
 use notchling_engine::accounts::http::{HttpClient, HttpRequest, HttpResponse};
 use notchling_engine::catalog::claude_live;
 use notchling_engine::catalog::live_cache::{refresh_due, LiveCache};
-use notchling_engine::catalog::{Catalog, LiveModel, ModelInfo, Tool};
+use notchling_engine::catalog::{model_key, Catalog, LiveModel, ModelInfo, Tool};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models as codex_models;
 use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec};
@@ -267,6 +267,26 @@ impl CatalogService {
     /// tool's live list.
     pub fn is_allowed(&self, tool: Tool, id: &str) -> bool {
         self.inner.catalog.is_allowed(tool, &self.live(tool).1, id)
+    }
+
+    /// A model's context window, as `catalog.get` reports it for that model: the catalog's (the
+    /// data file, the override, or the family's it borrows) and, for a Claude model it has none
+    /// for, the live list's; another tool's own list comes first. The phone's chat header shows
+    /// this, so it shows what Chat's Context Meter does.
+    pub fn context_window(&self, tool: Tool, model: &str) -> Option<u64> {
+        let key = model_key(model);
+        let live = || {
+            self.live(tool)
+                .1
+                .into_iter()
+                .find(|l| model_key(&l.id) == key)
+                .and_then(|l| l.context_window)
+        };
+        let catalog = || self.inner.catalog.context_window(tool, model);
+        match tool {
+            Tool::Claude => catalog().or_else(live),
+            _ => live().or_else(catalog),
+        }
     }
 
     /// The models and when their live list was fetched or seen (`None` while only the data

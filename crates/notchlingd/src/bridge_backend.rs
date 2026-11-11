@@ -135,6 +135,10 @@ impl Sources for DaemonSources {
         self.acting.catalog().is_allowed(Tool::Claude, id)
     }
 
+    fn context_window(&self, model: &str) -> Option<u64> {
+        self.acting.catalog().context_window(Tool::Claude, model)
+    }
+
     fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool {
         self.approvals.request(device_name, platform, address)
     }

@@ -94,6 +94,31 @@ fn model_allowed_is_the_catalogs_check() {
 }
 
 #[test]
+fn the_phones_context_window_is_the_catalogs() {
+    let mut window = live("claude-sonnet-6");
+    window.context_window = Some(300_000);
+    let (ops, _fake, _tmp) = ops(&[live("claude-opus-5-6"), window], "models-window");
+    let s = sources(&ops);
+    let catalog = ops.catalog().catalog();
+    // The data file's, and the family's for a newer Opus the live list reports.
+    for model in ["claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-5-6"] {
+        assert_eq!(
+            s.context_window(model),
+            catalog.context_window(Tool::Claude, model),
+            "{model}"
+        );
+        assert_eq!(s.context_window(model), Some(400_000), "{model}");
+    }
+    // The catalog has none for these; the live list's own is used, else none.
+    assert_eq!(
+        catalog.context_window(Tool::Claude, "claude-sonnet-6"),
+        None
+    );
+    assert_eq!(s.context_window("claude-sonnet-6"), Some(300_000));
+    assert_eq!(s.context_window("claude-sonnet-5-5"), None);
+}
+
+#[test]
 fn a_model_id_starts_a_session_on_exactly_that_model() {
     let (ops, fake, _tmp) = ops(&[], "models-start");
     let acting = DaemonActing {

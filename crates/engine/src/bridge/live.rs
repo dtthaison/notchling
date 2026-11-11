@@ -76,6 +76,11 @@ pub trait Sources: Send + Sync {
     fn model_allowed(&self, _id: &str) -> bool {
         false
     }
+    /// A Claude model's context window as the catalog has it (the one Chat's Context Meter
+    /// shows), or `None` when it doesn't know one.
+    fn context_window(&self, _model: &str) -> Option<u64> {
+        None
+    }
     /// `~/.claude/projects`, for the recent folders.
     fn projects_dir(&self) -> Option<PathBuf> {
         None
@@ -271,7 +276,9 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
                 if session.control == Control::ViewOnly {
                     session.takeover = self.sources.takeover_state(&session);
                 }
-                enrich(&mut session, &limits, now);
+                enrich(&mut session, &limits, now, &|model| {
+                    self.sources.context_window(model)
+                });
                 session
             })
             .collect();
@@ -426,8 +433,15 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 /// What Notchling knows about a Claude Code session, for the list and the chat header
 /// (`LiveBridgeBackend.enrich`): what it's doing while it runs, its newest reply, the context in
 /// use and the account's limits. Only sessions active in the last six hours; the readers keep a
-/// cursor per transcript, so a repeat call reads only what was appended.
-pub fn enrich(session: &mut Session, limits: &[Limit], now_ms: f64) {
+/// cursor per transcript, so a repeat call reads only what was appended. `window` is the
+/// catalog's context window for a model ([`Sources::context_window`]), so the phone shows the
+/// window Chat does.
+pub fn enrich(
+    session: &mut Session,
+    limits: &[Limit],
+    now_ms: f64,
+    window: &dyn Fn(&str) -> Option<u64>,
+) {
     if session.tool != "claude" || session.state == SessionState::Exited {
         return;
     }
@@ -459,17 +473,14 @@ pub fn enrich(session: &mut Session, limits: &[Limit], now_ms: f64) {
     }
     session.facts = Some(Facts {
         context_tokens: (facts.context_tokens > 0).then_some(facts.context_tokens as i64),
-        context_window: context_window(facts.model.as_deref()),
+        context_window: facts
+            .model
+            .as_deref()
+            .and_then(window)
+            .and_then(|w| i64::try_from(w).ok()),
         model: facts.model.clone(),
         limits: limits.to_vec(),
     });
-}
-
-/// The model's context window where it's known (Opus 5.5: 400k), as Chat's header has it.
-pub fn context_window(model: Option<&str>) -> Option<i64> {
-    model
-        .filter(|m| m.starts_with("claude-opus-5-5"))
-        .map(|_| 400_000)
 }
 
 /// A transcript chat message on the wire; its id is the Swift app's (`stableUUID` of its seed).

@@ -12,6 +12,7 @@ use super::test_support::{
     NOW_MS,
 };
 use super::wire::BridgeFailure;
+use crate::catalog::{Catalog, Tool};
 use crate::sessions::testutil::TempDir;
 use crate::transcript::model::{ChatItem, Conversation, ItemKind, ToolCall, ToolKind};
 use std::collections::{HashMap, HashSet};
@@ -45,7 +46,10 @@ fn enrich_adds_activity_the_newest_reply_and_facts() {
         resets_at: None,
     }];
     let mut session = claude(Some(transcript(&dir)), SessionState::Running);
-    enrich(&mut session, &limits, NOW_MS);
+    let catalog = Catalog::built_in();
+    enrich(&mut session, &limits, NOW_MS, &|m| {
+        catalog.context_window(Tool::Claude, m)
+    });
     assert_eq!(session.activity.as_deref(), Some("Editing main.swift"));
     let last = session.last_message.clone().expect("last message");
     assert_eq!(last.text, "The crash was a nil optional.");
@@ -54,6 +58,45 @@ fn enrich_adds_activity_the_newest_reply_and_facts() {
     assert_eq!(facts.context_window, Some(400_000));
     assert_eq!(facts.model.as_deref(), Some("claude-opus-5-5"));
     assert_eq!(facts.limits, limits);
+}
+
+fn no_window(_: &str) -> Option<u64> {
+    None
+}
+
+#[test]
+fn the_phones_context_window_is_the_catalogs() {
+    let dir = TempDir::new("bridge-enrich-window");
+    // An override gives Opus 5.5 another window; the phone shows the catalog's, as Chat does.
+    let catalog = Catalog::load(&dir.write(
+        "catalog.json",
+        r#"{"claude": {"windows": {"claude-opus-5-5": 1000000}}}"#,
+    ));
+    let world = FakeSources {
+        claude: vec![claude(Some(transcript(&dir)), SessionState::Running)],
+        catalog,
+        clock: Mutex::new(NOW_MS),
+        ..FakeSources::default()
+    };
+    let want = world
+        .catalog
+        .context_window(Tool::Claude, "claude-opus-5-5")
+        .map(|w| w as i64);
+    assert_eq!(want, Some(1_000_000));
+    let backend = LiveBackend::new(world, RecordingActing::default());
+    let session = backend
+        .sessions()
+        .into_iter()
+        .find(|s| s.id == "s1")
+        .expect("the session");
+    assert_eq!(session.facts.expect("facts").context_window, want);
+    // A model the catalog has no window for shows none.
+    let none = Catalog::default();
+    let mut other = claude(Some(transcript(&dir)), SessionState::Running);
+    enrich(&mut other, &[], NOW_MS, &|m| {
+        none.context_window(Tool::Claude, m)
+    });
+    assert_eq!(other.facts.expect("facts").context_window, None);
 }
 
 #[test]
@@ -66,7 +109,7 @@ fn enrich_leaves_quiet_exited_and_other_tools_alone() {
     let mut codex = claude(path.clone(), SessionState::Running);
     codex.tool = "codex".into();
     for session in [&mut quiet, &mut exited, &mut codex] {
-        enrich(session, &[], NOW_MS);
+        enrich(session, &[], NOW_MS, &no_window);
         assert_eq!(
             (
                 session.activity.clone(),
@@ -77,7 +120,7 @@ fn enrich_leaves_quiet_exited_and_other_tools_alone() {
         );
     }
     let mut done = claude(path, SessionState::Done);
-    enrich(&mut done, &[], NOW_MS);
+    enrich(&mut done, &[], NOW_MS, &no_window);
     assert_eq!(
         done.activity, None,
         "only a running session says what it's doing"
@@ -91,11 +134,15 @@ struct FakeSources {
     rows: Vec<ForeignRow>,
     live: ForeignLive,
     clock: Mutex<f64>,
+    catalog: Catalog,
 }
 
 impl Sources for FakeSources {
     fn claude_sessions(&self) -> Vec<Session> {
         self.claude.clone()
+    }
+    fn context_window(&self, model: &str) -> Option<u64> {
+        self.catalog.context_window(Tool::Claude, model)
     }
     fn takeover_state(&self, _: &Session) -> Option<TakeoverState> {
         Some(TakeoverState::Available)
@@ -224,6 +271,7 @@ fn agy_world() -> FakeSources {
             ..ForeignLive::default()
         },
         clock: Mutex::new(NOW_MS),
+        catalog: Catalog::default(),
     }
 }
 
