@@ -128,7 +128,10 @@ mod tests {
         assert_eq!(seen[0].0, "install.plan");
         assert_eq!(seen[1].0, "install.apply");
         for (_, args) in seen.iter() {
-            assert!(args.get("what").is_none(), "no list: the daemon does every part");
+            assert!(
+                args.get("what").is_none(),
+                "no list: the daemon does every part"
+            );
         }
     }
 

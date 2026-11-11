@@ -258,3 +258,26 @@ fn provider_pages_show_their_reports_defaults_and_remove_words() {
     let none = page("gemini", &s, &on(), false, NOW, Zone::UTC);
     assert!(none.rows.is_empty() && none.empty.is_some());
 }
+
+#[test]
+fn a_claude_desktop_row_shows_the_limits_of_the_same_claude_code_account() {
+    use crate::accounts::renders::claude_report;
+    let mut s = snapshot(Shown::Claude);
+    let uuid = page(CLAUDE_DESKTOP, &s, &on(), false, NOW, Zone::UTC).rows[0]
+        .id
+        .clone();
+    // Claude Code's id for the same account is `<uuid>:<org>`.
+    let code_id = format!("{uuid}:org-1");
+    s.claude.accounts[0].id = code_id.clone();
+    s.claude_usage.reports.insert(code_id, claude_report());
+    let desktop = page(CLAUDE_DESKTOP, &s, &on(), false, NOW, Zone::UTC);
+    let RowContent::Limits(groups) = &desktop.rows[0].content else {
+        panic!("the Claude Code account's limits");
+    };
+    assert_eq!(groups[0].lines.len(), 2);
+    assert_eq!(
+        desktop.rows[1].content,
+        RowContent::None,
+        "another account's limits never show"
+    );
+}

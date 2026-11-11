@@ -11,6 +11,7 @@ use super::flows::{add_panel, AddPanel};
 use super::limits::{self, LimitGroup, Zone};
 use super::store::Snapshot;
 use super::wire::Provider;
+use notchling_engine::limits::report::UsageReport;
 
 /// The Claude Code tab's id; the others are the daemon's provider ids.
 pub const CLAUDE_CODE: &str = "claudeCode";
@@ -265,6 +266,15 @@ fn empty_text(provider: &str) -> &'static str {
     }
 }
 
+/// The limits read for the Claude Code account whose UUID is `uuid` (its id is `<uuid>:<org>`).
+fn desktop_limits<'a>(s: &'a Snapshot, uuid: &str) -> Option<&'a UsageReport> {
+    s.claude
+        .accounts
+        .iter()
+        .filter(|c| c.id.split(':').next() == Some(uuid))
+        .find_map(|c| s.claude_usage.reports.get(&c.id))
+}
+
 fn provider_page(
     p: &Provider,
     s: &Snapshot,
@@ -279,7 +289,13 @@ fn provider_page(
         .iter()
         .map(|a| {
             let in_use = p.active_id.as_deref() == Some(a.id.as_str());
-            let report = reports.and_then(|r| r.get(&a.id));
+            // Claude Desktop signs in to the same accounts as Claude Code, so a Desktop row shows
+            // the limits read for the Claude Code account with its UUID (`<uuid>:<org>`).
+            let report = reports.and_then(|r| r.get(&a.id)).or_else(|| {
+                (p.id == CLAUDE_DESKTOP)
+                    .then(|| desktop_limits(s, &a.id))
+                    .flatten()
+            });
             let content = match report {
                 Some(report) => RowContent::Limits(limits::groups(report, now, zone)),
                 None => match (p.id.as_str(), in_use) {
