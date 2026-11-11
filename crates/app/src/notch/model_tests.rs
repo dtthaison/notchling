@@ -410,3 +410,36 @@ fn an_answer_hides_the_prompt_it_answered_and_not_one_that_came_after() {
     // Nothing to answer, nothing to key.
     assert_eq!(m.answer_key("nobody"), None);
 }
+
+#[test]
+fn the_settings_switches_set_the_width_the_peek_text_and_fold_a_hidden_notch() {
+    let mut m = model(vec![agent("a", AgentGroup::Completed)]);
+    m.snapshots.insert("a".into(), reply("All done"));
+    m.go(NotchState::List);
+    let medium = m.size(&NotchState::List).w;
+    let prefs = NotchPrefs {
+        width: NotchWidth::Large,
+        show_last_reply: false,
+        ..NotchPrefs::default()
+    };
+    assert!(m.apply(&prefs));
+    assert!(
+        m.size(&NotchState::List).w > medium,
+        "Large is wider than Medium"
+    );
+    let a = m.agents[0].clone();
+    assert_eq!(m.peek_text(&a), None, "no last reply in a peek");
+    assert_eq!(m.state, NotchState::List, "a shown notch keeps its state");
+    assert!(!m.apply(&prefs), "nothing changed the second time");
+
+    let hidden = NotchPrefs {
+        shown: false,
+        ..prefs
+    };
+    assert!(m.apply(&hidden));
+    assert_eq!(
+        m.state,
+        NotchState::Collapsed,
+        "a hidden notch comes back closed"
+    );
+}

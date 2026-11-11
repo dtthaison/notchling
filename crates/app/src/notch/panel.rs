@@ -23,6 +23,7 @@ use super::layout::{
     canvas_frame, geometry, hit_test, shape_rect, Geometry, NotchState, Rect, ScreenInfo,
 };
 use super::model::NotchModel;
+use super::prefs::NotchPrefs;
 use super::source::{now_ms, Source};
 use super::view::NotchView;
 use crate::actions::Actions;
@@ -98,6 +99,10 @@ pub fn open(
             view.ns_window = ns;
             view.geometry = Some(geometry);
             let mut source = source;
+            // Before the first draw, so a notch turned off in Settings never flashes up.
+            if let Some(prefs) = NotchPrefs::read(&source.root.data_dir) {
+                view.apply_prefs(prefs);
+            }
             // An open Antigravity session's lines come from the daemon (a read, peeking so the
             // poll never keeps an idle process alive); the notch can't read its files.
             let reader = view.actions.clone();
@@ -223,15 +228,20 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
             None => (None, None, ToolLive::default(), None, Default::default()),
         };
         if let Some(mut source) = source {
-            let (source, loaded) = cx
+            let (source, loaded, prefs) = cx
                 .background_executor()
                 .spawn(async move {
                     let loaded = source.load_live(claude, prompts, &live, now_ms());
-                    (source, loaded)
+                    // What the Settings sheet saved since the last poll.
+                    let prefs = NotchPrefs::read(&source.root.data_dir);
+                    (source, loaded, prefs)
                 })
                 .await;
             let applied = this.update(cx, |view, cx| {
                 view.source = Some(source);
+                if let Some(prefs) = prefs {
+                    view.apply_prefs(prefs);
+                }
                 view.model.daemon_note = note;
                 // What Chat answered is answered here too.
                 view.model.answered.extend(answered);

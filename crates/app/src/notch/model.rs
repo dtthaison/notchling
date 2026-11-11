@@ -12,6 +12,7 @@ use super::layout::{
     collapsed_size, detail_size, list_size, peek_size, permission_height, question_height,
     row_height, NotchState, NotchWidth, PeekContent, Size, DEFAULT_NOTCH,
 };
+use super::prefs::NotchPrefs;
 use super::requests::{HookRequest, RequestKind};
 
 /// The tabs in order; the order is also the rows' sort order.
@@ -294,6 +295,18 @@ impl NotchModel {
         }
         self.state = state;
         self.card_height = None;
+    }
+
+    /// Takes the Settings sheet's Notch switches; a hidden notch folds to the housing, so it comes
+    /// back closed. True when anything drawn changed.
+    pub fn apply(&mut self, prefs: &NotchPrefs) -> bool {
+        let before = (self.width, self.show_last_reply, self.state.clone());
+        self.width = prefs.width;
+        self.show_last_reply = prefs.show_last_reply;
+        if !prefs.shown {
+            self.go(NotchState::Collapsed);
+        }
+        before != (self.width, self.show_last_reply, self.state.clone())
     }
 
     /// Opens a session's conversation.

@@ -29,6 +29,7 @@ use super::model::{
 };
 use super::perch::{AxFrame, Perch, PetMode};
 use super::pet::Walk;
+use super::prefs::NotchPrefs;
 use super::source::Source;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
@@ -57,9 +58,10 @@ pub struct NotchView {
     /// The answer box's focus, and whether it had it at the last draw.
     pub(super) focus: FocusHandle,
     pub(super) focused: bool,
-    /// The pet: its place, the setting, and what a render forces.
+    /// The Settings sheet's Notch switches, as last read.
+    pub(super) prefs: NotchPrefs,
+    /// The pet: its place and what a render forces.
     pub(super) walk: Walk,
-    pub(super) show_pet: bool,
     pub(super) forced_pet: Option<PetMode>,
     pub(super) perch: Option<Perch>,
     /// A render's stand-in for the frontmost window, in the canvas (y down).
@@ -88,8 +90,8 @@ impl NotchView {
             send_error: None,
             focus: cx.focus_handle(),
             focused: false,
+            prefs: NotchPrefs::default(),
             walk: Walk::default(),
-            show_pet: true,
             forced_pet: None,
             perch: None,
             scene_window: None,
@@ -105,9 +107,24 @@ impl NotchView {
         self.actions.acting(attached)
     }
 
-    /// Every action control's gate.
+    /// Every action control's gate: acting, unless answering from the notch is off in Settings.
     pub(super) fn gate(&self) -> Control {
-        self.acting().control()
+        self.prefs.answer_gate(self.acting().control())
+    }
+
+    /// Takes the Settings sheet's Notch switches: the model's, the pet's, and whether the panel
+    /// is on screen at all. True when anything drawn changed.
+    pub(super) fn apply_prefs(&mut self, prefs: NotchPrefs) -> bool {
+        let changed = self.model.apply(&prefs) | (self.prefs != prefs);
+        self.prefs = prefs;
+        if let Some(w) = &self.ns_window {
+            if prefs.shown && !w.isVisible() {
+                w.orderFrontRegardless();
+            } else if !prefs.shown && w.isVisible() {
+                w.orderOut(None);
+            }
+        }
+        changed
     }
 
     /// The card on show in a state, and its drawn height.

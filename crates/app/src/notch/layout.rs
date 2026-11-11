@@ -26,6 +26,16 @@ pub enum NotchWidth {
 }
 
 impl NotchWidth {
+    /// The `notchWidth` setting's value.
+    pub fn from_key(key: &str) -> Option<NotchWidth> {
+        match key {
+            "small" => Some(NotchWidth::Small),
+            "medium" => Some(NotchWidth::Medium),
+            "large" => Some(NotchWidth::Large),
+            _ => None,
+        }
+    }
+
     /// The agent list and short peeks.
     pub fn list(self) -> f64 {
         match self {

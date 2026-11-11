@@ -26,6 +26,7 @@ pub mod perch;
 pub mod pet;
 #[cfg(target_os = "macos")]
 pub mod pet_view;
+pub mod prefs;
 pub mod renders;
 pub mod requests;
 pub mod source;

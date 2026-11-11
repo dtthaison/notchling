@@ -48,7 +48,7 @@ impl NotchView {
     pub(super) fn pet_mode(&self) -> PetMode {
         self.forced_pet.unwrap_or_else(|| {
             perch::mode(
-                self.show_pet,
+                self.prefs.show_pet,
                 self.model.count(AgentGroup::Working),
                 self.model.count(AgentGroup::NeedsInput),
             )
