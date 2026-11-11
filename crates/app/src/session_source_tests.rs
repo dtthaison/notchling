@@ -84,6 +84,18 @@ fn a_catalog_reply_is_read_for_its_models_and_an_empty_or_odd_one_is_ignored() {
 }
 
 #[test]
+fn the_catalog_is_read_when_asked_and_at_least_hourly() {
+    let last = Instant::now();
+    assert!(!catalog_due(last, last, false));
+    assert!(!catalog_due(last, last + Duration::from_secs(3599), false));
+    assert!(catalog_due(last, last + Duration::from_secs(3600), false));
+    // A model menu opening asks at once.
+    assert!(catalog_due(last, last, true));
+    // A clock that went backwards isn't due.
+    assert!(!catalog_due(last + Duration::from_secs(5), last, false));
+}
+
+#[test]
 fn backoff_doubles_and_never_passes_ten_seconds() {
     let b = Backoff::default();
     let secs: Vec<u64> = (0..6).map(|n| b.delay(n).as_secs()).collect();
@@ -290,6 +302,8 @@ mod over_a_socket {
     struct CatalogFake {
         list: Value,
         models: Arc<Mutex<Value>>,
+        /// How many `catalog.get` calls came in.
+        gets: Arc<AtomicUsize>,
     }
 
     impl Handler for CatalogFake {
@@ -299,11 +313,14 @@ mod over_a_socket {
 
         fn call(&self, _: &Caller, op: &str, _: &Value) -> Result<Value, ApiError> {
             Ok(match op {
-                "catalog.get" => serde_json::json!({
+                "catalog.get" => {
+                    self.gets.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
                     "tool": "claude",
                     "models": self.models.lock().unwrap_or_else(|e| e.into_inner()).clone(),
                     "fetchedAt": 1.0,
-                }),
+                    })
+                }
                 _ => self.list.clone(),
             })
         }
@@ -319,6 +336,7 @@ mod over_a_socket {
         let built_in = Catalog::built_in().models(Tool::Claude, &[]);
         let scratch = Scratch::new("ss-catalog");
         let socket = scratch.path().join(SOCKET_NAME);
+        let gets = Arc::new(AtomicUsize::new(0));
         let models = Arc::new(Mutex::new(
             serde_json::to_value(&built_in[..2]).expect("models"),
         ));
@@ -333,6 +351,7 @@ mod over_a_socket {
             Arc::new(CatalogFake {
                 list: serde_json::to_value(vec![agent("a")]).expect("rows"),
                 models: models.clone(),
+                gets: gets.clone(),
             }),
         )
         .expect("bind");
@@ -361,6 +380,21 @@ mod over_a_socket {
             assert!(Instant::now() < end, "waited for the changed catalog");
             std::thread::sleep(Duration::from_millis(10));
         }
+        // A model menu opening asks again (the daemon fetches only when asked): the list the daemon
+        // now serves is read, and it moves the catalog generation, not the rows'.
+        let asked_at = gets.load(Ordering::SeqCst);
+        let rows = source.generation();
+        *models.lock().unwrap_or_else(|e| e.into_inner()) =
+            serde_json::to_value(&built_in[..4]).expect("models");
+        let catalog_before = source.catalog_generation();
+        source.ask_catalog();
+        while source.catalog(Tool::Claude).len() != 4 {
+            assert!(Instant::now() < end, "waited for the asked catalog");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(gets.load(Ordering::SeqCst) > asked_at);
+        assert!(source.catalog_generation() > catalog_before);
+        assert_eq!(source.generation(), rows, "the conversation isn't reloaded");
         // A tool Chat doesn't read has nothing.
         assert!(source.catalog(Tool::Codex).is_empty());
         stop(running);

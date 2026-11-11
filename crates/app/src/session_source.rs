@@ -176,6 +176,9 @@ struct State {
     tools: ToolLive,
     /// What `catalog.get` last said, per tool; empty until the daemon has answered.
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
+    /// Counts changes of `catalog` apart from `generation`, which makes Chat reload its
+    /// conversation: a new model list only redraws.
+    catalog_generation: u64,
     answered: HashSet<String>,
     link: Link,
     generation: u64,
@@ -184,6 +187,8 @@ struct State {
 struct Shared {
     state: Mutex<State>,
     stop: AtomicBool,
+    /// Chat wants the model list read again now (a model menu opened).
+    catalog_ask: AtomicBool,
 }
 
 impl Shared {
@@ -200,7 +205,7 @@ impl Shared {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.catalog.get(&tool) != Some(&models) {
             state.catalog.insert(tool, models);
-            state.generation += 1;
+            state.catalog_generation += 1;
         }
     }
 
@@ -275,11 +280,13 @@ impl SessionSource {
                     prompts: None,
                     tools: ToolLive::default(),
                     catalog: HashMap::new(),
+                    catalog_generation: 0,
                     answered: HashSet::new(),
                     link,
                     generation: 0,
                 }),
                 stop: AtomicBool::new(false),
+                catalog_ask: AtomicBool::new(false),
             }),
         }
     }
@@ -324,6 +331,19 @@ impl SessionSource {
     pub fn catalog(&self, tool: CatalogTool) -> Vec<ModelInfo> {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.catalog.get(&tool).cloned().unwrap_or_default()
+    }
+
+    /// Counts changes of [`SessionSource::catalog`], so a caller can redraw without reloading.
+    pub fn catalog_generation(&self) -> u64 {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.catalog_generation
+    }
+
+    /// Asks the thread to read the model list again soon (a model menu opened): the daemon
+    /// fetches Anthropic's list only when asked, and an hour is long to wait for a new model.
+    /// Returns at once; the answer shows through [`SessionSource::catalog_generation`].
+    pub fn ask_catalog(&self) {
+        self.shared.catalog_ask.store(true, Ordering::SeqCst);
     }
 
     /// The held prompts and what was answered, without cloning the rest of the view: what Chat
@@ -463,11 +483,20 @@ fn held_change(list: &mut Vec<Value>, event: &Event) {
     }
 }
 
+/// How long the model list may go unread while Chat is open.
+const CATALOG_EVERY: Duration = Duration::from_secs(3600);
+
+/// Whether the model list is to be read now: Chat asked (a model menu opened), or it has been
+/// [`CATALOG_EVERY`] since the last read.
+fn catalog_due(last: Instant, now: Instant, asked: bool) -> bool {
+    asked || now.saturating_duration_since(last) >= CATALOG_EVERY
+}
+
 /// Applies `sessions.changed` and the prompt events until the connection ends or the source is
-/// dropped.
+/// dropped; reads the model list at the start, on `catalog.changed`, when Chat asks and hourly.
 fn follow(mut client: Client, shared: &Shared) {
-    // The model list at start; a daemon without `catalog.get` (an older one) leaves Chat on the
-    // built-in list.
+    // A daemon without `catalog.get` (an older one) leaves Chat on the built-in list.
+    let mut last_read = Instant::now();
     if read_catalog(&mut client, shared).is_err() {
         return;
     }
@@ -478,18 +507,29 @@ fn follow(mut client: Client, shared: &Shared) {
                     && event.data.get("tool").and_then(Value::as_str)
                         == Some(CatalogTool::Claude.name());
                 shared.apply(event);
-                if changed && read_catalog(&mut client, shared).is_err() {
-                    return;
+                if changed {
+                    last_read = Instant::now();
+                    if read_catalog(&mut client, shared).is_err() {
+                        return;
+                    }
                 }
             }
             Ok(None) => {}
             Err(_) => return,
         }
+        let asked = shared.catalog_ask.swap(false, Ordering::SeqCst);
+        if catalog_due(last_read, Instant::now(), asked) {
+            last_read = Instant::now();
+            if read_catalog(&mut client, shared).is_err() {
+                return;
+            }
+        }
     }
 }
 
-/// `catalog.get` for Claude Code, kept for Chat's pickers. An error from the daemon (no such op)
-/// or an answer that isn't a model list changes nothing; only a lost connection is an `Err`.
+/// `catalog.get` for Claude Code, kept for Chat's pickers. An error from the daemon (no such op),
+/// a slow answer or an answer that isn't a model list changes nothing (the last list stays); only
+/// a lost connection is an `Err`.
 fn read_catalog(client: &mut Client, shared: &Shared) -> Result<(), ClientError> {
     match client.call(
         ops::CATALOG_GET,
@@ -501,7 +541,7 @@ fn read_catalog(client: &mut Client, shared: &Shared) -> Result<(), ClientError>
             }
             Ok(())
         }
-        Err(ClientError::Api(_) | ClientError::Protocol(_)) => Ok(()),
+        Err(ClientError::Api(_) | ClientError::Protocol(_) | ClientError::Timeout) => Ok(()),
         Err(e) => Err(e),
     }
 }

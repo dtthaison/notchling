@@ -84,6 +84,14 @@ pub fn context_window(model: Option<&str>, catalog: &[ModelInfo]) -> Option<u64>
     claude_picker::find(catalog, model?)?.context_window
 }
 
+/// The known model a window is borrowed from (a model newer than any the catalog has heard of),
+/// when the window is known at all.
+pub fn context_window_source(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
+    let entry = claude_picker::find(catalog, model?)?;
+    entry.context_window?;
+    entry.borrowed_from.clone().filter(|_| entry.borrowed)
+}
+
 /// The header's context text: "148.8k / 400k · 37%" when the window is known, else "148.8k".
 /// `None` when nothing has been counted yet.
 pub fn context_text(

@@ -133,6 +133,8 @@ pub struct ChatView {
     source: Arc<SessionSource>,
     /// The source's generation at the last tick, so a change of rows or link reloads.
     seen_generation: u64,
+    /// The source's catalog generation at the last tick.
+    seen_catalog: u64,
     /// What the sidebar footer says about the daemon ("Daemon not running", "Daemon not trusted").
     daemon_note: Option<&'static str>,
     /// The models each tool offers, as the daemon's `catalog.get` last said; a tool with no entry
@@ -422,6 +424,7 @@ impl ChatView {
             scroll_to_end: true,
             gate: ReloadGate::default(),
             seen_generation: source.generation(),
+            seen_catalog: source.catalog_generation(),
             daemon_note: source.view().note(),
             catalog: HashMap::from([(CatalogTool::Claude, source.catalog(CatalogTool::Claude))]),
             source,
@@ -719,6 +722,12 @@ impl ChatView {
                 self.daemon_note = note;
             }
             self.sync_tools(cx);
+            cx.notify();
+        }
+        // A new model list only redraws (the pickers, the meter); it never reloads the conversation.
+        let catalog = self.source.catalog_generation();
+        if catalog != self.seen_catalog {
+            self.seen_catalog = catalog;
             self.catalog.insert(
                 CatalogTool::Claude,
                 self.source.catalog(CatalogTool::Claude),

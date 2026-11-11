@@ -6,8 +6,9 @@ use notchling_engine::catalog::ModelInfo;
 use notchling_engine::transcript::model::Conversation;
 use notchling_kit::Status;
 
+use super::claude_picker::model_label;
 use super::data::Session;
-use super::format::{context_text, model_name, short_path};
+use super::format::{context_text, context_window_source, model_name, short_path};
 use super::sidebar::status_of;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,12 +21,24 @@ pub struct Header {
     pub status_word: String,
     /// "148.8k / 400k · 37%", or the count alone, or nothing yet.
     pub context: Option<String>,
+    /// Says the context window is another model's, or `None`: "Window as Opus 5.5 until Notchling
+    /// knows this model".
+    pub context_note: Option<String>,
     /// "Opus 5.5".
     pub model: Option<String>,
     /// "Claude Code" or "Codex", plus where it runs.
     pub host: String,
     /// Background shells the transcript launched.
     pub shells: usize,
+}
+
+/// What the Context Meter says when its window is borrowed from the family's newest known model.
+fn window_note(model: Option<&str>, catalog: &[ModelInfo]) -> Option<String> {
+    let from = context_window_source(model, catalog)?;
+    Some(format!(
+        "Window as {} until Notchling knows this model",
+        model_name(&from)
+    ))
 }
 
 /// The header for a session and its conversation.
@@ -52,7 +65,12 @@ pub fn header(
             conversation.facts.model.as_deref(),
             catalog,
         ),
-        model: conversation.facts.model.as_deref().map(model_name),
+        context_note: window_note(conversation.facts.model.as_deref(), catalog),
+        model: conversation
+            .facts
+            .model
+            .as_deref()
+            .map(|id| model_label(Some(id), catalog)),
         host,
         shells: conversation.shells.len(),
     }
@@ -115,6 +133,45 @@ mod tests {
         assert_eq!(h.model.as_deref(), Some("Opus 5.5"));
         assert_eq!(h.host, "Claude Code · Background");
         assert_eq!(h.shells, 1);
+    }
+
+    fn on(model: &str) -> Conversation {
+        Conversation {
+            facts: SessionFacts {
+                model: Some(model.into()),
+                context_tokens: 148_800,
+                ..SessionFacts::default()
+            },
+            ..Conversation::default()
+        }
+    }
+
+    #[test]
+    fn a_borrowed_window_says_so_and_a_known_one_does_not() {
+        use notchling_engine::catalog::{Catalog, LiveModel, Tool};
+        let live = LiveModel {
+            id: "claude-opus-5-6".into(),
+            name: Some("Claude Opus 5.6".into()),
+            ..LiveModel::default()
+        };
+        let catalog = Catalog::built_in().models(Tool::Claude, &[live]);
+        let home = Path::new("/Users/me");
+        let new = header(&session(), &on("claude-opus-5-6"), home, &catalog);
+        assert_eq!(new.context.as_deref(), Some("148.8k / 400k · 37%"));
+        assert_eq!(
+            new.context_note.as_deref(),
+            Some("Window as Opus 5.5 until Notchling knows this model")
+        );
+        // The chip names it as the catalog does.
+        assert_eq!(new.model.as_deref(), Some("Opus 5.6"));
+        let known = header(&session(), &on("claude-opus-5-5"), home, &catalog);
+        assert_eq!(known.context_note, None);
+        // No window known (Sonnet 5.5): nothing to borrow, nothing said.
+        let none = header(&session(), &on("claude-sonnet-5-5"), home, &catalog);
+        assert_eq!(none.context_note, None);
+        // Before the daemon answers, the built-in list stands in and knows no borrowed model.
+        let early = header(&session(), &on("claude-opus-5-5"), home, &[]);
+        assert_eq!(early.context_note, None);
     }
 
     #[test]

@@ -93,6 +93,12 @@ impl ChatTool for Claude {
         )
     }
 
+    /// The model list is read again as a menu opens: the daemon fetches Anthropic's list only when
+    /// asked, so a new model shows without waiting for the hourly read.
+    fn menu_opening(&self, view: &mut ChatView) {
+        view.source.ask_catalog();
+    }
+
     fn pick(&self, view: &mut ChatView, menu: &str, value: &str, cx: &mut Context<ChatView>) {
         let kind = if menu == EFFORT {
             Kind::Effort

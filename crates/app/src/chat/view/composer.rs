@@ -744,7 +744,11 @@ fn tile(
         .part("Attachment", a, cx)
 }
 
-fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+fn context_meter(
+    view: &ChatView,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Option<Stateful<Div>> {
     let session = view.selected_session()?;
     let h = crate::chat::header::header(
         session,
@@ -753,14 +757,13 @@ fn context_meter(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> 
         view.claude_catalog(),
     );
     let context = h.context?;
-    Some(
-        super::header::chip(&format!("Context {context}"), a).part_at(
-            "Context Meter",
-            Corner::Top,
-            a,
-            cx,
-        ),
-    )
+    let chip = super::header::chip(&format!("Context {context}"), a).id("context-meter");
+    // A borrowed window says so on hover.
+    let chip = match h.context_note {
+        Some(note) => gate::tip_text(chip, note.into(), a),
+        None => chip,
+    };
+    Some(chip.part_at("Context Meter", Corner::Top, a, cx))
 }
 
 pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<ChatView>) -> Div {
