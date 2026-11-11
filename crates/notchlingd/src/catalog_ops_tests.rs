@@ -406,6 +406,47 @@ fn a_refused_login_is_not_asked_again_for_a_day_and_a_failure_for_15_minutes() {
     assert_eq!(r.model_requests().len(), 3, "no answer, so tried again");
 }
 
+#[test]
+fn a_401_or_a_429_holds_off_only_15_minutes() {
+    for status in [401, 429] {
+        let r = rig(&format!("short-{status}"), true, &live_login(None));
+        r.http.answer(MODELS_URL, status, "");
+        r.try_claude();
+        assert_eq!(r.model_requests().len(), 1, "{status}");
+        r.at(NOW + 600.0);
+        r.try_claude();
+        assert_eq!(r.model_requests().len(), 1, "{status}: within 15 minutes");
+        r.at(NOW + 1_000.0);
+        r.try_claude();
+        assert_eq!(r.model_requests().len(), 2, "{status}: asked again");
+    }
+}
+
+#[test]
+fn a_new_live_token_ends_a_refusal() {
+    let r = rig("refused-new-token", true, &live_login(None));
+    r.http.answer(MODELS_URL, 403, "");
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 1);
+    // The same token an hour later: nothing is sent.
+    r.at(NOW + 3_600.0);
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 1);
+    // Claude Code's login now holds another token: it is sent at the next try.
+    r.chain.put(
+        LIVE_SERVICE,
+        "me",
+        r#"{"claudeAiOauth":{"accessToken":"test-access-2"}}"#,
+    );
+    r.http.answer(MODELS_URL, 200, MODELS_LIST);
+    r.at(NOW + 7_200.0);
+    r.try_claude();
+    let seen = r.model_requests();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[1].1.as_deref(), Some("test-access-2"));
+    assert_eq!(r.cache().get(Tool::Claude).unwrap().0, NOW + 7_200.0);
+}
+
 /// Claude Code's main config with its own model list (the shape seen live).
 const CLAUDE_CODE_CONFIG: &str = r#"{"oauthAccount": {"emailAddress": "one@example.com"},
   "additionalModelOptionsCache": [

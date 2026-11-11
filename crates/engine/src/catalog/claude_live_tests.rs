@@ -54,7 +54,7 @@ fn a_401_or_a_500_or_garbage_is_an_error_and_nothing_else_is_sent() {
         let http = ScriptedHttp::new();
         http.answer(MODELS_URL, status, body);
         let err = fetch(&http, &Secret::new("test-token")).unwrap_err();
-        assert_eq!(err.refused(), status == 401, "{err}");
+        assert!(!err.refused(), "{err}: a 401 or a 5xx passes with time");
         let err = err.to_string();
         assert!(!err.contains("test-token") && !err.contains("html") && !err.contains("oops"));
         assert_eq!(http.seen().len(), 1, "one call, no retry");
@@ -65,4 +65,18 @@ fn a_401_or_a_500_or_garbage_is_an_error_and_nothing_else_is_sent() {
     // No answer at all (status 0) is an error too.
     let http = ScriptedHttp::new();
     assert!(fetch(&http, &Secret::new("t")).is_err());
+}
+
+#[test]
+fn only_400_403_and_404_are_a_refusal() {
+    for status in [400, 403, 404] {
+        assert!(FetchError::Status(status).refused(), "{status}");
+    }
+    for status in [401, 429, 500, 503] {
+        assert!(!FetchError::Status(status).refused(), "{status}");
+    }
+    assert!(!FetchError::NoAnswer.refused() && !FetchError::NotAList.refused());
+    let one = token_fingerprint(&Secret::new("test-token-1"));
+    assert_eq!(one, token_fingerprint(&Secret::new("test-token-1")));
+    assert_ne!(one, token_fingerprint(&Secret::new("test-token-2")));
 }

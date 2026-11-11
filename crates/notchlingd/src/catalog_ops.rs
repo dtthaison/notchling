@@ -34,8 +34,10 @@
 //!   It runs only while `accounts` is on, with the main login's access token read from Keychain by
 //!   [`ClaudeAccounts::live_token`], which only reads the live login, never renews anything and
 //!   answers nothing for an expired one. A failed fetch keeps the old list, and a try that found
-//!   no token or failed is not repeated for [`RETRY_SECS`], or for [`REFUSED_RETRY_SECS`] (a
-//!   day) after the endpoint refused the login with a 4xx. The first failure of a run is logged
+//!   no token or failed is not repeated for [`RETRY_SECS`]. After the endpoint refused a login
+//!   (400, 403 or 404; a 401 or 429 passes with time) the same token is not sent again for
+//!   [`REFUSED_RETRY_SECS`] (a day), told by its SHA-256 fingerprint, never kept itself; a new
+//!   live token is sent at the next try. The first failure of a run is logged
 //!   to standard error by its status alone, never its body or the token. Chat asks at start, every hour and when
 //!   a Claude picker menu opens, so the list is fetched about once a day while Chat runs.
 //! - The user's `catalog.json` (beside the socket) fixes prices, windows and names, entry by
@@ -74,8 +76,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// an expired login doesn't ask Keychain every time.
 pub const RETRY_SECS: f64 = 900.0;
 
-/// After the endpoint refused the login (a 4xx), no new try for a day: asking again sooner would
-/// be refused too, and costs a Keychain read and a request each time.
+/// After the endpoint refused a login (400, 403, 404), that token is not sent again for a day:
+/// it would be refused again. A new token is sent at the next try.
 pub const REFUSED_RETRY_SECS: f64 = 86_400.0;
 
 /// Runs a job off the caller's thread.
@@ -118,8 +120,11 @@ struct Inner {
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// A fetch is queued or running.
     fetching: AtomicBool,
-    /// When the last fetch was tried or refused and for how long no new one starts.
-    hold: Mutex<Option<(f64, f64)>>,
+    /// When the last fetch was tried, to hold off a retry for [`RETRY_SECS`].
+    last_try: Mutex<Option<f64>>,
+    /// When the endpoint refused a login (400, 403, 404) and that token's fingerprint (never the
+    /// token): the same token isn't sent again for [`REFUSED_RETRY_SECS`]; another one is.
+    refused: Mutex<Option<(f64, [u8; 32])>>,
     /// Where a failed fetch is logged: the daemon's log, standard error.
     log: Box<dyn Fn(&str) + Send + Sync>,
     /// A failed fetch was logged this run; later ones aren't.
@@ -140,8 +145,9 @@ impl Inner {
     /// Reads the main login's live token (read only: [`ClaudeAccounts::live_token`] has no saved
     /// slot, lane or renewal on its path, so whichever account is main when this runs, no refresh
     /// token is rotated) and fetches Anthropic's list. Anything missing or failing leaves the
-    /// cache as it was. The first failure of a run is logged, by its status only; a refusal (a
-    /// 4xx) holds off the next try for [`REFUSED_RETRY_SECS`].
+    /// cache as it was. The first failure of a run is logged, by its status only. After a
+    /// refusal (400, 403, 404) the same token is not sent again for [`REFUSED_RETRY_SECS`]; a
+    /// new live token (another login, or the same one renewed by Claude Code) is.
     fn fetch_claude(&self) {
         let Some((store, flag)) = &self.claude else {
             return;
@@ -152,15 +158,27 @@ impl Inner {
         let Ok(Some(token)) = store.live_token() else {
             return;
         };
-        match claude_live::fetch(&*self.http, &token) {
+        let fingerprint = claude_live::token_fingerprint(&token);
+        let now = (self.now)();
+        {
+            let refused = lock(&self.refused);
+            if refused.is_some_and(|(at, seen)| {
+                seen == fingerprint && now >= at && now - at < REFUSED_RETRY_SECS
+            }) {
+                return;
+            }
+        }
+        let answer = claude_live::fetch(&*self.http, &token);
+        *lock(&self.refused) = match &answer {
+            Err(why) if why.refused() => Some((now, fingerprint)),
+            _ => None,
+        };
+        match answer {
             Ok(models) => {
                 self.cache.put(Tool::Claude, (self.now)(), &models);
                 self.announce(Tool::Claude);
             }
             Err(why) => {
-                if why.refused() {
-                    *lock(&self.hold) = Some(((self.now)(), REFUSED_RETRY_SECS));
-                }
                 if !self.logged.swap(true, Ordering::SeqCst) {
                     (self.log)(&format!(
                         "notchling: Claude's model list wasn't read ({why}); the pickers show \
@@ -244,7 +262,8 @@ impl CatalogService {
                 room: None,
                 now: Arc::new(now_secs),
                 fetching: AtomicBool::new(false),
-                hold: Mutex::new(None),
+                last_try: Mutex::new(None),
+                refused: Mutex::new(None),
                 log: Box::new(|line| eprintln!("{line}")),
                 logged: AtomicBool::new(false),
             }),
@@ -423,8 +442,8 @@ impl CatalogService {
 
     /// Starts a fetch of Anthropic's list on a thread when it is due: none already running, the
     /// `accounts` switch on, the main login known, the cached list over a day old (or none), and
-    /// the last try not within [`RETRY_SECS`] (a refused one: [`REFUSED_RETRY_SECS`]). Otherwise
-    /// it does nothing.
+    /// the last try not within [`RETRY_SECS`]. Otherwise it does nothing. (A token refused within
+    /// [`REFUSED_RETRY_SECS`] is checked on the thread, where the token is read.)
     pub fn refresh_claude(&self) {
         let inner = &self.inner;
         let Some((store, flag)) = &inner.claude else {
@@ -450,12 +469,12 @@ impl CatalogService {
             return;
         }
         {
-            let mut hold = lock(&inner.hold);
-            if hold.is_some_and(|(at, secs)| now >= at && now - at < secs) {
+            let mut last = lock(&inner.last_try);
+            if last.is_some_and(|at| now >= at && now - at < RETRY_SECS) {
                 inner.fetching.store(false, Ordering::SeqCst);
                 return;
             }
-            *hold = Some((now, RETRY_SECS));
+            *last = Some(now);
         }
         let fetching = Fetching(inner.clone());
         (self.spawner)(Box::new(move || {

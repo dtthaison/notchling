@@ -25,10 +25,19 @@ pub enum FetchError {
 }
 
 impl FetchError {
-    /// A 4xx: the endpoint refused this login, and asking again soon would be refused too.
+    /// 400, 403 or 404: the endpoint won't serve this login the list, and asking again soon with
+    /// the same token would be refused too. A 401 (a token that just expired or was replaced) and
+    /// a 429 (asked too often) are not: they pass with time.
     pub fn refused(self) -> bool {
-        matches!(self, FetchError::Status(400..=499))
+        matches!(self, FetchError::Status(400 | 403 | 404))
     }
+}
+
+/// A fingerprint of a token (SHA-256), to tell whether the live login changed without keeping
+/// the token itself.
+pub fn token_fingerprint(token: &Secret) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.expose().as_bytes()).into()
 }
 
 impl std::fmt::Display for FetchError {
