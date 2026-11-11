@@ -5,7 +5,8 @@
 //! (which limits, the arc and its ink, the rows, the reset words, the grace delay) are
 //! `chat::limit_ring`; this draws them. Claude Code's limits are the account in use's, the same
 //! windows as the header's meters (a session in a lane has none yet); Codex's are its active
-//! login's first group; Antigravity has none, and unknown limits draw nothing.
+//! login's first group; Antigravity's are every group of its active login, the session model's
+//! group first, and its ring is that group's first bar. Unknown limits draw nothing.
 
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::accounts::limits::Zone;
-use crate::accounts::model::{CLAUDE_CODE, CODEX};
+use crate::accounts::model::{ANTIGRAVITY, CLAUDE_CODE, CODEX};
 use crate::chat::data::Tool;
 use crate::chat::limit_ring::{self as rules, Arc, Hover, Limit, Wait, GRACE_MS, OPEN_MS};
 
@@ -63,6 +64,7 @@ fn now_secs() -> f64 {
 /// The selected session's limits and where "See all" goes.
 struct Shown {
     limits: Vec<Limit>,
+    arc: Option<Arc>,
     plan: Option<String>,
     provider: &'static str,
 }
@@ -78,8 +80,10 @@ fn shown(view: &ChatView) -> Option<Shown> {
                 .iter()
                 .find(|p| p.id == "claude")?
                 .windows;
+            let limits = rules::claude_limits(windows);
             Shown {
-                limits: rules::claude_limits(windows),
+                arc: rules::arc(&limits),
+                limits,
                 plan: s
                     .claude
                     .active
@@ -93,14 +97,38 @@ fn shown(view: &ChatView) -> Option<Shown> {
             let codex = s.providers.providers.iter().find(|p| p.id == CODEX)?;
             let active = codex.active_id.as_ref()?;
             let report = s.usage.get(CODEX)?.get(active)?;
+            let limits = rules::codex_limits(report);
             Shown {
-                limits: rules::codex_limits(report),
+                arc: rules::arc(&limits),
+                limits,
                 plan: codex
                     .accounts
                     .iter()
                     .find(|a| &a.id == active)
                     .and_then(|a| a.plan.clone()),
                 provider: CODEX,
+            }
+        }
+        Tool::Antigravity => {
+            let agy = s.providers.providers.iter().find(|p| p.id == ANTIGRAVITY)?;
+            let active = agy.active_id.as_ref()?;
+            let report = s.usage.get(ANTIGRAVITY)?.get(active)?;
+            let model = view
+                .tools
+                .agy_config
+                .iter()
+                .find(|o| o.id == "model")
+                .map(|o| o.current_name().to_owned());
+            let limits = rules::antigravity_limits(report, model.as_deref());
+            Shown {
+                arc: limits.first().map(rules::arc_of),
+                limits,
+                plan: agy
+                    .accounts
+                    .iter()
+                    .find(|a| &a.id == active)
+                    .and_then(|a| a.plan.clone()),
+                provider: ANTIGRAVITY,
             }
         }
         _ => return None,
@@ -303,7 +331,7 @@ fn popover(
 /// session has no 5-hour limit to show.
 pub(super) fn ring(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let shown = shown(view)?;
-    let arc = rules::arc(&shown.limits)?;
+    let arc = shown.arc?;
     let open = view.limit_ring.hover.open(view.limit_ring.preview);
     let card = open
         .then(|| {

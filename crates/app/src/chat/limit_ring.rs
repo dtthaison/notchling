@@ -80,6 +80,73 @@ pub fn codex_limits(report: &UsageReport) -> Vec<Limit> {
         .unwrap_or_default()
 }
 
+/// An Antigravity login's bars, every group's, the group of the session's `model` first (its
+/// 5-hour bar, then its weekly one), so the ring follows the model in use. Antigravity's groups are
+/// named for models ("Gemini 4 Argon", "Gemini", "Claude/GPT"): the longest name the model starts
+/// with, else one whose `/` parts the model names, else the first group.
+pub fn antigravity_limits(report: &UsageReport, model: Option<&str>) -> Vec<Limit> {
+    let model = model.unwrap_or("").to_ascii_lowercase();
+    let starts = report
+        .groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| {
+            let name = g.name.as_deref()?.to_ascii_lowercase();
+            (!name.is_empty() && model.starts_with(&name)).then_some((i, name.len()))
+        })
+        .max_by_key(|(_, len)| *len)
+        .map(|(i, _)| i);
+    let names = || {
+        report.groups.iter().position(|g| {
+            g.name.as_deref().is_some_and(|n| {
+                n.split('/')
+                    .map(|part| part.trim().to_ascii_lowercase())
+                    .any(|part| !part.is_empty() && model.contains(&part))
+            })
+        })
+    };
+    let first = starts.or_else(names).unwrap_or(0);
+    let mut order: Vec<usize> = (0..report.groups.len()).collect();
+    if first < order.len() {
+        order.remove(first);
+        order.insert(0, first);
+    }
+    order
+        .into_iter()
+        .flat_map(|i| {
+            let group = &report.groups[i];
+            let name = group.name.clone().unwrap_or_default();
+            let mut bars: Vec<_> = group.bars.iter().collect();
+            // The 5-hour bar first, so the ring takes it when the group has one.
+            bars.sort_by_key(|b| b.kind != BarKind::Session);
+            bars.into_iter()
+                .map(|b| {
+                    let window = match b.kind {
+                        BarKind::Session => "5-hour limit".to_owned(),
+                        BarKind::Week => "weekly limit".to_owned(),
+                        BarKind::Other => b.label.clone(),
+                    };
+                    Limit {
+                        name: format!("{name} · {window}"),
+                        kind: Kind::Other,
+                        percent: b.percent,
+                        resets_at: b.resets_at,
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The arc for one limit (Antigravity's ring: the first of [`antigravity_limits`]).
+pub fn arc_of(limit: &Limit) -> Arc {
+    let percent = clamp(limit.percent);
+    Arc {
+        fraction: (percent / 100.0) as f32,
+        fill: Fill::of(percent),
+    }
+}
+
 /// The ring's arc: how much of the 5-hour limit is used, and how it is inked.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Arc {
@@ -539,5 +606,64 @@ mod tests {
         assert!(h.close_if_still(epoch));
         assert!(!h.open(false));
         assert!(h.open(true), "a render can force it open");
+    }
+
+    fn agy_report() -> UsageReport {
+        let bar = |kind, percent| Bar {
+            label: if kind == BarKind::Week { "Week" } else { "5h" }.into(),
+            kind,
+            percent,
+            resets_at: None,
+        };
+        UsageReport {
+            groups: vec![
+                Group {
+                    name: Some("Claude/GPT".into()),
+                    bars: vec![bar(BarKind::Week, 47.0), bar(BarKind::Session, 94.0)],
+                },
+                Group {
+                    name: Some("Gemini".into()),
+                    bars: vec![bar(BarKind::Session, 0.0), bar(BarKind::Week, 0.0)],
+                },
+                Group {
+                    name: Some("Gemini 4 Argon".into()),
+                    bars: vec![bar(BarKind::Week, 100.0)],
+                },
+            ],
+            fetched: NOW,
+        }
+    }
+
+    #[test]
+    fn antigravity_rings_the_group_of_the_model_in_use() {
+        let names = |model: Option<&str>| -> Vec<String> {
+            antigravity_limits(&agy_report(), model)
+                .into_iter()
+                .map(|l| l.name)
+                .collect()
+        };
+        // The longest group name the model starts with: Argon, not Gemini.
+        let argon = names(Some("Gemini 4 Argon (Medium)"));
+        assert_eq!(argon[0], "Gemini 4 Argon · weekly limit");
+        assert_eq!(argon.len(), 5, "every group is in the card");
+        assert_eq!(names(Some("Gemini 3 Flash"))[0], "Gemini · 5-hour limit");
+        // A model named by a part of a group's name; its 5-hour bar comes first.
+        assert_eq!(
+            names(Some("Claude Sonnet 4.6 (Thinking)"))[0],
+            "Claude/GPT · 5-hour limit"
+        );
+        assert_eq!(names(None)[0], "Claude/GPT · 5-hour limit");
+        let limits = antigravity_limits(&agy_report(), Some("Gemini 4 Argon"));
+        let arc = arc_of(&limits[0]);
+        assert_eq!(arc.fraction, 1.0);
+        assert_eq!(arc.fill, Fill::Hot);
+        assert!(antigravity_limits(
+            &UsageReport {
+                groups: vec![],
+                fetched: NOW
+            },
+            None
+        )
+        .is_empty());
     }
 }

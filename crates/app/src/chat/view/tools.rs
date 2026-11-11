@@ -832,13 +832,18 @@ impl ChatView {
     fn read_agy(&mut self, id: String, number: u64, cx: &mut Context<Self>) {
         let actions = self.acts(cx).actions;
         let asked = id.clone();
+        let log = crate::tools::agy_context::log_path(&self.root.home, &id);
         cx.spawn(async move |this, cx| {
-            let (conversation, state) = cx
+            let (conversation, state, context) = cx
                 .background_executor()
                 .spawn(async move {
                     let conversation = actions.read(&agy_conversation(&id, false)).ok();
                     let state = actions.read(&agy_state(&id)).ok();
-                    (conversation, state)
+                    // The stream tells the context's size only as a turn ends; the log has it now.
+                    let context = log
+                        .as_deref()
+                        .and_then(crate::tools::agy_context::context_tokens);
+                    (conversation, state, context)
                 })
                 .await;
             this.update(cx, |view, cx| {
@@ -847,6 +852,9 @@ impl ChatView {
                     if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
                         view.follow_content(false);
                         view.conversation = c.conversation.clone();
+                        if view.conversation.facts.context_tokens == 0 {
+                            view.conversation.facts.context_tokens = context.unwrap_or(0);
+                        }
                         view.loading = false;
                         view.tools.agy = Some(c);
                     }

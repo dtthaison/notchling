@@ -75,10 +75,15 @@ impl AntigravityPaths {
     }
 }
 
+/// The last limits read per account, kept in `notchling.db` so they outlive Antigravity closing
+/// and the daemon restarting: the language server answers only while Antigravity is open.
+pub const USAGE_DOC: &str = "accounts/antigravity-usage";
+
 #[derive(Default)]
 struct Inner {
     accounts: Vec<Saved>,
     active: Option<String>,
+    /// The last limits read per account, kept in [`USAGE_DOC`].
     usage: HashMap<String, GroupedUsage>,
     busy: bool,
     /// Antigravity was restarted at its sign-in screen; the next login it saves gets added.
@@ -105,11 +110,17 @@ impl AntigravityStore {
     /// Loads the saved account names from the daemon's own list; touches nothing else.
     pub fn new(deps: AntigravityDeps, paths: AntigravityPaths) -> AntigravityStore {
         let accounts = book::read_accounts(&paths.book());
+        let usage = crate::store::doc(&paths.data_dir, USAGE_DOC)
+            .ok()
+            .flatten()
+            .map(|text| usage_from_json(&text))
+            .unwrap_or_default();
         AntigravityStore {
             deps,
             paths,
             inner: Mutex::new(Inner {
                 accounts,
+                usage,
                 ..Inner::default()
             }),
             op: Mutex::new(()),
@@ -418,6 +429,10 @@ impl AccountProvider for AntigravityStore {
         let mut inner = lock(&self.inner);
         if let Some(usage) = snapshot.usage {
             inner.usage.insert(id.clone(), usage);
+            let text = usage_to_json(&inner.usage);
+            if let Err(e) = crate::store::put_doc(&self.paths.data_dir, USAGE_DOC, &text) {
+                eprintln!("antigravity: the limits read aren't kept ({e})");
+            }
         }
         if let Some(plan) = snapshot.plan {
             if let Some(a) = inner.accounts.iter_mut().find(|a| a.id == id) {
@@ -547,4 +562,74 @@ pub fn agy_running(ps: &str) -> bool {
             .next()
             .is_some_and(|program| program.rsplit('/').next() == Some("agy"))
     })
+}
+
+/// The kept limits: account id to `{fetched, groups: [{name, bars: [{label, percent, resets_at}]}]}`.
+pub fn usage_to_json(usage: &HashMap<String, GroupedUsage>) -> String {
+    let map: serde_json::Map<String, serde_json::Value> = usage
+        .iter()
+        .map(|(id, u)| {
+            let groups: Vec<serde_json::Value> = u
+                .groups
+                .iter()
+                .map(|g| {
+                    let bars: Vec<serde_json::Value> = g
+                        .bars
+                        .iter()
+                        .map(|(label, w)| {
+                            serde_json::json!({
+                                "label": label, "percent": w.percent, "resets_at": w.resets_at,
+                            })
+                        })
+                        .collect();
+                    serde_json::json!({"name": g.name, "bars": bars})
+                })
+                .collect();
+            (
+                id.clone(),
+                serde_json::json!({"fetched": u.fetched, "groups": groups}),
+            )
+        })
+        .collect();
+    serde_json::Value::Object(map).to_string()
+}
+
+/// Reads [`usage_to_json`]'s text; what doesn't read is left out.
+pub fn usage_from_json(text: &str) -> HashMap<String, GroupedUsage> {
+    use crate::providers::usage::{GroupedGroup, UsageWindow};
+    use serde_json::Value;
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) else {
+        return HashMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(id, u)| {
+            let groups = u
+                .get("groups")?
+                .as_array()?
+                .iter()
+                .filter_map(|g| {
+                    let bars = g
+                        .get("bars")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(|b| {
+                            Some((
+                                b.get("label")?.as_str()?.to_owned(),
+                                UsageWindow {
+                                    percent: b.get("percent")?.as_f64()?,
+                                    resets_at: b.get("resets_at").and_then(Value::as_f64),
+                                },
+                            ))
+                        })
+                        .collect();
+                    Some(GroupedGroup {
+                        name: g.get("name")?.as_str()?.to_owned(),
+                        bars,
+                    })
+                })
+                .collect();
+            let fetched = u.get("fetched")?.as_f64()?;
+            Some((id, GroupedUsage { groups, fetched }))
+        })
+        .collect()
 }

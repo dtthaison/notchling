@@ -17,7 +17,7 @@ use super::ChatView;
 use crate::accounts::menu::{
     account_menu, move_all_account, move_needs_accounts, AccountMenu, Entry, Place, Target,
 };
-use crate::accounts::model::{CLAUDE_CODE, CODEX};
+use crate::accounts::model::{ANTIGRAVITY, CLAUDE_CODE, CODEX};
 use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
 use crate::mac::gate;
@@ -195,7 +195,20 @@ pub(super) fn account_control(
                 "The Codex account. Click to switch or add one.".to_owned(),
             )
         }
-        Tool::Antigravity => return None,
+        Tool::Antigravity => {
+            let s = view.accounts.snapshot();
+            let agy = s.providers.providers.iter().find(|p| p.id == ANTIGRAVITY)?;
+            let active = agy.active_id.as_ref()?;
+            let email = agy
+                .accounts
+                .iter()
+                .find(|acc| &acc.id == active)
+                .map(|acc| acc.email.clone())?;
+            (
+                email,
+                "The Antigravity account. Click to switch or add one.".to_owned(),
+            )
+        }
     };
     let kind = if view.account_menu {
         ButtonKind::Secondary
@@ -234,7 +247,12 @@ pub(super) fn account_control(
     let b = gate::tip_text(b, tip.into(), a);
     Some(match session.tool {
         Tool::Claude => b.on_click(cx.listener(|this, _, _, cx| this.toggle_account_menu(cx))),
-        _ => b.on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(Some(CODEX), cx))),
+        Tool::Codex => {
+            b.on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(Some(CODEX), cx)))
+        }
+        Tool::Antigravity => b.on_click(
+            cx.listener(|this, _, _, cx| this.open_accounts_sheet(Some(ANTIGRAVITY), cx)),
+        ),
     })
 }
 

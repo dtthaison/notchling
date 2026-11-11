@@ -66,11 +66,11 @@ fn choices_survive_a_restart_and_a_bad_file_is_never_written_over() {
     assert_eq!(again.mode(&CLAUDE), LimitMode::Off);
     assert_eq!(again.switch_at(), 85);
 
-    // A stored mode the provider doesn't allow reads as its default.
+    // A stored mode that isn't one reads as the default.
     store::put_doc(
         &data,
         LIMITS_DOC,
-        r#"{"version":1,"values":{"antigravityLimitMode":"notifyAndSwitch","limitSwitchAt":"x"}}"#,
+        r#"{"version":1,"values":{"antigravityLimitMode":"sometimes","limitSwitchAt":"x"}}"#,
     )
     .unwrap();
     let odd = LimitConfig::open(&data);

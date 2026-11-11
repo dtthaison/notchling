@@ -410,3 +410,28 @@ fn idle_only_with_antigravity_closed_and_no_agy() {
     );
     assert!(!open.store.idle_for_auto_switch());
 }
+
+#[test]
+fn the_limits_read_are_kept_through_a_restart() {
+    use crate::accounts::antigravity::store::{usage_from_json, usage_to_json};
+    use crate::providers::usage::{GroupedGroup, GroupedUsage, UsageWindow};
+    let mut usage = std::collections::HashMap::new();
+    usage.insert(
+        "1".to_owned(),
+        GroupedUsage {
+            groups: vec![GroupedGroup {
+                name: "Gemini 4 Argon".into(),
+                bars: vec![(
+                    "Week".into(),
+                    UsageWindow {
+                        percent: 100.0,
+                        resets_at: Some(1_794_700_000.0),
+                    },
+                )],
+            }],
+            fetched: 1_794_380_000.0,
+        },
+    );
+    assert_eq!(usage_from_json(&usage_to_json(&usage)), usage);
+    assert!(usage_from_json("not json").is_empty());
+}
