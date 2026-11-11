@@ -147,6 +147,10 @@ pub mod ops {
     /// `{}` → `{approvals: [..], requests: [..]}`: the `vault.approval.pending` and
     /// `vault.request.pending` events still waiting, oldest first, for an app that (re)connects.
     pub const VAULT_PENDING: &str = "vault.pending";
+
+    /// The model catalog, agent tier, read only (`notchlingd`'s `catalog_ops` module docs):
+    /// `{tool: "claude" | "codex" | "antigravity"}` → `{tool, models: [ModelInfo], fetchedAt}`.
+    pub const CATALOG_GET: &str = "catalog.get";
 }
 
 /// Event topics and the events they carry.
@@ -176,6 +180,9 @@ pub mod topics {
     pub const ACCOUNTS_DONE: &str = "accounts.done";
     /// Other tools' sessions (Milestone 5): Codex turns and the rows they change.
     pub const TOOLS: &str = "tools";
+    /// `{"tool"}`: that tool's model list changed (Anthropic's list fetched, Antigravity's options
+    /// seen); a client asks `catalog.get` again.
+    pub const CATALOG_CHANGED: &str = "catalog.changed";
     /// `{"id": "codex:<session>" | null, "session", "state": "started" | "queued" | "ended" |
     /// "failed", "waiting"?, "error"?}`.
     pub const CODEX_TURN: &str = "codex.turn";

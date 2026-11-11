@@ -517,6 +517,46 @@ fn options_pass_only_what_the_session_offers() {
 }
 
 #[test]
+fn a_loaded_sessions_options_become_antigravitys_models_in_the_catalog() {
+    use notchling_engine::accounts::fake::PanicHttp;
+    use notchling_engine::catalog::live_cache::LiveCache;
+    use notchling_engine::catalog::{Catalog, Tool};
+    let rig = rig(true);
+    let state = scratch("catalog");
+    let catalog = Arc::new(
+        CatalogService::new(
+            Catalog::built_in(),
+            LiveCache::new(state.join("live-models.json")),
+            state.join("codex"),
+            None,
+            Arc::new(PanicHttp),
+        )
+        .with_room(rig.room.clone()),
+    );
+    rig.ops.attach_catalog(catalog.clone());
+    assert!(
+        catalog.models(Tool::Antigravity).is_empty(),
+        "nothing seen yet"
+    );
+    rig.loaded();
+    // The recording's session offers these Model values, and its Thinking Level's as efforts.
+    let models = catalog.models(Tool::Antigravity);
+    let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+    assert!(
+        ids.contains(&"gemini-4-argon") && ids.contains(&"claude-opus-5-5"),
+        "{ids:?}"
+    );
+    let argon = models.iter().find(|m| m.id == "gemini-4-argon").unwrap();
+    assert_eq!(argon.name, "Gemini 4 Argon");
+    assert!(!argon.efforts.is_empty(), "{argon:?}");
+    assert_eq!(argon.default_effort.as_deref(), Some("medium"));
+    // Cached for the next start, and announced on `tools`.
+    let cached = LiveCache::new(state.join("live-models.json"));
+    assert!(cached.get(Tool::Antigravity).is_some());
+    assert!(!rig.room.named(topics::CATALOG_CHANGED).is_empty());
+}
+
+#[test]
 fn the_daemons_handler_routes_them_with_their_tiers() {
     use crate::daemon::Ops;
     use notchling_local_api::Handler;

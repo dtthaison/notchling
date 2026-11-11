@@ -5,6 +5,7 @@
 //! [`agy_ops`]: crate::agy_ops
 
 use crate::acting_ops::{now_ms, Room};
+use crate::catalog_ops::CatalogService;
 use notchling_engine::bridge::foreign::PROMPT_PREFIX;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::tools::agy::{Change, Permission, Runner, Sink};
@@ -32,6 +33,8 @@ pub(crate) struct Shared {
     pub last_chunk: Mutex<HashMap<String, Instant>>,
     pub started: Mutex<HashMap<String, Started>>,
     pub runner: OnceLock<Runner>,
+    /// Told the model and thinking-level options each loaded session reports.
+    pub catalog: OnceLock<Arc<CatalogService>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -60,12 +63,21 @@ impl Shared {
             last_chunk: Mutex::new(HashMap::new()),
             started: Mutex::new(HashMap::new()),
             runner: OnceLock::new(),
+            catalog: OnceLock::new(),
         }
     }
 
     pub fn publish_both(&self, event: &str, prompt_event: &str, data: &Value) {
         self.room.publish(topics::PROMPTS, event, data);
         self.room.publish(topics::PROMPTS, prompt_event, data);
+    }
+
+    /// Hands the catalog the options a session offers (its Model values are the models the
+    /// picker lists), before the change is announced, so a client that asks then sees them.
+    fn options_seen(&self, session: &str) {
+        if let (Some(catalog), Some(runner)) = (self.catalog.get(), self.runner.get()) {
+            catalog.record_agy_options(&runner.config(session));
+        }
     }
 
     /// `session.changed` on the `tools` topic, as Codex's: `{id, session, row, change, error?}`.
@@ -174,11 +186,17 @@ impl Sink for DaemonSink {
                     shared.session_changed(session, "chunk", None);
                 }
             }
-            Change::Loaded => shared.session_changed(session, "loaded", None),
+            Change::Loaded => {
+                shared.options_seen(session);
+                shared.session_changed(session, "loaded", None);
+            }
             Change::LoadFailed(e) => shared.session_changed(session, "load_failed", Some(e)),
             Change::TurnStarted => shared.session_changed(session, "turn_started", None),
             Change::TurnEnded(error) => shared.session_changed(session, "turn_ended", error),
-            Change::Options => shared.session_changed(session, "options", None),
+            Change::Options => {
+                shared.options_seen(session);
+                shared.session_changed(session, "options", None);
+            }
             Change::OptionFailed(e) => shared.session_changed(session, "option_failed", Some(e)),
             Change::Closed => {
                 lock(&shared.last_chunk).remove(session);

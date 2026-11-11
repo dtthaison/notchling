@@ -13,6 +13,7 @@ use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
+use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::install_ops::{InstallOps, InstallSetup};
@@ -270,6 +271,8 @@ pub struct Wired {
     pub accounts: Arc<AccountsOps>,
     pub providers: Arc<ProvidersOps>,
     pub limits: Arc<LimitsOps>,
+    /// The one catalog: `catalog.get`, and the prices cost reads.
+    pub catalog: Arc<CatalogService>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
 }
@@ -354,9 +357,23 @@ impl Wired {
             stores.registry(),
             room.clone(),
         ));
+        // The one catalog: the data file with `catalog.json` over it, Claude's list fetched with
+        // the main login's token only while `accounts` is on, Codex's from its cache file and
+        // Antigravity's from the options an open `agy acp` reports.
+        let catalog = Arc::new(CatalogService::for_daemon(
+            layout,
+            (accounts.store(), on.clone()),
+            room.clone(),
+        ));
+        agy.attach_catalog(catalog.clone());
         // The limit watchers, over the same stores. The loop calls them only while `accounts` is
         // on; `cost.summary` only reads transcripts and needs no switch.
-        let limits = Arc::new(LimitsOps::for_daemon(layout, on.clone(), room.clone()));
+        let limits = Arc::new(LimitsOps::for_daemon(
+            layout,
+            on.clone(),
+            room.clone(),
+            catalog.shared_catalog(),
+        ));
         limits.set_claude(
             Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
             Arc::new(SessionJobs::new(acting.clone())),
@@ -404,6 +421,7 @@ impl Wired {
             accounts,
             providers,
             limits,
+            catalog,
             vault,
             install: Arc::new(install),
         }
@@ -432,6 +450,7 @@ impl Wired {
             .with_group(self.install.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
+            .with_group(self.catalog.clone())
             .with_group(self.vault.clone())
             .with_first_scan(first_scan, first_wait)
     }

@@ -187,7 +187,7 @@ fn ops_with(tmp: &TempDir, flag: Arc<SwitchFlag>, room: Arc<FakeRoom>) -> Limits
         }],
         cache_data: None,
         account_log: tmp.path("account-log.json"),
-        catalog_file: tmp.path("catalog.json"),
+        catalog: Arc::new(notchling_engine::catalog::Catalog::built_in()),
     }
     .service();
     LimitsOps::new(flag, Arc::new(LimitConfig::in_memory()), cost, room)

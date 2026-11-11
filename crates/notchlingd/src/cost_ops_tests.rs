@@ -5,8 +5,10 @@ use crate::cost_ops::{self, CostSetup};
 use crate::layout::Layout;
 use crate::limits_ops::*;
 use crate::limits_ops_tests::{rig, TempDir, NOW};
+use notchling_engine::catalog::Catalog;
 use notchling_local_api::ErrorCode;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn wait_scanned(ops: &LimitsOps) {
@@ -119,7 +121,7 @@ fn a_cost_reply_is_cut_to_fit_a_line() {
 fn the_cost_cache_is_the_daemons_own_document_and_never_the_swift_apps() {
     let tmp = TempDir::new("limits-cost-paths");
     let layout = Layout::resolve(None, Some(tmp.root().as_os_str()), || None).unwrap();
-    let setup = CostSetup::from_layout(&layout);
+    let setup = CostSetup::from_layout(&layout, Arc::new(Catalog::built_in()));
     let data = setup.cache_data.expect("a fixture root keeps a cache");
     assert_eq!(data, layout.data_dir);
     assert_eq!(
@@ -150,7 +152,9 @@ fn the_cost_cache_is_the_daemons_own_document_and_never_the_swift_apps() {
     )
     .unwrap();
     assert!(
-        CostSetup::from_layout(&given).cache_data.is_none(),
+        CostSetup::from_layout(&given, Arc::new(Catalog::built_in()))
+            .cache_data
+            .is_none(),
         "a test socket keeps none"
     );
 }
@@ -181,21 +185,29 @@ fn the_reply_lists_unpriced_and_borrowed_models() {
 }
 
 #[test]
-fn the_daemons_catalog_file_beside_the_socket_reprices_what_is_counted() {
+fn cost_prices_from_the_daemons_one_catalog_with_the_file_beside_the_socket_laid_over_it() {
+    use crate::acting_ops_tests::FakeRoom;
+    use crate::catalog_ops::CatalogService;
+    use crate::switches::{SwitchFlag, ACCOUNTS, ACCOUNTS_OFF};
     use notchling_engine::cost::tracker::CLAUDE_CODE;
     use notchling_engine::cost::{Root, Window};
     let tmp = TempDir::new("cost-catalog-file");
     let layout = Layout::resolve(None, Some(tmp.root().as_os_str()), || None).unwrap();
-    let from_layout = CostSetup::from_layout(&layout);
-    assert_eq!(
-        from_layout.catalog_file,
-        layout.state_dir().join("catalog.json")
+    tmp.write(
+        "notchling/catalog.json",
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 30.0, "cache_read": 0.2}]}}"#,
     );
     tmp.write(
         "claude/projects/-w-app/a.jsonl",
         &line_for("m1", "claude-opus-5-5", 1_000_000),
     );
-    // Same catalog file, transcripts in the temp folder, no cache.
+    let room = Arc::new(FakeRoom::default());
+    let flag = SwitchFlag::off(ACCOUNTS, ACCOUNTS_OFF);
+    let accounts =
+        crate::accounts_ops::AccountsOps::for_daemon(&layout, flag.clone(), room.clone());
+    let catalog = CatalogService::for_daemon(&layout, (accounts.store(), flag), room);
+    let from_layout = CostSetup::from_layout(&layout, catalog.shared_catalog());
+    // Transcripts in the temp folder, no cache.
     let setup = CostSetup {
         roots: vec![Root {
             dir: tmp.path("claude/projects"),
@@ -204,17 +216,34 @@ fn the_daemons_catalog_file_beside_the_socket_reprices_what_is_counted() {
         cache_data: None,
         ..from_layout
     };
-    let month = || {
-        let service = setup.service();
-        service.refresh(NOW);
-        service.snapshot().ranged.overall[&Window::All].month
-    };
-    assert!((month() - 20.0).abs() < 1e-6);
-    std::fs::create_dir_all(setup.catalog_file.parent().unwrap()).unwrap();
-    std::fs::write(
-        &setup.catalog_file,
-        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 30.0, "cache_read": 0.2}]}}"#,
-    )
-    .unwrap();
-    assert!((month() - 30.0).abs() < 1e-6, "the override is read");
+    assert!(
+        Arc::ptr_eq(&setup.catalog, &catalog.shared_catalog()),
+        "cost shares the service's catalog instead of loading its own"
+    );
+    let service = setup.service();
+    service.refresh(NOW);
+    let month = service.snapshot().ranged.overall[&Window::All].month;
+    assert!((month - 30.0).abs() < 1e-6, "the override is read: {month}");
+}
+
+#[test]
+fn each_unpriced_model_is_logged_once_per_run() {
+    let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let (tmp, _flag, _room, ops) = rig();
+    let sink = lines.clone();
+    let ops = ops.with_unpriced_sink(Box::new(move |l| sink.lock().unwrap().push(l.to_string())));
+    tmp.write(
+        "claude/projects/-w-app/a.jsonl",
+        &(line_for("m1", "claude-new-9", 1000) + &line_for("m2", "claude-newer-9", 1000)),
+    );
+    ops.call(COST_SUMMARY, &json!({"range": "all"})).unwrap();
+    wait_scanned(&ops);
+    for _ in 0..3 {
+        ops.call(COST_SUMMARY, &json!({"range": "all"})).unwrap();
+        ops.call(COST_SUMMARY, &json!({"range": "7"})).unwrap();
+    }
+    let lines = lines.lock().unwrap();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("claude-new-9") && lines[1].contains("claude-newer-9"));
+    assert!(lines.iter().all(|l| l.contains("no price")), "{lines:?}");
 }

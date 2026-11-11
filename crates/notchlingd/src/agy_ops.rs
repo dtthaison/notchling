@@ -28,6 +28,7 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{broad_folder, text_arg, Room};
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
+use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
 use crate::pages_ops::Titles;
 use notchling_engine::search::index::TitledSession;
@@ -132,6 +133,11 @@ impl AgyOps {
             runner,
             setup,
         }
+    }
+
+    /// Where the options a loaded session reports go (the model catalog's Antigravity list). Once.
+    pub fn attach_catalog(&self, catalog: Arc<CatalogService>) {
+        let _ = self.shared.catalog.set(catalog);
     }
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {

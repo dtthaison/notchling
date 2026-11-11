@@ -360,6 +360,7 @@ mod tests {
             summary: "Frontier".into(),
             efforts: vec!["medium".into(), "high".into()],
             default_effort: Some("medium".into()),
+            context_window: None,
         }];
         let ran = SessionFacts {
             model: Some("gpt-6.1-sol".into()),

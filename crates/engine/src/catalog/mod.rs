@@ -42,7 +42,7 @@ impl Tool {
         }
     }
 
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Tool::Claude => "claude",
             Tool::Codex => "codex",

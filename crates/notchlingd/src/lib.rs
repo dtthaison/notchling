@@ -39,6 +39,7 @@ pub mod agy_sink;
 pub mod attach;
 pub mod bridge_backend;
 pub mod bridge_ops;
+pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
 pub mod codex_ops;
@@ -80,6 +81,8 @@ mod accounts_ops_tests;
 mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
+#[cfg(test)]
+mod catalog_ops_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]

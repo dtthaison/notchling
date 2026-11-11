@@ -42,6 +42,7 @@ use crate::layout::Layout;
 use crate::limits_usage::{ClaudeUsage, LIMITS_USAGE};
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
+use notchling_engine::catalog::Catalog;
 use notchling_engine::cost::CostService;
 use notchling_engine::limits::claude::Announce;
 use notchling_engine::limits::mode::{LimitConfig, LimitMode, CLAUDE, PROVIDERS};
@@ -141,6 +142,8 @@ pub struct LimitsOps {
     notices: Arc<Mutex<VecDeque<(f64, String)>>>,
     room: Arc<dyn Room>,
     cost: Arc<CostService>,
+    /// Which unpriced models `cost.summary` has already logged.
+    unpriced: cost_ops::UnpricedLog,
     /// `limits.usage`: each Claude Code account's limits.
     claude_usage: ClaudeUsage,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
@@ -186,6 +189,7 @@ impl LimitsOps {
             notices: Arc::new(Mutex::new(VecDeque::new())),
             room,
             cost,
+            unpriced: cost_ops::UnpricedLog::new(),
             claude_usage: ClaudeUsage::default(),
             now: Arc::new(system_now),
             tick: TICK_EVERY,
@@ -195,11 +199,13 @@ impl LimitsOps {
     }
 
     /// The daemon's: its own limits document (`daemon/limits` in `<data>/notchling.db`, in memory for a daemon
-    /// given `--socket`) and the cost tracker over the layout's folders.
+    /// given `--socket`) and the cost tracker over the layout's folders, priced by the daemon's
+    /// one `catalog`.
     pub fn for_daemon(
         layout: &Layout,
         accounts: Arc<SwitchFlag>,
         room: Arc<dyn Room>,
+        catalog: Arc<Catalog>,
     ) -> LimitsOps {
         let config = if layout.socket_given {
             LimitConfig::in_memory()
@@ -209,7 +215,7 @@ impl LimitsOps {
         LimitsOps::new(
             accounts,
             Arc::new(config),
-            cost_ops::CostSetup::from_layout(layout).service(),
+            cost_ops::CostSetup::from_layout(layout, catalog).service(),
             room,
         )
     }
@@ -217,6 +223,12 @@ impl LimitsOps {
     /// A fixed clock (tests).
     pub fn with_clock(mut self, now: Arc<dyn Fn() -> f64 + Send + Sync>) -> LimitsOps {
         self.now = now;
+        self
+    }
+
+    /// Where the once-per-run "no price" lines go (tests).
+    pub fn with_unpriced_sink(mut self, sink: Box<dyn Fn(&str) + Send + Sync>) -> LimitsOps {
+        self.unpriced = cost_ops::UnpricedLog::with_sink(sink);
         self
     }
 
@@ -396,7 +408,7 @@ impl LimitsOps {
             LIMITS_STATUS => Ok(self.status()),
             LIMITS_SET_MODE => self.set_mode(args),
             LIMITS_USAGE => self.claude_usage.call(self.accounts.is_on(), args),
-            COST_SUMMARY => cost_ops::call(&self.cost, args, (self.now)()),
+            COST_SUMMARY => cost_ops::call(&self.cost, &self.unpriced, args, (self.now)()),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }

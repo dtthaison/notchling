@@ -83,6 +83,7 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         ops::PROVIDERS_LIST,
         "limits.status",
         "cost.summary",
+        ops::CATALOG_GET,
         ops::VAULT_LIST,
         ops::INSTALL_PLAN,
     ] {

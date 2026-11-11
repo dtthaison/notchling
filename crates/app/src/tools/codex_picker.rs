@@ -164,6 +164,7 @@ mod tests {
                 summary: "The big one".into(),
                 efforts: vec!["low".into(), "medium".into(), "high".into()],
                 default_effort: Some("medium".into()),
+                context_window: None,
             },
             Model {
                 slug: "gpt-6.1-mini".into(),
@@ -171,6 +172,7 @@ mod tests {
                 summary: String::new(),
                 efforts: vec!["low".into(), "medium".into()],
                 default_effort: Some("low".into()),
+                context_window: None,
             },
         ]
     }

@@ -17,6 +17,8 @@ pub struct Model {
     pub summary: String,
     pub efforts: Vec<String>,
     pub default_effort: Option<String>,
+    /// The window Codex reports for the model; `None` when the cache has none.
+    pub context_window: Option<u64>,
 }
 
 /// The models in Codex's cache file under `codex_home`; none when it is missing or unreadable.
@@ -62,6 +64,7 @@ pub fn parse(data: &[u8]) -> Vec<Model> {
                 summary: text(m, "description").unwrap_or_default(),
                 efforts,
                 default_effort: text(m, "default_reasoning_level"),
+                context_window: m.get("context_window").and_then(Value::as_u64),
                 slug,
             })
         })
@@ -98,6 +101,15 @@ mod tests {
         assert_eq!(models[1].efforts, ["low", "medium"]);
         assert_eq!(models[1].default_effort.as_deref(), Some("medium"));
         assert_eq!(models[0].name, "A");
+    }
+
+    #[test]
+    fn the_context_window_is_read_when_the_cache_has_one() {
+        let models = parse(
+            br#"{"models":[{"slug":"a","context_window":272000},{"slug":"b","context_window":"big"},{"slug":"c"}]}"#,
+        );
+        let windows: Vec<_> = models.iter().map(|m| m.context_window).collect();
+        assert_eq!(windows, [Some(272_000), None, None]);
     }
 
     #[test]
