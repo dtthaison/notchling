@@ -149,6 +149,11 @@ pub fn cost_page<V: 'static>(
                 .gap(px(10.0))
                 .children(view.tiles.iter().map(|t| tile(t, a))),
         )
+        .children(
+            view.unpriced
+                .as_deref()
+                .map(|line| label(line, TypeRole::Meta, Ink::TextMuted, a)),
+        )
         .child(segmented(
             "cost-range",
             &ranges,

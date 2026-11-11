@@ -30,7 +30,7 @@ The design is [the tool provider interface spec](../superpowers/specs/2026-11-11
 - Left for later:
   - `/model` sent through `session.command` isn't checked against the allowlist yet.
   - Codex's picker still reads Codex's cache in the app; it moves to `catalog.get` in phase 2, with the rest of the per-tool UI.
-  - The Token Cost page doesn't show `unpriced` and `borrowed` yet; `cost.summary` returns them.
+  - The Token Cost page doesn't show `borrowed` yet; `cost.summary` returns it. A model in `unpriced` shows "No Price" and its tokens, and a line under the totals names them.
   - Claude Code's list is read with the main login's token only; a lane's own login isn't used.
   - The phone app doesn't read `models` or send `modelId` yet.
   - Phases 2 to 5 get their own plans.
