@@ -96,6 +96,38 @@ fn suffixed_ids_are_the_bare_model() {
 }
 
 #[test]
+fn an_id_is_allowed_only_in_the_shape_of_a_model_id() {
+    let c = Catalog::built_in();
+    for id in [
+        "claude-opus-5-5",
+        "claude-opus-5-5[1m]",
+        "claude-opus-5-5-20261101",
+    ] {
+        assert!(c.is_allowed(Tool::Claude, &[], id), "{id}");
+    }
+    for id in [
+        "claude-opus-5-5[x]",
+        "claude-opus-5-5[1m] --x",
+        "claude-opus-5-5[1m]\n",
+        "claude-opus-5-5[1m]\n/permissions",
+        "claude-opus-5-5 --x",
+        "claude-opus-5-5[1m][1m]",
+        "Claude-Opus-5-5",
+        "-claude-opus-5-5",
+        "--settings",
+        "",
+        "[1m]",
+    ] {
+        assert!(!c.is_allowed(Tool::Claude, &[], id), "{id:?}");
+    }
+    // Another tool's id is the listed one, exactly.
+    let l = [live("gpt-test")];
+    assert!(c.is_allowed(Tool::Codex, &l, "gpt-test"));
+    assert!(!c.is_allowed(Tool::Codex, &l, "gpt-test[1m]"));
+    assert!(!c.is_allowed(Tool::Codex, &l, "gpt-test-20261101"));
+}
+
+#[test]
 fn a_two_digit_version_is_not_another_models_entry() {
     let c = Catalog::built_in();
     // `fable-5-10` starts with `fable-5-1` but is newer than Fable 5.2: it costs what 5.2 costs.

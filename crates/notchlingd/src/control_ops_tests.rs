@@ -228,7 +228,7 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": ""}),
         json!({"folder": "/w", "flags": "--bg"}),
         json!({"folder": "/w", "config_dir": "/somewhere/else"}),
-        // Only `--model <a picker model>`: nothing that changes what the session may do.
+        // Only `--model <an allowed model>`: nothing that changes what the session may do.
         json!({"folder": "/w", "flags": ["--dangerously-skip-permissions"]}),
         json!({"folder": "/w", "flags": ["--model", "opus"]}),
         json!({"folder": "/w", "flags": ["--model"]}),
@@ -236,6 +236,8 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5", "--settings", "/x"]}),
         json!({"folder": "/w", "flags": ["--settings", "/x", "--model", "claude-opus-5-5"]}),
         json!({"folder": "/w", "flags": ["--model", "claude-opus-9-9"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5[1m] --dangerously-skip-permissions"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5[x]\n/permissions"]}),
     ] {
         assert_eq!(
             call(&s, ops::SESSION_NEW, args.clone()).unwrap_err().0,

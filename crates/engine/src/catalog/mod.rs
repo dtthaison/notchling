@@ -162,6 +162,16 @@ pub fn model_key(model: &str) -> String {
     id.to_string()
 }
 
+/// `[a-z][a-z0-9.-]*` with an optional `[1m]` at the end: what a Claude model id looks like when
+/// it is typed into a command line. `model_key` drops everything from the first `[`, so without
+/// this `claude-opus-5-5[1m] --flag` would pass for `claude-opus-5-5`.
+fn startable_shape(id: &str) -> bool {
+    let name = id.strip_suffix("[1m]").unwrap_or(id);
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
+}
+
 /// "claude-fable-5-2" is family "fable", version [5, 2]. Ids that don't start `claude-<name>` have
 /// no family.
 fn family_version(id: &str) -> Option<(String, Vec<u64>)> {
@@ -378,9 +388,17 @@ impl Catalog {
         out
     }
 
-    /// Whether `id` may start a session: it, or its bare form (no `[1m]`, no date), is one of
-    /// `allowed`, whose ids are compared bare too.
+    /// Whether `id` may start a session. A Claude id must have the shape of a model id (see
+    /// `startable_shape`: lowercase ASCII, an optional `[1m]` and nothing else, since the id goes
+    /// to the tool's command line) and, bare (no `[1m]`, no date), be one of `allowed`, whose ids
+    /// are compared bare too. Another tool's id must be one of `allowed` exactly.
     pub fn is_allowed(&self, tool: Tool, live: &[LiveModel], id: &str) -> bool {
+        if tool != Tool::Claude {
+            return self.allowed(tool, live).iter().any(|a| a == id);
+        }
+        if !startable_shape(id) {
+            return false;
+        }
         let bare = model_key(id);
         self.allowed(tool, live)
             .iter()

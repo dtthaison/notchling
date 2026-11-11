@@ -6,7 +6,7 @@
 //! | --- | --- | --- |
 //! | `session.stop` | `{id}` | `{"stopped": true}` |
 //! | `session.remove` | `{id}` | `{"removed": true}` |
-//! | `session.new` | `{folder, config_dir?, flags?: ["--model", <a picker model>]}` | `{"jobId": "6ce4c19c" or null}` |
+//! | `session.new` | `{folder, config_dir?, flags?: ["--model", <an allowed model>]}` | `{"jobId": "6ce4c19c" or null}` |
 //! | `folder.trust` | `{folder, config_dir?}` | `{"trusted": true}` |
 //! | `session.move` | `{id, to_config_dir}` | `{"jobId": ...}` |
 //! | `session.command` | `{id, command}` | `{"sent": true}` |

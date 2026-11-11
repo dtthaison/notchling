@@ -52,6 +52,15 @@ fn every_switch_starts_off_and_every_watcher_is_fed() {
 }
 
 #[test]
+fn the_acting_ops_check_models_against_the_daemons_own_catalog() {
+    let (_root, _layout, w) = wired("catalog");
+    assert!(
+        std::ptr::eq(w.acting.catalog(), &*w.catalog),
+        "session.new --model must read the catalog catalog.get serves"
+    );
+}
+
+#[test]
 fn with_accounts_on_a_round_runs_over_the_fixture_stores_and_reaches_no_login() {
     let (_root, _layout, w) = wired("on");
     assert_eq!(w.accounts_switch().name(), ACCOUNTS);
