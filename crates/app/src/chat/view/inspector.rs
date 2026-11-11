@@ -21,8 +21,7 @@ use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::inspector::{
-    fact_icon, fact_text, inspector, no_writers, Fold, Inspector, Mark, ShellRow, SubagentRow,
-    TaskRow,
+    fact_icon, fact_text, inspector, Fold, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
 
 pub(super) const WIDTH: f32 = 260.0;
@@ -56,7 +55,9 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 
 /// The inspector panel, for the selected session.
 pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
-    let i = inspector(&view.conversation, &view.subagents, &no_writers);
+    let i = inspector(&view.conversation, &view.subagents, &|p: &str| {
+        view.shell_probe.writers(p)
+    });
     let folder = view.selected_session().map(|s| {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)

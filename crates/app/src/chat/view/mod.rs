@@ -23,6 +23,7 @@ mod prompts;
 mod row_menu;
 mod select;
 mod sheets;
+mod shell_probe;
 mod sidebar;
 mod simulator;
 mod slash_menu;
@@ -208,6 +209,7 @@ pub struct ChatView {
     /// The Details panel is hidden. The Swift app saves this as `chatInspector` (hidden until
     /// first opened); here the panel starts shown and the choice lasts for the window.
     details_hidden: bool,
+    shell_probe: shell_probe::Probe,
     /// The page panel: an Artifact clicked in a conversation, in the Details Panel's place. The
     /// window's, not a session's, so picking another session keeps it.
     page: page_panel::State,
@@ -429,6 +431,7 @@ impl ChatView {
             drawn_ms: 0,
             sidebar_hidden: false,
             details_hidden: false,
+            shell_probe: shell_probe::Probe::default(),
             page: page_panel::State::default(),
             terminal: terminal::State::default(),
             simulator: simulator::State::default(),
@@ -738,6 +741,7 @@ impl ChatView {
             cx.notify();
         }
         // A second opinion's card changes when its command ends, which nothing else signals.
+        shell_probe::tick(self, cx);
         if opinions::any_running(self, cx) {
             cx.notify();
         }
