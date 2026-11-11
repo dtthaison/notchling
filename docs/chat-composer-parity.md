@@ -12,6 +12,12 @@ The parts ask each session's tool through one interface, `ChatTool` in
 `crates/app/src/chat/view/tool/` (decision [0015](decisions/0015-one-chat-interface-per-tool.md)):
 a new tool is one adapter file there.
 
+A Claude Code session's Model and Effort pickers and its Context Meter's window come from the daemon's
+model catalog (`catalog.get`, decision [0016](decisions/0016-provider-interface-in-the-engine.md)),
+and the built-in list until the daemon answers. Codex's pickers still read Codex's own
+`models_cache.json` and Antigravity's its session's options; Codex moves to `catalog.get` in
+phase 2 of 0016.
+
 ## The parts, left to right
 
 Under the box: **Model** · **Effort** · status · **Context Meter** · **Account Menu** · **Limit Ring**.
@@ -27,10 +33,10 @@ In the box: **+** (attach), the text, **Send** or **Stop**. Over the box: the **
 | Send while a turn works | queued (Claude Code's queue) | queued (Notchling's outbox, next turn) | refused: the box is disabled ("busy") | Antigravity: queue in the outbox like Codex, send at the turn's end |
 | Edit a queued message | yes (take back) | no | no | Codex and Antigravity: take back from the outbox |
 | Stop / Esc | yes (interrupt) | yes (SIGINT) | yes (`session/cancel`) | |
-| Model picker | `/model` | next turn's model | its Model option | done 2026-11-11: one Model Picker for every tool (`chat::pickers`); Antigravity's Mode is a third picker of the same kind |
-| Effort picker | `/effort` | next turn's effort | Thinking Level | done 2026-11-11 |
+| Model picker | `/model`, rows from the catalog | next turn's model, rows from Codex's cache | its Model option | done 2026-11-11: one Model Picker for every tool (`chat::pickers`); Antigravity's Mode is a third picker of the same kind. Codex: rows from the catalog (phase 2 of 0016) |
+| Effort picker | `/effort`, the levels of the model in use from the catalog | next turn's effort | Thinking Level | done 2026-11-11 |
 | Slash Menu | yes (Claude Code's commands) | none in Chat | none in Chat | Codex: its commands and `~/.codex/prompts` (the Swift app had them). Antigravity: the commands its `available_commands_update` sends |
-| Context Meter | yes, with % of the window | yes when the rollout says | yes since 2026-11-11 (from its log before a turn ends), tokens only | a context window per Gemini model, so it shows a % |
+| Context Meter | yes, with % of the window from the catalog (it says when the window is another model's) | yes when the rollout says | yes since 2026-11-11 (from its log before a turn ends), tokens only | a context window per Gemini model, so it shows a % |
 | Account Menu | menu: this session's account, Move All, Add | button: opens Accounts on Codex | button: opens Accounts on Antigravity (2026-11-11) | the same menu for all: list the tool's accounts with a tick, Switch, Add Account… |
 | Limit Ring | the account's 5h ring, card | the active login's Codex group | the model's group, card with every group (2026-11-11) | |
 | Questions and permissions | cards in the conversation | none (exec can't ask) | permission card | Codex: say in the card area that this turn can't ask, once |

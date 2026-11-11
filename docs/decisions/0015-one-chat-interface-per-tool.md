@@ -21,7 +21,7 @@ The engine already worked this way for accounts (`AccountProvider`), for limits 
 
 ## Status
 
-Proposed. The maintainer asked for this design on 2026-11-11; accepting this record settles it.
+Proposed. Amended by [0016](0016-provider-interface-in-the-engine.md), which moves the interface per tool into the engine. The maintainer asked for this design on 2026-11-11; accepting this record settles it.
 
 ## Date
 

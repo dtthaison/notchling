@@ -163,6 +163,10 @@ Decided: a Rust engine, GPUI for every desktop app (the Swift app is replaced), 
 
 Machines stays a separate tool, not inside the daemon, and is ported last (part E10). That is a designer's call, not settled.
 
+### Models and prices
+
+Which models each tool offers, their effort levels, context windows and prices are data, not code ([0016](docs/decisions/0016-provider-interface-in-the-engine.md), Proposed). `notchling_engine::catalog` (`crates/engine/src/catalog/`) lays three sources over each other: the tool's live list (Anthropic's `GET /v1/models` for Claude Code, Codex's `models_cache.json`, the Model and Thinking Level options an `agy acp` session reports), the last live list cached in `live-models.json`, and the compiled-in data file `crates/engine/data/catalog.json`. A `catalog.json` beside the daemon's socket can fix a price, a window or a name, but never adds a model. The daemon's `CatalogService` (`crates/notchlingd/src/catalog_ops.rs`) owns the one catalog: it serves `catalog.get {tool}` (agent tier) and `catalog.changed` on `tools`, prices `cost.summary`, and decides which models `session.new --model` and the phone's `modelId` may start. Claude Code's list is fetched only while the `accounts` switch is on, with the main login's live token (`ClaudeAccounts::live_token`: read only, never renewed), when a `catalog.get` finds the cached list a day old or missing, and not tried again for 15 minutes after a failure. Chat's Claude Code pickers and Context Meter read `catalog.get` at start, every hour and when a picker menu opens, and use the built-in list until it answers. This is phase 1 of 0016; one daemon API and one provider per tool in the engine are planned.
+
 ### Repo layout
 
 | Folder | What | Today |
@@ -219,3 +223,8 @@ Today the Swift app owns all of them.
 - [0009](docs/decisions/0009-rulesets-as-code.md) Rulesets as code, applied by the maintainer.
 - [0010](docs/decisions/0010-build-then-sign-beta-then-stable.md) Build, then sign apart; Beta, then Stable.
 - [0011](docs/decisions/0011-one-owner-per-resource.md) One owner per resource while Swift and Rust run side by side.
+- [0012](docs/decisions/0012-remote-computers.md) Remote computers: identity by certificate, host-qualified session ids (Proposed).
+- [0013](docs/decisions/0013-page-panel-web-view.md) A web view in Chat's page panel (Proposed).
+- [0014](docs/decisions/0014-app-data-in-sqlite.md) The app's own data in SQLite, search by bm25.
+- [0015](docs/decisions/0015-one-chat-interface-per-tool.md) One Chat interface per tool (Proposed, amended by 0016).
+- [0016](docs/decisions/0016-provider-interface-in-the-engine.md) One provider interface per tool in the engine; model data from a catalog (Proposed).

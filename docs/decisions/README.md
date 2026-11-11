@@ -22,7 +22,8 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0012](0012-remote-computers.md) | Remote computers: identity by certificate, host-qualified session ids, nothing replicated | Proposed |
 | [0013](0013-page-panel-web-view.md) | A web view in Chat's page panel, and the live claude.ai page | Proposed |
 | [0014](0014-app-data-in-sqlite.md) | The app's own data in SQLite, and search by bm25 | Accepted |
-| [0015](0015-one-chat-interface-per-tool.md) | Chat's parts are shared; each tool is one adapter behind one interface | Proposed |
+| [0015](0015-one-chat-interface-per-tool.md) | Chat's parts are shared; each tool is one adapter behind one interface | Proposed, amended by 0016 |
+| [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

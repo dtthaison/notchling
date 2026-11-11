@@ -1,11 +1,15 @@
-//! The model catalog in the daemon: one [`CatalogService`] owns the engine's `Catalog` (the data
-//! file with the user's `catalog.json` laid over it) and the live lists, and serves `catalog.get`.
-//! Agent tier, read only, not switched: it reads Codex's cache file and the daemon's own cache,
-//! and the one thing it writes is that cache.
+//! The model catalog in the daemon (decision 0016, phase 1): one [`CatalogService`] owns the
+//! engine's `Catalog` (the data file with the user's `catalog.json` laid over it) and the live
+//! lists, and serves `catalog.get`. Agent tier, read only, not switched: it reads Codex's cache
+//! file and the daemon's own cache, and the one thing it writes is that cache.
 //!
 //! | Op | Tier | Args | Reply |
 //! | --- | --- | --- | --- |
 //! | `catalog.get` | agent | `{tool: "claude" \| "codex" \| "antigravity"}` | see below |
+//!
+//! | Event | Topic | Body | When |
+//! | --- | --- | --- | --- |
+//! | `catalog.changed` | `tools` | `{tool}` | a fetch of Claude's list lands, or a loaded `agy acp` session reports options that differ from the cached ones |
 //!
 //! ```json
 //! {"tool": "claude", "fetchedAt": 1794150245.0,
@@ -23,12 +27,20 @@
 //!   and Thinking Level options the last loaded `agy acp` session reported, cached. `fetchedAt` is
 //!   when that list was fetched or seen (the cache file's mtime for Codex), `null` for the data
 //!   file's list.
-//! - A call for Claude when its list is due starts a fetch on a thread (one at a time) and answers
-//!   from what it has; the fetch ends as `catalog.changed {tool}` on `tools`. It runs only while
-//!   `accounts` is on, with the main login's access token read from Keychain by
+//! - A call for Claude when its list is due (a day old, or none) starts a fetch on a thread (one at
+//!   a time) and answers from what it has; the fetch ends as `catalog.changed {tool}` on `tools`.
+//!   It runs only while `accounts` is on, with the main login's access token read from Keychain by
 //!   [`ClaudeAccounts::live_token`], which only reads the live login, never renews anything and
-//!   answers nothing for an expired one. A failed fetch keeps the old list, and a try that found no token or failed is
-//!   not repeated for [`RETRY_SECS`].
+//!   answers nothing for an expired one. A failed fetch keeps the old list, and a try that found
+//!   no token or failed is not repeated for [`RETRY_SECS`]. Chat asks at start, every hour and when
+//!   a Claude picker menu opens, so the list is fetched about once a day while Chat runs.
+//! - The user's `catalog.json` (beside the socket) fixes prices, windows and names, entry by
+//!   entry; it never adds a model to what a session may start on.
+//! - The same catalog is read elsewhere in the daemon: `cost.summary`'s prices (`cost_ops`), the
+//!   `session.new --model` check (`control_ops`, through [`CatalogService::is_allowed`]: the
+//!   built-in models plus the live lists, a Claude id in the shape `[a-z][a-z0-9.-]*` with an
+//!   optional `[1m]`), and the phone's `models` list and `modelId` (`bridge_backend`). A `/model`
+//!   sent through `session.command` isn't checked against it yet.
 
 use crate::acting_ops::{now_ms, Room};
 use crate::layout::Layout;
