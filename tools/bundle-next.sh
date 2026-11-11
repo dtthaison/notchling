@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Builds the Rust app as build/Notchling Next.app: notchling-app and the notchling daemon side by
-# side in Contents/MacOS (the app starts the notchling beside it), signed ad hoc. It sits beside the
-# Swift app's Notchling.app until that retires; the daemon trusts /Applications/Notchling Next.app
+# side in Contents/MacOS (the app starts the notchling beside it) and the terminal host,
+# notchling-ptyhost, in Contents/Helpers (its LaunchAgent runs it there), signed ad hoc. It sits
+# beside the Swift app's Notchling.app until that retires; the daemon trusts /Applications/Notchling Next.app
 # as the app tier (notchling_local_api::tier::installed_app_paths).
 #
 #   tools/bundle-next.sh             build only
@@ -10,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
-cargo build --release --locked -p notchling-app -p notchling-notchlingd
+cargo build --release --locked -p notchling-app -p notchling-notchlingd -p notchling-ptyhost
 # Where cargo put it: a shared `build.target-dir` in ~/.cargo/config.toml moves it out of `target/`,
 # and copying from there would bundle whatever older build was left behind.
 TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release"
@@ -19,8 +20,10 @@ APP="build/$NAME.app"
 VERSION=$(cargo pkgid -p notchling-app | sed 's/.*[#@]//')
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$TARGET/notchling-app" "$TARGET/notchling" "$APP/Contents/MacOS/"
+# The terminal host (the Swift app's agent-console-hostd, ported): its LaunchAgent runs it from here.
+cp "$TARGET/notchling-ptyhost" "$APP/Contents/Helpers/"
 cp legacy/macos/Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,6 +46,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 codesign --force --sign - "$APP/Contents/MacOS/notchling"
+codesign --force --sign - "$APP/Contents/Helpers/notchling-ptyhost"
 codesign --force --sign - "$APP"
 echo "built $APP ($VERSION)"
 
