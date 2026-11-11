@@ -436,31 +436,51 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .items_center()
         .gap(px(4.0));
     for (i, (title, shell)) in view.terminal.tabs.iter().enumerate() {
-        // A tab is its name only, at most 120 pt wide. The active one's × sits over the end of
-        // its name, on the tab's own fill so the name runs under it; the others have none.
-        let close = (i == active).then(|| {
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right_0()
-                .pl(px(2.0))
-                .pr(px(3.0))
-                .flex()
-                .items_center()
-                .fill(Ink::Raised, a)
-                .child(
-                    tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
-                        .h(px(20.0))
-                        .w(px(20.0))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.close_terminal(i, window, cx);
-                        })),
-                )
-        });
+        // A tab is its name only, at most 120 pt wide. Its × sits over the end of the name, on a
+        // patch of the tab's own fill so the name runs under it: always on the active tab, on the
+        // others while the pointer is over them.
+        let group = SharedString::from(format!("term-tab-{i}"));
+        let is_active = i == active;
+        let button = tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
+            .h(px(20.0))
+            .w(px(20.0))
+            .hover(move |s| s.bg(hsla(Ink::Text.color(a).with_alpha(0.14))))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.close_terminal(i, window, cx);
+            }));
+        // Rounded as the tab: GPUI clips children to the tab's rectangle, not its corners.
+        let patch = div()
+            .h_full()
+            .rounded_r(px(6.0))
+            .pl(px(2.0))
+            .pr(px(3.0))
+            .flex()
+            .items_center()
+            .map(|p| {
+                if is_active {
+                    p.fill(Ink::Raised, a)
+                } else {
+                    p.bg(hsla(Ink::Raised.color(a).with_alpha(0.5)))
+                }
+            })
+            .child(button);
+        let close = div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .rounded_r(px(6.0))
+            // Under an inactive tab's half fill, the panel's own color, so the name stays hidden.
+            .when(!is_active, |c| {
+                c.fill(Ink::Window, a)
+                    .invisible()
+                    .group_hover(group.clone(), |s| s.visible())
+            })
+            .child(patch);
         let tab = div()
-            .id(SharedString::from(format!("term-tab-{i}")))
+            .id(group.clone())
+            .group(group)
             .relative()
             .flex_shrink()
             .min_w(px(48.0))
@@ -478,7 +498,7 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
                 t.hover(move |s| s.bg(hsla(Ink::Raised.color(a).with_alpha(0.5))))
             })
             .child(label(&title, TypeRole::Label, Ink::Text, a).flex_shrink_0())
-            .children(close)
+            .child(close)
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.terminal.tabs.select(i);
                 this.focus_terminal(window);
