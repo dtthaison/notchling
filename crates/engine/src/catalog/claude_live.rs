@@ -15,21 +15,46 @@ pub const MODELS_URL: &str = "https://api.anthropic.com/v1/models?limit=1000";
 /// The API's version header; the OAuth beta header is already sent by the client.
 const VERSION: &str = "2023-06-01";
 
-/// The models Anthropic lists for this login. An error says only the status or the shape of the
-/// answer, never its body or the token, and nothing is retried: the caller keeps its last list.
-pub fn fetch(http: &dyn HttpClient, token: &Secret) -> Result<Vec<LiveModel>, String> {
+/// Why a fetch got no list. It names only the status or the shape of the answer, never its body
+/// or the token, so it can be logged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FetchError {
+    NoAnswer,
+    Status(u16),
+    NotAList,
+}
+
+impl FetchError {
+    /// A 4xx: the endpoint refused this login, and asking again soon would be refused too.
+    pub fn refused(self) -> bool {
+        matches!(self, FetchError::Status(400..=499))
+    }
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::NoAnswer => write!(f, "no answer"),
+            FetchError::Status(status) => write!(f, "status {status}"),
+            FetchError::NotAList => write!(f, "answer is not a model list"),
+        }
+    }
+}
+
+/// The models Anthropic lists for this login. Nothing is retried: the caller keeps its last list.
+pub fn fetch(http: &dyn HttpClient, token: &Secret) -> Result<Vec<LiveModel>, FetchError> {
     let request = HttpRequest::get(MODELS_URL, token).with_header("anthropic-version", VERSION);
     let answer = http.send(&request);
     match answer.status {
         200 => {}
-        0 => return Err("no answer".into()),
-        status => return Err(format!("status {status}")),
+        0 => return Err(FetchError::NoAnswer),
+        status => return Err(FetchError::Status(status)),
     }
     match serde_json::from_slice::<Value>(&answer.body) {
         Ok(Value::Object(map)) if map.get("data").is_some_and(Value::is_array) => {
             Ok(parse(&answer.body))
         }
-        _ => Err("answer is not a model list".into()),
+        _ => Err(FetchError::NotAList),
     }
 }
 

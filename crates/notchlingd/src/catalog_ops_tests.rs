@@ -56,6 +56,10 @@ struct Rig {
     room: Arc<FakeRoom>,
     jobs: Jobs,
     service: Arc<CatalogService>,
+    /// The service's clock, in seconds.
+    clock: Arc<Mutex<f64>>,
+    /// What the service logged.
+    logs: Arc<Mutex<Vec<String>>>,
 }
 
 fn live_login(expires_at: Option<u64>) -> String {
@@ -84,6 +88,9 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
     let room = Arc::new(FakeRoom::default());
     let jobs = Jobs::default();
     let store = world.ops.store();
+    let clock = Arc::new(Mutex::new(NOW));
+    let logs = Arc::new(Mutex::new(Vec::new()));
+    let (now, log) = (clock.clone(), logs.clone());
     let service = Arc::new(
         CatalogService::new(
             Catalog::built_in(),
@@ -93,8 +100,12 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
             store.env().http.clone(),
         )
         .with_room(room.clone())
-        .with_clock(Arc::new(|| NOW))
-        .with_spawner(jobs.spawner()),
+        .with_clock(Arc::new(move || *now.lock().unwrap()))
+        .with_spawner(jobs.spawner())
+        .with_claude_code_config(tmp.path("claude-code/.claude.json"))
+        .with_log(Box::new(move |line| {
+            log.lock().unwrap().push(line.to_string())
+        })),
     );
     Rig {
         tmp,
@@ -104,6 +115,8 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
         room,
         jobs,
         service,
+        clock,
+        logs,
     }
 }
 
@@ -340,6 +353,100 @@ fn nothing_is_fetched_while_the_accounts_switch_is_off() {
         !service.models(Tool::Claude).is_empty(),
         "the data file's list"
     );
+}
+
+impl Rig {
+    fn at(&self, now: f64) {
+        *self.clock.lock().unwrap() = now;
+    }
+
+    /// One `catalog.get` for Claude, running the fetch it starts.
+    fn try_claude(&self) {
+        self.get("claude").unwrap();
+        self.jobs.run();
+    }
+}
+
+#[test]
+fn a_failed_fetch_is_logged_once_by_its_status_alone() {
+    let r = rig("logged", true, &live_login(None));
+    r.http
+        .answer(MODELS_URL, 401, r#"{"error": "test-access-1 leaked"}"#);
+    r.try_claude();
+    r.at(NOW + 2.0 * 86_400.0);
+    r.http.answer(MODELS_URL, 500, "oops");
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 2);
+    let logs = r.logs.lock().unwrap().clone();
+    assert_eq!(logs.len(), 1, "once per run: {logs:?}");
+    assert!(logs[0].contains("status 401"), "{logs:?}");
+    assert!(!logs[0].contains("test-access-1") && !logs[0].contains("leaked"));
+}
+
+#[test]
+fn a_refused_login_is_not_asked_again_for_a_day_and_a_failure_for_15_minutes() {
+    let r = rig("refused", true, &live_login(None));
+    r.http.answer(MODELS_URL, 403, "");
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 1);
+    // An hour later, still refused: nothing is asked.
+    r.at(NOW + 3_600.0);
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 1);
+    // A day later it is asked again; a 5xx then holds off only 15 minutes.
+    r.at(NOW + 86_400.0 + 1.0);
+    r.http.answer(MODELS_URL, 503, "");
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 2);
+    r.at(NOW + 86_400.0 + 600.0);
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 2);
+    r.at(NOW + 86_400.0 + 1_000.0);
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 3, "no answer, so tried again");
+}
+
+/// Claude Code's main config with its own model list (the shape seen live).
+const CLAUDE_CODE_CONFIG: &str = r#"{"oauthAccount": {"emailAddress": "one@example.com"},
+  "additionalModelOptionsCache": [
+    {"value": "claude-fable-5-3[1m]", "label": "Fable", "description": "Fable 5.3 · Most capable"}]}"#;
+
+#[test]
+fn claude_code_s_own_list_stands_in_until_anthropic_s_is_read() {
+    let r = rig("fallback", true, &live_login(None));
+    r.tmp.write("claude-code/.claude.json", CLAUDE_CODE_CONFIG);
+    let config = r.tmp.path("claude-code/.claude.json");
+    let before = std::fs::read(&config).unwrap();
+    // The fetch fails: Claude Code's list is what shows, and what may start.
+    r.http.answer(MODELS_URL, 401, "");
+    let reply = r.get("claude").unwrap();
+    r.jobs.run();
+    let fable = reply["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "claude-fable-5-3")
+        .expect("Claude Code's model is listed")
+        .clone();
+    assert_eq!(fable["name"], "Fable 5.3");
+    assert_eq!(fable["tier"], "current");
+    assert!(reply["fetchedAt"].as_f64().is_some(), "the file's mtime");
+    assert!(r.service.is_allowed(Tool::Claude, "claude-fable-5-3[1m]"));
+    assert_eq!(std::fs::read(&config).unwrap(), before, "never written");
+
+    // Once Anthropic's list is read, it comes first.
+    r.at(NOW + 2.0 * 86_400.0);
+    r.http.answer(MODELS_URL, 200, MODELS_LIST);
+    r.try_claude();
+    let reply = r.get("claude").unwrap();
+    assert_eq!(reply["fetchedAt"], NOW + 2.0 * 86_400.0);
+
+    // With no token at all, Claude Code's list shows too.
+    let r = rig("fallback-expired", true, &live_login(Some(1_000)));
+    r.tmp.write("claude-code/.claude.json", CLAUDE_CODE_CONFIG);
+    r.try_claude();
+    assert!(r.model_requests().is_empty());
+    assert!(ids(&r.get("claude").unwrap()).contains(&"claude-fable-5-3".to_string()));
 }
 
 #[test]

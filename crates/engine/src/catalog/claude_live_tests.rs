@@ -54,6 +54,8 @@ fn a_401_or_a_500_or_garbage_is_an_error_and_nothing_else_is_sent() {
         let http = ScriptedHttp::new();
         http.answer(MODELS_URL, status, body);
         let err = fetch(&http, &Secret::new("test-token")).unwrap_err();
+        assert_eq!(err.refused(), status == 401, "{err}");
+        let err = err.to_string();
         assert!(!err.contains("test-token") && !err.contains("html") && !err.contains("oops"));
         assert_eq!(http.seen().len(), 1, "one call, no retry");
         assert_eq!(http.seen()[0].1.as_deref(), Some("test-token"));

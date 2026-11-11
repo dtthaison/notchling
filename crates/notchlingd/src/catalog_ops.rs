@@ -22,17 +22,21 @@
 //! - A `borrowed` model also has `borrowedFrom`, the known model whose price and window it uses.
 //! - An unknown or missing `tool` is `bad_request`.
 //! - Where each list comes from (the spec's table): Claude's is Anthropic's `GET /v1/models`, read
-//!   with the main login's token and cached for a day, else the data file's; Codex's is the
-//!   `models_cache.json` Codex keeps (re-read when its mtime changes); Antigravity's is the Model
-//!   and Thinking Level options the last loaded `agy acp` session reported, cached. `fetchedAt` is
-//!   when that list was fetched or seen (the cache file's mtime for Codex), `null` for the data
-//!   file's list.
+//!   with the main login's token and cached for a day; while none has ever been read (no token,
+//!   or every fetch failed), Claude Code's own `additionalModelOptionsCache` in its main
+//!   `~/.claude.json` (read only, re-read when its mtime changes); else the data file's. Codex's
+//!   is the `models_cache.json` Codex keeps (re-read when its mtime changes); Antigravity's is the
+//!   Model and Thinking Level options the last loaded `agy acp` session reported, cached.
+//!   `fetchedAt` is when that list was fetched or seen (the file's mtime for Codex's and Claude
+//!   Code's), `null` for the data file's list.
 //! - A call for Claude when its list is due (a day old, or none) starts a fetch on a thread (one at
 //!   a time) and answers from what it has; the fetch ends as `catalog.changed {tool}` on `tools`.
 //!   It runs only while `accounts` is on, with the main login's access token read from Keychain by
 //!   [`ClaudeAccounts::live_token`], which only reads the live login, never renews anything and
 //!   answers nothing for an expired one. A failed fetch keeps the old list, and a try that found
-//!   no token or failed is not repeated for [`RETRY_SECS`]. Chat asks at start, every hour and when
+//!   no token or failed is not repeated for [`RETRY_SECS`], or for [`REFUSED_RETRY_SECS`] (a
+//!   day) after the endpoint refused the login with a 4xx. The first failure of a run is logged
+//!   to standard error by its status alone, never its body or the token. Chat asks at start, every hour and when
 //!   a Claude picker menu opens, so the list is fetched about once a day while Chat runs.
 //! - The user's `catalog.json` (beside the socket) fixes prices, windows and names, entry by
 //!   entry; it never adds a model to what a session may start on.
@@ -48,8 +52,8 @@ use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::ClaudeAccounts;
 use notchling_engine::accounts::http::{HttpClient, HttpRequest, HttpResponse};
-use notchling_engine::catalog::claude_live;
 use notchling_engine::catalog::live_cache::{refresh_due, LiveCache};
+use notchling_engine::catalog::{claude_code, claude_live};
 use notchling_engine::catalog::{model_key, Catalog, LiveModel, ModelInfo, Tool};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models as codex_models;
@@ -63,6 +67,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// A try that found no token or failed is not repeated for this long, so a picker opened over
 /// an expired login doesn't ask Keychain every time.
 pub const RETRY_SECS: f64 = 900.0;
+
+/// After the endpoint refused the login (a 4xx), no new try for a day: asking again sooner would
+/// be refused too, and costs a Keychain read and a request each time.
+pub const REFUSED_RETRY_SECS: f64 = 86_400.0;
 
 /// Runs a job off the caller's thread.
 pub type Spawner = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
@@ -104,8 +112,12 @@ struct Inner {
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// A fetch is queued or running.
     fetching: AtomicBool,
-    /// When the last fetch was tried, to hold off a retry.
-    last_try: Mutex<Option<f64>>,
+    /// When the last fetch was tried or refused and for how long no new one starts.
+    hold: Mutex<Option<(f64, f64)>>,
+    /// Where a failed fetch is logged: the daemon's log, standard error.
+    log: Box<dyn Fn(&str) + Send + Sync>,
+    /// A failed fetch was logged this run; later ones aren't.
+    logged: AtomicBool,
 }
 
 impl Inner {
@@ -122,7 +134,8 @@ impl Inner {
     /// Reads the main login's live token (read only: [`ClaudeAccounts::live_token`] has no saved
     /// slot, lane or renewal on its path, so whichever account is main when this runs, no refresh
     /// token is rotated) and fetches Anthropic's list. Anything missing or failing leaves the
-    /// cache as it was.
+    /// cache as it was. The first failure of a run is logged, by its status only; a refusal (a
+    /// 4xx) holds off the next try for [`REFUSED_RETRY_SECS`].
     fn fetch_claude(&self) {
         let Some((store, flag)) = &self.claude else {
             return;
@@ -133,11 +146,49 @@ impl Inner {
         let Ok(Some(token)) = store.live_token() else {
             return;
         };
-        if let Ok(models) = claude_live::fetch(&*self.http, &token) {
-            self.cache.put(Tool::Claude, (self.now)(), &models);
-            self.announce(Tool::Claude);
+        match claude_live::fetch(&*self.http, &token) {
+            Ok(models) => {
+                self.cache.put(Tool::Claude, (self.now)(), &models);
+                self.announce(Tool::Claude);
+            }
+            Err(why) => {
+                if why.refused() {
+                    *lock(&self.hold) = Some(((self.now)(), REFUSED_RETRY_SECS));
+                }
+                if !self.logged.swap(true, Ordering::SeqCst) {
+                    (self.log)(&format!(
+                        "notchling: Claude's model list wasn't read ({why}); the pickers show \
+                         the cached list, Claude Code's own or the data file's"
+                    ));
+                }
+            }
         }
     }
+}
+
+/// The list `load` reads from `file`, read again only when the file's mtime changed, and that
+/// mtime in seconds. A missing file is no list.
+fn by_mtime(
+    file: &std::path::Path,
+    held: &Held,
+    load: impl FnOnce() -> Vec<LiveModel>,
+) -> (Option<f64>, Vec<LiveModel>) {
+    let modified = std::fs::metadata(file).and_then(|m| m.modified()).ok();
+    let mut held = lock(held);
+    let Some(modified) = modified else {
+        *held = None;
+        return (None, Vec::new());
+    };
+    if held.as_ref().is_none_or(|(at, _)| *at != modified) {
+        *held = Some((modified, load()));
+    }
+    let secs = modified
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    (
+        Some(secs),
+        held.as_ref().map_or_else(Vec::new, |h| h.1.clone()),
+    )
 }
 
 /// The network for a service that fetches nothing.
@@ -152,11 +203,19 @@ impl HttpClient for NoHttp {
     }
 }
 
+/// A list read from a file, and the mtime of the file it came from.
+type Held = Mutex<Option<(SystemTime, Vec<LiveModel>)>>;
+
 pub struct CatalogService {
     inner: Arc<Inner>,
     codex_dir: PathBuf,
-    /// Codex's list as read, and the mtime of the file it came from.
-    codex: Mutex<Option<(SystemTime, Vec<LiveModel>)>>,
+    /// Codex's list as read.
+    codex: Held,
+    /// Claude Code's main config file (`~/.claude.json`), whose `additionalModelOptionsCache` is
+    /// Claude's list while Anthropic's has never been read. Read only.
+    claude_code: Option<PathBuf>,
+    /// Claude Code's list as read.
+    claude_code_list: Held,
     spawner: Spawner,
 }
 
@@ -179,10 +238,14 @@ impl CatalogService {
                 room: None,
                 now: Arc::new(now_secs),
                 fetching: AtomicBool::new(false),
-                last_try: Mutex::new(None),
+                hold: Mutex::new(None),
+                log: Box::new(|line| eprintln!("{line}")),
+                logged: AtomicBool::new(false),
             }),
             codex_dir,
             codex: Mutex::new(None),
+            claude_code: None,
+            claude_code_list: Mutex::new(None),
             spawner: thread_spawner(),
         }
     }
@@ -210,6 +273,7 @@ impl CatalogService {
     ) -> CatalogService {
         let state = layout.state_dir();
         let http = claude.0.env().http.clone();
+        let config = claude.0.env().config_file.clone();
         CatalogService::new(
             Catalog::load(&state.join("catalog.json")),
             LiveCache::new(state.join("live-models.json")),
@@ -218,6 +282,20 @@ impl CatalogService {
             http,
         )
         .with_room(room)
+        .with_claude_code_config(config)
+    }
+
+    /// Claude Code's main config file, whose own model list stands in for Anthropic's while that
+    /// one has never been read (no token, or every fetch failed). Read only.
+    pub fn with_claude_code_config(mut self, file: PathBuf) -> CatalogService {
+        self.claude_code = Some(file);
+        self
+    }
+
+    /// Where a failed fetch is logged (tests).
+    pub fn with_log(mut self, log: Box<dyn Fn(&str) + Send + Sync>) -> CatalogService {
+        self.inner_mut().log = log;
+        self
     }
 
     /// Where `catalog.changed` goes.
@@ -297,12 +375,14 @@ impl CatalogService {
         (self.inner.catalog.models(tool, &live), at)
     }
 
-    /// The tool's live list and when it was fetched, read once.
+    /// The tool's live list and when it was fetched, read once. Claude's is Anthropic's as last
+    /// fetched, else Claude Code's own (`additionalModelOptionsCache`), else none.
     fn live(&self, tool: Tool) -> (Option<f64>, Vec<LiveModel>) {
         match tool {
             Tool::Codex => self.codex_list(),
             tool => match self.inner.cache.get(tool) {
                 Some((at, models)) => (Some(at), models),
+                None if tool == Tool::Claude => self.claude_code_models(),
                 None => (None, Vec::new()),
             },
         }
@@ -310,16 +390,9 @@ impl CatalogService {
 
     /// Codex's list, read again only when its file's mtime changed, and that mtime in seconds.
     fn codex_list(&self) -> (Option<f64>, Vec<LiveModel>) {
-        let modified = std::fs::metadata(self.codex_dir.join("models_cache.json"))
-            .and_then(|m| m.modified())
-            .ok();
-        let mut held = lock(&self.codex);
-        let Some(modified) = modified else {
-            *held = None;
-            return (None, Vec::new());
-        };
-        if held.as_ref().is_none_or(|(at, _)| *at != modified) {
-            let models = codex_models::load(&self.codex_dir)
+        let file = self.codex_dir.join("models_cache.json");
+        by_mtime(&file, &self.codex, || {
+            codex_models::load(&self.codex_dir)
                 .into_iter()
                 .map(|m| LiveModel {
                     id: m.slug,
@@ -328,21 +401,24 @@ impl CatalogService {
                     efforts: m.efforts,
                     default_effort: m.default_effort,
                 })
-                .collect();
-            *held = Some((modified, models));
-        }
-        let secs = modified
-            .duration_since(UNIX_EPOCH)
-            .map_or(0.0, |d| d.as_secs_f64());
-        (
-            Some(secs),
-            held.as_ref().map_or_else(Vec::new, |h| h.1.clone()),
-        )
+                .collect()
+        })
+    }
+
+    /// Claude Code's own list, read again only when its config file's mtime changed (the file is
+    /// large and changes often), and that mtime in seconds; none when it lists nothing.
+    fn claude_code_models(&self) -> (Option<f64>, Vec<LiveModel>) {
+        let Some(file) = &self.claude_code else {
+            return (None, Vec::new());
+        };
+        let (at, models) = by_mtime(file, &self.claude_code_list, || claude_code::read(file));
+        (at.filter(|_| !models.is_empty()), models)
     }
 
     /// Starts a fetch of Anthropic's list on a thread when it is due: none already running, the
     /// `accounts` switch on, the main login known, the cached list over a day old (or none), and
-    /// the last try not within [`RETRY_SECS`]. Otherwise it does nothing.
+    /// the last try not within [`RETRY_SECS`] (a refused one: [`REFUSED_RETRY_SECS`]). Otherwise
+    /// it does nothing.
     pub fn refresh_claude(&self) {
         let inner = &self.inner;
         let Some((store, flag)) = &inner.claude else {
@@ -368,12 +444,12 @@ impl CatalogService {
             return;
         }
         {
-            let mut last = lock(&inner.last_try);
-            if last.is_some_and(|at| now >= at && now - at < RETRY_SECS) {
+            let mut hold = lock(&inner.hold);
+            if hold.is_some_and(|(at, secs)| now >= at && now - at < secs) {
                 inner.fetching.store(false, Ordering::SeqCst);
                 return;
             }
-            *last = Some(now);
+            *hold = Some((now, RETRY_SECS));
         }
         let fetching = Fetching(inner.clone());
         (self.spawner)(Box::new(move || {

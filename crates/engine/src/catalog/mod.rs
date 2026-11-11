@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::cost::prices::display_name;
 
+pub mod claude_code;
 pub mod claude_live;
 pub mod live_cache;
 
@@ -168,7 +169,7 @@ pub fn model_key(model: &str) -> String {
 /// `[a-z][a-z0-9.-]*` with an optional `[1m]` at the end: what a Claude model id looks like when
 /// it is typed into a command line. `model_key` drops everything from the first `[`, so without
 /// this `claude-opus-5-5[1m] --flag` would pass for `claude-opus-5-5`.
-fn startable_shape(id: &str) -> bool {
+pub(crate) fn startable_shape(id: &str) -> bool {
     let name = id.strip_suffix("[1m]").unwrap_or(id);
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
@@ -533,6 +534,8 @@ impl Catalog {
     }
 }
 
+#[cfg(test)]
+mod claude_code_tests;
 #[cfg(test)]
 mod claude_live_tests;
 #[cfg(test)]
