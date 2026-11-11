@@ -173,6 +173,11 @@ impl TerminalScreen {
                 }
                 self.erase_line(1);
             }
+            // 3 also clears the scrollback (`clear` sends 2 and 3).
+            3 => {
+                self.scrollback.clear();
+                self.cells = vec![self.blank_row(); self.rows];
+            }
             _ => self.cells = vec![self.blank_row(); self.rows],
         }
     }

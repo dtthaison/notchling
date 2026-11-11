@@ -4,7 +4,12 @@
 //! modes) and skips everything else. Control sequences are in `csi.rs`, character widths in
 //! `width.rs`.
 
+use std::collections::VecDeque;
+
 use super::width;
+
+/// How many rows that scrolled off the top a screen keeps for scrolling back.
+pub const SCROLLBACK: usize = 5000;
 
 /// A cell's color: one of the 256 indexed ones, or 24-bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +89,8 @@ pub struct TerminalScreen {
     pub(super) bottom: usize,
     pub(super) saved_cursor: Option<SavedCursor>,
     pub(super) saved_main: Option<Vec<Vec<TermCell>>>,
+    /// Rows scrolled off the top of the main screen, oldest first, at most [`SCROLLBACK`].
+    pub(super) scrollback: VecDeque<Vec<TermCell>>,
     pub(super) state: State,
     pub(super) params: Vec<u8>,
     utf8: Vec<u8>,
@@ -113,6 +120,7 @@ impl TerminalScreen {
             bottom: rows - 1,
             saved_cursor: None,
             saved_main: None,
+            scrollback: VecDeque::new(),
             state: State::Ground,
             params: Vec::new(),
             utf8: Vec::new(),
@@ -148,6 +156,11 @@ impl TerminalScreen {
     }
     pub fn sgr_mouse(&self) -> bool {
         self.sgr_mouse
+    }
+    /// Rows that scrolled off the top of the main screen, oldest first. The alternate screen (full
+    /// screen programs) adds none.
+    pub fn scrollback(&self) -> &VecDeque<Vec<TermCell>> {
+        &self.scrollback
     }
     pub fn alt_screen(&self) -> bool {
         self.saved_main.is_some()
@@ -403,7 +416,14 @@ impl TerminalScreen {
         if n == 0 {
             return;
         }
-        self.cells.drain(self.top..self.top + n);
+        let gone = self.cells.drain(self.top..self.top + n);
+        if self.top == 0 && self.saved_main.is_none() {
+            self.scrollback.extend(gone);
+            let over = self.scrollback.len().saturating_sub(SCROLLBACK);
+            self.scrollback.drain(..over);
+        } else {
+            drop(gone);
+        }
         let at = self.bottom + 1 - n;
         let blank = self.blank_row();
         self.cells.splice(at..at, std::iter::repeat_n(blank, n));
@@ -448,5 +468,34 @@ impl TerminalScreen {
         self.bottom = self.rows - 1;
         self.cursor_visible = true;
         self.wrap_pending = false;
+    }
+}
+
+#[cfg(test)]
+mod scrollback_tests {
+    use super::*;
+
+    fn text(row: &[TermCell]) -> String {
+        row.iter()
+            .map(|c| c.text.as_str())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
+    #[test]
+    fn rows_scrolled_off_the_top_are_kept_and_clear_drops_them() {
+        let mut screen = TerminalScreen::new(2, 10);
+        screen.feed(b"one\r\ntwo\r\nthree\r\nfour");
+        let kept: Vec<String> = screen.scrollback().iter().map(|r| text(r)).collect();
+        assert_eq!(kept, vec!["one", "two"]);
+        screen.feed(b"\x1b[?1049hx\r\ny\r\nz\x1b[?1049l");
+        assert_eq!(
+            screen.scrollback().len(),
+            2,
+            "the alternate screen adds nothing"
+        );
+        screen.feed(b"\x1b[H\x1b[2J\x1b[3J");
+        assert!(screen.scrollback().is_empty());
     }
 }

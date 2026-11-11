@@ -103,6 +103,101 @@ pub fn runs(row: &[TermCell]) -> Vec<(String, TermStyle)> {
     out
 }
 
+/// A mouse drag across the grid: where it started and where the mouse is, as (row, column), the
+/// column a boundary between cells (0 is before the first, the width after the last).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub anchor: (usize, usize),
+    pub head: (usize, usize),
+}
+
+impl Selection {
+    pub fn at(cell: (usize, usize)) -> Self {
+        Selection {
+            anchor: cell,
+            head: cell,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.anchor == self.head
+    }
+
+    /// The columns selected on `row` (from..to) in a row `width` wide, None when it's outside.
+    pub fn columns(&self, row: usize, width: usize) -> Option<(usize, usize)> {
+        let (start, end) = if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        };
+        if row < start.0 || row > end.0 {
+            return None;
+        }
+        let from = if row == start.0 { start.1 } else { 0 };
+        let to = if row == end.0 { end.1 } else { width };
+        let (from, to) = (from.min(width), to.min(width));
+        (from < to).then_some((from, to))
+    }
+}
+
+/// The boundary nearest a point in the grid (x, y from its top left), clamped to `rows` × `cols`.
+pub fn boundary_at(x: f32, y: f32, rows: usize, cols: usize) -> (usize, usize) {
+    let row = (y / LINE).floor().max(0.0) as usize;
+    let col = (x / CELL).round().max(0.0) as usize;
+    (row.min(rows.saturating_sub(1)), col.min(cols))
+}
+
+/// The rows on show when the view is scrolled `back` rows into the scrollback (0: the live screen),
+/// as many as the screen has. `back` is clamped to the scrollback there is.
+pub fn shown_rows<'a>(
+    history: impl ExactSizeIterator<Item = &'a Vec<TermCell>> + DoubleEndedIterator,
+    cells: &'a [Vec<TermCell>],
+    back: usize,
+) -> Vec<Vec<TermCell>> {
+    let back = back.min(history.len());
+    let rows = cells.len();
+    let older: Vec<&Vec<TermCell>> = history.rev().take(back).collect();
+    older
+        .into_iter()
+        .rev()
+        .chain(cells.iter())
+        .take(rows)
+        .cloned()
+        .collect()
+}
+
+/// The word around column `col` (from..to): the run of non-blank cells it's in, or just that cell.
+pub fn word_at(row: &[TermCell], col: usize) -> (usize, usize) {
+    let blank = |c: &TermCell| c.width != 0 && c.text.trim().is_empty();
+    let col = col.min(row.len().saturating_sub(1));
+    if row.get(col).is_none_or(blank) {
+        return (col, (col + 1).min(row.len()));
+    }
+    let from = row[..col].iter().rposition(blank).map_or(0, |i| i + 1);
+    let to = row[col..]
+        .iter()
+        .position(blank)
+        .map_or(row.len(), |i| col + i);
+    (from, to)
+}
+
+/// The selected text: each row's part with its trailing blanks cut, rows joined by newlines.
+pub fn selected_text(cells: &[Vec<TermCell>], selection: Selection) -> String {
+    let mut lines = Vec::new();
+    for (r, row) in cells.iter().enumerate() {
+        let Some((from, to)) = selection.columns(r, row.len()) else {
+            continue;
+        };
+        let text: String = row[from..to]
+            .iter()
+            .filter(|c| c.width != 0)
+            .map(|c| c.text.as_str())
+            .collect();
+        lines.push(text.trim_end().to_owned());
+    }
+    lines.join("\n")
+}
+
 /// The text to write for a paste: wrapped in the bracketed-paste marks when the shell asked for
 /// them, so a pasted newline doesn't run half a command.
 pub fn paste(text: &str, bracketed: bool) -> String {
@@ -218,6 +313,81 @@ pub fn menu_keys(command: &str) -> [(u64, String); 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row(text: &str, width: usize) -> Vec<TermCell> {
+        let mut cells: Vec<TermCell> = text
+            .chars()
+            .map(|c| TermCell {
+                text: c.to_string(),
+                ..TermCell::default()
+            })
+            .collect();
+        cells.resize(width, TermCell::default());
+        cells
+    }
+
+    #[test]
+    fn a_drag_selects_text_across_rows_in_reading_order() {
+        let cells = vec![row("$ ls", 10), row("Cargo.toml", 10), row("docs", 10)];
+        let down = Selection {
+            anchor: (0, 2),
+            head: (2, 2),
+        };
+        assert_eq!(selected_text(&cells, down), "ls\nCargo.toml\ndo");
+        let up = Selection {
+            anchor: (2, 2),
+            head: (0, 2),
+        };
+        assert_eq!(
+            selected_text(&cells, up),
+            "ls\nCargo.toml\ndo",
+            "a drag upward too"
+        );
+        assert_eq!(selected_text(&cells, Selection::at((1, 3))), "");
+        assert!(Selection::at((1, 3)).is_empty());
+    }
+
+    #[test]
+    fn scrolling_back_shows_older_rows_above_the_screen() {
+        let history = [row("one", 4), row("two", 4), row("three", 5)];
+        let cells = vec![row("now", 4), row("$", 4)];
+        let text = |back| -> Vec<String> {
+            shown_rows(history.iter(), &cells, back)
+                .iter()
+                .map(|r| {
+                    r.iter()
+                        .map(|c| c.text.as_str())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect()
+        };
+        assert_eq!(text(0), vec!["now", "$"]);
+        assert_eq!(text(1), vec!["three", "now"]);
+        assert_eq!(text(3), vec!["one", "two"]);
+        assert_eq!(
+            text(99),
+            vec!["one", "two"],
+            "no further than the scrollback goes"
+        );
+    }
+
+    #[test]
+    fn a_double_click_takes_the_word_under_it() {
+        let cells = row("cd ~/go/src now", 20);
+        assert_eq!(word_at(&cells, 5), (3, 11));
+        assert_eq!(word_at(&cells, 0), (0, 2));
+        assert_eq!(word_at(&cells, 2), (2, 3), "a blank is just itself");
+    }
+
+    #[test]
+    fn a_point_maps_to_the_nearest_cell_boundary() {
+        assert_eq!(boundary_at(CELL * 2.4, LINE * 1.5, 24, 80), (1, 2));
+        assert_eq!(boundary_at(CELL * 2.6, 0.0, 24, 80), (0, 3));
+        assert_eq!(boundary_at(-5.0, -5.0, 24, 80), (0, 0));
+        assert_eq!(boundary_at(CELL * 500.0, LINE * 500.0, 24, 80), (23, 80));
+    }
 
     #[test]
     fn a_menu_command_in_a_background_job_runs_in_an_attached_tab() {

@@ -12,21 +12,26 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    canvas, div, prelude::*, px, rgb, AnyElement, Context, Div, FocusHandle, KeyDownEvent,
-    MouseButton, SharedString, Window,
+    canvas, div, prelude::*, px, rgb, AnyElement, ClipboardItem, Context, DispatchPhase, Div,
+    FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ScrollWheelEvent, SharedString, Window,
 };
 use notchling_engine::terminal::pty::Signal;
-use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TerminalScreen};
+use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TermCell, TerminalScreen};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SIDEBAR_WIDTH;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{hsla, icon, icon_button, label, KitPart, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::sidebar::HEADER_BUTTON;
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::page_panel::panel_width;
-use crate::chat::terminal::{bytes, grid, paste, rgb as cell_rgb, runs, Tabs, CELL, LINE};
+use crate::chat::terminal::{
+    boundary_at, bytes, grid, paste, rgb as cell_rgb, runs, selected_text, shown_rows, word_at,
+    Selection, Tabs, CELL, LINE,
+};
 use crate::mac::gate;
 
 /// Set, a render draws the panel over a sample screen (`expanded` for the wide one).
@@ -57,6 +62,16 @@ pub struct Shell {
     /// The rows and columns drawn last, so a change of size resizes the pty once.
     grid: Rc<Cell<(u16, u16)>>,
     focus: FocusHandle,
+    /// Text picked with the mouse, for ⌘C; a key typed into the shell clears it.
+    selection: Rc<Cell<Option<Selection>>>,
+    /// A drag that started on the grid is going on.
+    dragging: Rc<Cell<bool>>,
+    /// The grid's top left in the window, from the last paint, to turn mouse points into cells.
+    origin: Rc<Cell<Point<Pixels>>>,
+    /// How many rows the view is scrolled back into the scrollback; typing goes back to 0.
+    back: Rc<Cell<usize>>,
+    /// Wheel movement not yet a whole row, in points.
+    wheel: Rc<Cell<f32>>,
 }
 
 impl Drop for Shell {
@@ -171,6 +186,11 @@ fn start_program(
         name,
         grid: Rc::new(Cell::new((rows, cols))),
         focus: cx.focus_handle(),
+        selection: Rc::new(Cell::new(None)),
+        dragging: Rc::new(Cell::new(false)),
+        origin: Rc::new(Cell::new(Point::default())),
+        back: Rc::new(Cell::new(0)),
+        wheel: Rc::new(Cell::new(0.0)),
     })
 }
 
@@ -394,7 +414,11 @@ fn tool(
             ButtonKind::Ghost,
             PartState::Rest,
             a,
-        ),
+        )
+        // Square, as the Chat header's buttons.
+        .flex_shrink_0()
+        .size(px(HEADER_BUTTON))
+        .px(px(0.0)),
         tip.into(),
         a,
     )
@@ -412,39 +436,52 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .items_center()
         .gap(px(4.0));
     for (i, (title, shell)) in view.terminal.tabs.iter().enumerate() {
+        // The tab's × sits at its left and shows only while the pointer is over that tab, so a row
+        // of narrow tabs stays readable.
+        let group = SharedString::from(format!("term-tab-{i}"));
         let close = tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
+            .flex_shrink_0()
             .h(px(20.0))
             .w(px(20.0))
             .px(px(0.0))
+            .opacity(0.0)
+            .group_hover(group.clone(), |s| s.opacity(1.0))
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
                 this.close_terminal(i, window, cx);
             }));
         let tab = div()
-            .id(SharedString::from(format!("term-tab-{i}")))
+            .id(group.clone())
+            .group(group)
             .flex_shrink()
-            .min_w(px(0.0))
+            .min_w(px(56.0))
             .max_w(px(200.0))
             .h(px(26.0))
-            .pl(px(10.0))
-            .pr(px(3.0))
+            .pl(px(3.0))
+            .pr(px(10.0))
             .rounded(px(6.0))
+            .overflow_hidden()
             .flex()
             .items_center()
-            .gap(px(6.0))
+            .gap(px(4.0))
             .cursor_pointer()
             .when(i == active, |t| t.fill(Ink::Raised, a))
             .when(i != active, |t| {
                 t.hover(move |s| s.bg(hsla(Ink::Raised.color(a).with_alpha(0.5))))
             })
-            .child(label(&title, TypeRole::Label, Ink::Text, a).flex_shrink_0())
+            .child(close)
+            .child(
+                label(&title, TypeRole::Label, Ink::Text, a)
+                    .flex_shrink()
+                    .min_w(px(0.0))
+                    .elide(),
+            )
             .child(
                 label(&shell.name, TypeRole::Label, Ink::TextFaint, a)
                     .flex_shrink()
                     .min_w(px(0.0))
                     .elide(),
             )
-            .child(close)
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.terminal.tabs.select(i);
                 this.focus_terminal(window);
@@ -500,7 +537,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
     let (cells, cursor, cursor_on, ended) = {
         let screen = shell.screen.lock().unwrap_or_else(|e| e.into_inner());
         (
-            screen.cells().to_vec(),
+            on_show(&screen, &shell.back),
             screen.cursor(),
             screen.cursor_visible(),
             shell.ended.load(Ordering::Relaxed),
@@ -537,8 +574,22 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                     .child(text)
             }))
     });
+    let selection = shell.selection.get().filter(|s| !s.is_empty());
+    let highlights = selection.into_iter().flat_map(|s| {
+        cells.iter().enumerate().filter_map(move |(r, row)| {
+            s.columns(r, row.len()).map(|(from, to)| {
+                div()
+                    .absolute()
+                    .left(px(PAD_X + from as f32 * CELL))
+                    .top(px(PAD_Y + r as f32 * LINE))
+                    .w(px((to - from) as f32 * CELL))
+                    .h(px(LINE))
+                    .bg(hsla(Ink::Selection.color(a)))
+            })
+        })
+    });
     let focused = shell.focus.is_focused(window);
-    let caret = (cursor_on && !ended).then(|| {
+    let caret = (cursor_on && !ended && shell.back.get() == 0).then(|| {
         let block = div()
             .absolute()
             .left(px(PAD_X + cursor.1 as f32 * CELL))
@@ -552,9 +603,56 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         }
     });
     let (pty, screen, size) = (shell.pty.clone(), shell.screen.clone(), shell.grid.clone());
+    let (origin, dragging, picked) = (
+        shell.origin.clone(),
+        shell.dragging.clone(),
+        shell.selection.clone(),
+    );
     let fit = canvas(
         |bounds, _, _| bounds,
-        move |_, bounds, _, _| {
+        move |_, bounds, window, _| {
+            origin.set(bounds.origin + Point::new(px(PAD_X), px(PAD_Y)));
+            // A drag goes on outside the grid too, so these listen to the whole window.
+            {
+                let (origin, dragging, picked, size) = (
+                    origin.clone(),
+                    dragging.clone(),
+                    picked.clone(),
+                    size.clone(),
+                );
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
+                    if phase != DispatchPhase::Bubble || !dragging.get() {
+                        return;
+                    }
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        dragging.set(false);
+                        return;
+                    }
+                    let at = event.position - origin.get();
+                    let (rows, cols) = size.get();
+                    let head = boundary_at(
+                        f32::from(at.x),
+                        f32::from(at.y),
+                        usize::from(rows),
+                        usize::from(cols),
+                    );
+                    if let Some(mut s) = picked.get() {
+                        if s.head != head {
+                            s.head = head;
+                            picked.set(Some(s));
+                            window.refresh();
+                        }
+                    }
+                });
+            }
+            {
+                let dragging = dragging.clone();
+                window.on_mouse_event(move |_: &MouseUpEvent, phase, _, _| {
+                    if phase == DispatchPhase::Bubble {
+                        dragging.set(false);
+                    }
+                });
+            }
             let wanted = grid(
                 f32::from(bounds.size.width) - 2.0 * PAD_X,
                 f32::from(bounds.size.height) - 2.0 * PAD_Y,
@@ -575,6 +673,69 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
     .size_full();
     let (pty, screen) = (shell.pty.clone(), shell.screen.clone());
     let focus = shell.focus.clone();
+    let press = {
+        let (screen, origin, dragging, picked, back) = (
+            shell.screen.clone(),
+            shell.origin.clone(),
+            shell.dragging.clone(),
+            shell.selection.clone(),
+            shell.back.clone(),
+        );
+        move |event: &MouseDownEvent, window: &mut Window, _: &mut gpui::App| {
+            focus.focus(window);
+            let at = event.position - origin.get();
+            let cells = on_show(&screen.lock().unwrap_or_else(|e| e.into_inner()), &back);
+            let cols = cells.first().map_or(0, Vec::len);
+            let (row, col) = boundary_at(f32::from(at.x), f32::from(at.y), cells.len(), cols);
+            let line = cells.get(row).map(Vec::as_slice).unwrap_or(&[]);
+            // A second click takes the word under it, a third the whole line.
+            let (from, to) = match event.click_count {
+                1 => (col, col),
+                2 => {
+                    let x = (f32::from(at.x) / CELL).floor().max(0.0) as usize;
+                    word_at(line, x)
+                }
+                _ => (0, line.len()),
+            };
+            picked.set(Some(Selection {
+                anchor: (row, from),
+                head: (row, to),
+            }));
+            dragging.set(event.click_count == 1);
+            window.refresh();
+        }
+    };
+    let (picked, cells_for_copy, back) = (
+        shell.selection.clone(),
+        shell.screen.clone(),
+        shell.back.clone(),
+    );
+    let scroll = {
+        let (screen, back, wheel, picked) = (
+            shell.screen.clone(),
+            shell.back.clone(),
+            shell.wheel.clone(),
+            shell.selection.clone(),
+        );
+        move |event: &ScrollWheelEvent, window: &mut Window, cx: &mut gpui::App| {
+            let screen = screen.lock().unwrap_or_else(|e| e.into_inner());
+            // A full-screen program (an editor, `less`) has no scrollback of its own here.
+            if screen.alt_screen() {
+                return;
+            }
+            let moved = wheel.get() + f32::from(event.delta.pixel_delta(px(LINE)).y);
+            let rows = (moved / LINE).trunc();
+            wheel.set(moved - rows * LINE);
+            let most = screen.scrollback().len() as i64;
+            let to = (back.get() as i64 + rows as i64).clamp(0, most) as usize;
+            if to != back.get() {
+                back.set(to);
+                picked.set(None);
+                window.refresh();
+            }
+            cx.stop_propagation();
+        }
+    };
     div()
         .id("terminal-screen")
         .track_focus(&shell.focus)
@@ -589,8 +750,9 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         .text_size(px(crate::chat::terminal::FONT))
         .line_height(px(LINE))
         .cursor_text()
-        .on_mouse_down(MouseButton::Left, move |_, window, _| focus.focus(window))
-        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+        .on_mouse_down(MouseButton::Left, press)
+        .on_scroll_wheel(scroll)
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
             let keys = &event.keystroke;
             let m = &keys.modifiers;
             let (app_cursor, bracketed) = {
@@ -598,8 +760,20 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                 (s.app_cursor_keys(), s.bracketed_paste())
             };
             let out = if m.platform {
-                // ⌘V pastes; the other ⌘ keys stay the window's and the menu's.
+                // ⌘C copies the selection, ⌘V pastes; the other ⌘ keys stay the window's and the menu's.
                 match keys.key.as_str() {
+                    "c" => {
+                        if let Some(s) = picked.get().filter(|s| !s.is_empty()) {
+                            let text = {
+                                let screen =
+                                    cells_for_copy.lock().unwrap_or_else(|e| e.into_inner());
+                                selected_text(&on_show(&screen, &back), s)
+                            };
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            cx.stop_propagation();
+                        }
+                        return;
+                    }
                     "v" => cx
                         .read_from_clipboard()
                         .and_then(|item| item.text())
@@ -617,10 +791,14 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                 )
             };
             if let Some(out) = out {
+                if picked.take().is_some() || back.replace(0) != 0 {
+                    window.refresh();
+                }
                 let _ = pty.write_all_timeout(out.as_bytes(), Duration::from_millis(500));
                 cx.stop_propagation();
             }
         })
+        .children(highlights)
         .children(rows)
         .children(ended.then(|| {
             div()
@@ -631,6 +809,15 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         .children(caret)
         .child(fit)
         .into_any_element()
+}
+
+/// The rows on show: the live screen, or older rows when scrolled back.
+fn on_show(screen: &TerminalScreen, back: &Cell<usize>) -> Vec<Vec<TermCell>> {
+    if back.get() == 0 {
+        return screen.cells().to_vec();
+    }
+    back.set(back.get().min(screen.scrollback().len()));
+    shown_rows(screen.scrollback().iter(), screen.cells(), back.get())
 }
 
 /// The panel while it shows: beside the conversation, or across it when expanded.
