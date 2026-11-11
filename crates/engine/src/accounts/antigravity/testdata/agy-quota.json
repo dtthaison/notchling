@@ -1,0 +1,60 @@
+{
+ "response": {
+  "groups": [
+   {
+    "displayName": "Gemini Models",
+    "description": "Models within this group: Gemini Flash, Gemini Pro",
+    "buckets": [
+     {
+      "bucketId": "gemini-weekly",
+      "displayName": "Weekly Limit Remaining",
+      "window": "weekly",
+      "remainingFraction": 1,
+      "resetTime": "2026-11-18T12:55:01Z"
+     },
+     {
+      "bucketId": "gemini-5h",
+      "displayName": "Five Hour Limit Remaining",
+      "window": "5h",
+      "remainingFraction": 1,
+      "resetTime": "2026-11-11T17:55:01Z"
+     }
+    ]
+   },
+   {
+    "displayName": "Claude and GPT models",
+    "description": "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+    "buckets": [
+     {
+      "bucketId": "3p-weekly",
+      "displayName": "Weekly Limit Remaining",
+      "window": "weekly",
+      "remainingFraction": 1,
+      "resetTime": "2026-11-18T12:55:01Z"
+     },
+     {
+      "bucketId": "3p-5h",
+      "displayName": "Five Hour Limit Remaining",
+      "window": "5h",
+      "remainingFraction": 1,
+      "resetTime": "2026-11-11T17:55:01Z"
+     }
+    ]
+   },
+   {
+    "displayName": "Gemini 4 Argon",
+    "description": "For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota bucket) is available on Ultra plans.",
+    "buckets": [
+     {
+      "bucketId": "gemini-argon-wtu-weekly",
+      "displayName": "Gemini 4 Argon Weekly Limit",
+      "window": "weekly",
+      "remainingFraction": 1,
+      "resetTime": "2026-11-18T12:55:01Z"
+     }
+    ]
+   }
+  ],
+  "description": "Within each group, models share a weekly limit and a 5-hour limit. Quota is consumed proportionally to the cost of the tokens. Thus, limits will last longer with shorter tasks or using more cost-effective models. The 5-hour limit smooths out aggregate demand to fairly distribute global capacity across all users, while your weekly limit is tied directly to your individual tier."
+ }
+}

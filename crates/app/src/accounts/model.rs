@@ -304,7 +304,7 @@ fn provider_page(
                         warning: false,
                     },
                     (ANTIGRAVITY, true) => RowContent::Text {
-                        text: "Open Antigravity to read its limits.".into(),
+                        text: "Open Antigravity or an Antigravity chat to read its limits.".into(),
                         warning: false,
                     },
                     _ => RowContent::None,

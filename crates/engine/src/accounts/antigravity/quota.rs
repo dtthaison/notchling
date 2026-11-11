@@ -1,8 +1,10 @@
 //! Reads the signed-in account's limits from Antigravity's local language server, the same source
-//! as its own View Usage panel (`AntigravityQuota`). The server runs only while Antigravity is
-//! open, listens on a random local port behind a CSRF token, and speaks Connect (JSON over HTTPS
-//! with a self-signed certificate), so this finds the process, its token and ports, then calls
-//! each port until one answers.
+//! as its own View Usage panel (`AntigravityQuota`). Three programs run that server: Antigravity.app,
+//! Antigravity IDE.app and the `agy` CLI (each `agy acp` Chat or a delegation opens). It runs only
+//! while one of them does, listens on a random local port (the apps' behind a CSRF token; `agy`'s
+//! takes none), and speaks Connect (JSON over HTTPS with a self-signed certificate), so this finds
+//! the processes, their tokens and ports, then calls each port until one answers for the account.
+//! A server that isn't signed in (the IDE's answers 500 then) or is on another account is passed.
 //!
 //! The processes go through [`Procs`] and the calls through [`HttpClient`] (loopback-only trust),
 //! so a test runs neither. The CSRF token comes from the server's own command line and goes only
@@ -30,18 +32,64 @@ pub struct Snapshot {
     pub usage: Option<GroupedUsage>,
 }
 
-/// `expected_email` guards against reading while Antigravity is still loading another account: if
-/// the server reports a different email, it hasn't caught up, so skip this round.
+/// The servers that can answer, in the order they are tried: each runs the same language server
+/// and serves the same calls. `pgrep` arguments, and whether the server wants the CSRF token from
+/// its command line.
+const SERVERS: [(&[&str], bool); 3] = [
+    // Antigravity.app.
+    (&["-f", "bin/language_server --standalone"], true),
+    // Antigravity IDE.app (`language_server_macos_arm`, no `--standalone`).
+    (&["-f", "bin/language_server_macos"], true),
+    // The `agy` CLI (`agy acp`, Chat's and delegation's): its server takes no token, so none is sent.
+    (&["-x", "agy"], false),
+];
+
+/// At most this many processes of one kind are asked (several `agy acp` run at once).
+const PER_KIND: usize = 3;
+
+/// The first server that answers for the account. `expected_email` guards against reading while
+/// one is signed in to another account (or still loading it): that server is skipped, and another
+/// may answer.
 pub fn fetch(
     procs: &dyn Procs,
     http: &dyn HttpClient,
     expected_email: Option<&str>,
     now: f64,
 ) -> Option<Snapshot> {
-    let pid = find_pid(procs)?;
-    let csrf = csrf_token(procs, &pid)?;
-    for port in ports(procs, &pid) {
-        let Some(status_data) = post(http, "GetUserStatus", port, &csrf) else {
+    for (pgrep, wants_token) in SERVERS {
+        let Some(out) = procs.capture(PGREP, pgrep, SHELL_TIMEOUT) else {
+            continue;
+        };
+        for pid in parse_pids(&out).into_iter().take(PER_KIND) {
+            let csrf = if wants_token {
+                match csrf_token(procs, &pid) {
+                    Some(t) => Some(t),
+                    None => continue,
+                }
+            } else {
+                None
+            };
+            if let Some(snapshot) =
+                fetch_from(procs, http, &pid, csrf.as_deref(), expected_email, now)
+            {
+                return Some(snapshot);
+            }
+        }
+    }
+    None
+}
+
+/// One server: each of its ports until one answers GetUserStatus for the account.
+fn fetch_from(
+    procs: &dyn Procs,
+    http: &dyn HttpClient,
+    pid: &str,
+    csrf: Option<&str>,
+    expected_email: Option<&str>,
+    now: f64,
+) -> Option<Snapshot> {
+    for port in ports(procs, pid) {
+        let Some(status_data) = post(http, "GetUserStatus", port, csrf) else {
             continue;
         };
         let (email, plan) = parse_status(&status_data);
@@ -51,25 +99,24 @@ pub fn fetch(
             }
         }
         let usage =
-            post(http, "RetrieveUserQuotaSummary", port, &csrf).and_then(|d| parse_usage(&d, now));
+            post(http, "RetrieveUserQuotaSummary", port, csrf).and_then(|d| parse_usage(&d, now));
         return Some(Snapshot { plan, usage });
     }
     None
 }
 
-fn find_pid(procs: &dyn Procs) -> Option<String> {
-    let out = procs.capture(
-        PGREP,
-        &["-f", "bin/language_server --standalone"],
-        SHELL_TIMEOUT,
-    )?;
-    parse_pid(&out)
-}
-
 /// The first line, if it is a process id.
 pub fn parse_pid(out: &str) -> Option<String> {
-    let first = out.lines().next()?.trim();
-    (!first.is_empty() && first.bytes().all(|b| b.is_ascii_digit())).then(|| first.to_string())
+    parse_pids(out).into_iter().next()
+}
+
+/// Every line that is a process id, in order.
+pub fn parse_pids(out: &str) -> Vec<String> {
+    out.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_digit()))
+        .map(String::from)
+        .collect()
 }
 
 /// From the server's own command line (`--csrf_token <uuid>`).
@@ -119,16 +166,19 @@ pub fn ports_from_lsof(out: &str) -> Vec<u16> {
     seen
 }
 
-/// One Connect unary call; the body only on a 200.
-fn post(http: &dyn HttpClient, method: &str, port: u16, csrf: &str) -> Option<Vec<u8>> {
+/// One Connect unary call; the body only on a 200. The token header only for a server that wants it.
+fn post(http: &dyn HttpClient, method: &str, port: u16, csrf: Option<&str>) -> Option<Vec<u8>> {
+    let mut headers = vec![
+        ("Content-Type".into(), "application/json".into()),
+        ("Connect-Protocol-Version".into(), "1".into()),
+    ];
+    if let Some(csrf) = csrf {
+        headers.push(("x-codeium-csrf-token".into(), csrf.to_string()));
+    }
     let request = HttpRequest {
         method: "POST",
         url: format!("https://127.0.0.1:{port}{SERVICE}{method}"),
-        headers: vec![
-            ("Content-Type".into(), "application/json".into()),
-            ("Connect-Protocol-Version".into(), "1".into()),
-            ("x-codeium-csrf-token".into(), csrf.to_string()),
-        ],
+        headers,
         body: Some(b"{}".to_vec()),
         timeout: CALL_TIMEOUT,
         trust: Trust::LoopbackSelfSigned,
@@ -317,6 +367,102 @@ mod tests {
         http.ok(200, STATUS);
         assert!(fetch(&procs, &http, Some("someone-else@example.com"), 0.0).is_none());
         assert_eq!(http.calls(), 1, "no usage call after the mismatch");
+    }
+
+    /// What `agy acp`'s server answered on 2026-11-11 (Google AI Pro, nothing used yet).
+    const AGY_QUOTA: &str = include_str!("testdata/agy-quota.json");
+    const IDE_PGREP: &str = "/usr/bin/pgrep -f bin/language_server_macos";
+    const AGY_PGREP: &str = "/usr/bin/pgrep -x agy";
+    const AGY_LSOF: &str = "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nagy 777 me 12u IPv4 0x1 0t0 TCP 127.0.0.1:55483 (LISTEN)\nagy 777 me 13u IPv4 0x2 0t0 TCP 127.0.0.1:55484 (LISTEN)\n";
+
+    fn agy_only() -> FakeProcs {
+        FakeProcs::new()
+            .answer(AGY_PGREP, "777\n778\n")
+            .answer("/usr/sbin/lsof -nP -a -p 777 -iTCP -sTCP:LISTEN", AGY_LSOF)
+    }
+
+    #[test]
+    fn the_agy_cli_answers_without_a_token() {
+        let procs = agy_only();
+        let http = FakeHttp::new();
+        http.ok(200, STATUS);
+        http.ok(200, AGY_QUOTA);
+        let snap = fetch(&procs, &http, Some("a@example.com"), 1.0).unwrap();
+        let usage = snap.usage.unwrap();
+        let names: Vec<&str> = usage.groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"]
+        );
+        let bars: Vec<&str> = usage.groups[0].bars.iter().map(|b| b.0.as_str()).collect();
+        assert_eq!(bars, ["Week", "5h"]);
+        assert_eq!(usage.groups[0].bars[0].1.percent, 0.0);
+        let reqs = http.requests();
+        assert_eq!(reqs.len(), 2);
+        assert!(reqs[0].url.starts_with("https://127.0.0.1:55483/"));
+        for r in &reqs {
+            assert_eq!(r.trust, Trust::LoopbackSelfSigned);
+            assert!(
+                !r.headers.iter().any(|(k, _)| k == "x-codeium-csrf-token"),
+                "agy takes no token, and no other server's goes to it"
+            );
+        }
+        assert!(
+            !procs
+                .calls()
+                .iter()
+                .any(|c| format!("{c:?}").contains("/bin/ps")),
+            "agy's command line isn't read for a token"
+        );
+    }
+
+    #[test]
+    fn the_ide_server_is_found_with_its_token() {
+        let procs = FakeProcs::new()
+            .answer(IDE_PGREP, "28025\n")
+            .answer(
+                "/bin/ps -o command= -p 28025",
+                "/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity/bin/language_server_macos_arm --csrf_token ide-1 --subclient_type ide\n",
+            )
+            .answer("/usr/sbin/lsof -nP -a -p 28025 -iTCP -sTCP:LISTEN", LSOF_OUT);
+        let http = FakeHttp::new();
+        http.ok(200, STATUS);
+        http.ok(200, QUOTA);
+        assert!(fetch(&procs, &http, None, 0.0).unwrap().usage.is_some());
+        assert!(http.requests()[0]
+            .headers
+            .contains(&("x-codeium-csrf-token".into(), "ide-1".into())));
+    }
+
+    #[test]
+    fn a_server_not_signed_in_or_on_another_account_falls_through_to_agy() {
+        let procs = FakeProcs::new()
+            .answer(IDE_PGREP, "28025\n")
+            .answer("/bin/ps -o command= -p 28025", "x --csrf_token ide-1\n")
+            .answer(
+                "/usr/sbin/lsof -nP -a -p 28025 -iTCP -sTCP:LISTEN",
+                LSOF_OUT,
+            )
+            .answer(AGY_PGREP, "777\n")
+            .answer("/usr/sbin/lsof -nP -a -p 777 -iTCP -sTCP:LISTEN", AGY_LSOF);
+        let http = FakeHttp::new();
+        // The IDE: not signed in on one port (a 500), another account on the next.
+        http.ok(500, r#"{"code":"unknown"}"#);
+        http.ok(200, r#"{"userStatus":{"email":"other@example.com"}}"#);
+        // agy: the account's.
+        http.ok(200, STATUS);
+        http.ok(200, AGY_QUOTA);
+        let snap = fetch(&procs, &http, Some("a@example.com"), 0.0).unwrap();
+        assert_eq!(snap.usage.unwrap().groups.len(), 3);
+        let reqs = http.requests();
+        assert_eq!(reqs.len(), 4);
+        assert!(reqs[2].url.contains(":55483/"));
+    }
+
+    #[test]
+    fn several_pids_are_read_in_order() {
+        assert_eq!(parse_pids("1\n\n22\nnope\n333\n"), ["1", "22", "333"]);
+        assert!(parse_pids("").is_empty());
     }
 
     #[test]
