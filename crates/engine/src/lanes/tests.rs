@@ -263,3 +263,47 @@ fn a_lane_config_that_cant_be_read_is_never_written_over() {
         .unwrap()
         .contains("w@example.com"));
 }
+
+/// A lane whose `.claude.json` Claude Code made itself (no onboarding flags) opened `claude` on
+/// its first-run theme screen, so Trust Folder never saw the trust question and gave up.
+#[cfg(unix)]
+#[test]
+fn a_lane_claude_code_made_its_own_config_for_skips_first_run_setup() {
+    let tmp = TempDir::new("lanes-onboarding");
+    let s = store(&tmp);
+    tmp.write(
+        "home/.claude.json",
+        "{\n  \"hasCompletedOnboarding\": true,\n  \"lastOnboardingVersion\": \"2.1.310\",\n  \"oauthAccount\": {\"accountUuid\": \"main\"}\n}",
+    );
+    let l = lane(&s, "work");
+    std::fs::create_dir_all(&l.path).unwrap();
+    let config = Path::new(&l.path).join(".claude.json");
+    std::fs::write(
+        &config,
+        "{\n  \"firstStartTime\": \"x\",\n  \"oauthAccount\": {\"accountUuid\": \"acc\"}\n}",
+    )
+    .unwrap();
+
+    assert!(s.finish_onboarding(&l).unwrap());
+    let text = std::fs::read_to_string(&config).unwrap();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["hasCompletedOnboarding"], json!(true));
+    assert_eq!(v["lastOnboardingVersion"], json!("2.1.310"));
+    assert_eq!(v["firstStartTime"], json!("x"), "the rest is kept");
+    assert_eq!(v["oauthAccount"]["accountUuid"], json!("acc"));
+    // Done once: a second call changes nothing.
+    assert!(!s.finish_onboarding(&l).unwrap());
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+
+    // A lane's own newer version is never replaced, and a lane with no config yet is left to
+    // `prepare`.
+    std::fs::write(
+        &config,
+        "{\"hasCompletedOnboarding\": true, \"lastOnboardingVersion\": \"2.1.400\"}",
+    )
+    .unwrap();
+    assert!(!s.finish_onboarding(&l).unwrap());
+    let fresh = lane(&s, "fresh");
+    assert!(!s.finish_onboarding(&fresh).unwrap());
+    assert!(!Path::new(&fresh.path).join(".claude.json").exists());
+}

@@ -213,6 +213,7 @@ impl LaneStore {
         let config = dir.join(".claude.json");
         if config.exists() {
             self.set_profile(lane, profile)?;
+            self.finish_onboarding(lane)?;
         } else {
             let main = fs::read_to_string(&self.main_config).unwrap_or_else(|_| "{}".into());
             let text = set_top_level(&main, "oauthAccount", profile)
@@ -237,6 +238,43 @@ impl LaneStore {
         let out = set_top_level(&text, "oauthAccount", profile)
             .map_err(|e| LaneError::BadConfig(e.to_string()))?;
         notchling_platform::files::write_private_no_follow(&config, out.as_bytes()).map_err(io)
+    }
+
+    /// Copies the main login's first-run flags (`hasCompletedOnboarding`, `lastOnboardingVersion`)
+    /// into the lane's `.claude.json` where it lacks them. A lane whose file Claude Code made
+    /// itself has neither, so every `claude` there opened on the first-run theme screen, where a
+    /// hidden one (Trust Folder) waits for a question that never comes. Only missing keys are
+    /// set; a lane with no file yet is left to [`LaneStore::prepare`]. True when it wrote.
+    pub fn finish_onboarding(&self, lane: &Lane) -> Result<bool, LaneError> {
+        const FLAGS: [&str; 2] = ["hasCompletedOnboarding", "lastOnboardingVersion"];
+        let config = self.own_folder(lane)?.join(".claude.json");
+        let mut text = match fs::read_to_string(&config) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(io(e)),
+        };
+        let Ok(Value::Object(main)) = fs::read_to_string(&self.main_config)
+            .map_err(|_| ())
+            .and_then(|t| serde_json::from_str(&t).map_err(|_| ()))
+        else {
+            return Ok(false);
+        };
+        let Ok(Value::Object(own)) = serde_json::from_str::<Value>(&text) else {
+            return Err(LaneError::BadConfig(".claude.json isn't an object".into()));
+        };
+        let mut wrote = false;
+        for key in FLAGS {
+            if let (None, Some(value)) = (own.get(key), main.get(key)) {
+                text = set_top_level(&text, key, value)
+                    .map_err(|e| LaneError::BadConfig(e.to_string()))?;
+                wrote = true;
+            }
+        }
+        if wrote {
+            notchling_platform::files::write_private_no_follow(&config, text.as_bytes())
+                .map_err(io)?;
+        }
+        Ok(wrote)
     }
 
     /// The lane's folder, when it is directly inside [`LaneStore::lanes_dir`] and not a link.

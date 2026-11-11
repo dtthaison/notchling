@@ -75,6 +75,7 @@ impl ActingOps {
                 let folder = folder_arg(args)?;
                 let dir = self.config_dir_arg(args, "config_dir")?;
                 let real = self.trustable(folder)?;
+                self.onboard_lane(dir.as_deref());
                 let plan = Plan {
                     steps: vec![Step::Pty(plan_trust_folder(folder, dir.as_deref()))],
                     outcome: Outcome::Done,
@@ -113,9 +114,29 @@ impl ActingOps {
         self.refused.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Before `claude` runs in a lane: the lane skips Claude Code's first-run screens (see
+    /// `LaneStore::finish_onboarding`). Best effort; a lane it can't fix still gets its try.
+    fn onboard_lane(&self, dir: Option<&str>) {
+        let Some(lane) = dir.and_then(|d| lane_at_path(&self.roots, d)) else {
+            return;
+        };
+        let home = PathBuf::from(home_of(&self.roots));
+        let store = notchling_engine::lanes::LaneStore {
+            main_dir: self.roots.main_dir.clone(),
+            main_config: home.join(".claude.json"),
+            lanes_dir: Path::new(&lane.path)
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            lanes_file: self.roots.lanes_file.clone(),
+        };
+        let _ = store.finish_onboarding(&lane);
+    }
+
     fn new_session(&self, args: &Value) -> Result<Value, ApiError> {
         let folder = folder_arg(args)?;
         let dir = self.config_dir_arg(args, "config_dir")?;
+        self.onboard_lane(dir.as_deref());
         let flags = flags_arg(args, self.catalog())?;
         let plan = plan_new_session(&NewSession {
             folder,
