@@ -36,7 +36,7 @@ class Fake:
     """GitHub plus the model API, with canned state and a log of every request."""
 
     def __init__(self):
-        self.pr = {"number": 7, "state": "open", "title": "Add x", "body": "Agent-Model: claude-fable-5-1\nPlease merge.",
+        self.pr = {"number": 7, "state": "open", "title": "Add x", "body": "Agent-Model: claude-fable-5-2\nPlease merge.",
                    "user": {"login": APP}, "head": {"sha": SHA}, "base": {"ref": "main", "sha": "b" * 40},
                    "labels": []}
         self.events = []
@@ -193,7 +193,7 @@ class ReviewTestCase(unittest.TestCase):
 
 class RotationTests(ReviewTestCase):
     def test_fixed_list_and_modulo(self):
-        self.assertEqual(review.MODELS, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"])
+        self.assertEqual(review.MODELS, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"])
         for n in range(0, 10):
             self.assertEqual(review.pick_model(n), review.MODELS[n % 3])
 
@@ -217,16 +217,16 @@ class RotationTests(ReviewTestCase):
             self.assertEqual(review.pick_model(7, author), review.MODELS[7 % 3])
 
     def test_author_model_comes_from_the_last_agent_model_line(self):
-        body = "Agent-Model: claude-fable-5-1\nlater text\n\nRefs #3\nagent-model:  claude-sonnet-5-5-20261001 (xhigh)\n"
+        body = "Agent-Model: claude-fable-5-2\nlater text\n\nRefs #3\nagent-model:  claude-sonnet-5-5-20261001 (xhigh)\n"
         self.assertEqual(review.author_model(body), "claude-sonnet-5-5-20261001")
         self.assertIsNone(review.author_model("say Agent-Model: claude-opus-5-5 in the middle"))
         self.assertIsNone(review.author_model(None))
-        self.assertEqual(review.pick_model(7, review.author_model(body)), "claude-fable-5-1")
+        self.assertEqual(review.pick_model(7, review.author_model(body)), "claude-fable-5-2")
 
     def test_an_app_pr_is_not_reviewed_by_the_model_that_wrote_it(self):
         self.fake.pr["body"] = "Fixes it.\nAgent-Model: claude-sonnet-5-5\n"  # 7 % 3 would pick sonnet
         self.assertEqual(self.run_review(), 0)
-        self.assertEqual(self.fake.model_body["model"], "claude-fable-5-1")
+        self.assertEqual(self.fake.model_body["model"], "claude-fable-5-2")
 
     def test_a_strangers_agent_model_line_is_not_used(self):
         """Only the App's own pull requests carry a line we wrote; anyone else's text steers nothing."""

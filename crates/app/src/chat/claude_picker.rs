@@ -9,16 +9,17 @@ use super::format::model_name;
 /// The current models, in the order of Claude Code's own `/model` list (Swift `ModelPicker.choices`).
 pub const MODELS: [&str; 4] = [
     "claude-opus-5-5",
-    "claude-fable-5-1",
+    "claude-fable-5-2",
     "claude-sonnet-5-5",
     "claude-haiku-5-5",
 ];
 
 /// Older ones, under More Models (Swift `ModelPicker.older`).
-pub const OLDER_MODELS: [&str; 8] = [
+pub const OLDER_MODELS: [&str; 9] = [
     "claude-haiku-4-5",
     "claude-sonnet-5",
     "claude-opus-5",
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
@@ -181,7 +182,7 @@ mod tests {
     #[test]
     fn the_choices_are_the_swift_lists_in_order() {
         let names: Vec<String> = models(None).into_iter().map(|r| r.title).collect();
-        assert_eq!(names, ["Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Haiku 5.5"]);
+        assert_eq!(names, ["Opus 5.5", "Fable 5.2", "Sonnet 5.5", "Haiku 5.5"]);
         let older: Vec<String> = older_models(None).into_iter().map(|r| r.title).collect();
         assert_eq!(
             older,
@@ -189,6 +190,7 @@ mod tests {
                 "Haiku 4.5",
                 "Sonnet 5",
                 "Opus 5",
+                "Fable 5.1",
                 "Fable 5",
                 "Opus 4.8",
                 "Opus 4.7",
@@ -245,7 +247,7 @@ mod tests {
 
     #[test]
     fn a_pick_sends_the_command_with_its_value() {
-        assert_eq!(model_text("claude-fable-5-1"), "/model claude-fable-5-1");
+        assert_eq!(model_text("claude-fable-5-2"), "/model claude-fable-5-2");
         assert_eq!(effort_text("xhigh"), "/effort xhigh");
         // Every choice carries an argument, so the engine types it into the session as a reply and
         // never opens a terminal for it.

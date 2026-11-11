@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// The models Chat's picker offers (`ModelPicker.choices` in `Chat/Views/ChatPickers.swift`):
-/// Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5. Update both together.
+/// Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5. Update both together.
 pub const PICKER_MODELS: [&str; 4] = [
-    "claude-fable-5-1",
+    "claude-fable-5-2",
     "claude-opus-5-5",
     "claude-sonnet-5-5",
     "claude-haiku-5-5",

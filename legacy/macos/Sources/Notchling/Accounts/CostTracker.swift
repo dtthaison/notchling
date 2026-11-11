@@ -503,6 +503,7 @@ final class CostTracker: ObservableObject {
     /// Dollars per million tokens: input, output, cache read. Cache writes are 1.25× input for five
     /// minutes and 2× for an hour. Checked in order, so longer ids come first.
     private static let prices: [(prefix: String, input: Double, output: Double, read: Double)] = [
+        ("fable-5-2", 8, 40, 0.20), ("mythos-5-2", 8, 40, 0.20),
         ("fable-5-1", 10, 50, 0.25), ("mythos-5-1", 10, 50, 0.25), ("fable", 10, 50, 1), ("mythos", 10, 50, 1),
         ("opus-5-5", 4, 20, 0.20), ("opus-5", 5, 25, 0.50),
         ("opus-4-8", 5, 25, 0.50), ("opus-4-7", 5, 25, 0.50), ("opus-4-6", 5, 25, 0.50), ("opus-4-5", 5, 25, 0.50),

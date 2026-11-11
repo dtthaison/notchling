@@ -359,7 +359,7 @@ even that is a recommendation: the agent never approves, requests reviews on or 
 variable names it:
 
 - The reviewer model is picked by rotation over a fixed list (`claude-opus-5-5`, `claude-sonnet-5-5`,
-  `claude-fable-5-1`), keyed by the pull request's number. That is a design choice, not a secret: the
+  `claude-fable-5-2`), keyed by the pull request's number. That is a design choice, not a secret: the
   number is public and the comment names the model, so an author can tell which model reviews, and a
   keyed rotation would only hide it until the first review. What protects the review is not which
   model it is: the pull request's text is fenced as data, the answer is checked against a fixed shape

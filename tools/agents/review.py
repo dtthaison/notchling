@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set
 
 # The reviewer is picked by the PR number, never by what the PR says about its author.
-MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]
+MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"]
 STATUS_CONTEXT = "review-agent"
 REVIEW_LABEL = "notchling:review"
 NEEDS_YOU_LABEL = "notchling:needs-you"

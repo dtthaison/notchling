@@ -5,6 +5,8 @@ use serde_json::Value;
 /// Dollars per million tokens: input, output, cache read. Cache writes are 1.25x input for five
 /// minutes and 2x for an hour. Checked in order, so longer ids come first.
 const PRICES: &[(&str, f64, f64, f64)] = &[
+    ("fable-5-2", 8.0, 40.0, 0.20),
+    ("mythos-5-2", 8.0, 40.0, 0.20),
     ("fable-5-1", 10.0, 50.0, 0.25),
     ("mythos-5-1", 10.0, 50.0, 0.25),
     ("fable", 10.0, 50.0, 1.0),
