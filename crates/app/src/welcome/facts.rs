@@ -58,12 +58,20 @@ impl SwiftProbe for SystemProbe {
     fn find(&self) -> SwiftApp {
         if notchling_platform::apps::is_running(SWIFT_BUNDLE_ID) {
             SwiftApp::Running
-        } else if self.applications.join("Notchling.app").exists() {
+        } else if is_swift_bundle(&self.applications.join("Notchling.app")) {
             SwiftApp::Installed
         } else {
             SwiftApp::NotFound
         }
     }
+}
+
+/// Whether the bundle at `app` is the Swift app, by its bundle id: once it retires, this app is
+/// installed under the same name (`local.notchling.next`), and macOS file names ignore case, so
+/// the Swift executable `Notchling` can't tell them apart.
+fn is_swift_bundle(app: &std::path::Path) -> bool {
+    std::fs::read_to_string(app.join("Contents/Info.plist"))
+        .is_ok_and(|plist| plist.contains(&format!("<string>{SWIFT_BUNDLE_ID}</string>")))
 }
 
 /// A probe that answers as told.
@@ -287,13 +295,26 @@ mod tests {
     fn the_system_probe_looks_in_the_folder_it_is_given() {
         let dir = std::env::temp_dir().join(format!("nl-probe-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("Notchling.app")).unwrap();
-        let probe = SystemProbe {
-            applications: dir.clone(),
+        let plist = |folder: &str, id: &str| {
+            let contents = dir.join(folder).join("Notchling.app/Contents");
+            std::fs::create_dir_all(&contents).unwrap();
+            std::fs::write(
+                contents.join("Info.plist"),
+                format!("<dict>\n  <key>CFBundleIdentifier</key><string>{id}</string>\n</dict>\n"),
+            )
+            .unwrap();
+            SystemProbe {
+                applications: dir.join(folder),
+            }
         };
         // The bundle id of a Swift Notchling that happens to be running is the real machine's;
         // only the not-running answers are pinned here.
-        assert_ne!(probe.find(), SwiftApp::NotFound);
+        assert_ne!(plist("swift", SWIFT_BUNDLE_ID).find(), SwiftApp::NotFound);
+        // This app installed as Notchling.app once the Swift app retired is not the Swift app.
+        assert!(matches!(
+            plist("next", "local.notchling.next").find(),
+            SwiftApp::NotFound | SwiftApp::Running
+        ));
         let empty = SystemProbe {
             applications: dir.join("nowhere"),
         };
