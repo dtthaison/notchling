@@ -433,8 +433,11 @@ impl NewSession {
         if self.stage != Stage::Untrusted {
             return None;
         }
-        let (_, folder) = self.chosen()?;
-        let request = Request::trust_folder(folder);
+        let (account, folder) = self.chosen()?;
+        let Pick::Claude(dir) = &account.pick else {
+            return None;
+        };
+        let request = Request::trust_folder(folder, dir.as_deref());
         self.stage = Stage::Trusting;
         Some(request)
     }
@@ -477,9 +480,9 @@ impl NewSession {
         }
     }
 
-    /// The folder the Trust Folder pop-up names.
+    /// The folder the Trust Folder pop-up names, while it asks and while it trusts.
     pub fn untrusted_folder(&self) -> Option<&str> {
-        (self.stage == Stage::Untrusted)
+        matches!(self.stage, Stage::Untrusted | Stage::Trusting)
             .then(|| self.chosen().map(|(_, f)| f))
             .flatten()
     }
@@ -751,9 +754,27 @@ mod tests {
         assert_eq!(trust.op, "folder.trust");
         assert_eq!(trust.args, json!({"folder": "/h/work/new"}));
         assert_eq!(s.trust(), None, "only from the pop-up");
+        assert_eq!(
+            s.untrusted_folder(),
+            Some("/h/work/new"),
+            "named while it trusts"
+        );
         let again = s.trusted(Ok(())).unwrap();
         assert_eq!(again.op, "session.new");
         assert_eq!(s.stage, Stage::Starting);
+    }
+
+    #[test]
+    fn a_lane_trusts_the_folder_in_its_own_config_folder() {
+        let mut s = sheet();
+        s.pick_account(1);
+        s.start();
+        s.started(Err("Workspace not trusted".into()));
+        let trust = s.trust().unwrap();
+        assert_eq!(
+            trust.args,
+            json!({"folder": "/h/work/new", "config_dir": "/h/.claude-lanes/night"})
+        );
     }
 
     #[test]

@@ -475,11 +475,7 @@ impl NewSessionView {
 
     /// The Trust Folder pop-up, over the dimmed sheet.
     fn trust_pop_up(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
-        let folder = self
-            .model
-            .untrusted_folder()
-            .map(str::to_owned)
-            .or_else(|| (self.model.stage == Stage::Trusting).then(String::new))?;
+        let folder = self.model.untrusted_folder()?.to_owned();
         let control = match self.model.stage {
             Stage::Trusting => Control {
                 enabled: false,

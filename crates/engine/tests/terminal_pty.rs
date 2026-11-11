@@ -341,6 +341,28 @@ mod unix {
         assert!(String::from_utf8_lossy(&seen).contains("bye"));
     }
 
+    /// A program that quits with output nobody read (Claude Code after Trust Folder's Ctrl+C, with
+    /// an MCP server's lines still queued) waits in exit for the tty to drain. Dropping the pty
+    /// must not wait for it forever: it hung the daemon's `folder.trust` on 2026-11-11.
+    #[test]
+    fn dropping_a_pty_ends_a_child_stuck_on_unread_output() {
+        let scratch = Scratch::new("pty-drain");
+        // Ignores TERM and HUP, fills the tty's output queue past what it holds, and is never read.
+        let script = "trap '' TERM HUP; i=0; while [ $i -lt 4000 ]; do \
+                      echo 'line of output nobody reads'; i=$((i+1)); done; exit 0";
+        let pty = Pty::spawn(&sh(script, &scratch)).expect("sh starts");
+        std::thread::sleep(Duration::from_millis(500));
+        let (done, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(pty);
+            let _ = done.send(());
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+            "dropping the pty hung on its child"
+        );
+    }
+
     #[test]
     fn a_nul_in_an_argument_is_refused() {
         let mut command = PtyCommand::new("/bin/sh");

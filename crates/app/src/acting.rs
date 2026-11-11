@@ -263,8 +263,14 @@ impl Request {
         Request::new(ops::SESSION_NEW, args)
     }
 
-    pub fn trust_folder(folder: &str) -> Request {
-        Request::new(ops::FOLDER_TRUST, json!({ "folder": folder }))
+    /// `folder.trust` for the main login, or for a lane: trust is kept per config folder, so a
+    /// lane's session needs the lane's own.
+    pub fn trust_folder(folder: &str, config_dir: Option<&str>) -> Request {
+        let mut args = json!({ "folder": folder });
+        if let Some(dir) = config_dir {
+            args["config_dir"] = json!(dir);
+        }
+        Request::new(ops::FOLDER_TRUST, args)
     }
 
     pub fn move_session(id: &str, to_config_dir: &str) -> Request {
@@ -435,7 +441,7 @@ mod tests {
             json!({"folder": "/w/api", "config_dir": "/h/.claude-lanes/b", "flags": ["--x"]})
         );
         assert_eq!(
-            Request::trust_folder("/w/new"),
+            Request::trust_folder("/w/new", None),
             Request {
                 op: "folder.trust",
                 args: json!({"folder": "/w/new"})

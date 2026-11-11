@@ -583,8 +583,11 @@ impl Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        self.terminate(Duration::from_secs(2));
+        // The master closes first: a child quitting with output nobody read waits in exit for the
+        // tty to drain, and no signal ends that wait. Closing the master hangs the tty up and
+        // drops what was queued, so the child can finish and be reaped.
         // SAFETY: master is ours and closed once, here.
         unsafe { libc::close(self.master) };
+        self.terminate(Duration::from_secs(2));
     }
 }
