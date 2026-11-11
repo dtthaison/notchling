@@ -66,7 +66,6 @@ fn prices_match_todays_tables() {
 #[test]
 fn suffixed_ids_are_the_bare_model() {
     let c = Catalog::built_in();
-    let allowed = c.allowed(Tool::Claude, &[]);
     for (suffixed, bare) in [
         ("claude-opus-5-5[1m]", "claude-opus-5-5"),
         ("claude-fable-5-2-20261101", "claude-fable-5-2"),
@@ -77,8 +76,11 @@ fn suffixed_ids_are_the_bare_model() {
             c.context_window(Tool::Claude, suffixed),
             c.context_window(Tool::Claude, bare)
         );
-        assert!(allowed.contains(&model_key(suffixed)), "{suffixed}");
     }
+    assert!(c.is_allowed(Tool::Claude, &[], "claude-opus-5-5[1m]"));
+    assert!(c.is_allowed(Tool::Claude, &[], "claude-fable-5-2-20261101"));
+    assert!(!c.is_allowed(Tool::Claude, &[], "claude-evil-1"));
+    assert!(!c.is_allowed(Tool::Claude, &[], "claude-evil-1[1m]"));
     assert_eq!(
         c.context_window(Tool::Claude, "claude-opus-5-5[1m]"),
         Some(400000)
@@ -87,6 +89,39 @@ fn suffixed_ids_are_the_bare_model() {
     let a = c.allowed(Tool::Claude, &[live("claude-opus-9[1m]")]);
     assert!(a.contains(&"claude-opus-9".to_string()));
     assert!(a.contains(&"claude-opus-9[1m]".to_string()));
+    let l = [live("claude-opus-9[1m]")];
+    assert!(c.is_allowed(Tool::Claude, &l, "claude-opus-9"));
+    assert!(c.is_allowed(Tool::Claude, &l, "claude-opus-9-20261101"));
+    assert!(!c.is_allowed(Tool::Claude, &[], "claude-opus-9"));
+}
+
+#[test]
+fn a_two_digit_version_is_not_another_models_entry() {
+    let c = Catalog::built_in();
+    // `fable-5-10` starts with `fable-5-1` but is newer than Fable 5.2: it costs what 5.2 costs.
+    for id in ["claude-fable-5-10", "claude-fable-5-19"] {
+        let p = c.price(Tool::Claude, id).unwrap();
+        assert_eq!((p.input, p.output), (8.0, 40.0), "{id}");
+    }
+    // Mythos is no listed model, so there is nothing to borrow: the bare family entry, not 5.1's.
+    assert_eq!(
+        c.price(Tool::Claude, "claude-mythos-5-10")
+            .unwrap()
+            .cache_read,
+        1.0
+    );
+    assert!(c.price_borrowed(Tool::Claude, "claude-fable-5-10"));
+    // An entry made for that id, on a segment boundary, still wins.
+    let path = temp_file(
+        "tendigit",
+        r#"{"claude": {"prices": [{"match": "fable-5-10", "input": 1.0, "output": 2.0, "cache_read": 0.1}]}}"#,
+    );
+    let c = Catalog::load(&path);
+    assert_eq!(
+        c.price(Tool::Claude, "claude-fable-5-10").unwrap().input,
+        1.0
+    );
+    assert!(!c.price_borrowed(Tool::Claude, "claude-fable-5-10"));
 }
 
 #[test]

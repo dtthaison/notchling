@@ -318,9 +318,13 @@ impl Catalog {
     fn claude_price(&self, key: &str) -> (Option<Price>, bool) {
         let prices = &self.tools[Tool::Claude.index()].prices;
         let bare = |id: &str| id.strip_prefix("claude-").unwrap_or(id).to_string();
+        // An entry is for an id when it is the id or a leading run of its `-` segments, so
+        // `fable-5-1` is not for `fable-5-10`.
         let find = |id: &str| {
             let id = bare(id);
-            prices.iter().find(|p| id.starts_with(&p.key))
+            prices
+                .iter()
+                .find(|p| id == p.key || id.starts_with(&format!("{}-", p.key)))
         };
         let Some(source) = self.borrow_source(key) else {
             return (find(key).map(|p| p.price), false);
@@ -350,7 +354,8 @@ impl Catalog {
 
     /// Every model id a session may be started with. Claude's are the built-in lists plus what the
     /// tool lists live (bare and as listed, as a `[1m]` id is the bare model); the other tools' are
-    /// only what they list.
+    /// only what they list. Check membership with `is_allowed`, which sees through a `[1m]` or a
+    /// date suffix.
     pub fn allowed(&self, tool: Tool, live: &[LiveModel]) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         let mut add = |id: String| {
@@ -368,6 +373,15 @@ impl Catalog {
             add(l.id.clone());
         }
         out
+    }
+
+    /// Whether `id` may start a session: it, or its bare form (no `[1m]`, no date), is one of
+    /// `allowed`, whose ids are compared bare too.
+    pub fn is_allowed(&self, tool: Tool, live: &[LiveModel], id: &str) -> bool {
+        let bare = model_key(id);
+        self.allowed(tool, live)
+            .iter()
+            .any(|a| a == id || model_key(a) == bare)
     }
 
     /// The models to offer, current ones first.
