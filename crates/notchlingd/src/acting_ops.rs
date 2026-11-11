@@ -38,7 +38,9 @@ use crate::codex_ops::CodexOps;
 use crate::hook_ops::Parents;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
-use notchling_engine::reply::exec::{execute, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog};
+use notchling_engine::reply::exec::{
+    execute, Failure, Outcome, Pty, QueueLog, ScreenCheck, TranscriptLog,
+};
 use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
@@ -49,7 +51,7 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -182,6 +184,9 @@ pub struct ActingOps {
     agy: OnceLock<Arc<AgyOps>>,
     /// Codex turns: what turning acting off must stop.
     codex: OnceLock<Arc<CodexOps>>,
+    /// Where a screen refused by the permission dialog check is kept (0600, overwritten), so a real
+    /// dialog can become the reader's fixture (docs/recording.md, `dialog-permission`).
+    screen_file: Option<PathBuf>,
 }
 
 impl ActingOps {
@@ -208,7 +213,14 @@ impl ActingOps {
             refused: Mutex::new(HashMap::new()),
             agy: OnceLock::new(),
             codex: OnceLock::new(),
+            screen_file: None,
         }
+    }
+
+    /// Keeps a screen the permission check refused at `file`.
+    pub fn with_screen_file(mut self, file: PathBuf) -> ActingOps {
+        self.screen_file = Some(file);
+        self
     }
 
     /// The switch, shared with the ops of Milestone 5 that act on their own sessions.
@@ -359,15 +371,18 @@ impl ActingOps {
         log: &mut dyn QueueLog,
     ) -> Result<Outcome, ApiError> {
         let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
-        self.play_locked(agent, plan, log)
+        self.play_locked(agent, plan, log, None)
     }
 
     /// [`ActingOps::play`] for a caller that holds `typing` already.
+    /// `keep`: the request a permission answer was checked against; a screen the check refuses
+    /// is then kept with it ([`ActingOps::with_screen_file`]).
     fn play_locked(
         &self,
         agent: &Agent,
         plan: &Plan,
         log: &mut dyn QueueLog,
+        keep: Option<&Expected>,
     ) -> Result<Outcome, ApiError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -379,8 +394,13 @@ impl ActingOps {
         // A lane's job is reachable only through its own config folder.
         let config_dir = config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
         let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
-        execute(plan, pty.as_mut(), self.attacher.screen_check(), log)
-            .map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))
+        let played = execute(plan, pty.as_mut(), self.attacher.screen_check(), log);
+        if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
+            if failure.is_permission_refusal() {
+                keep_screen(file, expect, failure, &pty.screen());
+            }
+        }
+        played.map_err(|f| ApiError::new(ErrorCode::Failed, f.to_string()))
     }
 
     fn reply(&self, args: &Value) -> Result<Value, ApiError> {
@@ -413,7 +433,7 @@ impl ActingOps {
                 "the session isn't working, so there's nothing to stop (Esc on an idle session opens rewind)",
             ),
         })?;
-        self.play_locked(&agent, &plan, &mut NoLog)?;
+        self.play_locked(&agent, &plan, &mut NoLog, None)?;
         self.stopping
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -493,7 +513,15 @@ impl ActingOps {
         }
         let expect = expect_arg(args)?;
         let agent = self.agent(args)?;
-        self.play(&agent, &plan::permission(decision, &expect), &mut NoLog)?;
+        {
+            let _one = self.typing.lock().unwrap_or_else(|e| e.into_inner());
+            self.play_locked(
+                &agent,
+                &plan::permission(decision, &expect),
+                &mut NoLog,
+                Some(&expect),
+            )?;
+        }
         Ok(json!({"decided": decision.word(), "answered": "terminal"}))
     }
 
@@ -662,4 +690,29 @@ fn age<K>(marks: &Mutex<HashMap<K, Instant>>, by: Duration) {
 
 pub(crate) fn now_ms() -> i64 {
     notchling_engine::reply::popall::now_ms()
+}
+
+/// Writes the refused screen, with the request it was checked against, to `file` (0600). Errors
+/// are ignored: keeping it only helps fix the reader.
+fn keep_screen(file: &Path, expect: &Expected, failure: &Failure, lines: &[String]) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::remove_file(file);
+    let Ok(mut out) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(file)
+    else {
+        return;
+    };
+    let _ = writeln!(out, "request: {}: {}", expect.tool, expect.summary);
+    let _ = writeln!(out, "refused: {failure}");
+    let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
+    for line in lines {
+        let _ = writeln!(out, "{line}");
+    }
 }

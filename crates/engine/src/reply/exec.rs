@@ -116,6 +116,17 @@ pub enum Failure {
     PermissionStillOpen,
 }
 
+impl Failure {
+    /// The permission dialog check refused the screen: no dialog it could read, another request,
+    /// or no option for the answer. Nothing was typed.
+    pub fn is_permission_refusal(&self) -> bool {
+        matches!(
+            self,
+            Failure::NotPermission | Failure::PermissionMismatch | Failure::NoAlways
+        )
+    }
+}
+
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

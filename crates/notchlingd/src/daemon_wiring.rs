@@ -298,7 +298,8 @@ impl Wired {
             .with_launcher(
                 Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
                 Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
-            ),
+            )
+            .with_screen_file(layout.state_dir().join("permission-screen.txt")),
         );
         // Codex turns (M5), behind the same switch: nothing starts until acting is on.
         let codex = Arc::new(CodexOps::for_daemon(

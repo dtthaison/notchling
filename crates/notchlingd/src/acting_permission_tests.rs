@@ -168,6 +168,45 @@ fn no_dialog_on_screen_is_refused_with_nothing_typed() {
     assert!(s.writes.lock().unwrap().is_empty());
 }
 
+/// The dialog reader was written from made-up screens (docs/recording.md, `dialog-permission`):
+/// a screen it refuses is kept, private, so a real one can become the fixture.
+#[test]
+fn a_refused_screen_is_kept_private_and_a_typed_answer_keeps_none() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("nl-perm-screen-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("permission-screen.txt");
+
+    let s = setup(true, lines(&["> ", "  ? for shortcuts"]));
+    let ops = s.ops.with_screen_file(file.clone());
+    let refused = ops.call(
+        &app(),
+        ops::SESSION_PERMISSION,
+        &args("allow", "Bash", "ls -la && pwd"),
+    );
+    assert!(refused.is_err());
+    let kept = std::fs::read_to_string(&file).unwrap();
+    assert!(kept.contains("? for shortcuts"), "{kept}");
+    assert!(
+        kept.contains("Bash: ls -la && pwd"),
+        "the card's request is kept too: {kept}"
+    );
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+
+    let s = setup(true, dialog());
+    let ops = s.ops.with_screen_file(file.clone());
+    std::fs::remove_file(&file).unwrap();
+    ops.call(
+        &app(),
+        ops::SESSION_PERMISSION,
+        &args("allow", "Bash", "ls -la && pwd"),
+    )
+    .unwrap();
+    assert!(!file.exists(), "nothing is kept when the answer went in");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_args_are_checked_before_anything_is_attached() {
     let s = setup(true, dialog());
