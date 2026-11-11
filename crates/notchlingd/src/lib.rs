@@ -34,6 +34,7 @@ pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
 pub mod acting_ops;
+pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_sink;
 pub mod attach;

@@ -12,6 +12,7 @@
 //! except through a [`crate::tools::acp::Spawner`], and nothing is auto-approved.
 
 pub mod config;
+pub mod elsewhere;
 mod live;
 pub mod runner;
 pub mod summaries;

@@ -24,6 +24,10 @@ impl ChatTool for Antigravity {
     }
 
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str> {
+        // Another `agy` holds it: a reply through a second one would stop that one's work.
+        if let Some(note) = view.tools.agy.as_ref().and_then(|a| a.elsewhere.as_deref()) {
+            return Some(elsewhere_note(note));
+        }
         view.tools
             .live
             .is_working(&session.agent.id)
@@ -89,5 +93,16 @@ impl ChatTool for Antigravity {
                 .and_then(|a| a.plan.clone()),
             provider: ANTIGRAVITY,
         })
+    }
+}
+
+/// The reply box's tooltip for a session another `agy` holds: the daemon's words, as one of the
+/// two it says (a tooltip is static text).
+fn elsewhere_note(note: &str) -> &'static str {
+    use notchling_engine::tools::agy::elsewhere::{DELEGATION_NOTE, OTHER_NOTE};
+    if note == DELEGATION_NOTE {
+        DELEGATION_NOTE
+    } else {
+        OTHER_NOTE
     }
 }

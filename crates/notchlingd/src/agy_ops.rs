@@ -6,9 +6,9 @@
 //! | Op | Tier | Acting | Args | Reply |
 //! | --- | --- | --- | --- | --- |
 //! | `agy.sessions` | agent | no | `{}` | `[{id: "agy:<id>", name, project, cwd, sinceMs, working}]` (the summaries copy, plus sessions started here the copy doesn't list yet) |
-//! | `agy.state` | app | no | `{id}` | `{id, open, loading, loadError, working, title, folder, config, commands, permission}` |
-//! | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation, truncated, omitted}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`. A long one is its newest items within about 512 KB (`truncated: true`, `omitted` = how many older items were left out), since a reply is one 1 MiB line. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
-//! | `agy.open` | app | yes | `{id}` | `{id, loading: true}`: starts `agy acp` in the session's own folder and loads it |
+//! | `agy.state` | app | no | `{id}` | `{id, open, loading, loadError, working, title, folder, config, commands, permission, elsewhere}` |
+//! | `agy.conversation` | app | no | `{id, peek?}` | `{id, open, loading, loadError, working, conversation, truncated, omitted}`: the conversation the open runner holds (`transcript::model::Conversation` as JSON); not open, an empty one with `open: false`; one another `agy` holds (`elsewhere`), read from Antigravity's log with `elsewhere` set to what to say. A long one is its newest items within about 512 KB (`truncated: true`, `omitted` = how many older items were left out), since a reply is one 1 MiB line. `peek: true` doesn't count as use, so a list read every few seconds never keeps an idle process alive |
+//! | `agy.open` | app | yes | `{id}` | `{id, loading: true}`: starts `agy acp` in the session's own folder and loads it; while another `agy` holds the session (a delegation) it starts nothing and answers `{id, loading: false, elsewhere}` ([`crate::agy_elsewhere`]) |
 //! | `agy.send` | app | yes | `{id, text}` or `{draft_folder, text}` | `{id, sent: true}`; a draft starts the session first |
 //! | `agy.cancel` | app | yes | `{id}` | `{cancelled: true}` |
 //! | `agy.set_option` | app | yes | `{id, option, value}` | `{requested: true}`: the session's own options only |
@@ -16,7 +16,8 @@
 //!
 //! `id` is a row id, `agy:<session>`. A session's folder comes from the summaries copy or from the
 //! session this daemon started, never from the caller; a draft's `draft_folder` is an absolute
-//! folder that exists. One turn runs per session: `agy.send` while one runs is `failed` ("busy").
+//! folder that exists. One turn runs per session: `agy.send` while one runs is `failed` ("busy"), and while another `agy`
+//! holds the session it is `failed` with what Chat says.
 //!
 //! Events ([`crate::agy_sink`]): `session.changed {id, session, row, change, error?}` on `tools`
 //! (as Codex's; chunks at most every 250 ms), and on `prompts` (app tier) `agy.permission.pending`
@@ -27,6 +28,7 @@
 
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{broad_folder, text_arg, Room};
+use crate::agy_elsewhere::Elsewhere;
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
@@ -87,6 +89,8 @@ pub struct AgyOps {
     shared: Arc<Shared>,
     runner: Runner,
     setup: AgySetup,
+    /// Sessions another `agy` holds (a delegation): read from Antigravity's log, never sent to.
+    elsewhere: Arc<Elsewhere>,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -127,11 +131,18 @@ impl AgyOps {
         // No process starts while acting is off, whichever op reaches the spawn.
         runner.set_may_start(Arc::new(move || switch.is_on()));
         let _ = shared.runner.set(runner.clone());
+        let elsewhere = Arc::new(Elsewhere::new(
+            setup.root.clone(),
+            setup.home.clone(),
+            runner.clone(),
+            shared.clone(),
+        ));
         AgyOps {
             acting,
             shared,
             runner,
             setup,
+            elsewhere,
         }
     }
 
@@ -175,6 +186,12 @@ impl AgyOps {
             PERMISSION => self.permission(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
+    }
+
+    /// The sessions another `agy` holds (a test's processes go in here).
+    #[cfg(test)]
+    pub(crate) fn elsewhere(&self) -> &Arc<Elsewhere> {
+        &self.elsewhere
     }
 
     /// Antigravity's sessions by title, for the session index (`search.query`): read from the
@@ -276,12 +293,18 @@ impl AgyOps {
     fn state(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
         let r = &self.runner;
+        let elsewhere = self.elsewhere.watched(&session);
+        let working = match &elsewhere {
+            Some(holder) => self.elsewhere.conversation(&session, holder).1,
+            None => r.is_working(&session),
+        };
         Ok(json!({
             "id": row_id(&session),
             "open": r.is_open(&session),
             "loading": r.is_loading(&session),
             "loadError": r.load_error(&session),
-            "working": r.is_working(&session),
+            "working": working,
+            "elsewhere": elsewhere.map(|h| h.note()),
             "title": r.title(&session),
             "folder": r.folder(&session),
             "config": r.config(&session).iter().map(|o| o.to_json()).collect::<Vec<_>>(),
@@ -300,6 +323,23 @@ impl AgyOps {
             Some(_) => return Err(bad("peek is true or false")),
         };
         let r = &self.runner;
+        // Another `agy` holds it: the log has what both wrote; this daemon's copy may not.
+        if let Some(holder) = self.elsewhere.watched(&session) {
+            let (held, working) = self.elsewhere.conversation(&session, &holder);
+            let (held, omitted) = held.bounded(CONVERSATION_BYTES);
+            let conversation = serde_json::to_value(held).map_err(|e| failed(e.to_string()))?;
+            return Ok(json!({
+                "id": row_id(&session),
+                "open": false,
+                "loading": false,
+                "loadError": null,
+                "working": working,
+                "conversation": conversation,
+                "truncated": omitted > 0,
+                "omitted": omitted,
+                "elsewhere": holder.note(),
+            }));
+        }
         let held = if peek {
             r.peek_conversation(&session)
         } else {
@@ -324,6 +364,11 @@ impl AgyOps {
     fn open(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
         let folder = self.folder_for(&session)?;
+        // A second `agy` on the session would never see the other's turns: read its log instead.
+        if let Some(holder) = self.elsewhere.check(&session) {
+            return Ok(json!({"id": row_id(&session), "loading": false,
+                             "elsewhere": holder.note()}));
+        }
         let opened = self.runner.open(&session, &folder, false);
         self.settle();
         opened.map_err(run_error)?;
@@ -345,6 +390,10 @@ impl AgyOps {
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
             let folder = self.folder_for(&session)?;
+            // Sent through a second `agy`, it would stop the other one's work.
+            if let Some(holder) = self.elsewhere.check(&session) {
+                return Err(failed(holder.note()));
+            }
             let sent = self.runner.prompt(&session, text, &folder);
             self.settle();
             sent.map_err(run_error)?;

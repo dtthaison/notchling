@@ -132,7 +132,8 @@ impl ToolLive {
 
     fn agy_changed(&mut self, id: &str, change: Option<&str>, error: Option<&str>) {
         match change {
-            Some("closed") => {
+            // Another `agy` let go of it (`released`): opened again, it loads all of it.
+            Some("closed") | Some("released") => {
                 self.agy_open.remove(id);
                 self.agy_working.remove(id);
             }
@@ -141,6 +142,8 @@ impl ToolLive {
                 self.agy_working.insert(id.to_owned());
                 self.errors.remove(id);
             }
+            // Another `agy` (a delegation) holds it and wrote more: read it again, open nothing.
+            Some("elsewhere") => {}
             Some("turn_ended") => {
                 self.agy_open.insert(id.to_owned());
                 self.agy_working.remove(id);
@@ -358,6 +361,32 @@ mod tests {
         ));
         assert!(!live.is_open("agy:a1"));
         assert_eq!(live.agy_changes["agy:a1"], 3);
+    }
+
+    #[test]
+    fn a_session_another_agy_holds_is_read_again_but_never_counted_open() {
+        let mut live = ToolLive::default();
+        live.apply(&event(
+            "session.changed",
+            json!({"id": "agy:a1", "row": null, "change": "elsewhere"}),
+        ));
+        assert!(
+            !live.is_open("agy:a1"),
+            "or Chat would never ask to open it"
+        );
+        assert_eq!(live.agy_changes["agy:a1"], 1, "but it reads the log again");
+        live.apply(&event(
+            "session.changed",
+            json!({"id": "agy:a1", "row": null, "change": "loaded"}),
+        ));
+        live.apply(&event(
+            "session.changed",
+            json!({"id": "agy:a1", "row": null, "change": "released"}),
+        ));
+        assert!(
+            !live.is_open("agy:a1"),
+            "released: opened again, it loads all of it"
+        );
     }
 
     #[test]

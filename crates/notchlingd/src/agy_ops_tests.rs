@@ -574,3 +574,6 @@ fn the_daemons_handler_routes_them_with_their_tiers() {
 
 #[path = "agy_ops_limits_tests.rs"]
 mod limits;
+
+#[path = "agy_ops_elsewhere_tests.rs"]
+mod elsewhere;
