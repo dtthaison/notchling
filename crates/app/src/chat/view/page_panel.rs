@@ -146,13 +146,25 @@ impl ChatView {
     /// one, else the live page), anything else in the browser. The library is asked off the UI
     /// thread; without a daemon it has no pages, so an Artifact opens live.
     pub(super) fn open_link(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
-        // A file on this Mac (a picture's tile, an image under a reply): macOS opens it in its app.
+        // A file on this Mac (a picture's tile, an image under a reply, a path relative to the
+        // session's folder): macOS opens it in its app.
+        let folder = self
+            .selected_session()
+            .map(|s| s.agent.cwd.clone())
+            .unwrap_or_default();
+        if let Some(path) = crate::chat::drops::local_link(&url, &folder) {
+            cx.open_url(&crate::chat::drops::file_url(&path));
+            return;
+        }
         if url.starts_with('/') {
             cx.open_url(&crate::chat::drops::file_url(std::path::Path::new(&url)));
             return;
         }
         if artifact_link(&url).is_none() {
-            cx.open_url(&url);
+            // A path that isn't there has nothing to open; macOS would only say -50.
+            if url.contains("://") || url.starts_with("mailto:") {
+                cx.open_url(&url);
+            }
             return;
         }
         self.page.asked += 1;

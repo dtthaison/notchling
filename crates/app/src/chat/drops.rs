@@ -235,6 +235,75 @@ pub fn file_url(path: &Path) -> String {
     url
 }
 
+/// The file or folder on this Mac a reply's link names, or `None` for a web link or a path that
+/// isn't there. Agents link files relative to the session's `folder` (Codex: `<out/a.png>`), and
+/// macOS can't open a bare relative path (Finder's error -50). A `:12` or `#L12` after the name
+/// is a line, tried off when the whole doesn't exist.
+pub fn local_link(url: &str, folder: &str) -> Option<std::path::PathBuf> {
+    let raw = match url.strip_prefix("file://") {
+        Some(path) => path,
+        None if has_scheme(url) => return None,
+        None => url,
+    };
+    let text = percent_decoded(raw);
+    let base = |path: &str| -> Option<std::path::PathBuf> {
+        let p = if let Some(rest) = path.strip_prefix("~/") {
+            std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest)
+        } else if path.starts_with('/') {
+            std::path::PathBuf::from(path)
+        } else if folder.is_empty() {
+            return None;
+        } else {
+            Path::new(folder).join(path.strip_prefix("./").unwrap_or(path))
+        };
+        p.exists().then_some(p)
+    };
+    base(&text).or_else(|| {
+        let cut = text.rfind("#L").or_else(|| {
+            text.rfind(':').filter(|&i| {
+                text[i + 1..]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || b == b':')
+            })
+        })?;
+        base(&text[..cut])
+    })
+}
+
+/// `https:`, `mailto:`: letters before a colon, and no digit after it (`a.rs:12` is a line).
+fn has_scheme(url: &str) -> bool {
+    let Some(colon) = url.find(':') else {
+        return false;
+    };
+    let scheme = &url[..colon];
+    scheme.len() > 1
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        && !url[colon + 1..].starts_with(|c: char| c.is_ascii_digit())
+}
+
+/// `%20` and the like back to their bytes; anything that isn't a valid escape stays as written.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
+}
+
 /// Where a row's attached files are kept among the drafts: the row's id and a separator no id has.
 pub fn attachments_key(row: &str) -> String {
     format!("{row}\u{1f}files")
@@ -283,6 +352,33 @@ pub fn insert_paths(edit: &mut TextEdit, paths: &[impl AsRef<Path>]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Codex links its files relative to the session's folder (`[a.png](<out/a.png>)`); handed to
+    /// macOS as they are, Finder said "The application can't be opened. -50".
+    #[test]
+    fn a_relative_link_is_the_file_in_the_session_folder() {
+        let dir = std::env::temp_dir().join(format!("nl-link-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("out")).unwrap();
+        std::fs::write(dir.join("out/S1 a.png"), b"x").unwrap();
+        let folder = dir.to_string_lossy().into_owned();
+        let at = |url: &str| local_link(url, &folder);
+        assert_eq!(at("out/S1 a.png"), Some(dir.join("out/S1 a.png")));
+        assert_eq!(at("./out/S1 a.png"), Some(dir.join("out/S1 a.png")));
+        assert_eq!(at("out/S1%20a.png"), Some(dir.join("out/S1 a.png")));
+        let abs = dir.join("out/S1 a.png").to_string_lossy().into_owned();
+        assert_eq!(at(&abs), Some(dir.join("out/S1 a.png")));
+        assert_eq!(at(&format!("file://{abs}")), Some(dir.join("out/S1 a.png")));
+        // A line after the name (`a.rs:12`, `a.rs#L12`) still finds the file.
+        assert_eq!(at("out/S1 a.png:12"), Some(dir.join("out/S1 a.png")));
+        assert_eq!(at("out/S1 a.png#L3"), Some(dir.join("out/S1 a.png")));
+        // A folder opens too; a web link, a missing file or no session folder is not a file.
+        assert_eq!(at("out"), Some(dir.join("out")));
+        assert_eq!(at("https://example.com/out"), None);
+        assert_eq!(at("mailto:a@b.c"), None);
+        assert_eq!(at("out/missing.png"), None);
+        assert_eq!(local_link("out/S1 a.png", ""), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_path_with_spaces_or_quotes_is_single_quoted_for_the_shell() {
