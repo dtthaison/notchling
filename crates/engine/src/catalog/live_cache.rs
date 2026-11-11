@@ -3,6 +3,8 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use serde_json::{json, Map, Value};
 
@@ -10,6 +12,13 @@ use super::{LiveModel, Tool};
 
 /// A list older than this is fetched again.
 const MAX_AGE_SECS: f64 = 86_400.0;
+
+/// Held across a put's whole read-modify-write. One for the process, not per cache, so two
+/// `LiveCache`s over the same file (the Claude refresh and the Antigravity options each make
+/// their own) can't lose each other's entry.
+static WRITING: Mutex<()> = Mutex::new(());
+/// Makes each temp file's name its own, so two writers never share one.
+static TEMPS: AtomicU64 = AtomicU64::new(0);
 
 pub struct LiveCache {
     path: PathBuf,
@@ -24,13 +33,20 @@ impl LiveCache {
     pub fn get(&self, tool: Tool) -> Option<(f64, Vec<LiveModel>)> {
         let entry = self.read().remove(tool.name())?;
         let at = entry.get("at")?.as_f64()?;
-        let models = serde_json::from_value(entry.get("models")?.clone()).ok()?;
+        // One entry that doesn't decode (an older format) is skipped, not the whole list.
+        let models = entry
+            .get("models")?
+            .as_array()?
+            .iter()
+            .filter_map(|m| serde_json::from_value(m.clone()).ok())
+            .collect();
         Some((at, models))
     }
 
     /// Replaces one tool's list and keeps the others'. Best effort: a cache that can't be written
     /// only means the next start fetches again.
     pub fn put(&self, tool: Tool, at: f64, models: &[LiveModel]) {
+        let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
         let mut all = self.read();
         all.insert(tool.name().to_string(), json!({"at": at, "models": models}));
         let _ = self.write(&Value::Object(all));
@@ -52,9 +68,11 @@ impl LiveCache {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let temp = self
-            .path
-            .with_extension(format!("tmp-{}", std::process::id()));
+        let temp = self.path.with_extension(format!(
+            "tmp-{}-{}",
+            std::process::id(),
+            TEMPS.fetch_add(1, Ordering::Relaxed)
+        ));
         let result = (|| {
             // A leftover from a crash would keep its own mode.
             let _ = std::fs::remove_file(&temp);

@@ -90,7 +90,7 @@ pub enum Tier {
 
 /// One model as the tool itself lists it. Every field but the id may be missing.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct LiveModel {
     pub id: String,
     pub name: Option<String>,

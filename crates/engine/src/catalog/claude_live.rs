@@ -8,7 +8,8 @@ use super::LiveModel;
 use crate::accounts::http::{HttpClient, HttpRequest};
 use crate::accounts::Secret;
 
-/// The whole list in one page.
+/// The whole list in one page: `limit=1000` is far past the list's length, so `has_more` is
+/// ignored on purpose.
 pub const MODELS_URL: &str = "https://api.anthropic.com/v1/models?limit=1000";
 
 /// The API's version header; the OAuth beta header is already sent by the client.

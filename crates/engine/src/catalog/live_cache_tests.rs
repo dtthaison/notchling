@@ -82,3 +82,45 @@ fn refresh_is_due_after_a_day() {
     // A clock that went backwards doesn't leave a list fresh forever.
     assert!(refresh_due(Some(100_000.0), 10.0));
 }
+
+#[test]
+fn puts_from_two_threads_lose_nothing() {
+    let tmp = TempDir::new("live-cache-threads");
+    let path = tmp.path("cache.json");
+    let workers: Vec<_> = [Tool::Claude, Tool::Antigravity]
+        .into_iter()
+        .map(|tool| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                // Each thread has its own cache over the one file, as the daemon's callers do.
+                let cache = LiveCache::new(path);
+                for i in 0..200 {
+                    cache.put(tool, f64::from(i), &[model(&format!("{tool:?}-{i}"))]);
+                }
+            })
+        })
+        .collect();
+    for w in workers {
+        w.join().unwrap();
+    }
+    let cache = LiveCache::new(path);
+    assert_eq!(cache.get(Tool::Claude).unwrap().0, 199.0);
+    assert_eq!(cache.get(Tool::Antigravity).unwrap().0, 199.0);
+    let left = std::fs::read_dir(tmp.root()).unwrap().count();
+    assert_eq!(left, 1, "no temp file is left behind");
+}
+
+#[test]
+fn one_entry_that_does_not_decode_is_skipped_and_a_short_one_still_reads() {
+    let tmp = TempDir::new("live-cache-entries");
+    let path = tmp.write(
+        "cache.json",
+        r#"{"claude": {"at": 7.0, "models": [{"id": "claude-a"}, {"id": 5}, "junk", {"id": "claude-b", "name": "B", "efforts": ["high"]}]}}"#,
+    );
+    let (at, models) = LiveCache::new(path).get(Tool::Claude).unwrap();
+    assert_eq!(at, 7.0);
+    let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["claude-a", "claude-b"]);
+    assert!(models[0].efforts.is_empty());
+    assert_eq!(models[1].efforts, ["high"]);
+}
