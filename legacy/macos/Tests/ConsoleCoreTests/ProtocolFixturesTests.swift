@@ -226,6 +226,12 @@ final class ProtocolFixturesTests: XCTestCase {
         return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
+    /// A fixture of a field only the Rust bridge sends: checked to be JSON, nothing here produces it.
+    func rustOnly(_ name: String) throws {
+        touched.insert(name)
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: Self.data(name)) as? [String: Any], name)
+    }
+
     /// Compares what the Mac sent with its fixture, or writes the fixture. `scrub` replaces random values first.
     func capture(_ name: String, _ wire: String, scrub: (inout [String: Any]) -> Void = { _ in }, file: StaticString = #filePath, line: UInt = #line) throws {
         touched.insert(name)
@@ -347,6 +353,8 @@ final class ProtocolFixturesTests: XCTestCase {
         try await roundTrip(phone, "PingRequest", response: "PingResponse")
         try await roundTrip(phone, "PingRequest.string-id", response: "PingResponse.string-id")
         try await roundTrip(phone, "SessionsListRequest", response: "SessionsListResponse")
+        // Only the Rust bridge lists models (`models`); this Mac never sends it.
+        try rustOnly("SessionsListResponse.models")
         try await roundTrip(phone, "ChatGetRequest", response: "ChatGetResponse")
         try await roundTrip(phone, "ChatGetRequest.before", response: "ChatGetResponse.before")
         try await roundTrip(phone, "ChatGetRequest.after-gone", response: "ChatGetResponse.reset")
@@ -387,7 +395,9 @@ final class ProtocolFixturesTests: XCTestCase {
 
         try await roundTrip(phone, "SessionNewRequest", patch: ["cwd": home], response: "SessionNewResponse")
         try await roundTrip(phone, "SessionNewRequest.no-model", patch: ["cwd": home])
-        XCTAssertEqual(phone.backend.newSessions.map(\.1), ["opus", nil])
+        // A newer phone's `modelId` is unknown here: this Mac starts on the `model` sent beside it.
+        try await roundTrip(phone, "SessionNewRequest.model-id", patch: ["cwd": home])
+        XCTAssertEqual(phone.backend.newSessions.map(\.1), ["opus", nil, "opus"])
 
         try await roundTrip(phone, "SessionTakeoverRequest", response: "SessionTakeoverResponse")
         try await roundTrip(phone, "SessionTakeoverRequest.plain", response: "SessionTakeoverResponse.plain")
