@@ -508,8 +508,19 @@ impl Catalog {
             .collect()
     }
 
-    /// A stable fingerprint of every price after the override is merged, so a change to a price
-    /// shows (and costs counted at the old one can be counted again). Windows and names don't count.
+    /// The catalog with `id` among the current Claude models, as a later data file may have it
+    /// (tests: the built-in lists can't be changed otherwise).
+    #[cfg(test)]
+    pub(crate) fn with_current(mut self, id: &str) -> Catalog {
+        self.current.push(id.to_string());
+        self
+    }
+
+    /// A fingerprint of every price entry after the override is merged. Only a version 2 cost
+    /// cache, which was counted at the prices with this fingerprint, is checked against it: the
+    /// cost cache now keeps each model's own price (`Catalog::price`, borrowing included), which is
+    /// what says whether a model must be priced again. Windows, names and the model lists are not
+    /// in it.
     pub fn prices_hash(&self) -> String {
         let lists: Vec<&Vec<PriceEntry>> = self.tools.iter().map(|t| &t.prices).collect();
         let canonical = serde_json::to_string(&lists).unwrap_or_default();

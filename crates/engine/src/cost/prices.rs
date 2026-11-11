@@ -1,6 +1,6 @@
 //! What Claude's token use would have cost at API prices (`CostTracker.cost`, `prices`).
 
-use crate::catalog::{Catalog, Tool};
+use crate::catalog::{Catalog, Price, Tool};
 use serde_json::Value;
 
 // The catalog owns it now; cost and the sources still ask here.
@@ -10,15 +10,29 @@ fn n(from: &Value, key: &str) -> f64 {
     from.get(key).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-/// Input, output, cache-read and cache-write token counts from one message's usage.
-pub fn tokens(usage: &Value) -> [f64; 4] {
+/// Input, output, cache-read, five-minute and one-hour cache-write token counts from one message's
+/// usage.
+pub fn tokens(usage: &Value) -> [f64; 5] {
     let (write5m, write1h) = cache_writes(usage);
     [
         n(usage, "input_tokens"),
         n(usage, "output_tokens"),
         n(usage, "cache_read_input_tokens"),
-        write5m + write1h,
+        write5m,
+        write1h,
     ]
+}
+
+/// Dollars for token totals (input, output, cache read, five-minute and one-hour cache writes) at
+/// `price`'s base rates. Used to price again a day whose transcripts are gone, so a long prompt's
+/// dearer tier and `speed: fast`, which the totals don't keep, are not in it.
+pub fn estimate(price: &Price, t: &[f64; 5]) -> f64 {
+    (t[0] * price.input
+        + t[1] * price.output
+        + t[2] * price.cache_read
+        + t[3] * price.input * 1.25
+        + t[4] * price.input * 2.0)
+        / 1_000_000.0
 }
 
 /// Five-minute and one-hour cache writes: the split when the usage has one, else all five-minute.
@@ -34,7 +48,13 @@ fn cache_writes(usage: &Value) -> (f64, f64) {
 
 /// Dollars for one message, or `None` for a model the catalog has no price for.
 pub fn cost(catalog: &Catalog, model: &str, usage: &Value) -> Option<f64> {
-    let price = catalog.price(Tool::Claude, model)?;
+    catalog
+        .price(Tool::Claude, model)
+        .map(|price| cost_at(&price, usage))
+}
+
+/// Dollars for one message at `price`.
+pub fn cost_at(price: &Price, usage: &Value) -> f64 {
     let in_tokens = n(usage, "input_tokens");
     let out_tokens = n(usage, "output_tokens");
     let read_tokens = n(usage, "cache_read_input_tokens");
@@ -54,7 +74,7 @@ pub fn cost(catalog: &Catalog, model: &str, usage: &Value) -> Option<f64> {
     if usage.get("speed").and_then(Value::as_str) == Some("fast") {
         dollars *= 2.0;
     }
-    Some(dollars / 1_000_000.0)
+    dollars / 1_000_000.0
 }
 
 /// "claude-opus-5-5" is "Opus 5.5". Other tools' models ("gpt-6.1-sol", "Gemini 4 Argon") are

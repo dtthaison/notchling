@@ -234,7 +234,7 @@ fn a_cache_of_another_version_or_a_broken_one_is_read_from_scratch() {
         near(month(&t.ranged(NOW), Window::All), 20.0);
     }
     assert_eq!(
-        Cache::load(&tmp.path("missing"), &catalog().prices_hash()).version,
+        Cache::load(&tmp.path("missing"), &catalog()).version,
         CURRENT
     );
 }
@@ -251,7 +251,7 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
     let saved = store::doc(&data, CACHE_DOC).unwrap().unwrap();
     store::update_doc(&data, CACHE_DOC, |_| Ok(None)).unwrap();
     let old = tmp.write("data/daemon/cost-cache.json", &saved);
-    let loaded = Cache::load(&data, &catalog().prices_hash());
+    let loaded = Cache::load(&data, &catalog());
     assert!(!old.exists(), "the old file moved in");
     assert!(!loaded.files.is_empty(), "and its offsets came with it");
     assert_eq!(store::doc(&data, CACHE_DOC).unwrap().unwrap(), saved);
@@ -264,9 +264,7 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
         "data/daemon/cost-cache.json",
         &format!(r#"{{"version":{},"files":{{}}}}"#, CURRENT + 1),
     );
-    assert!(Cache::load(&data, &catalog().prices_hash())
-        .files
-        .is_empty());
+    assert!(Cache::load(&data, &catalog()).files.is_empty());
     assert!(stale.exists());
     assert_eq!(store::doc(&data, CACHE_DOC).unwrap(), None);
     let mut t = claude_tracker(&tmp);
@@ -731,4 +729,211 @@ fn a_changed_price_reprices_days_already_counted() {
     let mut third = claude_tracker(&tmp);
     third.refresh(NOW + 2.0);
     near(month(&third.ranged(NOW), Window::All), 4.0 + 20.0);
+}
+
+/// A Claude Code tracker over `tmp`'s transcripts and cache, pricing with `catalog`.
+fn tracker_with(tmp: &TempDir, catalog: Catalog) -> Tracker {
+    Tracker::new(
+        vec![Root {
+            dir: tmp.path("projects"),
+            channel: CLAUDE_CODE,
+        }],
+        Some(tmp.path("data")),
+        Some(tmp.path("account-log.json")),
+        Arc::new(catalog),
+    )
+    .with_zone(utc)
+}
+
+/// A catalog with the override file `body` laid over the built-in one.
+fn overridden(tmp: &TempDir, body: &str) -> Catalog {
+    Catalog::load(&tmp.write("catalog.json", body))
+}
+
+/// $20 counted forty days ago in a transcript that is then deleted, and $2 today in one that stays.
+fn old_day_gone(tmp: &TempDir) {
+    let old = append(
+        tmp,
+        "projects/-p/old.jsonl",
+        &usage_line("m-old", 20.0, NOW - 40.0 * DAY),
+    );
+    append(tmp, "projects/-p/new.jsonl", &usage_line("m-new", 2.0, NOW));
+    let mut first = claude_tracker(tmp);
+    first.refresh(NOW);
+    first.save_now(NOW);
+    near(month(&first.ranged(NOW), Window::All), 22.0);
+    std::fs::remove_file(old).unwrap();
+    let mut again = claude_tracker(tmp);
+    again.refresh(NOW + 1.0);
+    again.save_now(NOW + 1.0);
+    near(month(&again.ranged(NOW), Window::All), 22.0);
+}
+
+#[test]
+fn a_price_added_for_a_model_used_nowhere_keeps_days_whose_transcripts_are_gone() {
+    let tmp = TempDir::new("cost-unrelated-price");
+    old_day_gone(&tmp);
+    let catalog = overridden(
+        &tmp,
+        r#"{"claude": {"prices": [{"match": "fable-5-3", "input": 9.0, "output": 45.0, "cache_read": 0.2}]}}"#,
+    );
+    let mut t = tracker_with(&tmp, catalog);
+    t.refresh(NOW + 2.0);
+    near(month(&t.ranged(NOW), Window::All), 22.0);
+    t.save_now(NOW + 2.0);
+    let mut back = claude_tracker(&tmp);
+    back.refresh(NOW + 3.0);
+    near(month(&back.ranged(NOW), Window::All), 22.0);
+}
+
+#[test]
+fn a_changed_price_reprices_a_day_whose_transcript_is_gone_from_its_tokens() {
+    let tmp = TempDir::new("cost-reprice-gone");
+    old_day_gone(&tmp);
+    // Opus 5.5's output price doubled: today's request is read again, the old day is priced
+    // again from the tokens the cache kept.
+    let doubled = overridden(
+        &tmp,
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 40.0, "cache_read": 0.2}]}}"#,
+    );
+    let mut t = tracker_with(&tmp, doubled);
+    t.refresh(NOW + 2.0);
+    t.save_now(NOW + 2.0);
+    let r = t.ranged(NOW);
+    near(month(&r, Window::All), 44.0);
+    near(r.overall[&Window::All].today, 4.0);
+    // Back on the built-in price, every day is as it was.
+    let mut back = claude_tracker(&tmp);
+    back.refresh(NOW + 3.0);
+    near(month(&back.ranged(NOW), Window::All), 22.0);
+}
+
+#[test]
+fn a_model_priced_later_is_priced_from_its_tokens_when_its_transcript_is_gone() {
+    let tmp = TempDir::new("cost-priced-later");
+    let old = append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &model_line(
+            "m1",
+            "claude-new-9",
+            r#"{"output_tokens":1000000}"#,
+            NOW - 40.0 * DAY,
+        ),
+    );
+    let mut first = claude_tracker(&tmp);
+    first.refresh(NOW);
+    first.save_now(NOW);
+    assert_eq!(
+        first.ranged(NOW).overall[&Window::All].unpriced,
+        ["claude-new-9"]
+    );
+    std::fs::remove_file(old).unwrap();
+    let priced = overridden(
+        &tmp,
+        r#"{"claude": {"prices": [{"match": "new-9", "input": 1.0, "output": 10.0, "cache_read": 0.1}]}}"#,
+    );
+    let mut t = tracker_with(&tmp, priced);
+    t.refresh(NOW + 1.0);
+    let r = t.ranged(NOW);
+    let s = &r.overall[&Window::All];
+    near(s.month, 10.0);
+    assert!(s.unpriced.is_empty());
+}
+
+#[test]
+fn a_price_of_zero_still_counts_the_request() {
+    let tmp = TempDir::new("cost-zero-price");
+    append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 1.0, NOW));
+    let free = overridden(
+        &tmp,
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 0.0, "output": 0.0, "cache_read": 0.0}]}}"#,
+    );
+    let mut t = tracker_with(&tmp, free);
+    t.refresh(NOW);
+    let r = t.ranged(NOW);
+    let s = &r.overall[&Window::All];
+    near(s.month, 0.0);
+    assert!(s.unpriced.is_empty(), "it has a price, of 0");
+    assert_eq!(s.model_detail.len(), 1, "its tokens are counted");
+    near(s.model_detail[0].output, 50_000.0);
+}
+
+#[test]
+fn a_borrowed_model_named_current_later_is_priced_again() {
+    let tmp = TempDir::new("cost-borrowed-current");
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &model_line(
+            "m1",
+            "claude-fable-5-3",
+            r#"{"output_tokens":1000000}"#,
+            NOW,
+        ),
+    );
+    let mut first = claude_tracker(&tmp);
+    first.refresh(NOW);
+    first.save_now(NOW);
+    // Priced as Fable 5.2, $40 per million output tokens.
+    near(month(&first.ranged(NOW), Window::All), 40.0);
+    // A data file that names Fable 5.3 current with no price of its own: the family's, $50. The
+    // price entries are the same, so their fingerprint is too.
+    let named = Catalog::built_in().with_current("claude-fable-5-3");
+    assert_eq!(named.prices_hash(), Catalog::built_in().prices_hash());
+    let mut t = tracker_with(&tmp, named);
+    t.refresh(NOW + 1.0);
+    near(month(&t.ranged(NOW), Window::All), 50.0);
+}
+
+/// A version 2 cache holding one day, forty days ago, of $20 of Opus 5.5 output over projects
+/// "demo" and "other" on account "acct", counted at the prices with fingerprint `prices`.
+fn v2_cache(prices: &str) -> String {
+    let day = day_key(((NOW - 40.0 * DAY) / DAY).floor() as i64);
+    serde_json::json!({
+        "version": 2,
+        "prices": prices,
+        "files": {},
+        "models": {&day: {"acct\tclaude-opus-5-5": 20.0}},
+        "projects": {&day: {"acct\tdemo": 15.0, "acct\tother": 5.0}},
+        "channels": {&day: {"acct\tClaude Code": 20.0}},
+        "tokens": {&day: {"acct\tclaude-opus-5-5": [0.0, 1_000_000.0, 0.0, 0.0]}},
+        "channel_tokens": {&day: {"acct\tClaude Code": 1_000_000.0}},
+        "unpriced": {},
+        "seen": {&day: ""}
+    })
+    .to_string()
+}
+
+#[test]
+fn a_version_2_cache_moves_over_with_the_days_it_counted() {
+    let tmp = TempDir::new("cost-v2");
+    let data = tmp.path("data");
+    store::put_doc(&data, CACHE_DOC, &v2_cache(&catalog().prices_hash())).unwrap();
+    let mut t = claude_tracker(&tmp);
+    t.refresh(NOW);
+    let r = t.ranged(NOW);
+    let s = &r.overall[&Window::All];
+    near(s.month, 20.0);
+    let projects: Vec<_> = s
+        .projects
+        .iter()
+        .map(|p| (p.name.as_str(), p.cost))
+        .collect();
+    assert_eq!(projects, [("demo", 15.0), ("other", 5.0)]);
+    assert_eq!(s.channels[0].name, CLAUDE_CODE);
+    near(s.model_detail[0].output, 1_000_000.0);
+    t.save_now(NOW);
+    assert_eq!(Cache::load(&data, &catalog()).version, CURRENT);
+
+    // Counted at other prices: the day is priced again from its tokens, at today's.
+    let tmp = TempDir::new("cost-v2-other-prices");
+    store::put_doc(&tmp.path("data"), CACHE_DOC, &v2_cache("0000000000000000")).unwrap();
+    let doubled = overridden(
+        &tmp,
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 40.0, "cache_read": 0.2}]}}"#,
+    );
+    let mut t = tracker_with(&tmp, doubled);
+    t.refresh(NOW);
+    near(month(&t.ranged(NOW), Window::All), 40.0);
 }

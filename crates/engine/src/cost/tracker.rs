@@ -3,7 +3,7 @@
 //! every Antigravity `PLANNER_RESPONSE`.
 //!
 //! A month of transcripts can be several GB, so each file is read once and then only from where
-//! the last scan stopped. Running totals, read offsets and the ids already counted are kept in a
+//! the last scan stopped. What was counted, read offsets and the ids already counted are kept in a
 //! [`Cache`]. It only reads: transcripts and the account log are never written.
 //!
 //! The scan walks the roots (symlinks are not followed) and reads the files whose size moved. A
@@ -11,19 +11,24 @@
 //! transcript when it compacts or resumes, so totals are lower than its `/stats`. The key is
 //! `message.id|requestId` (Codex: file and ordinal; Antigravity: file and step), hashed with
 //! FNV-1a.
+//!
+//! A model whose price changed since it was counted (the cache keeps each model's price) is priced
+//! again when the cache loads ([`Tracker`]'s `reprice`): what its transcripts still on disk hold is
+//! counted again at the new price, and the rest, days whose transcripts are gone, is priced again
+//! from the tokens the cache kept. No other model and no day is dropped.
 
 use super::account_log::{self, Entry};
-use super::cache::{Cache, Mark};
+use super::cache::{cell_key, cell_parts, price_key, tool_of, Cache, Cell, Mark, Tokens};
 use super::other::{antigravity, codex, OtherPrices};
 pub use super::paths::hash;
 use super::paths::{account_in_path, contains, file_id, project_name, walk};
 use super::prices;
-use super::summary::{day_key, key, owners, summarize, Summary, Window};
-use crate::catalog::{Catalog, Tool};
+use super::summary::{day_key, owners, summarize, Summary, Tables, Window};
+use crate::catalog::{Catalog, Price, Tool};
 use crate::pages::clock::local_offset_secs;
 use crate::transcript::util::parse_date;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -71,6 +76,38 @@ struct Ctx<'a> {
     file_id: &'a str,
 }
 
+/// One request read from a transcript, before it is counted.
+struct Request<'a> {
+    day: String,
+    /// The hash of its dedupe key.
+    key: u64,
+    account: String,
+    channel: &'static str,
+    model: String,
+    project: String,
+    tokens: Tokens,
+    /// What it costs at a price.
+    price: &'a dyn Fn(&Price) -> f64,
+}
+
+/// A price change being applied: the models whose price changed, and what their transcripts still
+/// on disk hold, counted at the old and the new price.
+struct Recount {
+    /// `price_key` to the price it was counted at (`None`: not known) and its price now.
+    changed: HashMap<String, (Option<Option<Price>>, Option<Price>)>,
+    /// Requests already counted again, so a message copied to two transcripts counts once.
+    seen: HashSet<u64>,
+    /// Day and cell key to what the transcripts on disk hold of that cell.
+    covered: HashMap<(String, String), Covered>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Covered {
+    old: f64,
+    new: f64,
+    tokens: Tokens,
+}
+
 /// All the summaries, per window and per account.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ranged {
@@ -83,14 +120,16 @@ pub struct Tracker {
     cache_data: Option<PathBuf>,
     account_log: Option<PathBuf>,
     zone: ZoneFn,
-    /// Held for the tracker's life: a changed price means a new tracker (a restart), which finds
-    /// the cache's price fingerprint changed and counts everything again.
+    /// Held for the tracker's life: a changed price means a new tracker (a restart), whose first
+    /// load prices again the models whose price changed.
     catalog: Arc<Catalog>,
     cache: Option<Cache>,
     seen: HashSet<u64>,
     log: Vec<Entry>,
     unsaved: bool,
     last_persist: Option<f64>,
+    /// Set only while `reprice` reads the transcripts again.
+    recount: Option<Recount>,
 }
 
 impl Tracker {
@@ -114,6 +153,7 @@ impl Tracker {
             log: Vec::new(),
             unsaved: false,
             last_persist: None,
+            recount: None,
         }
     }
 
@@ -127,13 +167,15 @@ impl Tracker {
         if self.cache.is_some() {
             return;
         }
-        let prices = self.catalog.prices_hash();
         let cache = match self.cache_data.as_deref() {
-            Some(data) => Cache::load(data, &prices),
-            None => Cache::empty(&prices),
+            Some(data) => Cache::load(data, &self.catalog),
+            None => Cache::empty(),
         };
         self.seen = cache.seen_set();
         self.cache = Some(cache);
+        if self.reprice() {
+            self.unsaved = true;
+        }
     }
 
     /// The day number (days since 1970 in the zone) of a time.
@@ -148,12 +190,12 @@ impl Tracker {
     /// Reads whatever was added to the transcripts since the last scan; true when anything was
     /// counted or an offset moved. Saves the cache if it is due.
     pub fn refresh(&mut self, now: f64) -> bool {
-        self.load();
         self.log = self
             .account_log
             .as_deref()
             .map(account_log::load)
             .unwrap_or_default();
+        self.load();
         let dirty = self.scan_all();
         self.prune(now);
         if dirty {
@@ -205,23 +247,122 @@ impl Tracker {
         let Some(cache) = &self.cache else {
             return Ranged::default();
         };
+        let tables = Tables::from(cache);
         let today = self.day_number(now);
-        let ids = owners(cache);
+        let ids = owners(&tables);
         let mut out = Ranged::default();
         for window in Window::ALL {
-            out.overall
-                .insert(window, summarize(cache, None, window, today, &self.catalog));
+            out.overall.insert(
+                window,
+                summarize(&tables, None, window, today, &self.catalog),
+            );
             out.by_account.insert(
                 window,
                 ids.iter()
                     .map(|id| {
-                        let s = summarize(cache, Some(id), window, today, &self.catalog);
+                        let s = summarize(&tables, Some(id), window, today, &self.catalog);
                         (id.clone(), s)
                     })
                     .collect(),
             );
         }
         out
+    }
+
+    // MARK: Repricing
+
+    /// Prices again every model whose price is not the one its cells were counted at, and only
+    /// those (a price added for a model nobody used changes nothing). What the transcripts still
+    /// on disk hold of a cell is counted again exactly; the rest of it, requests whose transcript
+    /// is gone, is priced again from the cell's tokens: scaled by how the new price compares with
+    /// the old one when the old one is known, else at the new price's base rates. A model that
+    /// lost its price costs 0 and is listed as unpriced. True when anything changed.
+    fn reprice(&mut self) -> bool {
+        let Some(cache) = self.cache.as_ref() else {
+            return false;
+        };
+        let mut changed = HashMap::new();
+        let mut checked = HashSet::new();
+        for cells in cache.cells.values() {
+            for k in cells.keys() {
+                let (_, channel, model, _) = cell_parts(k);
+                let tool = tool_of(channel);
+                let pk = price_key(tool, model);
+                if !checked.insert(pk.clone()) {
+                    continue;
+                }
+                let now = self.catalog.price(tool, model);
+                let then = cache.priced_at.get(&pk).copied();
+                if then != Some(now) {
+                    changed.insert(pk, (then, now));
+                }
+            }
+        }
+        if changed.is_empty() {
+            return false;
+        }
+        // Only the transcripts of a tool with a changed model are read again.
+        let tools: HashSet<String> = changed
+            .keys()
+            .filter_map(|pk| pk.split('\t').next())
+            .map(str::to_string)
+            .collect();
+        self.recount = Some(Recount {
+            changed,
+            seen: HashSet::new(),
+            covered: HashMap::new(),
+        });
+        for root in self.roots.clone() {
+            if !tools.contains(tool_of(root.channel).name()) {
+                continue;
+            }
+            let mut files = Vec::new();
+            walk(&root.dir, 0, &mut files);
+            for (path, _) in files {
+                let text = path.to_string_lossy().into_owned();
+                if !Self::accepts(&text, root.channel) {
+                    continue;
+                }
+                let end = self
+                    .cache
+                    .as_ref()
+                    .and_then(|c| c.files.get(&text))
+                    .map_or(0, |m| m.offset);
+                if end == 0 {
+                    continue;
+                }
+                let file_id = file_id(&text);
+                let ctx = Ctx {
+                    channel: root.channel,
+                    project: project_name(&path, &root.dir),
+                    account: account_in_path(&path),
+                    file_id: &file_id,
+                };
+                self.read(&path, 0, Some(end), &ctx, &mut Reading::default());
+            }
+        }
+        let (Some(recount), Some(cache)) = (self.recount.take(), self.cache.as_mut()) else {
+            return false;
+        };
+        for (day, cells) in cache.cells.iter_mut() {
+            for (k, cell) in cells.iter_mut() {
+                let (_, channel, model, _) = cell_parts(k);
+                let Some(&(then, now)) = recount.changed.get(&price_key(tool_of(channel), model))
+                else {
+                    continue;
+                };
+                let covered = recount
+                    .covered
+                    .get(&(day.clone(), k.clone()))
+                    .copied()
+                    .unwrap_or_default();
+                cell.cost = repriced(cell, &covered, then, now);
+            }
+        }
+        for (pk, (_, now)) in recount.changed {
+            cache.priced_at.insert(pk, now);
+        }
+        true
     }
 
     // MARK: Scanning
@@ -304,7 +445,7 @@ impl Tracker {
             account: account_in_path(path),
             file_id: &file_id,
         };
-        mark.offset = self.read(path, mark.offset, &ctx, &mut reading);
+        mark.offset = self.read(path, mark.offset, None, &ctx, &mut reading);
         mark.size = size;
         mark.model = reading.model;
         mark.project = reading.project;
@@ -316,8 +457,16 @@ impl Tracker {
         true
     }
 
-    /// Counts every complete line from `offset` on and returns where the last complete line ends.
-    fn read(&mut self, path: &Path, offset: u64, ctx: &Ctx, reading: &mut Reading) -> u64 {
+    /// Counts every complete line from `offset` on (up to `end`, when given) and returns where the
+    /// last complete line read ends.
+    fn read(
+        &mut self,
+        path: &Path,
+        offset: u64,
+        end: Option<u64>,
+        ctx: &Ctx,
+        reading: &mut Reading,
+    ) -> u64 {
         let Ok(mut file) = File::open(path) else {
             return offset;
         };
@@ -335,11 +484,14 @@ impl Tracker {
             carry.extend_from_slice(&buf[..n]);
             let mut start = 0;
             while let Some(rel) = carry[start..].iter().position(|&b| b == b'\n') {
-                let end = start + rel;
-                if end > start {
-                    self.ingest(&carry[start..end], ctx, reading);
+                if end.is_some_and(|e| line_start + start as u64 >= e) {
+                    return line_start + start as u64;
                 }
-                start = end + 1;
+                let stop = start + rel;
+                if stop > start {
+                    self.ingest(&carry[start..stop], ctx, reading);
+                }
+                start = stop + 1;
             }
             line_start += start as u64;
             carry.drain(..start);
@@ -394,19 +546,11 @@ impl Tracker {
         if model == "<synthetic>" {
             return;
         }
-        let day = self.day_of(date);
         let request = object
             .get("requestId")
             .and_then(Value::as_str)
             .unwrap_or("");
-        if !self.first_time(hash(&format!("{id}|{request}")), &day) {
-            return;
-        }
-        let cost = prices::cost(&self.catalog, model, usage);
-        if cost.is_some_and(|c| c <= 0.0) {
-            return;
-        }
-        let name = object
+        let project = object
             .get("cwd")
             .and_then(Value::as_str)
             .and_then(|cwd| Path::new(cwd).file_name())
@@ -417,15 +561,17 @@ impl Tracker {
             .account
             .clone()
             .unwrap_or_else(|| account_log::account_at(date, &self.log));
-        self.record(
-            &day,
-            &account,
-            ctx.channel,
-            &prices::model_key(model),
-            &name,
-            cost,
-            prices::tokens(usage),
-        );
+        let price = |p: &Price| prices::cost_at(p, usage);
+        self.take(Request {
+            day: self.day_of(date),
+            key: hash(&format!("{id}|{request}")),
+            account,
+            channel: ctx.channel,
+            model: prices::model_key(model),
+            project,
+            tokens: prices::tokens(usage),
+            price: &price,
+        });
     }
 
     fn codex_line(&mut self, line: &[u8], ctx: &Ctx, reading: &mut Reading) {
@@ -470,23 +616,18 @@ impl Tracker {
                     Some(o) => format!("{o}"),
                     None => format!("{}", t.date),
                 };
-                let day = self.day_of(t.date);
-                if !self.first_time(hash(&format!("codex|{}|{id}", ctx.file_id)), &day) {
-                    return;
-                }
-                let model = reading.model.clone().unwrap_or_else(|| "codex".into());
                 let counts = codex::counts(&t);
-                let project = reading.project.clone().unwrap_or_else(|| "Codex".into());
-                let account = reading.account.clone().unwrap_or_default();
-                self.record(
-                    &day,
-                    &account,
-                    CODEX,
-                    &model,
-                    &project,
-                    OtherPrices::cost(&self.catalog, Tool::Codex, &model, &counts),
-                    counts,
-                );
+                let price = |p: &Price| OtherPrices::cost_at(p, &counts);
+                self.take(Request {
+                    day: self.day_of(t.date),
+                    key: hash(&format!("codex|{}|{id}", ctx.file_id)),
+                    account: reading.account.clone().unwrap_or_default(),
+                    channel: CODEX,
+                    model: reading.model.clone().unwrap_or_else(|| "codex".into()),
+                    project: reading.project.clone().unwrap_or_else(|| "Codex".into()),
+                    tokens: five(counts),
+                    price: &price,
+                });
             }
         }
     }
@@ -504,77 +645,111 @@ impl Tracker {
         match event {
             antigravity::Event::Model(name) => reading.model = Some(name),
             antigravity::Event::Tokens(t) => {
-                let day = self.day_of(t.date);
-                if !self.first_time(hash(&format!("agy|{}|{}", ctx.file_id, t.step)), &day) {
-                    return;
-                }
-                let model = reading
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "Antigravity".into());
                 let counts = antigravity::counts(&t);
-                self.record(
-                    &day,
-                    "agy",
-                    ANTIGRAVITY,
-                    &model,
-                    "Antigravity CLI",
-                    OtherPrices::cost(&self.catalog, Tool::Antigravity, &model, &counts),
-                    counts,
-                );
+                let price = |p: &Price| OtherPrices::cost_at(p, &counts);
+                self.take(Request {
+                    day: self.day_of(t.date),
+                    key: hash(&format!("agy|{}|{}", ctx.file_id, t.step)),
+                    account: "agy".into(),
+                    channel: ANTIGRAVITY,
+                    model: reading
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "Antigravity".into()),
+                    project: "Antigravity CLI".into(),
+                    tokens: five(counts),
+                    price: &price,
+                });
             }
         }
     }
 
-    /// Adds one request to the day's totals. A model with no price (`cost` is `None`) still counts
-    /// its tokens, at $0, and is listed in the day's `unpriced` so it never passes for free.
-    #[allow(clippy::too_many_arguments)]
-    fn record(
-        &mut self,
-        day: &str,
-        account: &str,
-        channel: &str,
-        model: &str,
-        project: &str,
-        cost: Option<f64>,
-        counts: [f64; 4],
-    ) {
+    /// Counts one request: once, and only when it used tokens. A model with no price still counts
+    /// its tokens, at $0, and is listed as unpriced so it never passes for free; a price of 0 counts
+    /// it at $0 like any other. While `reprice` runs, it is added to the recount instead.
+    fn take(&mut self, r: Request) {
+        let tool = tool_of(r.channel);
+        if let Some(recount) = self.recount.as_mut() {
+            recount.add(&self.seen, tool, &r);
+            return;
+        }
+        if !self.first_time(r.key, &r.day) || r.tokens.iter().all(|t| *t == 0.0) {
+            return;
+        }
+        let price = self.catalog.price(tool, &r.model);
+        let cost = price.as_ref().map_or(0.0, |p| (r.price)(p));
         let Some(cache) = self.cache.as_mut() else {
             return;
         };
-        let model_key = key(account, model);
-        if cost.is_none() {
-            cache
-                .unpriced
-                .entry(day.to_string())
-                .or_default()
-                .insert(model_key.clone());
-        }
-        let cost = cost.unwrap_or(0.0);
-        let slot = |table: &mut BTreeMap<String, BTreeMap<String, f64>>, k: String| {
-            *table
-                .entry(day.to_string())
-                .or_default()
-                .entry(k)
-                .or_insert(0.0) += cost;
-        };
-        slot(&mut cache.models, model_key.clone());
-        slot(&mut cache.projects, key(account, project));
-        slot(&mut cache.channels, key(account, channel));
-        *cache
-            .channel_tokens
-            .entry(day.to_string())
+        cache.priced_at.insert(price_key(tool, &r.model), price);
+        let cell = cache
+            .cells
+            .entry(r.day.clone())
             .or_default()
-            .entry(key(account, channel))
-            .or_insert(0.0) += counts.iter().sum::<f64>();
-        let sum = cache
-            .tokens
-            .entry(day.to_string())
-            .or_default()
-            .entry(model_key)
-            .or_insert([0.0; 4]);
-        for i in 0..4 {
-            sum[i] += counts[i];
+            .entry(cell_key(&r.account, r.channel, &r.model, &r.project))
+            .or_default();
+        cell.cost += cost;
+        for (sum, t) in cell.tokens.iter_mut().zip(r.tokens) {
+            *sum += t;
         }
     }
+}
+
+impl Recount {
+    /// Adds a request of a model being priced again, when it was counted and isn't added yet.
+    fn add(&mut self, counted: &HashSet<u64>, tool: Tool, r: &Request) {
+        let Some(&(then, now)) = self.changed.get(&price_key(tool, &r.model)) else {
+            return;
+        };
+        if !counted.contains(&r.key) || !self.seen.insert(r.key) {
+            return;
+        }
+        let covered = self
+            .covered
+            .entry((
+                r.day.clone(),
+                cell_key(&r.account, r.channel, &r.model, &r.project),
+            ))
+            .or_default();
+        covered.old += then.flatten().as_ref().map_or(0.0, r.price);
+        covered.new += now.as_ref().map_or(0.0, r.price);
+        for (sum, t) in covered.tokens.iter_mut().zip(r.tokens) {
+            *sum += t;
+        }
+    }
+}
+
+/// A cell's dollars at the price `now`, given what the transcripts on disk still hold of it
+/// (`covered`) and the price it was counted at (`then`, `None` when not known).
+fn repriced(
+    cell: &Cell,
+    covered: &Covered,
+    then: Option<Option<Price>>,
+    now: Option<Price>,
+) -> f64 {
+    let Some(now) = now else {
+        return 0.0;
+    };
+    let mut gone = [0.0; 5];
+    for (i, g) in gone.iter_mut().enumerate() {
+        *g = (cell.tokens[i] - covered.tokens[i]).max(0.0);
+    }
+    let rest = match then.flatten() {
+        Some(old) => {
+            let left = (cell.cost - covered.old).max(0.0);
+            let at_old = prices::estimate(&old, &gone);
+            if at_old > 0.0 {
+                left * prices::estimate(&now, &gone) / at_old
+            } else {
+                prices::estimate(&now, &gone)
+            }
+        }
+        None => prices::estimate(&now, &gone),
+    };
+    covered.new + rest
+}
+
+/// Four token counts (no one-hour cache writes) as five.
+fn five(c: [f64; 4]) -> Tokens {
+    [c[0], c[1], c[2], c[3], 0.0]
 }

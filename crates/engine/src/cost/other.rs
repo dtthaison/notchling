@@ -1,7 +1,7 @@
 //! Token use from the other tools' session files (`CostSources.swift`). Each parser is pure (one
 //! decoded line in, an event out) so it can be tested without a tracker.
 
-use crate::catalog::{Catalog, Tool};
+use crate::catalog::{Catalog, Price, Tool};
 use crate::transcript::util::parse_date;
 use serde_json::Value;
 
@@ -182,9 +182,12 @@ impl OtherPrices {
         if counts.len() < 3 {
             return None;
         }
-        Some(
-            (counts[0] * price.input + counts[2] * price.cache_read + counts[1] * price.output)
-                / 1_000_000.0,
-        )
+        Some(OtherPrices::cost_at(&price, counts))
+    }
+
+    /// Dollars for one request at `price`; `counts` has at least input, output and cache read.
+    pub fn cost_at(price: &Price, counts: &[f64]) -> f64 {
+        let n = |i: usize| counts.get(i).copied().unwrap_or(0.0);
+        (n(0) * price.input + n(2) * price.cache_read + n(1) * price.output) / 1_000_000.0
     }
 }

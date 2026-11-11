@@ -1,7 +1,7 @@
 //! The summaries over the cache (`CostTracker.summarize`): per window (7 days, 30 days, all time),
 //! for every account together or for one alone.
 
-use super::cache::Cache;
+use super::cache::{cell_parts, price_key, tool_of, Cache};
 use crate::catalog::{Catalog, Tool};
 use crate::pages::clock::civil_at;
 use serde::{Deserialize, Serialize};
@@ -120,8 +120,63 @@ fn by_value_then_name(a: &(String, f64), b: &(String, f64)) -> Ordering {
         .then_with(|| a.0.cmp(&b.0))
 }
 
+type DayTable<V> = BTreeMap<String, BTreeMap<String, V>>;
+
+/// The cache's cells summed the ways the summaries read them, keyed "account\tname" per day.
+#[derive(Clone, Debug, Default)]
+pub struct Tables {
+    pub models: DayTable<f64>,
+    pub projects: DayTable<f64>,
+    pub channels: DayTable<f64>,
+    /// Per model: input, output, cache read and cache write (both kinds) tokens.
+    pub tokens: DayTable<[f64; 4]>,
+    /// Per channel: all tokens, for channels whose cost is 0 (no known price).
+    pub channel_tokens: DayTable<f64>,
+    /// Per day, "account\tmodel" of the models counted with no price.
+    pub unpriced: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl Tables {
+    pub fn from(cache: &Cache) -> Tables {
+        let mut t = Tables::default();
+        for (day, cells) in &cache.cells {
+            for (k, cell) in cells {
+                let (account, channel, model, project) = cell_parts(k);
+                let add = |table: &mut DayTable<f64>, name: &str, v: f64| {
+                    *table
+                        .entry(day.clone())
+                        .or_default()
+                        .entry(key(account, name))
+                        .or_default() += v;
+                };
+                add(&mut t.models, model, cell.cost);
+                add(&mut t.projects, project, cell.cost);
+                add(&mut t.channels, channel, cell.cost);
+                add(&mut t.channel_tokens, channel, cell.tokens.iter().sum());
+                let sum = t
+                    .tokens
+                    .entry(day.clone())
+                    .or_default()
+                    .entry(key(account, model))
+                    .or_default();
+                let c = cell.tokens;
+                for (i, v) in [c[0], c[1], c[2], c[3] + c[4]].into_iter().enumerate() {
+                    sum[i] += v;
+                }
+                if cache.priced_at.get(&price_key(tool_of(channel), model)) == Some(&None) {
+                    t.unpriced
+                        .entry(day.clone())
+                        .or_default()
+                        .insert(key(account, model));
+                }
+            }
+        }
+        t
+    }
+}
+
 /// Every account that has cost, for the per-account summaries.
-pub fn owners(cache: &Cache) -> BTreeSet<String> {
+pub fn owners(cache: &Tables) -> BTreeSet<String> {
     cache
         .models
         .values()
@@ -133,7 +188,7 @@ pub fn owners(cache: &Cache) -> BTreeSet<String> {
 /// `week` stay the same across windows; `month` is the window's total and the bars and breakdowns
 /// cover the window. `catalog` says which of the models counted had their price borrowed.
 pub fn summarize(
-    cache: &Cache,
+    cache: &Tables,
     account: Option<&str>,
     window: Window,
     today: i64,
