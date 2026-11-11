@@ -32,7 +32,6 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use super::ChatView;
 use crate::chat::claude_picker::{self, Kind};
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
-use crate::chat::data::Tool;
 use crate::chat::pickers;
 use crate::chat::prompts::error_text;
 use crate::mac::gate;
@@ -67,9 +66,8 @@ fn inset(base: f32, edge: f32) -> f32 {
 fn placeholder(view: &ChatView) -> &'static str {
     match view.selected_session() {
         Some(s) if is_draft(&s.agent.id) => "Your first message starts the session",
-        Some(s) if s.tool == Tool::Codex => "Message Codex…",
-        Some(s) if s.tool == Tool::Antigravity => "Message Antigravity…",
-        _ => "Reply…",
+        Some(s) => super::tool::of(s.tool).placeholder(),
+        None => "Reply…",
     }
 }
 
@@ -165,17 +163,16 @@ fn more_row(open: bool, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<D
         .id("model-more")
         .w_full()
         .px(px(8.0))
-        .py(px(5.0))
+        .py(px(3.0))
         .rounded(px(RADIUS_SM))
         .flex()
         .items_center()
         .gap(px(8.0))
         .cursor_pointer()
         .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(div().w(px(14.0)).flex_shrink_0())
         .child(div().flex_1().child(label(
             claude_picker::MORE_MODELS,
-            TypeRole::Label,
+            TypeRole::Meta,
             Ink::Text,
             a,
         )))
@@ -207,14 +204,15 @@ fn picker_menu(
 ) -> impl IntoElement {
     let mut card = menu_card(a)
         .id("picker-menu")
+        .p(px(4.0))
         .w(px(if menu.rows.iter().any(|r| !r.detail.is_empty()) {
-            300.0
+            260.0
         } else {
-            220.0
+            190.0
         }))
         .max_h(px(420.0))
         .overflow_y_scroll()
-        .gap(px(2.0))
+        .gap(px(0.0))
         .shadow_lg()
         .occlude();
     if menu.rows.is_empty() {

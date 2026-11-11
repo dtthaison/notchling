@@ -150,7 +150,8 @@ pub(crate) fn pop_up(a: Appearance) -> Div {
         .gap(px(4.0))
 }
 
-/// A clickable row of a pop-up: a check when selected, the title, a faint detail under it.
+/// A clickable row of a pop-up: the title in the small Meta type, a faint detail under it, and a
+/// check at the right end when selected. Tight padding, as a compact menu.
 pub(crate) fn pick_row(
     id: impl Into<SharedString>,
     title: &str,
@@ -162,27 +163,27 @@ pub(crate) fn pick_row(
         .id(id.into())
         .w_full()
         .px(px(8.0))
-        .py(px(5.0))
+        .py(px(3.0))
         .rounded(px(RADIUS_SM))
         .flex()
-        .items_start()
+        .items_center()
         .gap(px(8.0))
         .cursor_pointer()
         .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(div().w(px(14.0)).flex_shrink_0().children(
-            selected.then(|| icon(Icon::Check, TypeRole::Label.spec().size, Ink::AccentText, a)),
-        ))
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.0))
                 .flex()
                 .flex_col()
-                .child(label(title, TypeRole::Label, Ink::Text, a).elide())
+                .child(label(title, TypeRole::Meta, Ink::Text, a).elide())
                 .when(!detail.is_empty(), |d| {
                     d.child(label(detail, TypeRole::Meta, Ink::TextFaint, a).line_clamp(2))
                 }),
         )
+        .child(div().w(px(12.0)).flex_shrink_0().children(
+            selected.then(|| icon(Icon::Check, TypeRole::Meta.spec().size, Ink::AccentText, a)),
+        ))
 }
 
 /// A small pill for one choice in a row of them.

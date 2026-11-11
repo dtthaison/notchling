@@ -29,6 +29,7 @@ mod simulator;
 mod slash_menu;
 mod tasks;
 mod terminal;
+mod tool;
 mod tools;
 
 use std::collections::HashSet;

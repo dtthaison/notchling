@@ -17,7 +17,7 @@ use super::ChatView;
 use crate::accounts::menu::{
     account_menu, move_all_account, move_needs_accounts, AccountMenu, Entry, Place, Target,
 };
-use crate::accounts::model::{ANTIGRAVITY, CLAUDE_CODE, CODEX};
+use crate::accounts::model::{CLAUDE_CODE, CODEX};
 use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
 use crate::mac::gate;
@@ -54,7 +54,7 @@ impl ChatView {
     }
 
     /// The menu for the selected Claude Code session, if it has an account to show.
-    fn menu(&self) -> Option<AccountMenu> {
+    pub(super) fn menu(&self) -> Option<AccountMenu> {
         let session = self.selected_session()?;
         if session.tool != Tool::Claude {
             return None;
@@ -172,44 +172,8 @@ pub(super) fn account_control(
     cx: &mut Context<ChatView>,
 ) -> Option<Stateful<Div>> {
     let session = view.selected_session()?;
-    let (text, tip): (String, String) = match session.tool {
-        Tool::Claude => {
-            let menu = view.menu()?;
-            let text = match &menu.lane {
-                Some(_) => format!("{} · lane", menu.label),
-                None => menu.label.clone(),
-            };
-            (text, menu.tooltip)
-        }
-        Tool::Codex => {
-            let s = view.accounts.snapshot();
-            let codex = s.providers.providers.iter().find(|p| p.id == CODEX)?;
-            let active = codex.active_id.as_ref()?;
-            let email = codex
-                .accounts
-                .iter()
-                .find(|acc| &acc.id == active)
-                .map(|acc| acc.email.clone())?;
-            (
-                email,
-                "The Codex account. Click to switch or add one.".to_owned(),
-            )
-        }
-        Tool::Antigravity => {
-            let s = view.accounts.snapshot();
-            let agy = s.providers.providers.iter().find(|p| p.id == ANTIGRAVITY)?;
-            let active = agy.active_id.as_ref()?;
-            let email = agy
-                .accounts
-                .iter()
-                .find(|acc| &acc.id == active)
-                .map(|acc| acc.email.clone())?;
-            (
-                email,
-                "The Antigravity account. Click to switch or add one.".to_owned(),
-            )
-        }
-    };
+    let tool = super::tool::of(session.tool);
+    let super::tool::AccountButton { text, tip } = tool.account(view)?;
     let kind = if view.account_menu {
         ButtonKind::Secondary
     } else {
@@ -245,15 +209,7 @@ pub(super) fn account_control(
     .min_w(px(0.0))
     .flex_shrink();
     let b = gate::tip_text(b, tip.into(), a);
-    Some(match session.tool {
-        Tool::Claude => b.on_click(cx.listener(|this, _, _, cx| this.toggle_account_menu(cx))),
-        Tool::Codex => {
-            b.on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(Some(CODEX), cx)))
-        }
-        Tool::Antigravity => b.on_click(
-            cx.listener(|this, _, _, cx| this.open_accounts_sheet(Some(ANTIGRAVITY), cx)),
-        ),
-    })
+    Some(b.on_click(cx.listener(move |this, _, _, cx| tool.account_click(this, cx))))
 }
 
 pub(super) fn menu_item(

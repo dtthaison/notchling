@@ -33,8 +33,7 @@ use crate::tools::fetch_gate::{Ask, FetchGate};
 use crate::tools::live::{Follow, ToolLive};
 use crate::tools::open_gate::OpenGate;
 use crate::tools::requests::{
-    agy_cancel, agy_conversation, agy_open, agy_permission, agy_send, agy_send_draft,
-    agy_set_option, agy_state, codex_send, codex_send_draft, codex_stop, is_draft,
+    agy_conversation, agy_open, agy_permission, agy_set_option, agy_state, is_draft,
     parse_conversation, sent_row, sent_state, AgyConversation, Pick, Sent,
 };
 use notchling_kit::ui::{TextEditor, TextEditorEvent};
@@ -275,26 +274,21 @@ impl ChatView {
                 tooltip: None,
             };
         };
-        let off = |why: &'static str| Control {
-            enabled: false,
-            tooltip: Some(why),
-        };
-        match session.tool {
-            Tool::Claude if session.agent.label == "Exited" => off(EXITED),
-            Tool::Claude if !session.agent.can_reply() => off(READ_ONLY),
-            Tool::Antigravity if gate.enabled && self.tools.live.is_working(&session.agent.id) => {
-                off(AGY_BUSY)
-            }
-            _ => gate,
+        match super::tool::of(session.tool).refusal(self, session) {
+            // Acting off says so first, except where the row could never take a reply.
+            Some(AGY_BUSY) if !gate.enabled => gate,
+            Some(why) => Control {
+                enabled: false,
+                tooltip: Some(why),
+            },
+            None => gate,
         }
     }
 
     /// Whether the selected row's turn runs, so Stop shows.
     pub(super) fn selected_working(&self) -> bool {
         self.selected_session().is_some_and(|s| {
-            self.tools.live.is_working(&s.agent.id)
-                || (s.tool == Tool::Claude
-                    && s.agent.group == notchling_engine::sessions::AgentGroup::Working)
+            self.tools.live.is_working(&s.agent.id) || super::tool::of(s.tool).working(s)
         })
     }
 
@@ -354,59 +348,12 @@ impl ChatView {
         if text.is_empty() {
             return;
         }
-        // A command that opens a menu runs in a terminal tab attached to the session, where the
-        // menu shows; typed through the hidden attach it would hold the session on a menu unseen.
-        if session.tool == Tool::Claude {
-            use crate::chat::terminal::{menu_route, MenuRoute};
-            match menu_route(&text, &session.agent.target) {
-                MenuRoute::Reply => {}
-                MenuRoute::Attach { job } => {
-                    let opened = self.open_menu_command(
-                        &job,
-                        session.agent.config_dir.as_deref(),
-                        &session.agent.cwd,
-                        &text,
-                        cx,
-                    );
-                    match opened {
-                        Ok(()) => {
-                            self.put_draft(&id, String::new(), cx);
-                            self.set_attached(&id, &[], cx);
-                        }
-                        Err(message) => self.tools.error = Some(message),
-                    }
-                    cx.notify();
-                    return;
-                }
-                MenuRoute::OwnTerminal => {
-                    self.tools.error = Some(format!(
-                        "{} opens a menu: run it in this session's own terminal",
-                        text.split_whitespace().next().unwrap_or("This command")
-                    ));
-                    cx.notify();
-                    return;
-                }
-            }
+        let tool = super::tool::of(session.tool);
+        if tool.intercept(self, &session, &text, cx) {
+            return;
         }
-        let draft = is_draft(&id);
-        let request = match session.tool {
-            Tool::Claude => Request::reply(&id, &text),
-            Tool::Codex => {
-                let pick = self.tools.picks.get(&id).cloned().unwrap_or_default();
-                if draft {
-                    codex_send_draft(&id, &session.agent.cwd, &text, &pick)
-                } else {
-                    codex_send(&id, &text, &pick)
-                }
-            }
-            Tool::Antigravity => {
-                if draft {
-                    agy_send_draft(&session.agent.cwd, &text)
-                } else {
-                    agy_send(&id, &text)
-                }
-            }
-        };
+        let request = tool.send(self, &session, &text);
+        let queues = tool.queues();
         self.put_draft(&id, String::new(), cx);
         self.set_attached(&id, &[], cx);
         // Shown at once as your bubble: typing it into the session takes seconds.
@@ -424,7 +371,7 @@ impl ChatView {
             move |view, result, cx| match result {
                 Ok(reply) => {
                     view.tools.delivered(&id, &sent_text, now_ms());
-                    if session.tool == Tool::Codex {
+                    if queues {
                         match sent_state(&reply) {
                             Sent::Queued(_) => {
                                 // Its Queued bubble takes over from the Sending one.
@@ -491,11 +438,7 @@ impl ChatView {
         if self.stopping() {
             return;
         }
-        let request = match session.tool {
-            Tool::Claude => Request::interrupt(&id),
-            Tool::Codex => codex_stop(&id),
-            Tool::Antigravity => agy_cancel(&id),
-        };
+        let request = super::tool::of(session.tool).stop(&id);
         self.tools.stopping = Some((id, now_ms()));
         self.spawn_send(
             request,
@@ -611,24 +554,14 @@ impl ChatView {
 
     /// The selected row's pickers, from its tool (`chat::pickers`): the same parts for every tool.
     pub(super) fn menus(&self) -> Vec<crate::chat::pickers::Menu> {
-        use crate::chat::pickers;
-        let Some(session) = self.selected_session() else {
-            return Vec::new();
-        };
-        let id = &session.agent.id;
-        match session.tool {
-            Tool::Claude => pickers::claude(self.claude_model(), self.claude_effort()),
-            Tool::Codex => pickers::codex(&self.codex_picker()),
-            Tool::Antigravity => pickers::antigravity(
-                &self.tools.agy_config,
-                !is_draft(id),
-                self.tools.agy.as_ref().is_some_and(|a| a.loading),
-            ),
+        match self.selected_session() {
+            Some(session) => super::tool::of(session.tool).menus(self, session),
+            None => Vec::new(),
         }
     }
 
     /// The selected Codex row's model and effort: its pick over what its last turn ran with.
-    fn codex_picker(&self) -> CodexPicker {
+    pub(super) fn codex_picker(&self) -> CodexPicker {
         let id = self.selected.clone().unwrap_or_default();
         CodexPicker::new(
             self.tools.codex_models.clone().unwrap_or_default(),
@@ -640,12 +573,8 @@ impl ChatView {
     /// Opens or closes a picker's menu (any other closes). Codex's models are read on the way.
     pub(super) fn toggle_menu(&mut self, menu: &str, cx: &mut Context<Self>) {
         let open = self.tools.picker.as_ref().is_some_and(|p| p.menu == menu);
-        if !open
-            && self
-                .selected_session()
-                .is_some_and(|s| s.tool == Tool::Codex)
-        {
-            self.tools.codex_models = Some(models::load(&self.root.codex_dir));
+        if let Some(tool) = self.selected_session().filter(|_| !open).map(|s| s.tool) {
+            super::tool::of(tool).menu_opening(self);
         }
         self.tools.picker = (!open).then(|| Picker {
             menu: menu.to_owned(),
@@ -657,39 +586,8 @@ impl ChatView {
     /// A pick in any picker menu, handed to the selected row's tool: a Claude Code reply
     /// (`/model`, `/effort`), Codex's next-turn pick, or an Antigravity option.
     pub(super) fn pick(&mut self, menu: &str, value: &str, cx: &mut Context<Self>) {
-        use crate::chat::pickers::{agy_option, EFFORT, MODEL, RESET};
-        let Some(session) = self.selected_session() else {
-            return;
-        };
-        match session.tool {
-            Tool::Claude => {
-                let kind = if menu == EFFORT {
-                    Kind::Effort
-                } else {
-                    Kind::Model
-                };
-                self.pick_claude(kind, value, cx);
-            }
-            Tool::Codex => {
-                let mut picker = self.codex_picker();
-                match menu {
-                    MODEL if value == RESET => picker.reset(),
-                    MODEL => picker.choose_model(value),
-                    _ => {
-                        let model = picker
-                            .pick
-                            .model
-                            .clone()
-                            .or_else(|| picker.running_model.clone())
-                            .unwrap_or_default();
-                        picker.choose_effort(&model, value);
-                    }
-                }
-                self.keep_pick(&picker);
-                self.tools.picker = None;
-                cx.notify();
-            }
-            Tool::Antigravity => self.set_agy_option(agy_option(menu), value, cx),
+        if let Some(tool) = self.selected_session().map(|s| s.tool) {
+            super::tool::of(tool).pick(self, menu, value, cx);
         }
     }
 

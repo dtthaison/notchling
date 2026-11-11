@@ -8,6 +8,10 @@ tool at once, or the table below says which tool waits and why.
 Written 2026-11-11, from the code in `crates/app/src/chat/view/` (`composer.rs`, `tools.rs`,
 `slash_menu.rs`, `accounts.rs`, `limit_ring.rs`).
 
+The parts ask each session's tool through one interface, `ChatTool` in
+`crates/app/src/chat/view/tool/` (decision [0015](decisions/0015-one-chat-interface-per-tool.md)):
+a new tool is one adapter file there.
+
 ## The parts, left to right
 
 Under the box: **Model** · **Effort** · status · **Context Meter** · **Account Menu** · **Limit Ring**.
@@ -23,8 +27,8 @@ In the box: **+** (attach), the text, **Send** or **Stop**. Over the box: the **
 | Send while a turn works | queued (Claude Code's queue) | queued (Notchling's outbox, next turn) | refused: the box is disabled ("busy") | Antigravity: queue in the outbox like Codex, send at the turn's end |
 | Edit a queued message | yes (take back) | no | no | Codex and Antigravity: take back from the outbox |
 | Stop / Esc | yes (interrupt) | yes (SIGINT) | yes (`session/cancel`) | |
-| Model picker | its own button (`/model`) | one combined button "Codex · model · effort" | one combined button "Antigravity · model · thinking" | One Model button and one Effort button for every tool, the same look; Antigravity's Mode stays in the Model button's menu |
-| Effort picker | its own button (`/effort`) | inside the combined button | inside the combined button (Thinking Level) | as above |
+| Model picker | `/model` | next turn's model | its Model option | done 2026-11-11: one Model Picker for every tool (`chat::pickers`); Antigravity's Mode is a third picker of the same kind |
+| Effort picker | `/effort` | next turn's effort | Thinking Level | done 2026-11-11 |
 | Slash Menu | yes (Claude Code's commands) | none in Chat | none in Chat | Codex: its commands and `~/.codex/prompts` (the Swift app had them). Antigravity: the commands its `available_commands_update` sends |
 | Context Meter | yes, with % of the window | yes when the rollout says | yes since 2026-11-11 (from its log before a turn ends), tokens only | a context window per Gemini model, so it shows a % |
 | Account Menu | menu: this session's account, Move All, Add | button: opens Accounts on Codex | button: opens Accounts on Antigravity (2026-11-11) | the same menu for all: list the tool's accounts with a tick, Switch, Add Account… |

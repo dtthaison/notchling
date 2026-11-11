@@ -22,8 +22,6 @@ use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
 use crate::accounts::limits::Zone;
-use crate::accounts::model::{ANTIGRAVITY, CLAUDE_CODE, CODEX};
-use crate::chat::data::Tool;
 use crate::chat::limit_ring::{self as rules, Arc, Hover, Limit, Wait, GRACE_MS, OPEN_MS};
 
 /// Set to `1`, a render draws the card open, since nothing hovers in a picture.
@@ -62,78 +60,16 @@ fn now_secs() -> f64 {
 }
 
 /// The selected session's limits and where "See all" goes.
-struct Shown {
-    limits: Vec<Limit>,
-    arc: Option<Arc>,
-    plan: Option<String>,
-    provider: &'static str,
+pub(super) struct Shown {
+    pub limits: Vec<Limit>,
+    pub arc: Option<Arc>,
+    pub plan: Option<String>,
+    pub provider: &'static str,
 }
 
 fn shown(view: &ChatView) -> Option<Shown> {
     let session = view.selected_session()?;
-    let s = view.accounts.snapshot();
-    let shown = match session.tool {
-        Tool::Claude if session.agent.config_dir.is_none() => {
-            let windows = &s
-                .limits
-                .providers
-                .iter()
-                .find(|p| p.id == "claude")?
-                .windows;
-            let limits = rules::claude_limits(windows);
-            Shown {
-                arc: rules::arc(&limits),
-                limits,
-                plan: s
-                    .claude
-                    .active
-                    .as_ref()
-                    .and_then(|id| s.claude.accounts.iter().find(|a| &a.id == id))
-                    .and_then(|a| a.plan.clone()),
-                provider: CLAUDE_CODE,
-            }
-        }
-        Tool::Codex => {
-            let codex = s.providers.providers.iter().find(|p| p.id == CODEX)?;
-            let active = codex.active_id.as_ref()?;
-            let report = s.usage.get(CODEX)?.get(active)?;
-            let limits = rules::codex_limits(report);
-            Shown {
-                arc: rules::arc(&limits),
-                limits,
-                plan: codex
-                    .accounts
-                    .iter()
-                    .find(|a| &a.id == active)
-                    .and_then(|a| a.plan.clone()),
-                provider: CODEX,
-            }
-        }
-        Tool::Antigravity => {
-            let agy = s.providers.providers.iter().find(|p| p.id == ANTIGRAVITY)?;
-            let active = agy.active_id.as_ref()?;
-            let report = s.usage.get(ANTIGRAVITY)?.get(active)?;
-            let model = view
-                .tools
-                .agy_config
-                .iter()
-                .find(|o| o.id == "model")
-                .map(|o| o.current_name().to_owned());
-            let limits = rules::antigravity_limits(report, model.as_deref());
-            Shown {
-                arc: limits.first().map(rules::arc_of),
-                limits,
-                plan: agy
-                    .accounts
-                    .iter()
-                    .find(|a| &a.id == active)
-                    .and_then(|a| a.plan.clone()),
-                provider: ANTIGRAVITY,
-            }
-        }
-        _ => return None,
-    };
-    Some(shown)
+    super::tool::of(session.tool).limits(view, session)
 }
 
 impl ChatView {
