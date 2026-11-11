@@ -49,7 +49,7 @@
 //! | `limitMode` | `off`/`notify`/`notifyAndSwitch` | `notifyAndSwitch` | yes | Claude limit watching |
 //! | `limitSwitchAt` | int | 95 | yes | Percent that triggers a switch (reads are held to 80 to 99) |
 //! | `codexLimitMode` | `off`/`notify`/`notifyAndSwitch` | `notify` | yes | Codex limit watching |
-//! | `antigravityLimitMode` | `off`/`notify` | `notify` | yes | Antigravity limit watching |
+//! | `antigravityLimitMode` | `off`/`notify`/`notifyAndSwitch` | `notify` | yes | Antigravity limit watching |
 //! | `codexNetwork` | bool | true | yes | Network open in Codex turns |
 //! | `migratedFromAwake` | bool | false | no | The migration ran |
 //! | `chatClosedSessions` | dict string to number | `{}` | no | Sessions closed in Chat |

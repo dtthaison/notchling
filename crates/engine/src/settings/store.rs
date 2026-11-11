@@ -474,6 +474,18 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_takes_notify_and_switch() {
+        let tmp = TempDir::new("set-agy");
+        let mut s = open(&tmp);
+        s.set("antigravityLimitMode", json!("notifyAndSwitch"))
+            .unwrap();
+        assert_eq!(
+            s.raw("antigravityLimitMode"),
+            Some(&json!("notifyAndSwitch"))
+        );
+    }
+
+    #[test]
     fn limit_switch_at_reads_inside_80_to_99() {
         // LimitWatcher.switchAt: min(max(v, 80), 99) on read; the stored value is left as written.
         let tmp = TempDir::new("set-clamp");

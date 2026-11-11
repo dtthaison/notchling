@@ -173,7 +173,7 @@ pub const KEYS: &[KeySpec] = &[
     choice("limitMode", "notifyAndSwitch", &["off", "notify", "notifyAndSwitch"], true, "Claude Code limit watching"),
     key("limitSwitchAt", K::Int, D::Int(95), true, "Percent at which a limit switch happens (reads stay in 80 to 99)").ranged(80, 99),
     choice("codexLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Codex limit watching"),
-    choice("antigravityLimitMode", "notify", &["off", "notify"], true, "Antigravity limit watching (never switches)"),
+    choice("antigravityLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Antigravity limit watching"),
     key("codexNetwork", K::Bool, D::Bool(true), true, "Open the network in Codex turns (Allow Network in Codex Turns)"),
     // Not migrated.
     key("migratedFromAwake", K::Bool, D::Bool(false), false, "The Awake migration already ran"),
