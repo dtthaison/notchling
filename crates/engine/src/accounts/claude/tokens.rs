@@ -36,6 +36,28 @@ impl ClaudeAccounts {
         Ok(token)
     }
 
+    /// The main login's access token as Keychain holds it now, read only, for a caller that only
+    /// wants to ask Anthropic something as the logged-in user (the model list). `None` when no
+    /// login is known or the live one has expired. There is no saved slot, no lane and no renewal
+    /// on this path at all, so it can't rotate a refresh token, whichever account is main by the
+    /// time it runs.
+    pub fn live_token(&self) -> Result<Option<Secret>, AccountError> {
+        let state = self.lock();
+        if state.active.is_none() {
+            return Ok(None);
+        }
+        let live = self
+            .env
+            .keys
+            .read_json(super::LIVE_SERVICE, &self.env.keys.user)?;
+        let now = self.now();
+        Ok(live
+            .and_then(|l| l.object("claudeAiOauth"))
+            .filter(|o| !is_expired(o, now))
+            .as_ref()
+            .and_then(access_token))
+    }
+
     pub(super) fn token_locked(
         &self,
         state: &mut State,

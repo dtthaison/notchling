@@ -2,14 +2,14 @@
 //! codex home and cache file, and a spawner the test runs by hand. Nothing here reaches a real
 //! login, the network or `~/.claude`, `~/.codex` or `~/.gemini`.
 
-use crate::accounts_ops_tests::{profile, world, World, ID1};
+use crate::accounts_ops_tests::{profile, world, World, ID1, ID2};
 use crate::acting_ops_tests::{app, FakeRoom};
 use crate::catalog_ops::{CatalogService, Spawner};
 use crate::limits_ops_tests::{TempDir, NOW};
 use crate::op_group::OpGroup;
-use notchling_engine::accounts::claude::LIVE_SERVICE;
+use notchling_engine::accounts::claude::{LIVE_SERVICE, SAVED_SERVICE};
 use notchling_engine::accounts::fake::{MemoryKeychain, PanicHttp, PanicKeychain, ScriptedHttp};
-use notchling_engine::accounts::http::PROFILE_URL;
+use notchling_engine::accounts::http::{PROFILE_URL, TOKEN_URL};
 use notchling_engine::catalog::claude_live::MODELS_URL;
 use notchling_engine::catalog::live_cache::LiveCache;
 use notchling_engine::catalog::{Catalog, LiveModel, Tool};
@@ -51,6 +51,7 @@ impl Jobs {
 struct Rig {
     tmp: TempDir,
     world: World,
+    chain: Arc<MemoryKeychain>,
     http: Arc<ScriptedHttp>,
     room: Arc<FakeRoom>,
     jobs: Jobs,
@@ -98,6 +99,7 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
     Rig {
         tmp,
         world,
+        chain,
         http,
         room,
         jobs,
@@ -218,10 +220,7 @@ fn a_due_claude_list_is_fetched_once_with_the_live_token_and_never_renewed() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].1.as_deref(), Some("test-access-1"));
     assert!(
-        !r.http
-            .seen()
-            .iter()
-            .any(|(url, _)| url == notchling_engine::accounts::http::TOKEN_URL),
+        !r.http.seen().iter().any(|(url, _)| url == TOKEN_URL),
         "no token was renewed"
     );
     assert_eq!(r.cache().get(Tool::Claude).unwrap().0, NOW);
@@ -238,9 +237,32 @@ fn a_due_claude_list_is_fetched_once_with_the_live_token_and_never_renewed() {
 #[test]
 fn an_expired_live_login_asks_for_nothing_and_a_failed_fetch_keeps_the_old_list() {
     let r = rig("expired", true, &live_login(Some(1_000)));
+    // Another saved account has an expired slot, and the token endpoint would renew it: the
+    // list fetch must never reach for it, whichever account is main.
+    r.chain.put(
+        SAVED_SERVICE,
+        ID2,
+        r#"{"claudeAiOauth":{"accessToken":"test-access-2","refreshToken":"test-refresh-2","expiresAt":1},
+            "oauthAccount":{"accountUuid":"a2a2","organizationUuid":"0202","emailAddress":"two@example.com"}}"#,
+    );
+    std::fs::create_dir_all(r.world.d.0.join("data/daemon")).unwrap();
+    std::fs::write(
+        r.world.d.0.join("data/daemon/accounts.json"),
+        format!(r#"[{{"id":"{ID2}","email":"two@example.com","plan":"Pro"}}]"#),
+    )
+    .unwrap();
+    r.http.answer(
+        TOKEN_URL,
+        200,
+        r#"{"access_token":"test-access-new","refresh_token":"test-refresh-new","expires_in":3600}"#,
+    );
     r.get("claude").unwrap();
     r.jobs.run();
     assert!(r.model_requests().is_empty(), "no token, no request");
+    assert!(
+        !r.http.seen().iter().any(|(url, _)| url == TOKEN_URL),
+        "nothing was renewed"
+    );
     assert!(r.cache().get(Tool::Claude).is_none());
 
     // A fetch that fails leaves the cached list as it was.

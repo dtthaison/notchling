@@ -287,6 +287,29 @@ fn the_main_logins_token_is_never_renewed() {
 }
 
 #[test]
+fn the_live_token_reads_only_the_live_login_and_never_reaches_the_network() {
+    let w = World::new("acc-live-token");
+    // No login known yet: nothing.
+    assert_eq!(w.store.live_token().unwrap(), None);
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.store.sync().unwrap();
+    let seen = w.http.seen().len();
+    assert_eq!(
+        w.store.live_token().unwrap().unwrap().expose(),
+        "test-access-1-1"
+    );
+    // The live login expires, and an expired saved slot is there to tempt a renewal: still
+    // nothing, and nothing asked of the network.
+    w.saved(2, 1, NOW - 1);
+    w.saved(1, 1, NOW - 1);
+    w.clock.store(LATER, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(w.store.live_token().unwrap(), None);
+    assert_eq!(w.http.seen().len(), seen, "no request of any kind");
+    assert_eq!(w.token_requests(), 0);
+}
+
+#[test]
 fn a_saved_login_live_by_the_config_file_is_never_renewed_either() {
     // No sync yet, so the store hasn't read the live login: ~/.claude.json still says it's main.
     let w = World::new("acc-token-config");

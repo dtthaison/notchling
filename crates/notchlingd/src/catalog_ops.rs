@@ -25,8 +25,8 @@
 //! - A call for Claude when its list is due starts a fetch on a thread (one at a time) and answers
 //!   from what it has; the fetch ends as `catalog.changed {tool}` on `tools`. It runs only while
 //!   `accounts` is on, with the main login's access token read from Keychain by
-//!   [`ClaudeAccounts::usage_token`], which never renews a login in use and answers nothing for an
-//!   expired one. A failed fetch keeps the old list, and a try that found no token or failed is
+//!   [`ClaudeAccounts::live_token`], which only reads the live login, never renews anything and
+//!   answers nothing for an expired one. A failed fetch keeps the old list, and a try that found no token or failed is
 //!   not repeated for [`RETRY_SECS`].
 
 use crate::acting_ops::{now_ms, Room};
@@ -106,16 +106,18 @@ impl Inner {
         }
     }
 
-    /// Reads the main login's token and fetches Anthropic's list. Anything missing or failing
-    /// leaves the cache as it was.
-    fn fetch_claude(&self, account: &str) {
+    /// Reads the main login's live token (read only: [`ClaudeAccounts::live_token`] has no saved
+    /// slot, lane or renewal on its path, so whichever account is main when this runs, no refresh
+    /// token is rotated) and fetches Anthropic's list. Anything missing or failing leaves the
+    /// cache as it was.
+    fn fetch_claude(&self) {
         let Some((store, flag)) = &self.claude else {
             return;
         };
         if !flag.is_on() {
             return;
         }
-        let Ok(Some(token)) = store.usage_token(account) else {
+        let Ok(Some(token)) = store.live_token() else {
             return;
         };
         if let Ok(models) = claude_live::fetch(&*self.http, &token) {
@@ -215,31 +217,30 @@ impl CatalogService {
 
     /// The tool's models: the live list laid over the data file as the catalog says.
     pub fn models(&self, tool: Tool) -> Vec<ModelInfo> {
-        self.inner.catalog.models(tool, &self.live(tool))
+        self.models_and_time(tool).0
     }
 
     /// Every model id a session of `tool` may start on.
     pub fn allowed(&self, tool: Tool) -> Vec<String> {
-        self.inner.catalog.allowed(tool, &self.live(tool))
+        self.inner.catalog.allowed(tool, &self.live(tool).1)
     }
 
-    fn live(&self, tool: Tool) -> Vec<LiveModel> {
-        match tool {
-            Tool::Codex => self.codex_list().1,
-            tool => self
-                .inner
-                .cache
-                .get(tool)
-                .map(|(_, models)| models)
-                .unwrap_or_default(),
-        }
+    /// The models and when their live list was fetched or seen (`None` while only the data
+    /// file's is shown), from one read of the list, so a fetch that lands meanwhile can't pair a
+    /// new time with the old models.
+    fn models_and_time(&self, tool: Tool) -> (Vec<ModelInfo>, Option<f64>) {
+        let (at, live) = self.live(tool);
+        (self.inner.catalog.models(tool, &live), at)
     }
 
-    /// When the tool's live list was fetched or seen; `None` while only the data file's is shown.
-    fn fetched_at(&self, tool: Tool) -> Option<f64> {
+    /// The tool's live list and when it was fetched, read once.
+    fn live(&self, tool: Tool) -> (Option<f64>, Vec<LiveModel>) {
         match tool {
-            Tool::Codex => self.codex_list().0,
-            tool => self.inner.cache.get(tool).map(|(at, _)| at),
+            Tool::Codex => self.codex_list(),
+            tool => match self.inner.cache.get(tool) {
+                Some((at, models)) => (Some(at), models),
+                None => (None, Vec::new()),
+            },
         }
     }
 
@@ -286,9 +287,11 @@ impl CatalogService {
         if !flag.is_on() {
             return;
         }
-        let Some(account) = store.snapshot().active else {
+        // Nothing to do before the main login has been seen (the live token would be refused
+        // anyway); this reads no Keychain.
+        if store.snapshot().active.is_none() {
             return;
-        };
+        }
         let now = (inner.now)();
         if !refresh_due(inner.cache.get(Tool::Claude).map(|(at, _)| at), now) {
             return;
@@ -311,7 +314,7 @@ impl CatalogService {
         let fetching = Fetching(inner.clone());
         (self.spawner)(Box::new(move || {
             let fetching = fetching;
-            fetching.0.fetch_claude(&account);
+            fetching.0.fetch_claude();
         }));
     }
 
@@ -372,10 +375,11 @@ impl OpGroup for CatalogService {
         if tool == Tool::Claude {
             self.refresh_claude();
         }
+        let (models, fetched_at) = self.models_and_time(tool);
         Ok(json!({
             "tool": tool.name(),
-            "models": self.models(tool),
-            "fetchedAt": self.fetched_at(tool),
+            "models": models,
+            "fetchedAt": fetched_at,
         }))
     }
 
