@@ -12,12 +12,18 @@ use crate::acting::Control;
 /// A tooltip's view.
 pub struct Tip {
     text: SharedString,
+    /// A second, fainter line (a terminal's user, host and folder).
+    detail: Option<SharedString>,
     appearance: Appearance,
 }
 
 impl Tip {
     pub fn new(text: SharedString, appearance: Appearance) -> Tip {
-        Tip { text, appearance }
+        Tip {
+            text,
+            detail: None,
+            appearance,
+        }
     }
 }
 
@@ -35,7 +41,30 @@ impl Render for Tip {
             .kit_type(TypeRole::Meta)
             .ink(Ink::Text, a)
             .child(self.text.clone())
+            .children(
+                self.detail
+                    .clone()
+                    .map(|d| div().ink(Ink::TextFaint, a).child(d)),
+            )
     }
+}
+
+/// A tooltip of a title and a fainter detail line under it.
+pub fn tip_detail(
+    element: Stateful<Div>,
+    text: SharedString,
+    detail: SharedString,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    element.tooltip(move |_, cx| {
+        let (text, detail) = (text.clone(), Some(detail.clone()));
+        cx.new(|_| Tip {
+            text,
+            detail,
+            appearance,
+        })
+        .into()
+    })
 }
 
 /// The part state a control is drawn in.
@@ -55,7 +84,7 @@ pub fn tip_text(
 ) -> Stateful<Div> {
     element.tooltip(move |_, cx| {
         let text = text.clone();
-        cx.new(|_| Tip { text, appearance }).into()
+        cx.new(|_| Tip::new(text, appearance)).into()
     })
 }
 
@@ -63,11 +92,8 @@ pub fn tip_text(
 pub fn tip(element: Stateful<Div>, control: Control, appearance: Appearance) -> Stateful<Div> {
     match control.tooltip {
         Some(text) => element.tooltip(move |_, cx| {
-            cx.new(|_| Tip {
-                text: SharedString::from(text),
-                appearance,
-            })
-            .into()
+            cx.new(|_| Tip::new(SharedString::from(text), appearance))
+                .into()
         }),
         None => element,
     }

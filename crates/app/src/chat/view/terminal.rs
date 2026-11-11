@@ -436,58 +436,60 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .items_center()
         .gap(px(4.0));
     for (i, (title, shell)) in view.terminal.tabs.iter().enumerate() {
-        // The tab's × sits at its left and shows only while the pointer is over that tab, so a row
-        // of narrow tabs stays readable.
-        let group = SharedString::from(format!("term-tab-{i}"));
-        let close = tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
-            .flex_shrink_0()
-            .h(px(20.0))
-            .w(px(20.0))
-            .px(px(0.0))
-            .opacity(0.0)
-            .group_hover(group.clone(), |s| s.opacity(1.0))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.close_terminal(i, window, cx);
-            }));
+        // A tab is its name only, at most 120 pt wide. The active one's × sits over the end of
+        // its name, on the tab's own fill so the name runs under it; the others have none.
+        let close = (i == active).then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .pl(px(2.0))
+                .pr(px(3.0))
+                .flex()
+                .items_center()
+                .fill(Ink::Raised, a)
+                .child(
+                    tool(format!("term-close-{i}"), Icon::Close, "End this shell", a)
+                        .h(px(20.0))
+                        .w(px(20.0))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.close_terminal(i, window, cx);
+                        })),
+                )
+        });
         let tab = div()
-            .id(group.clone())
-            .group(group)
+            .id(SharedString::from(format!("term-tab-{i}")))
+            .relative()
             .flex_shrink()
-            .min_w(px(56.0))
-            .max_w(px(200.0))
+            .min_w(px(48.0))
+            .max_w(px(120.0))
             .h(px(26.0))
-            .pl(px(3.0))
-            .pr(px(10.0))
+            .px(px(10.0))
             .rounded(px(6.0))
             .overflow_hidden()
+            .whitespace_nowrap()
             .flex()
             .items_center()
-            .gap(px(4.0))
             .cursor_pointer()
             .when(i == active, |t| t.fill(Ink::Raised, a))
             .when(i != active, |t| {
                 t.hover(move |s| s.bg(hsla(Ink::Raised.color(a).with_alpha(0.5))))
             })
-            .child(close)
-            .child(
-                label(&title, TypeRole::Label, Ink::Text, a)
-                    .flex_shrink()
-                    .min_w(px(0.0))
-                    .elide(),
-            )
-            .child(
-                label(&shell.name, TypeRole::Label, Ink::TextFaint, a)
-                    .flex_shrink()
-                    .min_w(px(0.0))
-                    .elide(),
-            )
+            .child(label(&title, TypeRole::Label, Ink::Text, a).flex_shrink_0())
+            .children(close)
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.terminal.tabs.select(i);
                 this.focus_terminal(window);
                 cx.notify();
             }));
-        let tab = gate::tip_text(tab, shell.folder.clone().into(), a);
+        let tab = gate::tip_detail(
+            tab,
+            title.clone().into(),
+            format!("{}:{}", who(), shell.folder).into(),
+            a,
+        );
         tabs = tabs.child(tab);
     }
     let add = tool("term-add", Icon::Plus, "New Terminal", a)
@@ -809,6 +811,17 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         .children(caret)
         .child(fit)
         .into_any_element()
+}
+
+/// `user@host`, as a shell prompt shows it, for a tab's tip.
+fn who() -> &'static str {
+    static WHO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    WHO.get_or_init(|| {
+        let user = std::env::var("USER").unwrap_or_default();
+        let host = notchling_engine::bridge::net::bridge::host_name().unwrap_or_default();
+        let host = host.split('.').next().unwrap_or_default();
+        format!("{user}@{host}")
+    })
 }
 
 /// The rows on show: the live screen, or older rows when scrolled back.

@@ -90,7 +90,7 @@ fn default_lan_ip() -> IpAddr {
 }
 
 #[cfg(unix)]
-fn host_name() -> Option<String> {
+pub fn host_name() -> Option<String> {
     let mut buf = [0u8; 256];
     // SAFETY: gethostname writes at most `buf.len()` bytes into `buf`.
     let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
@@ -105,7 +105,7 @@ fn host_name() -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn host_name() -> Option<String> {
+pub fn host_name() -> Option<String> {
     std::env::var("COMPUTERNAME").ok().filter(|s| !s.is_empty())
 }
 
