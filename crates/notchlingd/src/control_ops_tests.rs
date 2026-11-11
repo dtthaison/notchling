@@ -3,6 +3,8 @@
 //! Nothing is started: the launcher is `FakeLauncher` and the terminal the tests' fake.
 
 use crate::acting_ops_tests::{app, code, sessions, setup_in, Setup, PROMPT, SESSION};
+use crate::catalog_ops_tests::seeded;
+use notchling_engine::catalog::LiveModel;
 use notchling_engine::control::{
     plan_trust_folder, Call, Command, FakeLauncher, LaunchOutput, Launcher,
 };
@@ -145,6 +147,79 @@ fn new_session_starts_claude_bg_and_names_the_job() {
     );
 }
 
+fn live(id: &str) -> LiveModel {
+    LiveModel {
+        id: id.into(),
+        ..LiveModel::default()
+    }
+}
+
+#[test]
+fn session_new_takes_a_model_the_live_list_reports() {
+    let (_d, s, fake) = control("newlive", true);
+    let (_tmp, service) = seeded("newlive-cat", &[live("claude-fable-5-3")], None);
+    s.ops.attach_catalog(service);
+    fake.push_output(Ok(LaunchOutput::ok(
+        "backgrounded · 6ce4c19c · api (idle)\n",
+    )));
+    assert_eq!(
+        call(
+            &s,
+            ops::SESSION_NEW,
+            json!({"folder": "/w/api", "flags": ["--model", "claude-fable-5-3"]})
+        ),
+        Ok(json!({"jobId": "6ce4c19c"}))
+    );
+    assert_eq!(
+        fake.commands(),
+        [main_login(&["claude", "--model", "claude-fable-5-3", "--bg"]).in_dir("/w/api")]
+    );
+}
+
+#[test]
+fn session_new_takes_a_built_in_model_with_a_suffix_or_an_older_one() {
+    let (_d, s, fake) = control("newsuffix", true);
+    for id in [
+        "claude-opus-5-5[1m]",
+        "claude-sonnet-5-5-20261101",
+        "claude-opus-4-6",
+    ] {
+        fake.push_output(Ok(LaunchOutput::ok("backgrounded · 6ce4c19c (idle)\n")));
+        assert_eq!(
+            call(
+                &s,
+                ops::SESSION_NEW,
+                json!({"folder": "/w/api", "flags": ["--model", id]})
+            ),
+            Ok(json!({"jobId": "6ce4c19c"})),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn session_new_refuses_a_model_only_the_override_names() {
+    let (_d, s, fake) = control("newoverride", true);
+    let (_tmp, service) = seeded(
+        "newoverride-cat",
+        &[],
+        Some(
+            r#"{"claude": {"current": ["claude-evil-1"], "prices": [{"match": "claude-evil-1", "input": 1, "output": 1}]}}"#,
+        ),
+    );
+    s.ops.attach_catalog(service);
+    let (code, message) = call(
+        &s,
+        ops::SESSION_NEW,
+        json!({"folder": "/w", "flags": ["--model", "claude-evil-1"]}),
+    )
+    .unwrap_err();
+    assert_eq!(code, ErrorCode::BadRequest);
+    assert!(message.contains("claude-opus-5-5"), "{message}");
+    assert!(!message.contains("claude-evil-1,"), "{message}");
+    assert!(fake.calls().is_empty());
+}
+
 #[test]
 fn new_session_refuses_a_folder_it_cannot_use() {
     let (_d, s, fake) = control("newbad", true);
@@ -160,7 +235,7 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": "/w", "flags": ["--model=claude-opus-5-5"]}),
         json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5", "--settings", "/x"]}),
         json!({"folder": "/w", "flags": ["--settings", "/x", "--model", "claude-opus-5-5"]}),
-        json!({"folder": "/w", "flags": ["--model", "claude-opus-4-6"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-9-9"]}),
     ] {
         assert_eq!(
             call(&s, ops::SESSION_NEW, args.clone()).unwrap_err().0,

@@ -107,6 +107,31 @@ fn rig(tag: &str, on: bool, login: &str) -> Rig {
     }
 }
 
+/// A service over a temp folder, with no accounts and no network: the built-in data, `overrides`
+/// as the user's `catalog.json` and `live` as Claude's cached list. The folder must outlive it.
+pub(crate) fn seeded(
+    tag: &str,
+    live: &[LiveModel],
+    overrides: Option<&str>,
+) -> (TempDir, Arc<CatalogService>) {
+    let tmp = TempDir::new(tag);
+    if let Some(text) = overrides {
+        tmp.write("state/catalog.json", text);
+    }
+    let cache = LiveCache::new(tmp.path("state/live-models.json"));
+    if !live.is_empty() {
+        cache.put(Tool::Claude, NOW, live);
+    }
+    let service = Arc::new(CatalogService::new(
+        Catalog::load(&tmp.path("state/catalog.json")),
+        cache,
+        tmp.path("codex"),
+        None,
+        Arc::new(PanicHttp),
+    ));
+    (tmp, service)
+}
+
 impl Rig {
     fn get(&self, tool: &str) -> Result<Value, notchling_local_api::ApiError> {
         self.service

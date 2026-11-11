@@ -34,6 +34,7 @@
 
 use crate::acting::{Acting, ACTING_OFF};
 use crate::agy_ops::AgyOps;
+use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::hook_ops::Parents;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
@@ -184,6 +185,8 @@ pub struct ActingOps {
     agy: OnceLock<Arc<AgyOps>>,
     /// Codex turns: what turning acting off must stop.
     codex: OnceLock<Arc<CodexOps>>,
+    /// The models a session may start on; the data file's alone until [`ActingOps::attach_catalog`].
+    catalog: OnceLock<Arc<CatalogService>>,
     /// Where a screen refused by the permission dialog check is kept (0600, overwritten), so a real
     /// dialog can become the reader's fixture (docs/recording.md, `dialog-permission`).
     screen_file: Option<PathBuf>,
@@ -213,6 +216,7 @@ impl ActingOps {
             refused: Mutex::new(HashMap::new()),
             agy: OnceLock::new(),
             codex: OnceLock::new(),
+            catalog: OnceLock::new(),
             screen_file: None,
         }
     }
@@ -237,6 +241,19 @@ impl ActingOps {
     /// The Codex ops, so acting off stops their turns and drops the messages waiting. Once.
     pub fn attach_codex(&self, codex: Arc<CodexOps>) {
         let _ = self.codex.set(codex);
+    }
+
+    /// The daemon's catalog, so `session.new --model` takes what it lists (built in or live).
+    /// Once, before the first op: the daemon's wiring builds it after these ops, since its
+    /// accounts store needs them.
+    pub fn attach_catalog(&self, catalog: Arc<CatalogService>) {
+        let _ = self.catalog.set(catalog);
+    }
+
+    /// The catalog a session's model is checked against.
+    pub(crate) fn catalog(&self) -> &CatalogService {
+        self.catalog
+            .get_or_init(|| Arc::new(CatalogService::built_in()))
     }
 
     /// Moves every stopping mark `by` into the past (tests).

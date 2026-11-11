@@ -3,7 +3,7 @@
 //! acting switch applies: while it's off, the phone reads and never types, answers or starts).
 
 use crate::acting_ops::{ActingOps, Room};
-use crate::control_ops::PICKER_MODELS;
+use crate::catalog_ops::CatalogService;
 use crate::prompts::{Kind, Prompt};
 use notchling_engine::bridge::agents;
 use notchling_engine::bridge::live::{Acting, Sources};
@@ -11,6 +11,7 @@ use notchling_engine::bridge::model::{
     Control, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session, TakeoverOutcome,
 };
 use notchling_engine::bridge::BridgeFailure;
+use notchling_engine::catalog::{Tier as ModelTier, Tool};
 use notchling_engine::sessions::{Agent, AgentTarget};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
@@ -248,7 +249,7 @@ impl Acting for DaemonActing {
 
     fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure> {
         let mut args = json!({"folder": cwd.to_string_lossy()});
-        if let Some(full) = model.and_then(model_id) {
+        if let Some(full) = model.and_then(|short| model_id(short, self.ops.catalog())) {
             args["flags"] = json!(["--model", full]);
         }
         self.call(ops::SESSION_NEW, args).map(|_| ())
@@ -261,12 +262,14 @@ impl Acting for DaemonActing {
     }
 }
 
-/// The phone's short model name as the picker's full id (`opus` → `claude-opus-5-5`).
-fn model_id(short: &str) -> Option<&'static str> {
-    PICKER_MODELS
-        .iter()
-        .copied()
-        .find(|id| id.split('-').nth(1) == Some(short))
+/// The phone's short model name as the catalog's current id of that family (`opus` →
+/// `claude-opus-5-5`); none for a name that is no family or has no current model.
+pub(crate) fn model_id(short: &str, catalog: &CatalogService) -> Option<String> {
+    catalog
+        .models(Tool::Claude)
+        .into_iter()
+        .find(|m| m.tier == ModelTier::Current && m.id.split('-').nth(1) == Some(short))
+        .map(|m| m.id)
 }
 
 /// The phone answers with option labels or free text; `session.answer` takes option numbers
@@ -293,13 +296,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn short_model_names_become_the_pickers_ids() {
-        assert_eq!(model_id("opus"), Some("claude-opus-5-5"));
-        assert_eq!(model_id("sonnet"), Some("claude-sonnet-5-5"));
-        assert_eq!(model_id("default"), None);
-    }
 
     #[test]
     fn answers_become_option_numbers_or_text() {

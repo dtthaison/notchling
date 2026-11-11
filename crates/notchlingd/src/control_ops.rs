@@ -21,13 +21,17 @@
 //! What a caller may change is narrow, since whoever holds the app tier for a moment shouldn't be
 //! able to widen what a session may do:
 //!
-//! - `flags` is nothing, or exactly `--model <id>` with an id from Chat's model picker
-//!   ([`PICKER_MODELS`], the Swift `ModelPicker.choices`). Anything else is refused.
+//! - `flags` is nothing, or exactly `--model <id>` with a model the catalog allows: the built-in
+//!   ones plus what the tool lists live (`Catalog::is_allowed`, which sees through a `[1m]` or a
+//!   date suffix). The user's `catalog.json` renames and prices models but never adds one.
+//!   Anything else is refused, naming the allowed ids.
 //! - `folder.trust` takes an absolute path to a folder that exists, isn't `/` or the home folder,
 //!   and that `session.new` was refused as untrusted within the last [`TRUST_WINDOW`] (compared
 //!   canonical). It trusts only what the user just tried to start a session in.
 
 use crate::acting_ops::{bad, text_arg, ActingOps, NoLog};
+use crate::catalog_ops::CatalogService;
+use notchling_engine::catalog::Tool;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::slash::{route, Route};
 use notchling_engine::control::{
@@ -40,15 +44,6 @@ use notchling_local_api::{ops, ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-
-/// The models Chat's picker offers (`ModelPicker.choices` in `Chat/Views/ChatPickers.swift`):
-/// Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5. Update both together.
-pub const PICKER_MODELS: [&str; 4] = [
-    "claude-fable-5-2",
-    "claude-opus-5-5",
-    "claude-sonnet-5-5",
-    "claude-haiku-5-5",
-];
 
 /// How long after `session.new` was refused a folder may be trusted.
 pub const TRUST_WINDOW: Duration = Duration::from_secs(10 * 60);
@@ -121,7 +116,7 @@ impl ActingOps {
     fn new_session(&self, args: &Value) -> Result<Value, ApiError> {
         let folder = folder_arg(args)?;
         let dir = self.config_dir_arg(args, "config_dir")?;
-        let flags = flags_arg(args)?;
+        let flags = flags_arg(args, self.catalog())?;
         let plan = plan_new_session(&NewSession {
             folder,
             config_dir: dir.as_deref(),
@@ -214,8 +209,8 @@ impl ActingOps {
     }
 }
 
-/// `flags`: nothing, or `["--model", <a picker model>]`.
-fn flags_arg(args: &Value) -> Result<Vec<String>, ApiError> {
+/// `flags`: nothing, or `["--model", <a model the catalog allows>]`.
+fn flags_arg(args: &Value, catalog: &CatalogService) -> Result<Vec<String>, ApiError> {
     let list = match args.get("flags") {
         None | Some(Value::Null) => return Ok(Vec::new()),
         Some(Value::Array(list)) => list
@@ -227,10 +222,10 @@ fn flags_arg(args: &Value) -> Result<Vec<String>, ApiError> {
     };
     match list.as_slice() {
         [] => Ok(list),
-        [flag, model] if flag == "--model" && PICKER_MODELS.contains(&model.as_str()) => Ok(list),
+        [flag, model] if flag == "--model" && catalog.is_allowed(Tool::Claude, model) => Ok(list),
         _ => Err(bad(format!(
             "flags may only be --model with one of {}",
-            PICKER_MODELS.join(", ")
+            catalog.allowed(Tool::Claude).join(", ")
         ))),
     }
 }

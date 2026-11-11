@@ -366,6 +366,7 @@ impl Wired {
             room.clone(),
         ));
         agy.attach_catalog(catalog.clone());
+        acting.attach_catalog(catalog.clone());
         // The limit watchers, over the same stores. The loop calls them only while `accounts` is
         // on; `cost.summary` only reads transcripts and needs no switch.
         let limits = Arc::new(LimitsOps::for_daemon(

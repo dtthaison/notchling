@@ -371,3 +371,35 @@ fn the_bridge_acts_only_through_the_acting_switch() {
     let view_only = Session::new("s2", "n", "/tmp", Control::ViewOnly, SessionState::Running);
     assert!(on.send_message("hi", &view_only).is_err());
 }
+
+#[test]
+fn the_phones_short_names_still_map() {
+    use crate::bridge_backend::model_id;
+    use crate::catalog_ops_tests::seeded;
+    use notchling_engine::catalog::LiveModel;
+
+    let (_a, built_in) = seeded("short-built-in", &[], None);
+    for (short, id) in [
+        ("opus", "claude-opus-5-5"),
+        ("sonnet", "claude-sonnet-5-5"),
+        ("haiku", "claude-haiku-5-5"),
+        ("fable", "claude-fable-5-2"),
+    ] {
+        assert_eq!(model_id(short, &built_in).as_deref(), Some(id), "{short}");
+    }
+    // Neither a name the phone doesn't know nor a family without a current model maps.
+    assert_eq!(model_id("default", &built_in), None);
+    assert_eq!(model_id("evil", &built_in), None);
+
+    // A newer Fable the tool lists is the current one.
+    let newer = LiveModel {
+        id: "claude-fable-5-3".into(),
+        ..LiveModel::default()
+    };
+    let (_b, live) = seeded("short-live", &[newer], None);
+    assert_eq!(
+        model_id("fable", &live).as_deref(),
+        Some("claude-fable-5-3")
+    );
+    assert_eq!(model_id("opus", &live).as_deref(), Some("claude-opus-5-5"));
+}

@@ -34,7 +34,7 @@ use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::ClaudeAccounts;
-use notchling_engine::accounts::http::HttpClient;
+use notchling_engine::accounts::http::{HttpClient, HttpRequest, HttpResponse};
 use notchling_engine::catalog::claude_live;
 use notchling_engine::catalog::live_cache::{refresh_due, LiveCache};
 use notchling_engine::catalog::{Catalog, LiveModel, ModelInfo, Tool};
@@ -127,6 +127,18 @@ impl Inner {
     }
 }
 
+/// The network for a service that fetches nothing.
+struct NoHttp;
+
+impl HttpClient for NoHttp {
+    fn send(&self, _: &HttpRequest) -> HttpResponse {
+        HttpResponse {
+            status: 0,
+            body: Vec::new(),
+        }
+    }
+}
+
 pub struct CatalogService {
     inner: Arc<Inner>,
     codex_dir: PathBuf,
@@ -160,6 +172,19 @@ impl CatalogService {
             codex: Mutex::new(None),
             spawner: thread_spawner(),
         }
+    }
+
+    /// Only the data file's models: no live list, no override, no accounts and no network. What
+    /// the ops that need a catalog use until the daemon gives them its own.
+    pub fn built_in() -> CatalogService {
+        let nowhere = PathBuf::from("/nonexistent/notchling-catalog");
+        CatalogService::new(
+            Catalog::built_in(),
+            LiveCache::new(nowhere.join("live-models.json")),
+            nowhere.join("codex"),
+            None,
+            Arc::new(NoHttp),
+        )
     }
 
     /// The daemon's: `<state dir>/catalog.json` over the data file, the live lists cached beside
@@ -223,6 +248,12 @@ impl CatalogService {
     /// Every model id a session of `tool` may start on.
     pub fn allowed(&self, tool: Tool) -> Vec<String> {
         self.inner.catalog.allowed(tool, &self.live(tool).1)
+    }
+
+    /// Whether a session of `tool` may start on `id`, as `Catalog::is_allowed` says it over the
+    /// tool's live list.
+    pub fn is_allowed(&self, tool: Tool, id: &str) -> bool {
+        self.inner.catalog.is_allowed(tool, &self.live(tool).1, id)
     }
 
     /// The models and when their live list was fetched or seen (`None` while only the data
