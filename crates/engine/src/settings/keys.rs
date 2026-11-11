@@ -178,6 +178,7 @@ pub const KEYS: &[KeySpec] = &[
     // Not migrated.
     key("migratedFromAwake", K::Bool, D::Bool(false), false, "The Awake migration already ran"),
     key("chatClosedSessions", K::Dict, D::Empty, false, "Sessions closed in Chat: row id to time (seconds)"),
+    key("chatUsedSessions", K::Dict, D::Empty, false, "Codex and Antigravity sessions used in Chat: row id to time (seconds)"),
     key("chatInspector", K::Bool, D::Bool(false), false, "The Details panel is open"),
     key("codexPicks", K::Json, D::None, false, "Model and effort picked per Codex session: row id to pick (JSON)"),
     key("chatProjectFolders", K::StringList, D::Empty, false, "Recent folders for New Session (at most 30)"),

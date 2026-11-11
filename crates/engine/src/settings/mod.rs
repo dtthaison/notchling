@@ -53,6 +53,7 @@
 //! | `codexNetwork` | bool | true | yes | Network open in Codex turns |
 //! | `migratedFromAwake` | bool | false | no | The migration ran |
 //! | `chatClosedSessions` | dict string to number | `{}` | no | Sessions closed in Chat |
+//! | `chatUsedSessions` | dict string to number | `{}` | no | Codex and Antigravity sessions used in Chat |
 //! | `chatInspector` | bool | false | no | Details panel open |
 //! | `codexPicks` | JSON | unset | no | Model and effort per Codex session |
 //! | `chatProjectFolders` | list of strings | `[]` | no | Recent New Session folders (30) |
