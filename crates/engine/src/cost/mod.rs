@@ -1,7 +1,7 @@
 //! E8c: token cost (Milestone 6), ported from `CostTracker.swift` and `CostSources.swift`. It only
 //! reads transcripts, so it is not behind a switch.
 //!
-//! - [`prices`]: Claude's API prices, model keys and names.
+//! - [`prices`]: what a Claude message costs (at the catalog's prices), model keys and names.
 //! - [`other`]: Codex's rollouts and Antigravity's transcripts, and [`other::OtherPrices`].
 //! - [`tracker`]: [`tracker::Tracker`], the scan over the roots, with a [`cache`] of its own
 //!   (never the Swift app's), deduped by `message.id|requestId`, with per-model token totals.

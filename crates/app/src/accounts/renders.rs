@@ -227,6 +227,8 @@ fn cost_reply() -> CostReply {
             },
         ],
         channel_tokens: BTreeMap::from([("Antigravity CLI".to_owned(), 390_700.0)]),
+        unpriced: vec![],
+        borrowed: vec![],
     };
     let mut small = summary.clone();
     small.today = 0.4;

@@ -357,6 +357,8 @@ mod tests {
                 },
             ],
             channel_tokens: BTreeMap::from([("Codex".to_owned(), 123_456.0)]),
+            unpriced: vec![],
+            borrowed: vec![],
         };
         CostReply {
             range: "30".into(),

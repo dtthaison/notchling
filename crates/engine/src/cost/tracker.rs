@@ -19,6 +19,7 @@ pub use super::paths::hash;
 use super::paths::{account_in_path, contains, file_id, project_name, walk};
 use super::prices;
 use super::summary::{day_key, key, owners, summarize, Summary, Window};
+use crate::catalog::{Catalog, Tool};
 use crate::pages::clock::local_offset_secs;
 use crate::transcript::util::parse_date;
 use serde_json::Value;
@@ -26,6 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub const CLAUDE_CODE: &str = "Claude Code";
 pub const DESKTOP: &str = "Desktop";
@@ -81,6 +83,9 @@ pub struct Tracker {
     cache_data: Option<PathBuf>,
     account_log: Option<PathBuf>,
     zone: ZoneFn,
+    /// Held for the tracker's life: a changed price means a new tracker (a restart), which finds
+    /// the cache's price fingerprint changed and counts everything again.
+    catalog: Arc<Catalog>,
     cache: Option<Cache>,
     seen: HashSet<u64>,
     log: Vec<Entry>,
@@ -91,17 +96,19 @@ pub struct Tracker {
 impl Tracker {
     /// `cache_data` is the data folder whose `notchling.db` holds the cache; `None` keeps it in
     /// memory (tests). `account_log` is the account store's
-    /// `account-log.json`, read for the CLI's transcripts.
+    /// `account-log.json`, read for the CLI's transcripts. `catalog` prices every request.
     pub fn new(
         roots: Vec<Root>,
         cache_data: Option<PathBuf>,
         account_log: Option<PathBuf>,
+        catalog: Arc<Catalog>,
     ) -> Tracker {
         Tracker {
             roots,
             cache_data,
             account_log,
             zone: local_offset_secs,
+            catalog,
             cache: None,
             seen: HashSet::new(),
             log: Vec::new(),
@@ -120,11 +127,11 @@ impl Tracker {
         if self.cache.is_some() {
             return;
         }
-        let cache = self
-            .cache_data
-            .as_deref()
-            .map(Cache::load)
-            .unwrap_or_default();
+        let prices = self.catalog.prices_hash();
+        let cache = match self.cache_data.as_deref() {
+            Some(data) => Cache::load(data, &prices),
+            None => Cache::empty(&prices),
+        };
         self.seen = cache.seen_set();
         self.cache = Some(cache);
     }
@@ -203,11 +210,14 @@ impl Tracker {
         let mut out = Ranged::default();
         for window in Window::ALL {
             out.overall
-                .insert(window, summarize(cache, None, window, today));
+                .insert(window, summarize(cache, None, window, today, &self.catalog));
             out.by_account.insert(
                 window,
                 ids.iter()
-                    .map(|id| (id.clone(), summarize(cache, Some(id), window, today)))
+                    .map(|id| {
+                        let s = summarize(cache, Some(id), window, today, &self.catalog);
+                        (id.clone(), s)
+                    })
                     .collect(),
             );
         }
@@ -392,8 +402,8 @@ impl Tracker {
         if !self.first_time(hash(&format!("{id}|{request}")), &day) {
             return;
         }
-        let cost = prices::cost(model, usage);
-        if cost <= 0.0 {
+        let cost = prices::cost(&self.catalog, model, usage);
+        if cost.is_some_and(|c| c <= 0.0) {
             return;
         }
         let name = object
@@ -474,7 +484,7 @@ impl Tracker {
                     CODEX,
                     &model,
                     &project,
-                    OtherPrices::cost(&model, &counts),
+                    OtherPrices::cost(&self.catalog, Tool::Codex, &model, &counts),
                     counts,
                 );
             }
@@ -509,15 +519,15 @@ impl Tracker {
                     ANTIGRAVITY,
                     &model,
                     "Antigravity CLI",
-                    OtherPrices::cost(&model, &counts),
+                    OtherPrices::cost(&self.catalog, Tool::Antigravity, &model, &counts),
                     counts,
                 );
             }
         }
     }
 
-    /// Adds one request to the day's totals. A cost of 0 still counts its tokens (a model without
-    /// a price).
+    /// Adds one request to the day's totals. A model with no price (`cost` is `None`) still counts
+    /// its tokens, at $0, and is listed in the day's `unpriced` so it never passes for free.
     #[allow(clippy::too_many_arguments)]
     fn record(
         &mut self,
@@ -526,13 +536,21 @@ impl Tracker {
         channel: &str,
         model: &str,
         project: &str,
-        cost: f64,
+        cost: Option<f64>,
         counts: [f64; 4],
     ) {
         let Some(cache) = self.cache.as_mut() else {
             return;
         };
         let model_key = key(account, model);
+        if cost.is_none() {
+            cache
+                .unpriced
+                .entry(day.to_string())
+                .or_default()
+                .insert(model_key.clone());
+        }
+        let cost = cost.unwrap_or(0.0);
         let slot = |table: &mut BTreeMap<String, BTreeMap<String, f64>>, k: String| {
             *table
                 .entry(day.to_string())

@@ -3,15 +3,16 @@
 //!
 //! It is the [`CACHE_DOC`] document of `<data>/notchling.db` (it used to be the daemon's
 //! `<data>/daemon/cost-cache.json`, which moves in once), never the Swift app's `cost-cache.json`,
-//! and carries its own [`CURRENT`] version: a cache with another version, or one that can't be
-//! read, is dropped and the history is read again. Offsets, totals and counted ids are saved
+//! and carries its own [`CURRENT`] version and the fingerprint of the prices its dollars were
+//! counted at: a cache with another version or other prices, or one that can't be read, is dropped
+//! and the history is read again (so a price fixed in the catalog reprices what was counted). Offsets, totals and counted ids are saved
 //! together (one row), so a crash only means re-reading from the last save, never double
 //! counting.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::store;
@@ -25,7 +26,7 @@ pub fn old_cache_file(data: &Path) -> PathBuf {
 }
 
 /// Bump when the stored fields change; it forces a full re-read.
-pub const CURRENT: u32 = 1;
+pub const CURRENT: u32 = 2;
 
 /// Where reading stopped in one file. The rest is what a file's later lines depend on: Codex and
 /// Antigravity name the model, folder and account once, before the lines that use them.
@@ -45,6 +46,8 @@ type DayTable<V> = BTreeMap<String, BTreeMap<String, V>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Cache {
     pub version: u32,
+    /// `Catalog::prices_hash` of the prices the dollars below were counted at.
+    pub prices: String,
     pub files: BTreeMap<String, Mark>,
     /// Day ("2026-10-26", local time) to "account id, tab, model id" to dollars. Projects
     /// likewise.
@@ -56,21 +59,26 @@ pub struct Cache {
     pub tokens: DayTable<[f64; 4]>,
     /// Day to "account, channel" to all tokens, for channels whose cost is 0 (no known price).
     pub channel_tokens: DayTable<f64>,
+    /// Day to the Claude model ids counted that day with no price (cost 0, tokens counted).
+    pub unpriced: BTreeMap<String, BTreeSet<String>>,
     /// Day to the hashes of the message ids counted on that day.
     #[serde(with = "packed")]
     pub seen: BTreeMap<String, Vec<u64>>,
 }
 
-impl Default for Cache {
-    fn default() -> Cache {
+impl Cache {
+    /// Nothing counted yet, at the prices with this fingerprint.
+    pub fn empty(prices: &str) -> Cache {
         Cache {
             version: CURRENT,
+            prices: prices.to_string(),
             files: BTreeMap::new(),
             models: BTreeMap::new(),
             projects: BTreeMap::new(),
             channels: BTreeMap::new(),
             tokens: BTreeMap::new(),
             channel_tokens: BTreeMap::new(),
+            unpriced: BTreeMap::new(),
             seen: BTreeMap::new(),
         }
     }
@@ -115,15 +123,16 @@ mod packed {
 
 impl Cache {
     /// The saved cache in `data`'s database (the old file moves in first, once), or an empty one
-    /// when there is none, it can't be read or it is another version.
-    pub fn load(data: &Path) -> Cache {
+    /// when there is none, it can't be read, it is another version or it was counted at other
+    /// `prices` (a `Catalog::prices_hash`).
+    pub fn load(data: &Path, prices: &str) -> Cache {
         let _ = store::import_file(data, CACHE_DOC, &old_cache_file(data), parses);
         store::doc(data, CACHE_DOC)
             .ok()
             .flatten()
             .and_then(|text| serde_json::from_str::<Cache>(&text).ok())
-            .filter(|c| c.version == CURRENT)
-            .unwrap_or_default()
+            .filter(|c| c.version == CURRENT && c.prices == prices)
+            .unwrap_or_else(|| Cache::empty(prices))
     }
 
     /// Writes the cache as one row. An old file left beside the database (an unreadable one, or
@@ -149,6 +158,7 @@ impl Cache {
         self.channels.retain(|d, _| !old(d));
         self.tokens.retain(|d, _| !old(d));
         self.channel_tokens.retain(|d, _| !old(d));
+        self.unpriced.retain(|d, _| !old(d));
     }
 }
 

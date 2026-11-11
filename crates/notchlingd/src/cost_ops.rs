@@ -15,7 +15,8 @@
 //!             "projects": [{"name": "notchling", "cost": 20.0}],
 //!             "accounts": [{"id": "uuid:uuid", "cost": 25.0}],
 //!             "channels": [{"name": "Claude Code", "cost": 30.0}],
-//!             "channel_tokens": {"Claude Code": 123456.0}},
+//!             "channel_tokens": {"Claude Code": 123456.0},
+//!             "unpriced": ["claude-new-9"], "borrowed": ["claude-fable-5-3"]},
 //!  "by_account": {"uuid:uuid": {...same as summary...}}}
 //! ```
 //!
@@ -24,10 +25,15 @@
 //! - The reply is what the last scan published. A scan starts on a thread when a request finds the
 //!   last one 20 s old or none; `scanned` is when the last finished one began (`null` before the
 //!   first) and `scanning` says one is running, so a client asks again a moment later.
+//! - Prices come from the engine's catalog (the built-in data, with the override file `catalog.json`
+//!   beside the socket laid over it). `unpriced` lists the models in the range that have no price:
+//!   their tokens are counted and their dollars are 0. `borrowed` lists those newer than any the
+//!   catalog knows, priced as the newest of their family. Both are sorted ids, once each.
 //! - The lists are cut to 50 rows, and `by_account` is left out if the reply would pass 700 KB
 //!   (a line is at most 1 MiB).
 
 use crate::layout::Layout;
+use notchling_engine::catalog::Catalog;
 use notchling_engine::cost::summary::Summary;
 use notchling_engine::cost::tracker::{Root, ANTIGRAVITY, CLAUDE_CODE, CODEX, DESKTOP};
 use notchling_engine::cost::{CostService, Snapshot, Tracker, Window};
@@ -50,6 +56,9 @@ pub struct CostSetup {
     pub cache_data: Option<PathBuf>,
     /// The account store's `account-log.json`, read only.
     pub account_log: PathBuf,
+    /// The user's catalog override (prices, windows, names), read once when the service is made;
+    /// a missing or broken file leaves the built-in prices.
+    pub catalog_file: PathBuf,
 }
 
 impl CostSetup {
@@ -69,6 +78,7 @@ impl CostSetup {
             ],
             cache_data: (!layout.socket_given).then(|| layout.data_dir.clone()),
             account_log: layout.data_dir.join("account-log.json"),
+            catalog_file: layout.state_dir().join("catalog.json"),
         }
     }
 
@@ -77,6 +87,7 @@ impl CostSetup {
             self.roots.clone(),
             self.cache_data.clone(),
             Some(self.account_log.clone()),
+            Arc::new(Catalog::load(&self.catalog_file)),
         ))
     }
 }

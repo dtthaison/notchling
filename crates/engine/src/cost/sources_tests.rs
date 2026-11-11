@@ -4,6 +4,7 @@
 use super::other::{antigravity, codex, OtherPrices};
 use super::prices;
 use super::tracker::{Tracker, ANTIGRAVITY, CLAUDE_CODE, CODEX};
+use crate::catalog::{Catalog, Tool};
 use serde_json::{json, Value};
 
 const CODEX_ROLLOUT: &str = include_str!("fixtures/codex-rollout.jsonl");
@@ -101,23 +102,25 @@ fn model_selection_change() {
 #[test]
 fn other_prices() {
     // gpt-5.1: $1.25 in, $0.125 cached, $10 out per million.
-    let near = |a: f64, b: f64| assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+    let near = |a: Option<f64>, b: f64| {
+        let a = a.expect("priced");
+        assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+    };
+    let c = Catalog::built_in();
+    let codex = |model: &str, counts: &[f64]| OtherPrices::cost(&c, Tool::Codex, model, counts);
     near(
-        OtherPrices::cost("gpt-5.1", &[1_000_000.0, 100_000.0, 2_000_000.0]),
+        codex("gpt-5.1", &[1_000_000.0, 100_000.0, 2_000_000.0]),
         1.25 + 1.0 + 0.25,
     );
-    near(
-        OtherPrices::cost("gpt-5.1-2026-01-01", &[1_000_000.0, 0.0, 0.0]),
-        1.25,
+    near(codex("gpt-5.1-2026-01-01", &[1_000_000.0, 0.0, 0.0]), 1.25);
+    assert_eq!(
+        codex("gpt-6.1-sol", &[1_000_000.0, 1_000_000.0, 0.0]),
+        None,
+        "unknown model: no price"
     );
     assert_eq!(
-        OtherPrices::cost("gpt-6.1-sol", &[1_000_000.0, 1_000_000.0, 0.0]),
-        0.0,
-        "unknown model: no cost"
-    );
-    assert_eq!(
-        OtherPrices::cost("gpt-5.6-sol", &[1_000_000.0, 0.0, 0.0]),
-        0.0,
+        codex("gpt-5.6-sol", &[1_000_000.0, 0.0, 0.0]),
+        None,
         "a longer id doesn't take gpt-5's price"
     );
 }
@@ -148,10 +151,15 @@ fn which_files_are_read() {
 
 #[test]
 fn claude_prices() {
-    let near = |a: f64, b: f64| assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+    let c = Catalog::built_in();
+    let near = |a: Option<f64>, b: f64| {
+        let a = a.expect("priced");
+        assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+    };
     // Opus 5.5: $4 in, $20 out, $0.20 cache read.
     near(
         prices::cost(
+            &c,
             "claude-opus-5-5",
             &json!({"input_tokens": 1_000_000, "output_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000}),
         ),
@@ -160,6 +168,7 @@ fn claude_prices() {
     // Cache writes: 1.25x input for five minutes, 2x for an hour; the split wins over the total.
     near(
         prices::cost(
+            &c,
             "claude-opus-5-5",
             &json!({"cache_creation_input_tokens": 9_999_999,
                     "cache_creation": {"ephemeral_5m_input_tokens": 1_000_000, "ephemeral_1h_input_tokens": 1_000_000}}),
@@ -168,6 +177,7 @@ fn claude_prices() {
     );
     near(
         prices::cost(
+            &c,
             "claude-opus-5-5",
             &json!({"cache_creation_input_tokens": 1_000_000}),
         ),
@@ -176,6 +186,7 @@ fn claude_prices() {
     // Fast mode doubles it.
     near(
         prices::cost(
+            &c,
             "claude-opus-5-5",
             &json!({"output_tokens": 1_000_000, "speed": "fast"}),
         ),
@@ -183,25 +194,25 @@ fn claude_prices() {
     );
     // Haiku 5.5 costs five times as much once the prompt is over 100K tokens.
     near(
-        prices::cost("claude-haiku-5-5", &json!({"input_tokens": 50_000})),
+        prices::cost(&c, "claude-haiku-5-5", &json!({"input_tokens": 50_000})),
         0.005,
     );
     near(
-        prices::cost("claude-haiku-5-5", &json!({"input_tokens": 200_000})),
+        prices::cost(&c, "claude-haiku-5-5", &json!({"input_tokens": 200_000})),
         0.1,
     );
     // Longer ids come first: opus-5-5 is not opus-5.
     near(
-        prices::cost("claude-opus-5-1", &json!({"output_tokens": 1_000_000})),
+        prices::cost(&c, "claude-opus-5-1", &json!({"output_tokens": 1_000_000})),
         25.0,
     );
     assert_eq!(
-        prices::cost("gpt-5", &json!({"output_tokens": 1_000_000})),
-        0.0
+        prices::cost(&c, "gpt-5", &json!({"output_tokens": 1_000_000})),
+        None
     );
     assert_eq!(
-        prices::cost("claude-new-9", &json!({"output_tokens": 1})),
-        0.0
+        prices::cost(&c, "claude-new-9", &json!({"output_tokens": 1})),
+        None
     );
 }
 

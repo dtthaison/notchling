@@ -2,6 +2,7 @@
 //! for every account together or for one alone.
 
 use super::cache::Cache;
+use crate::catalog::{Catalog, Tool};
 use crate::pages::clock::civil_at;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -84,6 +85,14 @@ pub struct Summary {
     /// All tokens (input, output, cache) per channel, so a channel whose models have no known
     /// price (cost 0) still shows what it used.
     pub channel_tokens: BTreeMap<String, f64>,
+    /// Model ids counted in the window with no price: their tokens are in, their dollars are not.
+    /// Sorted, once each. Absent from an older daemon's reply, which the app still reads.
+    #[serde(default)]
+    pub unpriced: Vec<String>,
+    /// Model ids in the window priced as another, older model's (they are newer than any the
+    /// catalog knows). Sorted, once each.
+    #[serde(default)]
+    pub borrowed: Vec<String>,
 }
 
 /// "yyyy-MM-dd" for a day number (days since 1970-01-01 in the zone the days are counted in).
@@ -122,8 +131,14 @@ pub fn owners(cache: &Cache) -> BTreeSet<String> {
 
 /// Totals over `window`, for one account or all of them, as of `today` (a day number). `today` and
 /// `week` stay the same across windows; `month` is the window's total and the bars and breakdowns
-/// cover the window.
-pub fn summarize(cache: &Cache, account: Option<&str>, window: Window, today: i64) -> Summary {
+/// cover the window. `catalog` says which of the models counted had their price borrowed.
+pub fn summarize(
+    cache: &Cache,
+    account: Option<&str>,
+    window: Window,
+    today: i64,
+    catalog: &Catalog,
+) -> Summary {
     let included = |key: &str| account.is_none_or(|a| account_of(key) == a);
     let total = |day: &str| -> f64 {
         cache.models.get(day).map_or(0.0, |m| {
@@ -245,6 +260,20 @@ pub fn summarize(cache: &Cache, account: Option<&str>, window: Window, today: i6
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.0.cmp(b.0))
     });
+    s.unpriced = window_days
+        .iter()
+        .filter_map(|day| cache.unpriced.get(day))
+        .flatten()
+        .filter(|k| included(k))
+        .map(|k| name_of(k).to_string())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    s.borrowed = tokens_by_model
+        .keys()
+        .filter(|m| catalog.price_borrowed(Tool::Claude, m))
+        .cloned()
+        .collect();
     s.model_detail = detail
         .into_iter()
         .map(|(model, cost)| {

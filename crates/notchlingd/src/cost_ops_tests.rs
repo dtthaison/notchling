@@ -154,3 +154,67 @@ fn the_cost_cache_is_the_daemons_own_document_and_never_the_swift_apps() {
         "a test socket keeps none"
     );
 }
+
+fn line_for(id: &str, model: &str, output: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"2027-01-15T08:00:00Z","message":{{"id":"{id}","model":"{model}","usage":{{"output_tokens":{output}}}}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn the_reply_lists_unpriced_and_borrowed_models() {
+    let (tmp, _flag, _room, ops) = rig();
+    tmp.write(
+        "claude/projects/-w-app/a.jsonl",
+        &(line_for("m1", "claude-new-9", 1000)
+            + &line_for("m2", "claude-fable-5-3", 1_000_000)
+            + &opus_line("m3", 5.0)),
+    );
+    ops.call(COST_SUMMARY, &json!({"range": "all"})).unwrap();
+    wait_scanned(&ops);
+    let reply = ops.call(COST_SUMMARY, &json!({"range": "all"})).unwrap();
+    assert_eq!(reply["summary"]["unpriced"], json!(["claude-new-9"]));
+    assert_eq!(reply["summary"]["borrowed"], json!(["claude-fable-5-3"]));
+    // 5 for Opus 5.5 and 40 for a million Fable 5.2 output tokens.
+    let month = reply["summary"]["month"].as_f64().unwrap();
+    assert!((month - 45.0).abs() < 1e-6, "{reply}");
+}
+
+#[test]
+fn the_daemons_catalog_file_beside_the_socket_reprices_what_is_counted() {
+    use notchling_engine::cost::tracker::CLAUDE_CODE;
+    use notchling_engine::cost::{Root, Window};
+    let tmp = TempDir::new("cost-catalog-file");
+    let layout = Layout::resolve(None, Some(tmp.root().as_os_str()), || None).unwrap();
+    let from_layout = CostSetup::from_layout(&layout);
+    assert_eq!(
+        from_layout.catalog_file,
+        layout.state_dir().join("catalog.json")
+    );
+    tmp.write(
+        "claude/projects/-w-app/a.jsonl",
+        &line_for("m1", "claude-opus-5-5", 1_000_000),
+    );
+    // Same catalog file, transcripts in the temp folder, no cache.
+    let setup = CostSetup {
+        roots: vec![Root {
+            dir: tmp.path("claude/projects"),
+            channel: CLAUDE_CODE,
+        }],
+        cache_data: None,
+        ..from_layout
+    };
+    let month = || {
+        let service = setup.service();
+        service.refresh(NOW);
+        service.snapshot().ranged.overall[&Window::All].month
+    };
+    assert!((month() - 20.0).abs() < 1e-6);
+    std::fs::create_dir_all(setup.catalog_file.parent().unwrap()).unwrap();
+    std::fs::write(
+        &setup.catalog_file,
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 4.0, "output": 30.0, "cache_read": 0.2}]}}"#,
+    )
+    .unwrap();
+    assert!((month() - 30.0).abs() < 1e-6, "the override is read");
+}

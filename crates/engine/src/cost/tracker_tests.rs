@@ -6,11 +6,13 @@ use super::cache::{old_cache_file, Cache, CACHE_DOC, CURRENT};
 use super::service::CostService;
 use super::summary::{day_key, Window};
 use super::tracker::{Ranged, Root, Tracker, ANTIGRAVITY, CLAUDE_CODE, CODEX, DESKTOP};
+use crate::catalog::Catalog;
 use crate::pages::clock::{civil_at, text};
 use crate::sessions::testutil::TempDir;
 use crate::store;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// 2027-01-15 08:00:00 UTC.
 const NOW: f64 = 1_800_000_000.0;
@@ -45,6 +47,10 @@ fn append(tmp: &TempDir, rel: &str, text: &str) -> PathBuf {
     path
 }
 
+fn catalog() -> Arc<Catalog> {
+    Arc::new(Catalog::built_in())
+}
+
 fn claude_tracker(tmp: &TempDir) -> Tracker {
     Tracker::new(
         vec![Root {
@@ -53,6 +59,7 @@ fn claude_tracker(tmp: &TempDir) -> Tracker {
         }],
         Some(tmp.path("data")),
         Some(tmp.path("account-log.json")),
+        catalog(),
     )
     .with_zone(utc)
 }
@@ -226,7 +233,10 @@ fn a_cache_of_another_version_or_a_broken_one_is_read_from_scratch() {
         t.refresh(NOW);
         near(month(&t.ranged(NOW), Window::All), 20.0);
     }
-    assert_eq!(Cache::load(&tmp.path("missing")).version, CURRENT);
+    assert_eq!(
+        Cache::load(&tmp.path("missing"), &catalog().prices_hash()).version,
+        CURRENT
+    );
 }
 
 #[test]
@@ -241,7 +251,7 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
     let saved = store::doc(&data, CACHE_DOC).unwrap().unwrap();
     store::update_doc(&data, CACHE_DOC, |_| Ok(None)).unwrap();
     let old = tmp.write("data/daemon/cost-cache.json", &saved);
-    let loaded = Cache::load(&data);
+    let loaded = Cache::load(&data, &catalog().prices_hash());
     assert!(!old.exists(), "the old file moved in");
     assert!(!loaded.files.is_empty(), "and its offsets came with it");
     assert_eq!(store::doc(&data, CACHE_DOC).unwrap().unwrap(), saved);
@@ -254,7 +264,9 @@ fn the_old_cache_file_moves_in_once_and_a_stale_one_is_read_from_scratch() {
         "data/daemon/cost-cache.json",
         &format!(r#"{{"version":{},"files":{{}}}}"#, CURRENT + 1),
     );
-    assert!(Cache::load(&data).files.is_empty());
+    assert!(Cache::load(&data, &catalog().prices_hash())
+        .files
+        .is_empty());
     assert!(stale.exists());
     assert_eq!(store::doc(&data, CACHE_DOC).unwrap(), None);
     let mut t = claude_tracker(&tmp);
@@ -346,6 +358,7 @@ fn a_desktop_transcript_carries_its_account_in_the_path() {
         }],
         None,
         None,
+        catalog(),
     )
     .with_zone(utc);
     t.refresh(NOW);
@@ -386,11 +399,12 @@ fn per_model_token_totals_and_projects() {
         "the message's cwd names the project"
     );
     let detail = &s.model_detail;
-    assert_eq!(
-        detail.len(),
-        1,
-        "synthetic and unpriced models are skipped: {detail:?}"
-    );
+    // The synthetic message is skipped; the unpriced model keeps its tokens at $0, after the priced
+    // one, and is listed.
+    assert_eq!(detail.len(), 2, "{detail:?}");
+    assert_eq!(detail[1].name, "Unknown 1");
+    assert_eq!((detail[1].cost, detail[1].output), (0.0, 99.0));
+    assert_eq!(s.unpriced, ["claude-unknown-1"]);
     assert_eq!(detail[0].name, "Opus 5.5");
     assert_eq!(
         (
@@ -443,6 +457,7 @@ fn other_tracker(tmp: &TempDir) -> Tracker {
         ],
         None,
         None,
+        catalog(),
     )
     .with_zone(utc)
 }
@@ -538,6 +553,7 @@ fn the_codex_model_survives_a_restart_through_the_cache() {
             }],
             Some(tmp.path("data")),
             None,
+            catalog(),
         )
         .with_zone(utc)
     };
@@ -616,4 +632,103 @@ fn the_service_answers_at_once_and_scans_on_a_thread() {
         25.0,
     );
     assert!(!service.snapshot().scanning);
+}
+
+/// An assistant line for any model with the given usage object.
+fn model_line(id: &str, model: &str, usage: &str, at: f64) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{}","message":{{"id":"{id}","model":"{model}","usage":{usage}}}}}"#,
+        iso(at)
+    ) + "\n"
+}
+
+#[test]
+fn an_unpriced_claude_model_counts_tokens_and_is_listed() {
+    let tmp = TempDir::new("cost-unpriced");
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &model_line("m1", "claude-new-9", r#"{"output_tokens":1000}"#, NOW),
+    );
+    let mut t = claude_tracker(&tmp);
+    t.refresh(NOW);
+    let r = t.ranged(NOW);
+    let s = &r.overall[&Window::All];
+    near(s.month, 0.0);
+    assert_eq!(s.unpriced, ["claude-new-9"]);
+    assert!(s.borrowed.is_empty());
+    assert_eq!(s.model_detail.len(), 1, "its tokens are counted");
+    near(s.model_detail[0].output, 1000.0);
+    assert_eq!(s.channel_tokens[CLAUDE_CODE], 1000.0);
+    // A priced model alone lists nothing.
+    let tmp = TempDir::new("cost-priced");
+    append(&tmp, "projects/-p/a.jsonl", &usage_line("m1", 1.0, NOW));
+    let mut t = claude_tracker(&tmp);
+    t.refresh(NOW);
+    assert!(t.ranged(NOW).overall[&Window::All].unpriced.is_empty());
+}
+
+#[test]
+fn a_newer_family_model_is_priced_as_borrowed() {
+    let tmp = TempDir::new("cost-borrowed");
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &model_line(
+            "m1",
+            "claude-fable-5-3",
+            r#"{"output_tokens":1000000}"#,
+            NOW,
+        ),
+    );
+    let mut t = claude_tracker(&tmp);
+    t.refresh(NOW);
+    let r = t.ranged(NOW);
+    let s = &r.overall[&Window::All];
+    // Fable 5.2: $40 per million output tokens.
+    near(s.month, 40.0);
+    assert_eq!(s.borrowed, ["claude-fable-5-3"]);
+    assert!(s.unpriced.is_empty());
+}
+
+#[test]
+fn a_changed_price_reprices_days_already_counted() {
+    let tmp = TempDir::new("cost-reprice");
+    append(
+        &tmp,
+        "projects/-p/a.jsonl",
+        &model_line(
+            "m1",
+            "claude-opus-5-5",
+            r#"{"input_tokens":1000000,"output_tokens":1000000}"#,
+            NOW,
+        ),
+    );
+    let mut first = claude_tracker(&tmp);
+    first.refresh(NOW);
+    first.save_now(NOW);
+    near(month(&first.ranged(NOW), Window::All), 4.0 + 20.0);
+
+    // Opus 5.5's input price fixed to $8 in an override file.
+    let file = tmp.write(
+        "catalog.json",
+        r#"{"claude": {"prices": [{"match": "opus-5-5", "input": 8.0, "output": 20.0, "cache_read": 0.2}]}}"#,
+    );
+    let mut second = Tracker::new(
+        vec![Root {
+            dir: tmp.path("projects"),
+            channel: CLAUDE_CODE,
+        }],
+        Some(tmp.path("data")),
+        Some(tmp.path("account-log.json")),
+        Arc::new(Catalog::load(&file)),
+    )
+    .with_zone(utc);
+    second.refresh(NOW + 1.0);
+    near(month(&second.ranged(NOW), Window::All), 8.0 + 20.0);
+
+    // Back on the built-in prices it is repriced again, and nothing is counted twice.
+    let mut third = claude_tracker(&tmp);
+    third.refresh(NOW + 2.0);
+    near(month(&third.ranged(NOW), Window::All), 4.0 + 20.0);
 }

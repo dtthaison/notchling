@@ -1,6 +1,7 @@
 //! Token use from the other tools' session files (`CostSources.swift`). Each parser is pure (one
 //! decoded line in, an event out) so it can be tested without a tracker.
 
+use crate::catalog::{Catalog, Tool};
 use crate::transcript::util::parse_date;
 use serde_json::Value;
 
@@ -168,59 +169,22 @@ pub mod antigravity {
     }
 }
 
-/// Dollars per million tokens for models outside Claude, at OpenAI's API list prices: input,
-/// cached input, output. Source: openai.com/api/pricing, as of 2026-11-06. A model not listed (the
-/// gpt-6.x family, Gemini) has no entry because no list price is published for it that Notchling
-/// knows: its tokens are still counted and its cost is 0. Add a line here when a price is known.
-/// Ids match whole, minus a `-YYYY-MM-DD` suffix, so "gpt-5.6-sol" can't pick up "gpt-5"'s price.
+/// Dollars for a request by a model outside Claude, at the catalog's price (`Catalog::price`
+/// matches an id whole, minus a `-YYYY-MM-DD` suffix, so "gpt-5.6-sol" can't pick up "gpt-5"'s).
+/// A model with no price (the gpt-6.x family, Gemini) is `None`: its tokens are still counted and
+/// it is listed as unpriced.
 pub struct OtherPrices;
 
 impl OtherPrices {
-    pub const TABLE: &'static [(&'static str, f64, f64, f64)] = &[
-        ("gpt-5", 1.25, 0.125, 10.0),
-        ("gpt-5-codex", 1.25, 0.125, 10.0),
-        ("gpt-5.1", 1.25, 0.125, 10.0),
-        ("gpt-5.1-codex", 1.25, 0.125, 10.0),
-        ("gpt-5.1-codex-max", 1.25, 0.125, 10.0),
-        ("gpt-5-mini", 0.25, 0.025, 2.0),
-        ("gpt-5.1-codex-mini", 0.25, 0.025, 2.0),
-        ("gpt-5-nano", 0.05, 0.005, 0.40),
-        ("gpt-4.1", 2.0, 0.50, 8.0),
-        ("o3", 2.0, 0.50, 8.0),
-        ("o4-mini", 1.10, 0.275, 4.40),
-    ];
-
     /// Dollars for one request. `counts` is input (not cached), output, cache read.
-    pub fn cost(model: &str, counts: &[f64]) -> f64 {
-        let lower = model.to_lowercase();
-        let id = strip_date_suffix(&lower);
-        let Some(&(_, input, cached, output)) = Self::TABLE.iter().find(|p| p.0 == id) else {
-            return 0.0;
-        };
+    pub fn cost(catalog: &Catalog, tool: Tool, model: &str, counts: &[f64]) -> Option<f64> {
+        let price = catalog.price(tool, model)?;
         if counts.len() < 3 {
-            return 0.0;
+            return None;
         }
-        (counts[0] * input + counts[2] * cached + counts[1] * output) / 1_000_000.0
-    }
-}
-
-/// "gpt-5.1-2026-01-01" is "gpt-5.1".
-fn strip_date_suffix(id: &str) -> &str {
-    let bytes = id.as_bytes();
-    if bytes.len() < 11 {
-        return id;
-    }
-    let tail = &bytes[bytes.len() - 11..];
-    let digits = |r: std::ops::Range<usize>| tail[r].iter().all(u8::is_ascii_digit);
-    if tail[0] == b'-'
-        && digits(1..5)
-        && tail[5] == b'-'
-        && digits(6..8)
-        && tail[8] == b'-'
-        && digits(9..11)
-    {
-        &id[..id.len() - 11]
-    } else {
-        id
+        Some(
+            (counts[0] * price.input + counts[2] * price.cache_read + counts[1] * price.output)
+                / 1_000_000.0,
+        )
     }
 }
