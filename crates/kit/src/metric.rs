@@ -39,6 +39,24 @@ pub const WINDOW_MIN: (f32, f32) = (720.0, 460.0);
 /// Horizontal padding inside a button.
 pub const BUTTON_PADDING: f32 = 12.0;
 
+/// A popup menu (the model picker's, which every menu follows; `ui::menu`): panel padding, a
+/// row's padding, the gap between a row's parts, the width it hugs content within, its tallest
+/// height before it scrolls, the check/chevron slot at a row's end, and a row's leading icon.
+pub const MENU_PADDING: f32 = 4.0;
+pub const MENU_ROW_X: f32 = 8.0;
+pub const MENU_ROW_Y: f32 = 3.0;
+pub const MENU_ROW_GAP: f32 = 8.0;
+pub const MENU_MIN_WIDTH: f32 = 112.0;
+pub const MENU_MAX_WIDTH: f32 = 260.0;
+pub const MENU_MAX_HEIGHT: f32 = 420.0;
+pub const MENU_MARK: f32 = 12.0;
+pub const MENU_ICON: f32 = 11.0;
+/// The gap between a menu and what opens it, and the space above and below its divider.
+pub const MENU_GAP: f32 = 6.0;
+pub const MENU_RULE_Y: f32 = 2.0;
+/// The panel's corner, the card's.
+pub const MENU_RADIUS: f32 = RADIUS_CARD;
+
 /// The 4 pt grid: 4, 8, 12, 16, 20, 24.
 pub const SPACE: [f32; 6] = [4.0, 8.0, 12.0, 16.0, 20.0, 24.0];
 
@@ -68,6 +86,8 @@ mod tests {
             (RADIUS_SM, RADIUS_MD, RADIUS_CARD, RADIUS_COMPOSER),
             (6.0, 10.0, 14.0, 18.0)
         );
+        // The popup menu's padding: the model picker's, which every menu follows.
+        assert_eq!((MENU_PADDING, MENU_ROW_X, MENU_ROW_Y), (4.0, 8.0, 3.0));
         assert!(WINDOW_MIN.0 <= WINDOW_DEFAULT.0 && WINDOW_MIN.1 <= WINDOW_DEFAULT.1);
     }
 }

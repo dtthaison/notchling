@@ -8,10 +8,11 @@ use std::sync::Arc;
 use gpui::{div, prelude::*, px, AnyView, App, Context, Div, Render, SharedString, Window};
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::transcript::model::DiffKind;
-use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
+use notchling_kit::metric::{MENU_PADDING, MENU_ROW_X, PILL_HEIGHT, RADIUS_MD};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, label, option_row, window_appearance, KitStyled,
+    button_with, icon, label, menu_note, menu_panel_wide, menu_rule, menu_section, option_row,
+    window_appearance, KitStyled, MenuItem,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
@@ -141,17 +142,13 @@ pub enum PickerAction {
     Reset,
 }
 
+/// The panel of a pop-up: the kit's wide menu (`menu_panel_wide`), since its notes and details wrap.
 pub(crate) fn pop_up(a: Appearance) -> Div {
-    card(a)
-        .w(px(320.0))
-        .p(px(8.0))
-        .flex()
-        .flex_col()
-        .gap(px(4.0))
+    menu_panel_wide(a)
 }
 
-/// A clickable row of a pop-up: the title in the small Meta type, a faint detail under it, and a
-/// check at the right end when selected. Tight padding, as a compact menu.
+/// A clickable row of a pop-up: the title, a faint detail under it, and a check at the right end
+/// when selected (the kit's `MenuItem`).
 pub(crate) fn pick_row(
     id: impl Into<SharedString>,
     title: &str,
@@ -159,31 +156,10 @@ pub(crate) fn pick_row(
     selected: bool,
     a: Appearance,
 ) -> gpui::Stateful<Div> {
-    div()
-        .id(id.into())
-        .w_full()
-        .px(px(8.0))
-        .py(px(3.0))
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Raised.color(a))))
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .child(label(title, TypeRole::Meta, Ink::Text, a).elide())
-                .when(!detail.is_empty(), |d| {
-                    d.child(label(detail, TypeRole::Meta, Ink::TextFaint, a).line_clamp(2))
-                }),
-        )
-        .child(div().w(px(12.0)).flex_shrink_0().children(
-            selected.then(|| icon(Icon::Check, TypeRole::Meta.spec().size, Ink::AccentText, a)),
-        ))
+    MenuItem::new(id, title.to_owned())
+        .detail(detail)
+        .checked(selected)
+        .build(a)
 }
 
 /// A small pill for one choice in a row of them.
@@ -198,8 +174,18 @@ fn pill(
     } else {
         ButtonKind::Ghost
     };
-    // 8 pt a side (the 4 pt grid) instead of the button's 12, so a row of four efforts fits
-    button(id.into(), title, kind, PartState::Rest, a).px(px(8.0))
+    // The small Meta type at the pill's height and 6 pt a side, as the pickers' buttons, so a row
+    // of four efforts fits
+    let ink = if selected { Ink::Text } else { Ink::TextMuted };
+    button_with(
+        id.into(),
+        label(title, TypeRole::Meta, ink, a),
+        kind,
+        PartState::Rest,
+        a,
+    )
+    .h(px(PILL_HEIGHT))
+    .px(px(6.0))
 }
 
 /// The Codex model picker (`CodexModelPicker`): Codex's models, each with its efforts, and
@@ -210,10 +196,10 @@ pub fn codex_picker_card<V: 'static>(
     cx: &mut Context<V>,
     act: impl Fn(&mut V, PickerAction, &mut Context<V>) + Clone + 'static,
 ) -> Div {
-    let mut pop = pop_up(a).child(label("Model", TypeRole::Section, Ink::TextFaint, a).px(px(8.0)));
+    let mut pop = pop_up(a).child(menu_section("Model", a));
     let rows = picker.rows();
     if rows.is_empty() {
-        pop = pop.child(label(NO_MODELS, TypeRole::Meta, Ink::TextMuted, a).px(px(8.0)));
+        pop = pop.child(menu_note(NO_MODELS, a));
     }
     for (i, row) in rows.iter().enumerate() {
         let slug = row.slug.clone();
@@ -233,8 +219,8 @@ pub fn codex_picker_card<V: 'static>(
         if !row.efforts.is_empty() {
             pop = pop.child(
                 div()
-                    .pl(px(30.0))
-                    .pb(px(4.0))
+                    .px(px(MENU_ROW_X))
+                    .pb(px(MENU_PADDING))
                     .flex()
                     .flex_wrap()
                     .gap(px(4.0))
@@ -255,13 +241,13 @@ pub fn codex_picker_card<V: 'static>(
         }
     }
     let on_reset = act;
-    pop.child(div().h(px(1.0)).w_full().bg(hsla(Ink::Hairline.color(a))))
+    pop.child(menu_rule(a))
         .child(
             pick_row("model-default", DEFAULT_TITLE, "", picker.is_default(), a).on_click(
                 cx.listener(move |this, _, _, cx| on_reset(this, PickerAction::Reset, cx)),
             ),
         )
-        .child(label(CODEX_NOTE, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)))
+        .child(menu_note(CODEX_NOTE, a))
 }
 
 /// The Antigravity options picker (`ACPOptionsPicker`): each option the session offers with its
@@ -275,33 +261,26 @@ pub fn agy_options_card<V: 'static>(
 ) -> Div {
     let mut pop = pop_up(a);
     for (i, option) in options.iter().enumerate() {
-        pop = pop
-            .child(label(&option.name, TypeRole::Section, Ink::TextFaint, a).px(px(8.0)))
-            .child(
-                div()
-                    .px(px(8.0))
-                    .pb(px(4.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(4.0))
-                    .children(option.values.iter().enumerate().map(|(k, v)| {
-                        let (id, value) = (option.id.clone(), v.value.clone());
-                        let set = set.clone();
-                        let selected = v.value == option.current;
-                        let pill = pill(format!("agy-option-{i}-{k}"), &v.name, selected, a);
-                        gate::tip(pill, gate, a).when(gate.enabled, |p| {
-                            p.on_click(
-                                cx.listener(move |this, _, _, cx| set(this, &id, &value, cx)),
-                            )
-                        })
-                    })),
-            );
+        pop = pop.child(menu_section(&option.name, a)).child(
+            div()
+                .px(px(MENU_ROW_X))
+                .pb(px(MENU_PADDING))
+                .flex()
+                .flex_wrap()
+                .gap(px(4.0))
+                .children(option.values.iter().enumerate().map(|(k, v)| {
+                    let (id, value) = (option.id.clone(), v.value.clone());
+                    let set = set.clone();
+                    let selected = v.value == option.current;
+                    let pill = pill(format!("agy-option-{i}-{k}"), &v.name, selected, a);
+                    gate::tip(pill, gate, a).when(gate.enabled, |p| {
+                        p.on_click(cx.listener(move |this, _, _, cx| set(this, &id, &value, cx)))
+                    })
+                })),
+        );
     }
-    pop.children(
-        gate.tooltip
-            .map(|why| label(why, TypeRole::Meta, Ink::TextMuted, a).px(px(8.0))),
-    )
-    .child(label(AGY_NOTE, TypeRole::Meta, Ink::TextFaint, a).px(px(8.0)))
+    pop.children(gate.tooltip.map(|why| menu_note(why, a)))
+        .child(menu_note(AGY_NOTE, a))
 }
 
 /// `--render codex-model-picker`: the picker alone, over the fixture's models cache. A click

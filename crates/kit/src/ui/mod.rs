@@ -10,6 +10,7 @@
 
 mod gallery;
 mod icons;
+mod menu;
 mod parts;
 mod resize;
 mod scrollbar;
@@ -22,6 +23,9 @@ mod widgets;
 
 pub use gallery::KitGallery;
 pub use icons::{icon, icon_in, spinner, KitAssets};
+pub use menu::{
+    menu_note, menu_panel, menu_panel_wide, menu_row, menu_rule, menu_section, MenuItem,
+};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart};
 pub use resize::{resize_edges, TopBorder};
 pub use scrollbar::{scrollable, scrollable_list, PinScrollbars, Scrollable, ThumbAt, ThumbRecord};
