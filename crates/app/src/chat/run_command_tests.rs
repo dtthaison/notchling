@@ -1,4 +1,4 @@
-use super::run_command::{available, command, message};
+use super::run_command::{available, command, how, message, RunHow};
 use crate::chat::data::Tool;
 
 fn run(language: &str, text: &str) -> Option<String> {
@@ -34,7 +34,10 @@ fn shell_languages_run_whatever_their_first_word() {
         Some("echo hi"),
         "an info string keeps its first word"
     );
-    assert_eq!(run("sh", "frobnicate --now").as_deref(), Some("frobnicate --now"));
+    assert_eq!(
+        run("sh", "frobnicate --now").as_deref(),
+        Some("frobnicate --now")
+    );
 }
 
 #[test]
@@ -219,4 +222,94 @@ fn run_shows_only_where_the_reply_box_takes_a_bang() {
     // `!` is Claude Code's shell mode: Codex and Antigravity have none.
     assert!(!available(Tool::Codex, true, false));
     assert!(!available(Tool::Antigravity, true, false));
+}
+
+const SSH_SECRET: &str = r#"ssh -t deploy@100.69.89.73 'read -rsp "Google client secret: " s; echo; umask 077; printf %s "$s" > /opt/…/google-secret; bash /opt/…/setup.sh | tail -2'"#;
+
+#[test]
+fn the_ssh_secret_block_is_a_command_that_needs_a_terminal() {
+    let found = command("", SSH_SECRET).expect("a block with no language that starts with ssh");
+    assert_eq!(found, SSH_SECRET);
+    assert_eq!(how(&found), RunHow::Terminal);
+}
+
+#[test]
+fn a_remote_command_without_a_tty_is_sent() {
+    for text in [
+        "ssh host uptime",
+        "ssh deploy@host uptime",
+        "ssh -i ~/.ssh/key host ls",
+        "ssh -p 2222 host uptime",
+        "ssh -o BatchMode=yes host 'df -h'",
+    ] {
+        let found = command("", text).unwrap_or_else(|| panic!("{text}"));
+        assert_eq!(how(&found), RunHow::Send, "{text}");
+    }
+}
+
+#[test]
+fn a_tty_or_a_login_shell_needs_a_terminal() {
+    for text in [
+        "ssh -t host sudo reboot",
+        "ssh -tt host",
+        "ssh deploy@host",
+        "ssh -i key -p 22 host",
+        "sudo make install",
+        "docker run -it ubuntu bash",
+        "docker exec -it web sh",
+        "vim notes.md",
+        "cargo test 2>&1 | less",
+        "read -s TOKEN && echo ok",
+        "passwd",
+        "gh auth login",
+        "git rebase -i HEAD~3",
+        "FOO=1 sudo ls",
+    ] {
+        assert_eq!(how(text), RunHow::Terminal, "{text}");
+    }
+    // A program started with no arguments opens a session of its own.
+    for text in ["claude", "codex", "python3", "node"] {
+        assert_eq!(how(text), RunHow::Terminal, "{text}");
+        assert_eq!(command("bash", text).as_deref(), Some(text));
+    }
+}
+
+#[test]
+fn plain_commands_are_sent() {
+    for text in [
+        "git status",
+        "cargo test --workspace",
+        "docker ps -a",
+        "docker run ubuntu echo hi",
+        "claude --version",
+        "codex login",
+        "curl -s https://example.com",
+        "rsync -av a/ host:b/",
+        "scp a host:b",
+        "bash ./setup.sh",
+        "git add .",
+        "echo reading -s",
+    ] {
+        assert_eq!(how(text), RunHow::Send, "{text}");
+    }
+}
+
+#[test]
+fn more_untagged_command_words() {
+    for text in [
+        "scp build.tar host:/tmp",
+        "rsync -av a/ host:b/",
+        "curl -s https://example.com/x.json",
+        "sudo launchctl list",
+        "bash ./setup.sh",
+        "bash /opt/app/setup.sh",
+        "sh tools/run.sh",
+        "zsh ~/bin/x.sh",
+    ] {
+        assert_eq!(command("", text).as_deref(), Some(text), "{text}");
+    }
+    // A shell's name starts prose as easily as a command.
+    for text in ["bash is the default shell", "sh", "bash", "zsh -l"] {
+        assert_eq!(command("", text), None, "{text}");
+    }
 }

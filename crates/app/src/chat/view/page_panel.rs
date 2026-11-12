@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::chat::run_command::RunHow;
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, App, Context, CursorStyle, DragMoveEvent,
     EmptyView, ImageFormat, ObjectFit, SharedString, WeakEntity, Window,
@@ -203,6 +204,14 @@ pub fn follow_link(url: &str, window: &mut Window, cx: &mut App) {
     match window.root::<ChatView>() {
         Some(Some(chat)) => chat.update(cx, |view, cx| view.open_link(url.to_owned(), window, cx)),
         _ => cx.open_url(url),
+    }
+}
+
+/// Run on a code block: in the Chat window, the session takes the command as a `!` message, or
+/// the terminal runs it when it asks for input.
+pub fn run_in_chat(command: &str, how: RunHow, window: &mut Window, cx: &mut App) {
+    if let Some(Some(chat)) = window.root::<ChatView>() {
+        chat.update(cx, |view, cx| view.run_command(command, how, cx));
     }
 }
 
@@ -453,6 +462,7 @@ fn file_body(
     markdown: &RefCell<MarkdownCache>,
     chat: WeakEntity<ChatView>,
     a: Appearance,
+    cx: &App,
 ) -> AnyElement {
     let key = format!("file-panel-{}", file.path.display());
     let note = |text: &str, ink: Ink| label(text, TypeRole::Meta, ink, a).into_any_element();
@@ -464,7 +474,7 @@ fn file_body(
             let message = markdown
                 .borrow_mut()
                 .message(&key, text, &folder.to_string_lossy());
-            super::markdown::render(&key, &super::markdown::Sel::File, &message, a)
+            super::markdown::render(&key, &super::markdown::Sel::File, &message, a, cx)
                 .into_any_element()
         }
         Body::Text { text, cut: c } => {
@@ -675,6 +685,7 @@ pub fn render(
             &view.parts.conversation.read(cx).s.markdown,
             cx.entity().downgrade(),
             a,
+            cx,
         ),
         None => web_page(view, shown, a),
     };

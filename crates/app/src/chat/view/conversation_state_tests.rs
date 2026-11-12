@@ -70,6 +70,7 @@ fn input() -> ConversationInput {
         subagents: Vec::new(),
         tasks_inset: false,
         selected: Some("s1".into()),
+        can_run: false,
         chat: WeakEntity::new_invalid(),
     }
 }
@@ -113,4 +114,11 @@ fn what_the_column_draws_from_the_session_changes_the_input() {
     let mut links = input();
     links.subagents = vec![(Some("call".into()), "agent".into())];
     assert!(a != links);
+}
+
+#[test]
+fn run_showing_or_not_is_a_change_the_column_draws() {
+    let mut shown = input();
+    shown.can_run = true;
+    assert!(shown != input());
 }

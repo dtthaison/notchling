@@ -298,6 +298,7 @@ fn row_element(
                         sel,
                         &s.markdown.borrow_mut().message(id, text, folder),
                         a,
+                        cx,
                     ))
                     .part("Claude's Reply", a, cx),
             )
@@ -364,6 +365,7 @@ fn row_with_opinions(
         row: &key,
         next: &next,
         state: &s.sel,
+        run: input.can_run,
     };
     let element = row_element(input, s, row, &sel, live, a, cx);
     // A subagent's transcript is only read: no second opinions on it.

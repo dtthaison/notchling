@@ -24,9 +24,10 @@ use serde_json::Value;
 use super::ChatView;
 use crate::acting::{Acting, Control, Request};
 use crate::chat::claude_picker::{self, Hint, Kind};
-use crate::chat::data::Tool;
+use crate::chat::data::{Session, Tool};
 use crate::chat::outgoing::Outgoing;
 use crate::chat::prompts::is_dialog;
+use crate::chat::run_command::RunHow;
 use crate::phone::bridge::now_ms;
 use crate::tools::agy_options::parse_config;
 use crate::tools::agy_permission::{held_prompt, HeldPrompt};
@@ -353,15 +354,69 @@ impl ChatView {
         let Some(session) = self.selected_session().cloned() else {
             return;
         };
-        let id = session.agent.id.clone();
         // The first message is still starting this session: another would start a second one.
-        if self.tools.starting.contains_key(&id) {
+        if self.tools.starting.contains_key(&session.agent.id) {
             return;
         }
         // The editor's text, which is this row's draft, read live rather than from the copy; the
         // attached files' paths follow it.
-        let files = self.attached(&id);
+        let files = self.attached(&session.agent.id);
         let text = crate::chat::drops::with_attachments(self.tools.editor.read(cx).text(), &files);
+        self.dispatch(session, text, true, cx);
+    }
+
+    /// Whether code blocks in the conversation offer Run: the selected session is one the reply
+    /// box would send a `!` message to (`run_command::available`).
+    pub(super) fn run_available(&self, cx: &App) -> bool {
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        let takes_replies = self.acting_in(cx) == Acting::On
+            && super::tool::of(session.tool)
+                .refusal(self, session)
+                .is_none();
+        crate::chat::run_command::available(
+            session.tool,
+            takes_replies,
+            self.open_subagent.is_some(),
+        )
+    }
+
+    /// Run on a code block: `command` goes to the session as a `!` message, the way the reply box
+    /// sends one, without touching the box or its draft (a command that asks for input runs in the
+    /// terminal instead). Like Return in the box, a click while a
+    /// send is still going out does nothing.
+    pub(super) fn run_command(&mut self, command: &str, how: RunHow, cx: &mut Context<Self>) {
+        if !self.run_available(cx) {
+            return;
+        }
+        // It asks for input: the terminal takes it, and what is typed there never reaches the
+        // transcript.
+        if how == RunHow::Terminal {
+            self.open_command_terminal(command, cx);
+            return;
+        }
+        if self.tools.sending {
+            return;
+        }
+        let Some(session) = self.selected_session().cloned() else {
+            return;
+        };
+        if self.tools.starting.contains_key(&session.agent.id) {
+            return;
+        }
+        self.dispatch(
+            session,
+            crate::chat::run_command::message(command),
+            false,
+            cx,
+        );
+    }
+
+    /// Sends `text` to `session` through its tool. `from_box`: it came out of the reply box, so
+    /// the draft and attachments are cleared on sending and put back if the send fails.
+    fn dispatch(&mut self, session: Session, text: String, from_box: bool, cx: &mut Context<Self>) {
+        let id = session.agent.id.clone();
         if text.is_empty() {
             return;
         }
@@ -371,8 +426,10 @@ impl ChatView {
         }
         let request = tool.send(self, &session, &text);
         let queues = tool.queues();
-        self.put_draft(&id, String::new(), cx);
-        self.set_attached(&id, &[], cx);
+        if from_box {
+            self.put_draft(&id, String::new(), cx);
+            self.set_attached(&id, &[], cx);
+        }
         // Shown at once as your bubble: typing it into the session takes seconds.
         self.tools
             .outgoing
@@ -422,14 +479,16 @@ impl ChatView {
                 }
                 Err(message) => {
                     view.tools.take_outgoing(&id, &sent_text);
-                    // Back into the box, in front of anything typed since.
-                    let typed = view.tools.drafts.remove(&id).unwrap_or_default();
-                    let back = if typed.is_empty() {
-                        sent_text.clone()
-                    } else {
-                        format!("{sent_text}\n\n{typed}")
-                    };
-                    view.put_draft(&id, back, cx);
+                    if from_box {
+                        // Back into the box, in front of anything typed since.
+                        let typed = view.tools.drafts.remove(&id).unwrap_or_default();
+                        let back = if typed.is_empty() {
+                            sent_text.clone()
+                        } else {
+                            format!("{sent_text}\n\n{typed}")
+                        };
+                        view.put_draft(&id, back, cx);
+                    }
                     // A question or permission is open: read it again, for the card.
                     let asking = is_dialog(&message);
                     view.tools.error = Some(message);

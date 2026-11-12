@@ -44,6 +44,8 @@ pub(super) struct ConversationState {
     pub expand_all: bool,
     /// Every message's row of actions drawn, as if hovered (`NOTCHLING_RENDER_ACTIONS=1`).
     pub actions_preview: bool,
+    /// Run offered as if the session took replies (`NOTCHLING_RENDER_RUN=1`).
+    pub run_preview: bool,
     /// The "Latest" pill drawn as if scrolled up (`NOTCHLING_RENDER_LATEST=1`).
     pub latest_preview: bool,
     /// The message whose Copy was clicked and when (ms), for its check.
@@ -76,6 +78,7 @@ impl ConversationState {
             expanded: HashSet::new(),
             expand_all: false,
             actions_preview: false,
+            run_preview: false,
             latest_preview: false,
             copied: None,
             hovered_message: None,
@@ -193,6 +196,8 @@ pub(super) struct ConversationInput {
     pub tasks_inset: bool,
     /// The row id: the second opinions' key.
     pub selected: Option<String>,
+    /// Code blocks that are a shell command offer Run (`run_command::available`).
+    pub can_run: bool,
     /// The chat, for what a click does to the session (not part of equality; the view fills it in).
     pub chat: WeakEntity<ChatView>,
 }
@@ -209,6 +214,7 @@ impl PartialEq for ConversationInput {
             && self.subagents == other.subagents
             && self.tasks_inset == other.tasks_inset
             && self.selected == other.selected
+            && self.can_run == other.can_run
     }
 }
 
@@ -251,10 +257,12 @@ impl ConversationView {
 
     /// The input from the chat now, with the handle this view acts through.
     fn input_from(&self, chat: &ChatView, cx: &App) -> ConversationInput {
-        ConversationInput {
+        let mut input = ConversationInput {
             chat: self.chat.clone(),
             ..chat.conversation_input(cx)
-        }
+        };
+        input.can_run |= self.s.run_preview;
+        input
     }
 
     /// Takes the input and draws only if it differs from the one drawn.
@@ -475,6 +483,7 @@ impl ChatView {
             subagents: crate::chat::subagent_view::links(&self.subagents),
             tasks_inset: super::tasks::shown(self),
             selected: self.selected.clone(),
+            can_run: self.run_available(cx),
             chat: WeakEntity::new_invalid(),
         }
     }

@@ -38,7 +38,19 @@ const COMMAND_WORDS: &[&str] = &[
     "gh",
     "docker",
     "kubectl",
+    "ssh",
+    "scp",
+    "rsync",
+    "curl",
+    "sudo",
+    "bash",
+    "sh",
+    "zsh",
 ];
+
+/// A shell run as a line's first word names a script: it needs a path after it, or the line is as
+/// likely prose ("sh is not bash") as a command.
+const SHELLS: &[&str] = &["bash", "sh", "zsh"];
 
 /// Command words that are also English ("make sure", "open the"): a line with these needs an
 /// argument and no long run of plain words after it.
@@ -221,6 +233,9 @@ fn looks_like_command(line: &str) -> bool {
     if !script && !COMMAND_WORDS.contains(&first) {
         return false;
     }
+    if SHELLS.contains(&first) && !rest.first().is_some_and(|a| is_path(a)) {
+        return false;
+    }
     // A sentence ends in a word and a full stop; a command may end in `.` or `..` alone.
     if let Some(last) = rest.last().copied().or(Some(first)) {
         let word = last.trim_end_matches(['.', '?', '!', ':']);
@@ -235,4 +250,130 @@ fn looks_like_command(line: &str) -> bool {
         }
     }
     true
+}
+
+/// An argument that is a path to a file (`/opt/x.sh`, `./x.sh`, `~/x.sh`, `tools/x.sh`).
+fn is_path(arg: &str) -> bool {
+    let arg = arg.trim_matches(['\'', '"']);
+    ["/", "./", "../", "~/", "tools/"]
+        .iter()
+        .any(|p| arg.starts_with(p))
+}
+
+/// Where Run puts a command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunHow {
+    /// Sent to the session as a `!` message, whose output shows in the conversation.
+    Send,
+    /// Run in Chat's terminal, because it asks for input (a password, a secret, a tty) that a `!`
+    /// message could not give it and that must not reach the transcript.
+    Terminal,
+}
+
+/// How `command` runs: in the terminal when it is interactive, else as a message.
+pub fn how(command: &str) -> RunHow {
+    if is_interactive(command) {
+        RunHow::Terminal
+    } else {
+        RunHow::Send
+    }
+}
+
+/// First words of commands that need a terminal whatever their arguments.
+const NEEDS_TTY: &[&str] = &[
+    "sudo", "su", "passwd", "vim", "vi", "nvim", "nano", "emacs", "less", "more", "man", "top",
+    "htop", "tmux", "screen", "sftp",
+];
+/// Programs that start a session of their own when given no arguments.
+const REPLS: &[&str] = &[
+    "claude", "codex", "python3", "python", "node", "bash", "sh", "zsh",
+];
+/// `ssh` options that take a value, so the value is not the host.
+const SSH_VALUED: &[&str] = &[
+    "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q",
+    "-R", "-S", "-W", "-w",
+];
+
+/// Whether the command asks for input from a terminal: a tty (`ssh -t`, `docker run -it`),
+/// a prompt (`read -s`, `sudo`, a login), an editor or pager, or a program that starts a session.
+fn is_interactive(command: &str) -> bool {
+    if reads_a_prompt(command) {
+        return true;
+    }
+    command
+        .split(['|', ';', '&'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(segment_is_interactive)
+}
+
+/// `read -p`, `read -s`, `read -rsp`: wherever it appears, even inside the quotes of an `ssh`.
+fn reads_a_prompt(command: &str) -> bool {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    words.windows(2).any(|w| {
+        w[0].trim_start_matches(['\'', '"']) == "read"
+            && w[1].starts_with('-')
+            && w[1].chars().any(|c| c == 'p' || c == 's')
+    })
+}
+
+fn segment_is_interactive(segment: &str) -> bool {
+    let words: Vec<&str> = segment
+        .split_whitespace()
+        // `VAR=value command` runs the command.
+        .skip_while(|w| !w.starts_with('-') && w.contains('=') && !w.starts_with('/'))
+        .collect();
+    let Some((&first, args)) = words.split_first() else {
+        return false;
+    };
+    let first = first.trim_start_matches(['\'', '"', '(']);
+    if NEEDS_TTY.contains(&first) {
+        return true;
+    }
+    if REPLS.contains(&first) && args.is_empty() {
+        return true;
+    }
+    match first {
+        "ssh" => ssh_is_interactive(args),
+        "docker" | "podman" | "kubectl" => {
+            args.iter().any(|a| matches!(*a, "run" | "exec"))
+                && args
+                    .iter()
+                    .any(|a| matches!(*a, "-i" | "-t" | "-it" | "-ti" | "--tty" | "--stdin"))
+        }
+        "git" => {
+            args.iter()
+                .any(|a| matches!(*a, "-i" | "--interactive" | "-p" | "--patch"))
+                && args
+                    .iter()
+                    .any(|a| matches!(*a, "rebase" | "add" | "checkout" | "stash"))
+        }
+        "gh" | "npm" | "docker-login" | "yarn" | "pnpm" | "vercel" | "op" => args
+            .iter()
+            .take(3)
+            .any(|a| matches!(*a, "login" | "signin")),
+        _ => false,
+    }
+}
+
+/// `ssh` asks for a terminal with `-t`, and gives one when it has no remote command.
+fn ssh_is_interactive(args: &[&str]) -> bool {
+    let mut positional = 0;
+    let mut skip = false;
+    for arg in args {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if let Some(flags) = arg.strip_prefix('-').filter(|f| !f.is_empty()) {
+            if flags.chars().all(|c| c == 't') || (!flags.starts_with('-') && flags.contains('t')) {
+                return true;
+            }
+            skip = SSH_VALUED.contains(arg);
+            continue;
+        }
+        positional += 1;
+    }
+    // Only the host: a login shell.
+    positional <= 1
 }
