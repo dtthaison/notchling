@@ -361,3 +361,20 @@ The scroll itself is a 16 ms timer that moves the list by `autoscroll_speed` poi
 scroll bar's offset (`set_offset_from_scrollbar`, `scroll_target`), not `ListState::scroll_by`:
 `scroll_by` from a list that follows its end first moves it a whole viewport's worth of
 unmeasured offset, while the bar's offset moves it from where it stands.
+
+### Task 6.4: the scroll bar's fade
+
+`bench_scroll_fade` (mode `scroll-fade`: 1.5 s of warm-up, 1 s of the `scroll` wheel, then 2 s of
+nothing while the bar holds for 0.7 s and fades over 0.3 s; the numbers are those 2 s). Release
+build, three runs, the screen awake (`forced: false`, the window's own frames):
+
+| Run | frames | conversation draws | rows built | cpu ms | ms/frame |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 27 | 9 | 9 | 39 | 1.43 |
+| 2 | 28 | 10 | 10 | 107 | 3.83 |
+| 3 | 28 | 9 | 9 | 97 | 3.47 |
+
+The fade draws the conversation 9 or 10 times (the hold's wake-up and the fade's steps at 30 a
+second), one row each, and `ms_per_frame` stays under 4 ms in every run, so the fade rate is left
+as it is: `FADE_STEP_SECONDS` stays 1/30 and `the_fade_steps_at_fifteen_frames_a_second` was not
+added. (Before the list a fade step drew all 500 rows; the plan's 4 ms line is for the list.)

@@ -37,6 +37,9 @@ pub enum Mode {
     /// A wheel over the conversation: 2000 pt up once, then 60 pt every step, up for 30 steps
     /// and down for 30.
     Scroll,
+    /// A second of the `Scroll` wheel before the numbers start, then nothing: what is measured is
+    /// the scroll bar holding and fading (`HOLD_SECONDS`, `FADE_SECONDS`).
+    ScrollFade,
     /// The mouse over the conversation, 7 pt down a step, wrapping.
     Hover,
     /// A press on a message, dragged 7 pt a step down and back, released at the end.
@@ -57,6 +60,7 @@ impl Mode {
         Some(match name {
             "idle" => Mode::Idle,
             "scroll" => Mode::Scroll,
+            "scroll-fade" => Mode::ScrollFade,
             "hover" => Mode::Hover,
             "select" => Mode::Select,
             "typing" => Mode::Typing,
@@ -71,6 +75,7 @@ impl Mode {
         match self {
             Mode::Idle => "idle",
             Mode::Scroll => "scroll",
+            Mode::ScrollFade => "scroll-fade",
             Mode::Hover => "hover",
             Mode::Select => "select",
             Mode::Typing => "typing",
@@ -83,7 +88,7 @@ impl Mode {
     /// Steps a second; `None` for a mode that does nothing.
     fn rate(self) -> Option<u32> {
         match self {
-            Mode::Idle => None,
+            Mode::Idle | Mode::ScrollFade => None,
             Mode::Scroll => Some(60),
             Mode::Hover | Mode::Select | Mode::Terminal => Some(30),
             Mode::Typing => Some(10),
@@ -150,7 +155,7 @@ fn step(mode: Mode, n: u64, target: &mut Target, cx: &mut AsyncApp) {
     let middle = bench_point(target.size);
     let (top, span) = lane(target.size);
     match mode {
-        Mode::Idle => {}
+        Mode::Idle | Mode::ScrollFade => {}
         Mode::Scroll => {
             let dy = if (n / WHEEL_RUN).is_multiple_of(2) {
                 WHEEL_STEP
@@ -186,6 +191,20 @@ async fn prepare(mode: Mode, target: &mut Target, cx: &mut AsyncApp) {
             if let Some(injector) = target.injector.as_mut() {
                 injector.scroll(middle.x, middle.y, WHEEL_START);
             }
+        }
+        Mode::ScrollFade => {
+            if let Some(injector) = target.injector.as_mut() {
+                injector.scroll(middle.x, middle.y, WHEEL_START);
+            }
+            cx.background_executor().timer(WARM_UP).await;
+            // A second of wheel, then straight into the measured time: the bar holds, then fades.
+            for n in 0..60 {
+                step(Mode::Scroll, n, target, cx);
+                cx.background_executor()
+                    .timer(Duration::from_secs_f64(1.0 / 60.0))
+                    .await;
+            }
+            return;
         }
         Mode::Select => {
             // The conversation loads in the background: a press before its first draw lands on
@@ -350,6 +369,7 @@ mod tests {
         let modes = [
             Mode::Idle,
             Mode::Scroll,
+            Mode::ScrollFade,
             Mode::Hover,
             Mode::Select,
             Mode::Typing,

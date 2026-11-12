@@ -368,6 +368,20 @@ fn bench_scroll_draws_only_rows_on_screen() {
     assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
 }
 
+/// The scroll bar after a second of scrolling holds for 0.7 s and fades over 0.3 s, then the window
+/// is still: the conversation is drawn a few times (the fade's steps), each building only the rows
+/// on screen, and not at all once the bar is gone. The numbers go in
+/// `docs/perf/chat-state-split-bench.md`.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_scroll_fade() {
+    let result = bench_for("scroll-fade", 2);
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+    // 0.3 s at 30 steps a second is 9 steps, and the hold's own wake-up: nowhere near a draw a
+    // frame for the two seconds (which would be 60 or more even at 30 a second).
+    assert!(count(&result, "conversation") <= 20, "{result}");
+}
+
 /// Hovering builds only the rows on screen when it draws the conversation at all.
 #[test]
 #[ignore = "opens a window; a Mac with a display"]
