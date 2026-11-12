@@ -47,6 +47,14 @@ impl TempRoot {
         TempRoot(dir)
     }
 
+    /// The plain root with the working session's transcript replaced by a copy of `real` (a
+    /// session of the maintainer's: read here, copied to the temp folder, never printed).
+    fn real(real: &Path) -> TempRoot {
+        let root = TempRoot::new(Shape::Plain);
+        std::fs::copy(real, root.path().join(WORKING_TRANSCRIPT)).expect("copy the transcript");
+        root
+    }
+
     fn path(&self) -> &Path {
         &self.0
     }
@@ -168,8 +176,12 @@ fn append(root: &Path, n: u32) {
 
 /// The `scroll` object of a run in `mode` over a root of `shape`.
 fn scroll(mode: &str, seconds: u64, shape: Shape, options: Options) -> (Value, Value) {
-    let root = TempRoot::new(shape);
-    let result = run(mode, seconds, &root, options);
+    scroll_in(mode, seconds, &TempRoot::new(shape), options)
+}
+
+/// The same over a root already made.
+fn scroll_in(mode: &str, seconds: u64, root: &TempRoot, options: Options) -> (Value, Value) {
+    let result = run(mode, seconds, root, options);
     assert_eq!(result["mode"], mode, "{result}");
     assert!(result["frames"].as_u64().unwrap_or(0) > 0, "{result}");
     let report = result["scroll"].clone();
@@ -208,7 +220,7 @@ fn rows_per_draw(result: &Value) -> f64 {
 fn scrolling_up_from_the_end_moves_from_the_first_step() {
     let (report, result) = scroll("scroll-start", 4, Shape::Plain, Options::default());
     assert!(
-        count(&report, "asked") >= 150,
+        count(&report, "steps") >= 150,
         "the wheel didn't turn: {result}"
     );
     assert_smooth(&report, &result);
@@ -224,7 +236,7 @@ fn scrolling_up_from_the_end_moves_from_the_first_step() {
 fn a_slow_scroll_through_unmeasured_rows_moves_by_the_wheel() {
     let (report, result) = scroll("scroll-slow", 6, Shape::Plain, Options::default());
     assert!(
-        count(&report, "asked") >= 200,
+        count(&report, "steps") >= 300,
         "the wheel didn't turn: {result}"
     );
     assert_smooth(&report, &result);
@@ -242,7 +254,7 @@ fn scrolling_up_while_lines_are_appended_stays_put() {
     };
     let (report, result) = scroll("scroll-slow", 6, Shape::Plain, options);
     assert!(
-        count(&report, "asked") >= 200,
+        count(&report, "steps") >= 300,
         "the wheel didn't turn: {result}"
     );
     assert_smooth(&report, &result);
@@ -258,11 +270,28 @@ fn scrolling_through_rows_taller_than_the_window_moves_by_the_wheel() {
     };
     let (report, result) = scroll("scroll-slow", 6, Shape::Tall, options);
     assert!(
-        count(&report, "asked") >= 200,
+        count(&report, "steps") >= 300,
         "the wheel didn't turn: {result}"
     );
     assert_smooth(&report, &result);
     assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+}
+
+/// Step groups of sixty calls, open: a group's row is a few thousand points of small parts, laid
+/// out whole in every draw it is on screen.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn scrolling_through_open_step_groups_moves_by_the_wheel() {
+    let options = Options {
+        env: vec![("NOTCHLING_RENDER_EXPAND", "1")],
+        ..Options::default()
+    };
+    let (report, result) = scroll("scroll-slow", 6, Shape::Busy, options);
+    assert!(
+        count(&report, "steps") >= 300,
+        "the wheel didn't turn: {result}"
+    );
+    assert_smooth(&report, &result);
 }
 
 /// A trackpad's momentum: bursts of steps that decay, up and back down.
@@ -271,7 +300,7 @@ fn scrolling_through_rows_taller_than_the_window_moves_by_the_wheel() {
 fn a_momentum_scroll_moves_by_the_wheel() {
     let (report, result) = scroll("scroll-momentum", 8, Shape::Plain, Options::default());
     assert!(
-        count(&report, "asked") >= 200,
+        count(&report, "steps") >= 300,
         "the wheel didn't turn: {result}"
     );
     assert_smooth(&report, &result);
@@ -283,8 +312,31 @@ fn a_momentum_scroll_moves_by_the_wheel() {
 fn a_fling_moves_by_the_wheel() {
     let (report, result) = scroll("scroll-fling", 4, Shape::Plain, Options::default());
     assert!(
-        count(&report, "asked") >= 30,
+        count(&report, "steps") >= 30,
         "the wheel didn't turn: {result}"
     );
+    assert_smooth(&report, &result);
+}
+
+/// A copy of a real session (`NOTCHLING_BENCH_REAL=<transcript>`): the rows a real conversation
+/// has, tall tool output and long answers included. Skipped when it isn't set.
+#[test]
+#[ignore = "opens a window; a Mac with a display; needs NOTCHLING_BENCH_REAL"]
+fn a_real_transcript_scrolls_by_the_wheel() {
+    let Some(path) = std::env::var_os("NOTCHLING_BENCH_REAL") else {
+        println!("skipped: NOTCHLING_BENCH_REAL names no transcript");
+        return;
+    };
+    let root = TempRoot::real(Path::new(&path));
+    for mode in ["scroll-slow", "scroll-momentum"] {
+        let (report, result) = scroll_in(mode, 6, &root, Options::default());
+        assert_smooth(&report, &result);
+    }
+    // And with the session working: a line every 500 ms while the reader scrolls up.
+    let options = Options {
+        append: true,
+        ..Options::default()
+    };
+    let (report, result) = scroll_in("scroll-slow", 6, &root, options);
     assert_smooth(&report, &result);
 }

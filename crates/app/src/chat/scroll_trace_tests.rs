@@ -172,3 +172,78 @@ fn the_json_names_what_a_test_asserts_on() {
         assert!(v.get(key).is_some(), "{key}");
     }
 }
+
+fn draw(cpu_ms: f64, rows: u64, changes: u64) -> Draw {
+    Draw {
+        cpu_ms,
+        wall_ms: cpu_ms * 2.0,
+        rows,
+        changes,
+        ..Draw::default()
+    }
+}
+
+#[test]
+fn draws_are_counted_against_the_frame_budget() {
+    let mut draws: Vec<Draw> = (0..96).map(|_| draw(3.0, 0, 0)).collect();
+    draws.extend([draw(9.0, 1, 0), draw(20.0, 4, 0), draw(40.0, 2, 1)]);
+    let r = draw_report(&draws);
+    assert_eq!(r.draws, 99);
+    assert_eq!((r.over_half, r.over_budget, r.over_two), (3, 2, 1));
+    assert_eq!(r.cpu_max_ms, 40.0);
+    assert_eq!(r.worst.len(), 6);
+    assert_eq!(r.worst[0].cpu_ms, 40.0);
+    assert_eq!(r.worst[1].cpu_ms, 20.0);
+}
+
+#[test]
+fn a_dear_draw_names_what_it_built() {
+    assert_eq!(draw(5.0, 3, 0).cause(), "none");
+    assert_eq!(draw(30.0, 4, 0).cause(), "4 rows built");
+    assert_eq!(draw(30.0, 4, 1).cause(), "list changed (4 rows built)");
+    assert_eq!(draw(30.0, 0, 0).cause(), "rows already laid out");
+}
+
+#[test]
+fn no_draws_report_nothing() {
+    let r = draw_report(&[]);
+    assert_eq!(r, DrawReport::default());
+    assert!(r.json().get("over_budget").is_some());
+}
+
+#[test]
+fn up_at_the_top_has_nowhere_to_go() {
+    let at_top = |f: Frame| Frame { at_top: true, ..f };
+    // Asked 30 up; the list is at its top and stays: not a stall.
+    let a = at_top(frame(0.0, 0.0, at(0.0)));
+    let b = at_top(frame(16.0, 30.0, at(0.0)));
+    assert_eq!(judge(&a, &b), None);
+    // Reaching the top with less to go than asked is fine too.
+    let c = frame(0.0, 0.0, at(0.0));
+    let d = at_top(frame(16.0, 30.0, at(10.0)));
+    assert_eq!(judge(&c, &d), None);
+    // Away from the top, no move is a stall.
+    let e = frame(32.0, 60.0, at(10.0));
+    let f = frame(48.0, 90.0, at(10.0));
+    assert_eq!(judge(&e, &f), Some(Event::Stall { asked: 30.0 }));
+}
+
+#[test]
+fn a_step_of_a_viewport_or_more_is_not_a_lost_frame() {
+    // Two flings: 900 points with a 700 point list (no row can be in both), and 300 that lost its rows.
+    let frames = [
+        frame(0.0, 0.0, at(0.0)),
+        frame(16.0, 900.0, [None, None, None]),
+        frame(32.0, 1200.0, [None, None, None]),
+    ];
+    let r = report(&frames, &[], 700.0);
+    assert_eq!((r.lost, r.max_jump), (1, 700.0));
+}
+
+#[test]
+fn a_big_step_may_be_off_by_a_share_of_itself() {
+    let (a, b) = (frame(0.0, 0.0, at(0.0)), frame(16.0, 620.0, at(612.0)));
+    assert_eq!(judge(&a, &b), None);
+    let c = frame(16.0, 620.0, at(560.0));
+    assert!(matches!(judge(&a, &c), Some(Event::Jump { .. })));
+}

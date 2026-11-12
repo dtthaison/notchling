@@ -365,7 +365,10 @@ impl Render for ConversationView {
                 .child(self.list_column(cx))
                 .when(super::scroll_probe::enabled(), |d| {
                     d.child(super::scroll_probe::frame_canvas(list, || {
-                        super::pane::ROWS.load(Ordering::Relaxed)
+                        (
+                            super::pane::ROWS.load(Ordering::Relaxed),
+                            super::pane::LIST_CHANGES.load(Ordering::Relaxed),
+                        )
                     }))
                 })
                 .into_any_element(),

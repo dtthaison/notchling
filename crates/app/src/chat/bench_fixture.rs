@@ -25,6 +25,9 @@ pub enum Shape {
     /// Some turns have rows much taller than a window: a 3,000-line tool output, and a long
     /// reply of many sections with tables and code, as a real session's long answers are.
     Tall,
+    /// Some turns run sixty tool calls in a row: one step group a few thousand points tall once
+    /// it is open, as a long working turn's is.
+    Busy,
 }
 
 /// The files of a data root, as relative paths and texts: the working job first, then three done
@@ -85,7 +88,7 @@ fn transcript(session: &str, turns: usize, end_ms: i64, shape: Shape) -> String 
 }
 
 /// One turn's four lines. `at(k)` is the time of its `k`-th line.
-fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> String) -> [Value; 4] {
+fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> String) -> Vec<Value> {
     let tool = format!("{session}-t{turn}");
     // A tall turn's output is 3,000 lines (every seventh turn); the others' are 20.
     let lines = if shape == Shape::Tall && turn % 7 == 3 {
@@ -101,7 +104,7 @@ fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> Stri
         })
         .collect::<Vec<_>>()
         .join("\n");
-    [
+    let mut lines = vec![
         json!({
             "type": "user",
             "timestamp": at(0),
@@ -146,6 +149,47 @@ fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> Stri
                 "usage": {"input_tokens": 1400, "output_tokens": 180},
             },
         }),
+    ];
+    if shape == Shape::Busy && turn % 6 == 2 {
+        // Sixty more calls between the first result and the reply: they join the first one's
+        // group (no text between them), the way a long working turn's do.
+        let extra: Vec<Value> = (0..60)
+            .flat_map(|k| busy_call(session, turn, k, at(2)))
+            .collect();
+        lines.splice(3..3, extra);
+    }
+    lines
+}
+
+/// Call `k` of a busy turn: a Read of one file and its result.
+fn busy_call(session: &str, turn: usize, k: usize, when: String) -> [Value; 2] {
+    let tool = format!("{session}-x{turn}-{k}");
+    [
+        json!({
+            "type": "assistant",
+            "timestamp": when,
+            "effort": "high",
+            "message": {
+                "id": format!("{tool}-m"),
+                "model": "claude-opus-5-5",
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool,
+                    "name": "Read",
+                    "input": {"file_path": format!("/Users/me/work/bench/crates/parser/src/part{k}.rs")},
+                }],
+                "usage": {"input_tokens": 1300, "output_tokens": 30},
+            },
+        }),
+        json!({
+            "type": "user",
+            "timestamp": when,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool,
+                "content": format!("     1\tpub fn part{k}() {{}}\n     2\t// turn {turn}"),
+            }]},
+        }),
     ]
 }
 
@@ -188,6 +232,8 @@ fn long_reply(turn: usize) -> String {
 #[cfg(test)]
 mod tests {
     use notchling_engine::transcript::conversation::Parser;
+
+    use notchling_engine::transcript::model::ItemKind;
 
     use super::*;
     use crate::chat::data::DataRoot;
@@ -258,6 +304,29 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(longest > 20_000, "{longest}");
+    }
+
+    #[test]
+    fn a_busy_fixture_has_a_group_of_sixty_calls() {
+        let (_, text) = files_shaped(40, T, Shape::Busy)
+            .into_iter()
+            .find(|(path, _)| path == WORKING_TRANSCRIPT)
+            .expect("the working transcript");
+        let mut parser = Parser::default();
+        for line in text.lines() {
+            parser.consume(line.as_bytes());
+        }
+        let largest = parser
+            .conversation()
+            .items
+            .iter()
+            .map(|item| match &item.kind {
+                ItemKind::Tools(calls) => calls.len(),
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(largest >= 60, "{largest}");
     }
 
     #[test]

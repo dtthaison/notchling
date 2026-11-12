@@ -31,6 +31,9 @@ const WARM_UP: Duration = Duration::from_millis(1500);
 /// How often a forced frame is tried.
 const FORCED_EVERY: Duration = Duration::from_millis(16);
 
+/// How long a scroll script waits after its last step for that step to be drawn.
+const SETTLE: Duration = Duration::from_millis(150);
+
 /// What the driver does while the bench runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -331,11 +334,31 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         }
         Some(rate) => {
             let every = Duration::from_secs_f64(1.0 / f64::from(rate));
+            // A scroll script runs every one of its steps, however late the main thread gets to
+            // them (a busy Mac), up to four times the time asked for.
+            let script = match mode {
+                Mode::Trace(scenario) => Some((
+                    scenario.steps(),
+                    until + Duration::from_secs_f64(seconds * 3.0),
+                )),
+                _ => None,
+            };
             let mut n = 0;
-            while Instant::now() < until {
+            loop {
+                let more = match script {
+                    Some((steps, cap)) => n < steps && Instant::now() < cap,
+                    None => Instant::now() < until,
+                };
+                if !more {
+                    break;
+                }
                 step(mode, n, &mut target, cx);
                 n += 1;
                 cx.background_executor().timer(every).await;
+            }
+            if script.is_some() {
+                // The last step's draw.
+                cx.background_executor().timer(SETTLE).await;
             }
             finish(mode, &target);
         }
@@ -363,9 +386,12 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         cpu / wall / 10.0
     );
     let scroll = matches!(mode, Mode::Trace(_)).then(|| {
-        let (frames, steps, viewport) = scroll_probe::finish();
-        super::bench_scroll::dump(&frames);
-        scroll_trace::report(&frames, &steps, viewport).json()
+        let recording = scroll_probe::finish();
+        super::bench_scroll::dump(&recording);
+        let mut report =
+            scroll_trace::report(&recording.frames, &recording.steps, recording.viewport).json();
+        report["draws"] = scroll_trace::draw_report(&recording.draws).json();
+        report
     });
     let mut json = serde_json::json!({
         "mode": mode.name(),

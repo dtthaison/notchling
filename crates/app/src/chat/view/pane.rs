@@ -33,6 +33,8 @@ pub static SIDEBAR_RENDERS: AtomicU64 = AtomicU64::new(0);
 pub static DETAILS_RENDERS: AtomicU64 = AtomicU64::new(0);
 /// Conversation rows built, and times the window's root view (`ChatView`) was drawn.
 pub static ROWS: AtomicU64 = AtomicU64::new(0);
+/// Times the list took a change (a splice or a reset) from a load.
+pub static LIST_CHANGES: AtomicU64 = AtomicU64::new(0);
 pub static ROOT_RENDERS: AtomicU64 = AtomicU64::new(0);
 
 /// What a model part draws, computed from the chat on each of its notifies.

@@ -6,7 +6,7 @@
 //! A step is whole points (the injected event carries an integer pixel delta) and positive moves
 //! the content down, towards what is above it, the way the wheel does when you scroll up.
 
-use crate::chat::scroll_trace::Frame;
+use crate::chat::view::scroll_probe::Recording;
 
 /// What a scroll mode feeds the wheel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +43,16 @@ impl Scenario {
         Scenario::ALL.into_iter().find(|s| s.name() == name)
     }
 
+    /// How many wheel steps the script has, a short rest at its end included.
+    pub fn steps(self) -> u64 {
+        match self {
+            Scenario::Start => 2 * START_UP + START_REST + 18,
+            Scenario::Slow => SLOW_STEPS,
+            Scenario::Fling => 2 * FLING_STEPS + FLING_REST + 10,
+            Scenario::Momentum => BURSTS * (BURST_STEPS + BURST_REST),
+        }
+    }
+
     /// One move before the numbers start, past the follow tolerance, for a scenario that is about
     /// something other than leaving the end.
     pub fn prime(self) -> f32 {
@@ -63,8 +73,9 @@ impl Scenario {
     }
 }
 
-/// A slow scroll's step.
+/// A slow scroll's step, and how many it makes (six seconds).
 const SLOW_STEP: f32 = 6.0;
+const SLOW_STEPS: u64 = 360;
 
 /// The ramp a gesture starts with: 1, 1, 2, 2, 3, 3 … up to 30 a step.
 fn ramp(n: u64) -> f32 {
@@ -130,31 +141,49 @@ fn momentum(n: u64) -> f32 {
 /// Where a run writes every frame's numbers, one JSON object per line (never a row's key or text).
 pub const DUMP_ENV: &str = "NOTCHLING_BENCH_SCROLL_DUMP";
 
-/// Writes the recorded frames to the file `DUMP_ENV` names, if it is set: what a person reads to
-/// see where a jump happened.
-pub fn dump(frames: &[Frame]) {
+/// Writes the recorded frames to the file `DUMP_ENV` names, if it is set, and the timed draws to
+/// the same name with `.draws` added: what a person reads to see where a jump or a slow draw
+/// happened.
+pub fn dump(recording: &Recording) {
     use std::io::Write;
     let Some(path) = std::env::var_os(DUMP_ENV) else {
         return;
     };
-    let Ok(mut file) = std::fs::File::create(path) else {
-        return;
-    };
-    for (i, f) in frames.iter().enumerate() {
-        let line = serde_json::json!({
-            "i": i,
-            "t": (f.at_ms * 10.0).round() / 10.0,
-            "wheel": f.injected,
-            "win": f.window_frame,
-            "item": f.item_ix,
-            "offset": f.offset_in_item.round(),
-            "scrolled": f.scrolled.round(),
-            "end": f.at_end,
-            "rows": f.rows.len(),
-            "first_y": f.rows.first().map(|(_, y)| y.round()),
-            "built": f.rows_built,
-        });
-        let _ = writeln!(file, "{line}");
+    if let Ok(mut file) = std::fs::File::create(&path) {
+        for (i, f) in recording.frames.iter().enumerate() {
+            let line = serde_json::json!({
+                "i": i,
+                "t": (f.at_ms * 10.0).round() / 10.0,
+                "wheel": f.injected,
+                "win": f.window_frame,
+                "item": f.item_ix,
+                "offset": f.offset_in_item.round(),
+                "scrolled": f.scrolled.round(),
+                "end": f.at_end,
+                "top": f.at_top,
+                "rows": f.rows.len(),
+                "first_y": f.rows.first().map(|(_, y)| y.round()),
+                "built": f.rows_built,
+            });
+            let _ = writeln!(file, "{line}");
+        }
+    }
+    let mut draws_path = path;
+    draws_path.push(".draws");
+    if let Ok(mut file) = std::fs::File::create(draws_path) {
+        for d in &recording.draws {
+            let line = serde_json::json!({
+                "t": d.at_ms.round(),
+                "cpu": (d.cpu_ms * 10.0).round() / 10.0,
+                "wall": (d.wall_ms * 10.0).round() / 10.0,
+                "build": (d.build_ms * 10.0).round() / 10.0,
+                "prepaint": (d.prepaint_ms * 10.0).round() / 10.0,
+                "between": (d.between_cpu_ms * 10.0).round() / 10.0,
+                "rows": d.rows,
+                "changes": d.changes,
+            });
+            let _ = writeln!(file, "{line}");
+        }
     }
 }
 
@@ -190,6 +219,18 @@ mod tests {
         }
         // Momentum's rounding leaves a few points either way.
         assert!(total(Scenario::Momentum, 1000).abs() < 10.0);
+    }
+
+    #[test]
+    fn a_script_has_all_its_moves_in_its_steps() {
+        // Every step that moves is inside the count, and the rest after it is quiet. (The slow
+        // scroll never rests: its count is its length.)
+        for s in [Scenario::Start, Scenario::Fling, Scenario::Momentum] {
+            let last = (0..2000).rev().find(|n| s.delta(*n) != 0.0).unwrap_or(0);
+            assert!(s.steps() > last, "{} stops at {last}", s.name());
+            assert!(s.steps() < last + 120, "{} rests too long", s.name());
+        }
+        assert_eq!(Scenario::Slow.steps(), SLOW_STEPS);
     }
 
     #[test]

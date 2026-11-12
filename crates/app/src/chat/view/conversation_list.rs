@@ -289,6 +289,9 @@ impl ListRows {
             || old.tail != next.tail
             || old.live != next.live
             || old.inset != next.inset;
+        if !matches!(plan, Plan::Nothing) {
+            super::pane::LIST_CHANGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let follow = goes_to_end(self.at_bottom(), force_follow, changed);
         let mut keys_changed = old.keys != next.keys;
         match plan {
@@ -480,7 +483,11 @@ impl ConversationView {
         };
         let a = window_appearance(window);
         let live = live_group_of(input) == Some(i);
+        let built_at = super::scroll_probe::enabled().then(std::time::Instant::now);
         let element = render_row(input, &self.s, i, &row, live, a, cx);
+        if let Some(at) = built_at {
+            super::scroll_probe::built(at.elapsed());
+        }
         let mut item = div()
             .w_full()
             .px(px(SIDE_PADDING))

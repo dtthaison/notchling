@@ -12,8 +12,10 @@ use serde_json::{json, Value};
 
 /// A move smaller than this (points) is no move: rounding and sub-pixel layout.
 pub const NO_MOVE: f32 = 0.5;
-/// What a frame may differ from the wheel by (points) before it counts as a jump.
+/// What a frame may differ from the wheel by (points) before it counts as a jump, and the share of
+/// a big step that is allowed on top (a fling of 1,000 points is measured to a few).
 pub const JUMP_TOLERANCE: f32 = 1.5;
+pub const JUMP_SHARE: f32 = 0.02;
 /// Rows whose places disagree by more than this changed height between two frames.
 pub const RELAYOUT: f32 = 1.5;
 /// A wheel step that waits longer than this (ms) for the draw that shows it was shown late: two
@@ -39,6 +41,8 @@ pub struct Frame {
     pub scrolled: f32,
     /// The list holds its end (it follows new content).
     pub at_end: bool,
+    /// The list is at its very top: nothing above to scroll to.
+    pub at_top: bool,
     /// Rows laid out in this draw's frame so far (the running count), for rows per draw.
     pub rows_built: u64,
 }
@@ -106,8 +110,8 @@ pub fn judge(a: &Frame, b: &Frame) -> Option<Event> {
         let growing_at_end = a.at_end && b.at_end;
         return (m.abs() >= JUMP_TOLERANCE && !growing_at_end).then_some(Event::Drift { moved: m });
     }
-    // Down at the end of the list: there is nowhere to go.
-    if a.at_end && asked < 0.0 {
+    // Down at the end of the list, or up at its top: there is nowhere to go.
+    if (a.at_end && asked < 0.0) || (a.at_top && asked > 0.0) {
         return None;
     }
     let Some((m, _)) = moved else {
@@ -119,11 +123,12 @@ pub fn judge(a: &Frame, b: &Frame) -> Option<Event> {
     if m.signum() != asked.signum() {
         return Some(Event::Reversal { asked, moved: m });
     }
-    // Stopped at the end, with less to go than asked.
-    if b.at_end && asked < 0.0 && m.abs() < asked.abs() {
+    // Stopped at the end or the top, with less to go than asked.
+    if ((b.at_end && asked < 0.0) || (b.at_top && asked > 0.0)) && m.abs() < asked.abs() {
         return None;
     }
-    ((m - asked).abs() > JUMP_TOLERANCE).then_some(Event::Jump { asked, moved: m })
+    ((m - asked).abs() > JUMP_TOLERANCE.max(asked.abs() * JUMP_SHARE))
+        .then_some(Event::Jump { asked, moved: m })
 }
 
 /// What a run's frames add up to.
@@ -131,6 +136,8 @@ pub fn judge(a: &Frame, b: &Frame) -> Option<Event> {
 pub struct Report {
     /// Draws of the conversation recorded.
     pub frames: usize,
+    /// Wheel steps the bench made.
+    pub steps: usize,
     /// Intervals between two draws in which the wheel asked for a move.
     pub asked: usize,
     pub stalls: usize,
@@ -160,6 +167,7 @@ const KEPT: usize = 8;
 pub fn report(frames: &[Frame], steps: &[(f64, f64)], viewport: f32) -> Report {
     let mut r = Report {
         frames: frames.len(),
+        steps: steps.len(),
         ..Report::default()
     };
     for (i, pair) in frames.windows(2).enumerate() {
@@ -174,6 +182,10 @@ pub fn report(frames: &[Frame], steps: &[(f64, f64)], viewport: f32) -> Report {
             }
         }
         let Some(event) = judge(a, b) else { continue };
+        // A step of a viewport or more can't leave a row in both frames: not a loss.
+        if matches!(event, Event::Lost { asked } if asked.abs() >= viewport) {
+            continue;
+        }
         let size = match event {
             Event::Lost { .. } => viewport,
             other => other.size(),
@@ -222,6 +234,7 @@ impl Report {
             .collect();
         json!({
             "frames": self.frames,
+            "steps": self.steps,
             "asked": self.asked,
             "stalls": self.stalls,
             "jumps": self.jumps,
@@ -235,6 +248,149 @@ impl Report {
             "latency_p99_ms": round(self.latency_p99_ms),
             "latency_max_ms": round(self.latency_max_ms),
             "first_events": events,
+        })
+    }
+}
+
+/// What a draw may cost (ms of the main thread's own CPU time) before a 60 Hz display misses its
+/// frame.
+pub const FRAME_BUDGET_MS: f64 = 16.7;
+
+/// One window draw, as the bench's frame driver timed it. The thread's CPU time is the number to
+/// read: wall time also holds whatever else the Mac was doing (a build next door).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Draw {
+    /// Milliseconds since the recording started, at the draw's start.
+    pub at_ms: f64,
+    pub wall_ms: f64,
+    /// The main thread's CPU time inside the draw.
+    pub cpu_ms: f64,
+    /// The main thread's CPU time since the last draw ended, outside any draw: the wheel events,
+    /// loads landing, timers.
+    pub between_cpu_ms: f64,
+    /// Conversation rows built in this draw.
+    pub rows: u64,
+    /// The list was changed (a load's splice, a reset) since the last draw.
+    pub changes: u64,
+    /// Of `cpu_ms`, what building the rows' elements took.
+    pub build_ms: f64,
+    /// Of `cpu_ms`, how much was spent by the end of the conversation's prepaint (the root's
+    /// render, layout and measuring the rows); the rest is painting.
+    pub prepaint_ms: f64,
+}
+
+impl Draw {
+    /// What made the draw dear, in a word and its number.
+    pub fn cause(&self) -> String {
+        if self.cpu_ms <= FRAME_BUDGET_MS {
+            "none".to_owned()
+        } else if self.changes > 0 {
+            format!("list changed ({} rows built)", self.rows)
+        } else if self.rows > 0 {
+            format!("{} rows built", self.rows)
+        } else {
+            "rows already laid out".to_owned()
+        }
+    }
+}
+
+/// The draws of a run added up.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DrawReport {
+    pub draws: usize,
+    pub cpu_p50_ms: f64,
+    pub cpu_p99_ms: f64,
+    pub cpu_max_ms: f64,
+    pub wall_p99_ms: f64,
+    pub wall_max_ms: f64,
+    /// Draws over half the budget, over the budget, and over two frames of it.
+    pub over_half: usize,
+    pub over_budget: usize,
+    pub over_two: usize,
+    /// Time outside draws worth a frame (CPU ms over the budget) and its largest.
+    pub between_over_budget: usize,
+    pub between_max_ms: f64,
+    /// The dearest draws, worst first.
+    pub worst: Vec<Draw>,
+}
+
+/// How many of the dearest draws a report keeps.
+const WORST: usize = 6;
+
+pub fn draw_report(draws: &[Draw]) -> DrawReport {
+    let mut r = DrawReport {
+        draws: draws.len(),
+        ..DrawReport::default()
+    };
+    if draws.is_empty() {
+        return r;
+    }
+    let quantile = |mut v: Vec<f64>, q: f64| {
+        v.sort_by(f64::total_cmp);
+        v[((v.len() - 1) as f64 * q).round() as usize]
+    };
+    let cpu: Vec<f64> = draws.iter().map(|d| d.cpu_ms).collect();
+    let wall: Vec<f64> = draws.iter().map(|d| d.wall_ms).collect();
+    r.cpu_p50_ms = quantile(cpu.clone(), 0.5);
+    r.cpu_p99_ms = quantile(cpu.clone(), 0.99);
+    r.cpu_max_ms = quantile(cpu, 1.0);
+    r.wall_p99_ms = quantile(wall.clone(), 0.99);
+    r.wall_max_ms = quantile(wall, 1.0);
+    r.over_half = draws
+        .iter()
+        .filter(|d| d.cpu_ms > FRAME_BUDGET_MS / 2.0)
+        .count();
+    r.over_budget = draws.iter().filter(|d| d.cpu_ms > FRAME_BUDGET_MS).count();
+    r.over_two = draws
+        .iter()
+        .filter(|d| d.cpu_ms > FRAME_BUDGET_MS * 2.0)
+        .count();
+    r.between_over_budget = draws
+        .iter()
+        .filter(|d| d.between_cpu_ms > FRAME_BUDGET_MS)
+        .count();
+    r.between_max_ms = draws.iter().map(|d| d.between_cpu_ms).fold(0.0, f64::max);
+    let mut worst = draws.to_vec();
+    worst.sort_by(|a, b| b.cpu_ms.total_cmp(&a.cpu_ms));
+    worst.truncate(WORST);
+    r.worst = worst;
+    r
+}
+
+impl DrawReport {
+    /// The `draws` object of the bench's `scroll` report.
+    pub fn json(&self) -> Value {
+        let round = |v: f64| (v * 10.0).round() / 10.0;
+        let worst: Vec<Value> = self
+            .worst
+            .iter()
+            .map(|d| {
+                json!({
+                    "at_ms": d.at_ms.round(),
+                    "cpu_ms": round(d.cpu_ms),
+                    "wall_ms": round(d.wall_ms),
+                    "build_ms": round(d.build_ms),
+                    "prepaint_ms": round(d.prepaint_ms),
+                    "rows": d.rows,
+                    "changes": d.changes,
+                    "between_cpu_ms": round(d.between_cpu_ms),
+                    "cause": d.cause(),
+                })
+            })
+            .collect();
+        json!({
+            "draws": self.draws,
+            "cpu_p50_ms": round(self.cpu_p50_ms),
+            "cpu_p99_ms": round(self.cpu_p99_ms),
+            "cpu_max_ms": round(self.cpu_max_ms),
+            "wall_p99_ms": round(self.wall_p99_ms),
+            "wall_max_ms": round(self.wall_max_ms),
+            "over_half_budget": self.over_half,
+            "over_budget": self.over_budget,
+            "over_two_frames": self.over_two,
+            "between_over_budget": self.between_over_budget,
+            "between_max_ms": round(self.between_max_ms),
+            "worst": worst,
         })
     }
 }
