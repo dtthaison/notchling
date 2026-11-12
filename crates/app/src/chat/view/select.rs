@@ -178,7 +178,9 @@ pub fn listener() -> impl IntoElement {
             })
         },
         |_, _, window, _| {
-            window.on_mouse_event(|event: &MouseDownEvent, phase, window, _| {
+            // The view this paints in: a selection change draws it, not the whole window.
+            let view = window.current_view();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
                 if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                     return;
                 }
@@ -193,7 +195,7 @@ pub fn listener() -> impl IntoElement {
                         // A press anywhere else (the reply box, the sidebar) lets it go.
                         if s.anchor.take().is_some() {
                             s.focus = None;
-                            window.refresh();
+                            cx.notify(view);
                         }
                         return;
                     };
@@ -216,10 +218,10 @@ pub fn listener() -> impl IntoElement {
                         index: range.end,
                     });
                     s.dragging = true;
-                    window.refresh();
+                    cx.notify(view);
                 });
             });
-            window.on_mouse_event(|event: &MouseMoveEvent, phase, window, _| {
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
@@ -238,7 +240,7 @@ pub fn listener() -> impl IntoElement {
                     let spot = s.widen(spot);
                     if s.focus.as_ref() != Some(&spot) {
                         s.focus = Some(spot);
-                        window.refresh();
+                        cx.notify(view);
                     }
                 });
             });

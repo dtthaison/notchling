@@ -182,7 +182,7 @@ impl RenderOnce for Panel {
             .flex_col()
             .gap(px(16.0));
         for (key, part, title, content) in sections {
-            column = column.child(section(id, key, part, &title, content, a, cx));
+            column = column.child(section((id, &self.chat), key, part, &title, content, a, cx));
         }
 
         div()
@@ -204,7 +204,7 @@ impl RenderOnce for Panel {
 /// A section: its header (a chevron and the title, which folds it on a click) over its content, named
 /// for the ? button with the Swift panel's name (`part`). The title keeps its count when folded.
 fn section(
-    window: WindowId,
+    (window, chat): (WindowId, &WeakEntity<ChatView>),
     key: &'static str,
     part: &str,
     title: &str,
@@ -213,6 +213,7 @@ fn section(
     cx: &App,
 ) -> Div {
     let folded = is_folded(cx, window, key);
+    let chat = chat.clone();
     let chevron = if folded {
         Icon::ChevronRight
     } else {
@@ -228,7 +229,8 @@ fn section(
         .child(label(title, TypeRole::Section, Ink::TextFaint, a))
         .on_click(move |_, window, cx| {
             toggle_folded(cx, window.window_handle().window_id(), key);
-            window.refresh();
+            // The fold is read by the Details Panel alone: draw it, not the whole window.
+            chat.update(cx, |v, cx| v.redraw_details(cx)).ok();
         });
     div()
         .flex()

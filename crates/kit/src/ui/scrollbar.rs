@@ -213,6 +213,8 @@ impl Element for Scrollable {
         };
         let handle = layout.handle.clone();
         let bar = layout.bar.clone();
+        // The view the bar is in: its changes draw that view, not the whole window.
+        let view = window.current_view();
         let geometry = Geometry::of(bounds, &handle);
         let now = Instant::now();
         let appearance = window_appearance(window);
@@ -313,7 +315,7 @@ impl Element for Scrollable {
                     } else {
                         state.drag = None;
                     }
-                    window.refresh();
+                    cx.notify(view);
                     cx.stop_propagation();
                     return;
                 }
@@ -324,7 +326,7 @@ impl Element for Scrollable {
                     if !over {
                         state.active = Some(Instant::now());
                     }
-                    window.refresh();
+                    cx.notify(view);
                 }
             });
         }
@@ -360,13 +362,13 @@ impl Element for Scrollable {
                     }
                 }
                 state.active = Some(Instant::now());
-                window.refresh();
+                cx.notify(view);
                 cx.stop_propagation();
             });
         }
         {
             let (bar, zone) = (bar.clone(), zone.clone());
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, window, _| {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
                     return;
                 }
@@ -374,7 +376,7 @@ impl Element for Scrollable {
                 if state.drag.take().is_some() {
                     state.hovered = zone.is_hovered(window);
                     state.active = Some(Instant::now());
-                    window.refresh();
+                    cx.notify(view);
                 }
             });
         }

@@ -186,11 +186,17 @@ impl ChatView {
         self.parts.sidebar.update(cx, |_, cx| cx.notify());
     }
 
+    /// Draws the Details Panel again (and the window's outer parts), not the conversation: for a
+    /// change only it shows (a section folded).
+    pub(super) fn redraw_details(&self, cx: &mut Context<ChatView>) {
+        self.parts.details.update(cx, |_, cx| cx.notify());
+    }
+
     /// After a load that changed nothing the conversation shows (another session's files did):
     /// the rows' ages and states, the Details Panel and the window's other parts.
     pub(super) fn redraw_all_but_conversation(&self, cx: &mut Context<ChatView>) {
         self.redraw_sidebar(cx);
-        self.parts.details.update(cx, |_, cx| cx.notify());
+        self.redraw_details(cx);
         self.redraw_chrome(cx);
     }
 

@@ -257,3 +257,13 @@ fn bench_typing_draws_no_part() {
     assert_eq!(count(&result, "sidebar"), 0, "{result}");
     assert_eq!(count(&result, "details"), 0, "{result}");
 }
+
+/// A selection drag redraws the conversation (the wash follows the pointer), not the Sidebar or the
+/// Details Panel.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_select_draws_no_sidebar_or_details() {
+    let result = bench_for("select", 3);
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+}
