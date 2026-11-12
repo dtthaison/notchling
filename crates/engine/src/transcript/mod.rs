@@ -13,7 +13,7 @@
 //! | [`conversation::read_subagent`]`(path)` / [`subagents::read`]`(path)` | The same for a subagent's own sidechain transcript. |
 //! | [`conversation::Parser`] | The line-at-a-time parser behind `read`: `Parser::new()`, `consume(&[u8])`, `conversation()`. |
 //! | [`tail::read_lines`]`(path, max_bytes)` | `io::Result<Vec<String>>`: the file's last `max_bytes` as lines, the cut first line dropped. |
-//! | [`tail::Cursors`] / [`tail::LineParser`] | The incremental reader: `Cursors::new(tail_bytes, limit, render)` and `read(path) -> Option<O>`. |
+//! | [`tail::Cursors`] / [`tail::LineParser`] | The incremental reader: `Cursors::new(tail_bytes, limit, render)` and `read(path) -> Option<O>`. The conversation readers keep `Arc<Conversation>` in them and expose it as `conversation::read_shared`, `read_subagent_shared`, `codex::read_shared` and `subagents::read_shared`: an unchanged file gives the same `Arc`, so a caller tells "nothing changed" by `Arc::ptr_eq`; `read` and friends return an owned copy. |
 //! | [`snapshot::read`]`(path)` | [`snapshot::Snapshot`] for the notch: the last lines, `last_prompt`, `activity`, the pending [`snapshot::PendingQuestion`], `subagents_active`. |
 //! | [`errors::limit_hit_in_file`], [`errors::sleep_cut_in_file`], [`errors::tool_finished`] | What a transcript's end says. |
 //! | [`locate::project_folder`], [`locate::find_transcript`], [`locate::job_transcript`], [`locate::successor`] | Where a session's transcript is, a job that moved into a worktree, the file a `/clear` started. |

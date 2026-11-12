@@ -48,3 +48,25 @@ fn an_unchanged_reread_parses_nothing_and_an_append_parses_only_its_line() {
     );
     assert!(third.items.len() > second.items.len());
 }
+
+#[test]
+fn an_unchanged_file_gives_the_same_arc() {
+    use notchling_engine::transcript::conversation;
+    use std::sync::Arc;
+
+    let dir = Scratch::new("shared-arc");
+    let path = dir.write("session.jsonl", THREE_LINES);
+    let path = path.to_string_lossy().into_owned();
+
+    let first = conversation::read_shared(&path);
+    let second = conversation::read_shared(&path);
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "an unchanged file is the same Arc"
+    );
+
+    dir.write("session.jsonl", &format!("{THREE_LINES}{ONE_MORE}"));
+    let third = conversation::read_shared(&path);
+    assert!(!Arc::ptr_eq(&second, &third), "an append is a new Arc");
+    assert!(third.items.len() > second.items.len());
+}

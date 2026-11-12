@@ -19,7 +19,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use stamped::{Stamp, Stamped};
 
@@ -439,15 +439,22 @@ impl LineParser for Parser {
     }
 }
 
-fn cursors() -> &'static Cursors<Parser, Conversation> {
-    static CURSORS: OnceLock<Cursors<Parser, Conversation>> = OnceLock::new();
+fn cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
+    static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
     // Image tool results are megabytes of base64 Chat doesn't draw; they mustn't push the prompt out.
     CURSORS.get_or_init(|| {
-        Cursors::new(CHAT_TAIL_BYTES, 30, Parser::conversation).long_lines_free(64_000_000)
+        Cursors::new(CHAT_TAIL_BYTES, 30, |p: &Parser| Arc::new(p.conversation()))
+            .long_lines_free(64_000_000)
     })
 }
 
-/// A Codex session file as Chat's conversation, read incrementally like a Claude transcript.
-pub fn read(path: &str) -> Conversation {
+/// A Codex session file as Chat's conversation, read incrementally like a Claude transcript. An
+/// unchanged file gives the same `Arc` as the last call.
+pub fn read_shared(path: &str) -> Arc<Conversation> {
     cursors().read(path).unwrap_or_default()
+}
+
+/// [`read_shared`] as an owned copy.
+pub fn read(path: &str) -> Conversation {
+    (*read_shared(path)).clone()
 }

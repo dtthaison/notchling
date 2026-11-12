@@ -216,6 +216,11 @@ pub fn read(path: &str) -> Conversation {
     super::conversation::read_subagent(path)
 }
 
+/// [`read`] as a shared conversation: an unchanged file gives the same `Arc`.
+pub fn read_shared(path: &str) -> std::sync::Arc<Conversation> {
+    super::conversation::read_subagent_shared(path)
+}
+
 // MARK: The phone bridge's view
 
 #[derive(Deserialize)]

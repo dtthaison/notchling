@@ -12,7 +12,7 @@ pub use user::{model_id_in_confirmation, user_item};
 
 use super::model::Conversation;
 use super::tail::{Cursors, LineParser, CHAT_TAIL_BYTES};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// A subagent's transcript parser: its lines are all marked sidechain.
 pub struct SubagentParser(Parser);
@@ -29,24 +29,39 @@ impl LineParser for SubagentParser {
     }
 }
 
-fn session_cursors() -> &'static Cursors<Parser, Conversation> {
-    static CURSORS: OnceLock<Cursors<Parser, Conversation>> = OnceLock::new();
-    CURSORS.get_or_init(|| Cursors::new(CHAT_TAIL_BYTES, 60, Parser::conversation))
+fn session_cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
+    static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
+    CURSORS
+        .get_or_init(|| Cursors::new(CHAT_TAIL_BYTES, 60, |p: &Parser| Arc::new(p.conversation())))
 }
 
-fn subagent_cursors() -> &'static Cursors<SubagentParser, Conversation> {
-    static CURSORS: OnceLock<Cursors<SubagentParser, Conversation>> = OnceLock::new();
-    CURSORS
-        .get_or_init(|| Cursors::new(CHAT_TAIL_BYTES, 30, |p: &SubagentParser| p.0.conversation()))
+fn subagent_cursors() -> &'static Cursors<SubagentParser, Arc<Conversation>> {
+    static CURSORS: OnceLock<Cursors<SubagentParser, Arc<Conversation>>> = OnceLock::new();
+    CURSORS.get_or_init(|| {
+        Cursors::new(CHAT_TAIL_BYTES, 30, |p: &SubagentParser| {
+            Arc::new(p.0.conversation())
+        })
+    })
 }
 
 /// A session transcript as Chat's conversation. The first call parses the last 4 MB; later calls parse
-/// only the lines appended since. An unreadable file gives an empty conversation.
-pub fn read(path: &str) -> Conversation {
+/// only the lines appended since. An unreadable file gives an empty conversation. An unchanged file gives
+/// the same `Arc` as the last call, so a caller can tell "nothing changed" by pointer.
+pub fn read_shared(path: &str) -> Arc<Conversation> {
     session_cursors().read(path).unwrap_or_default()
 }
 
+/// [`read_shared`] as an owned copy, for callers that edit it or don't care about the copy.
+pub fn read(path: &str) -> Conversation {
+    (*read_shared(path)).clone()
+}
+
 /// A subagent's own transcript (see `subagents`), whose every line is a sidechain line.
-pub fn read_subagent(path: &str) -> Conversation {
+pub fn read_subagent_shared(path: &str) -> Arc<Conversation> {
     subagent_cursors().read(path).unwrap_or_default()
+}
+
+/// [`read_subagent_shared`] as an owned copy.
+pub fn read_subagent(path: &str) -> Conversation {
+    (*read_subagent_shared(path)).clone()
 }
