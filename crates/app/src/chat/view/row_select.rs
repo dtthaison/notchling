@@ -30,6 +30,7 @@ use notchling_kit::ui::hsla;
 use notchling_kit::{Appearance, Ink};
 
 use super::conversation_view::ConversationView;
+use super::copy_menu::selects;
 use crate::chat::rows::Row;
 use crate::chat::selection::{floor, ordered, range_in, word_at, At};
 
@@ -324,7 +325,15 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
             let (down, drag, up) = (state.clone(), state.clone(), state);
             let (down_view, drag_view) = (view.clone(), view);
             window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
-                if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                // With the Copy menu open a press belongs to the menu, which copies what is
+                // selected and goes away on any other click: the selection stays as it is.
+                let menu_open = down_view
+                    .upgrade()
+                    .is_some_and(|view| view.read(cx).copy_menu_open(cx));
+                if menu_open && event.button == MouseButton::Left {
                     return;
                 }
                 let mut frame = down.borrow_mut();
@@ -333,6 +342,24 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
                     .iter()
                     .find(|n| n.layout.bounds().contains(&event.position))
                     .map(|n| (n.row.clone(), n.block));
+                // The right button opens the Copy menu over text and leaves the selection as it is.
+                if event.button == MouseButton::Right {
+                    if over.is_some() {
+                        let enabled = selects(
+                            frame.selection.anchor.as_ref(),
+                            frame.selection.focus.as_ref(),
+                        );
+                        drop(frame);
+                        let at = event.position;
+                        down_view
+                            .update(cx, |view, cx| view.right_click(at, enabled, cx))
+                            .ok();
+                    }
+                    return;
+                }
+                if event.button != MouseButton::Left {
+                    return;
+                }
                 let Some((row, block)) = over else {
                     // A press anywhere else (the reply box, the sidebar) lets it go.
                     if frame.selection.anchor.take().is_some() {

@@ -3,13 +3,15 @@
 //! view the events AppKit would: the same path a real mouse or trackpad takes, ending in GPUI's
 //! `handle_view_event`. Nothing here moves the real pointer or posts a system event.
 
+use std::cell::Cell;
+
 use gpui::Pixels;
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSResponder, NSView};
-use objc2_core_graphics::{CGEvent, CGEventField, CGScrollEventUnit};
-use objc2_foundation::NSPoint;
+use objc2_core_graphics::{CGEvent, CGEventField, CGEventType, CGMouseButton, CGScrollEventUnit};
+use objc2_foundation::{NSPoint, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 /// Sends events to one window's content view.
@@ -19,7 +21,7 @@ pub struct Injector {
     /// The view's height in points: AppKit's y runs up from the bottom, GPUI's down from the top.
     height: f64,
     /// What a scroll event's location has to add, found once (see [`Injector::scroll`]).
-    scroll_origin: Option<f64>,
+    scroll_origin: Cell<Option<f64>>,
 }
 
 impl Injector {
@@ -37,7 +39,7 @@ impl Injector {
             view,
             window_number,
             height,
-            scroll_origin: None,
+            scroll_origin: Cell::new(None),
         })
     }
 
@@ -89,6 +91,53 @@ impl Injector {
         }
     }
 
+    /// The right button pressed and let go at a point of the window: a context menu's click.
+    /// AppKit's own constructor can't say which button an event is (GPUI reads
+    /// `buttonNumber`, always 0 there), so these come from Core Graphics events, placed the way
+    /// [`Injector::scroll`] places its own.
+    pub fn right_click(&self, x: Pixels, y: Pixels) {
+        for kind in [CGEventType::RightMouseDown, CGEventType::RightMouseUp] {
+            let wanted = self.at(x, y);
+            let Some(cg) = CGEvent::new_mouse_event(
+                None,
+                kind,
+                NSPoint::new(wanted.x, 0.0),
+                CGMouseButton::Right,
+            ) else {
+                return;
+            };
+            CGEvent::set_integer_value_field(Some(&cg), CGEventField::MouseEventClickState, 1);
+            let origin = self.screen_origin();
+            CGEvent::set_location(Some(&cg), NSPoint::new(wanted.x, origin - wanted.y));
+            let Some(event) = NSEvent::eventWithCGEvent(&cg) else {
+                return;
+            };
+            if kind == CGEventType::RightMouseDown {
+                NSResponder::rightMouseDown(&self.view, &event);
+            } else {
+                NSResponder::rightMouseUp(&self.view, &event);
+            }
+        }
+    }
+
+    /// What an event with no window reports as its location's y when it is at the top of the
+    /// screen: AppKit's y runs up from the bottom, Core Graphics' down from the top. Found once.
+    fn screen_origin(&self) -> f64 {
+        if let Some(origin) = self.scroll_origin.get() {
+            return origin;
+        }
+        let probe = CGEvent::new_mouse_event(
+            None,
+            CGEventType::MouseMoved,
+            NSPoint::new(0.0, 0.0),
+            CGMouseButton::Left,
+        )
+        .and_then(|cg| NSEvent::eventWithCGEvent(&cg));
+        let origin = probe.map_or(0.0, |event| event.locationInWindow().y);
+        self.scroll_origin.set(Some(origin));
+        origin
+    }
+
     pub fn drag(&self, x: Pixels, y: Pixels) {
         if let Some(event) = self.mouse(NSEventType::LeftMouseDragged, x, y, 1) {
             NSResponder::mouseDragged(&self.view, &event);
@@ -99,6 +148,27 @@ impl Injector {
         if let Some(event) = self.mouse(NSEventType::LeftMouseUp, x, y, 1) {
             NSResponder::mouseUp(&self.view, &event);
         }
+    }
+
+    /// ⌘ and a key, offered to the window's view as AppKit offers a key equivalent (the first
+    /// thing it does with a ⌘ key): whether the view took it. `code` is the key's virtual code.
+    pub fn command_key(&self, letter: &str, code: u16) -> bool {
+        let chars = NSString::from_str(letter);
+        let Some(event) = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            NSEventType::KeyDown,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::Command,
+            0.0,
+            self.window_number,
+            None,
+            &chars,
+            &chars,
+            false,
+            code,
+        ) else {
+            return false;
+        };
+        self.view.performKeyEquivalent(&event)
     }
 
     /// A trackpad scroll of `dy` points at a point of the window; positive moves the content down
@@ -117,7 +187,7 @@ impl Injector {
         let place = |cg: &CGEvent, screen_y: f64| {
             CGEvent::set_location(Some(cg), NSPoint::new(wanted.x, screen_y));
         };
-        let origin = match self.scroll_origin {
+        let origin = match self.scroll_origin.get() {
             Some(origin) => origin,
             None => {
                 // At screen y 0 (the top), AppKit's y is the screen's height.
@@ -126,7 +196,7 @@ impl Injector {
                     return;
                 };
                 let origin = probe.locationInWindow().y;
-                self.scroll_origin = Some(origin);
+                self.scroll_origin.set(Some(origin));
                 origin
             }
         };

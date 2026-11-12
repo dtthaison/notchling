@@ -2,6 +2,7 @@
 //! overlay.
 
 use super::*;
+use crate::mac::dock::Copy as CopyAction;
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -9,6 +10,8 @@ impl Render for ChatView {
         let a = window_appearance(window);
         super::render_map::sync(self.chrome.entity_id(), cx);
         self.take_terminal_focus(window);
+        // With no focus a key reaches only the window's outermost node: keep Copy reachable.
+        self.keys.hold(window, cx);
         if let Some(text) = self.slash_preview.clone() {
             if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
                 self.tools
@@ -28,6 +31,7 @@ impl Render for ChatView {
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.row_menu.is_some()
+            || self.copy_menu.is_some()
             || self.phone.is_some()
             || self.tools.picker.is_some()
             || self.composer.is_open()
@@ -118,23 +122,20 @@ impl Render for ChatView {
             // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
             // draws takes it back, or typing would go on reaching the page.
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
-            // ⌘C with text selected in the conversation (`row_select`) or the file panel (`select`)
-            // copies it; a press anywhere
-            // else lets that go, so the reply box's own ⌘C isn't taken. Then the command list's
-            // keys, before the reply box moves its caret on Up and Down.
-            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                let (k, m) = (&event.keystroke, &event.keystroke.modifiers);
-                if k.key == "c" && m.platform && !m.shift && !m.alt && !m.control {
-                    // The conversation's selection, else the file panel's own.
-                    let conversation = this.parts.conversation.read(cx).copied(cx);
-                    if let Some(text) = row_select::clipboard_text(conversation, select::copied) {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-                        cx.stop_propagation();
-                        return;
-                    }
+            // Copy (⌘C, the Edit menu, the right-click menu): the selection in the conversation
+            // (`row_select`), the file panel (`select`) or the reply box. A press anywhere else
+            // lets the first two go, so the reply box's own ⌘C isn't taken. Without a selection
+            // the action goes on to the key. Then the command list's keys, before the reply box
+            // moves its caret on Up and Down.
+            .on_action(cx.listener(|this, _: &CopyAction, window, cx| {
+                if !this.copy_selection(window, cx) {
+                    cx.propagate();
                 }
+            }))
+            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 this.capture_slash_key(event, window, cx)
             }))
+            .child(self.keys.anchor())
             .children((!self.sidebar_hidden).then(|| self.parts.sidebar(a, cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(
@@ -177,6 +178,7 @@ impl Render for ChatView {
             .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))
             .children(row_menu::render(self, a, cx))
+            .children(copy_menu::render(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
             .child(resize_edges(window, TopBorder::InContent))
