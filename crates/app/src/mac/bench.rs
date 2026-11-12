@@ -144,7 +144,7 @@ fn wave(step: u64, wrap: bool, span: f32) -> f32 {
 }
 
 /// The lane's top point (in the conversation's column) and its length.
-fn lane(size: Size<gpui::Pixels>) -> (gpui::Point<gpui::Pixels>, f32) {
+pub(super) fn lane(size: Size<gpui::Pixels>) -> (gpui::Point<gpui::Pixels>, f32) {
     let middle = bench_point(size);
     let span = (f32::from(size.height) - LANE_TOP - LANE_BOTTOM).max(MOUSE_STEP);
     (point(middle.x, px(LANE_TOP)), span)

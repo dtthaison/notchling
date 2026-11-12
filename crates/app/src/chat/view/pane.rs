@@ -230,6 +230,19 @@ impl ChatView {
         self.redraw_chrome(cx);
     }
 
+    /// `--render`'s copy check: what ⌘C would copy from the conversation now, none when nothing
+    /// is selected.
+    pub fn bench_selected_text(&self, cx: &App) -> Option<String> {
+        self.parts.conversation.read(cx).copied(cx)
+    }
+
+    /// `--render`'s copy check: the reply box has the keyboard, as it does once it was clicked.
+    pub fn bench_focus_reply(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        self.tools
+            .editor
+            .update(cx, |editor, _| editor.focus(window));
+    }
+
     /// `--render`'s bench: whether the conversation is at its newest message.
     pub fn bench_at_end(&self, cx: &App) -> bool {
         self.parts.conversation.read(cx).s.at_bottom()

@@ -9,7 +9,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSResponder, NSView};
 use objc2_core_graphics::{CGEvent, CGEventField, CGScrollEventUnit};
-use objc2_foundation::NSPoint;
+use objc2_foundation::{NSPoint, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 /// Sends events to one window's content view.
@@ -99,6 +99,27 @@ impl Injector {
         if let Some(event) = self.mouse(NSEventType::LeftMouseUp, x, y, 1) {
             NSResponder::mouseUp(&self.view, &event);
         }
+    }
+
+    /// ⌘ and a key, offered to the window's view as AppKit offers a key equivalent (the first
+    /// thing it does with a ⌘ key): whether the view took it. `code` is the key's virtual code.
+    pub fn command_key(&self, letter: &str, code: u16) -> bool {
+        let chars = NSString::from_str(letter);
+        let Some(event) = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            NSEventType::KeyDown,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::Command,
+            0.0,
+            self.window_number,
+            None,
+            &chars,
+            &chars,
+            false,
+            code,
+        ) else {
+            return false;
+        };
+        self.view.performKeyEquivalent(&event)
     }
 
     /// A trackpad scroll of `dy` points at a point of the window; positive moves the content down

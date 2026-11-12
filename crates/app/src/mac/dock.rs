@@ -88,6 +88,12 @@ pub fn register(cx: &mut App) {
                 .ok();
         }
     });
+    bind_keys(cx);
+}
+
+/// The main menu's key equivalents as GPUI key bindings (⌘C is the `Copy` action, and so on).
+/// A render binds them too, so a check sends the keys the real window gets.
+pub fn bind_keys(cx: &mut App) {
     let bindings = main_menu()
         .into_iter()
         .flat_map(|menu| menu.items)

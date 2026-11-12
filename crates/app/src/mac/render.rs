@@ -45,6 +45,11 @@ pub const BENCH_ENV: &str = "NOTCHLING_RENDER_BENCH";
 /// the model's blocks (`ChatView::check_blocks`) and prints `blocks-check: ok <n>`.
 pub const CHECK_BLOCKS_ENV: &str = "NOTCHLING_RENDER_CHECK_BLOCKS";
 
+/// The environment's name for the switch that selects text in the conversation with the pointer,
+/// copies it and checks the clipboard (`check_copy`), printing `copy-check: ok <n>`: `1` or `key`
+/// sends ⌘C to the window, `action` dispatches the Copy action, as the Edit menu's item does.
+pub const CHECK_COPY_ENV: &str = "NOTCHLING_RENDER_CHECK_COPY";
+
 /// The environment's name for the switch that draws frames by hand when the screen sends none
 /// (locked), so a render sees what loads after the first frame.
 pub const FORCE_FRAMES_ENV: &str = "NOTCHLING_RENDER_FORCE_FRAMES";
@@ -140,6 +145,8 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
         crate::mac::app_icons::install();
         // No Dock icon for a render.
         dock::apply(Policy::Accessory);
+        // The keys the real window binds, so a check that sends ⌘C sends what a person's does.
+        dock::bind_keys(cx);
         if std::env::var_os(SCROLLBARS_ENV).is_some_and(|v| v == "1") {
             cx.set_global(notchling_kit::ui::PinScrollbars);
         }
@@ -193,6 +200,7 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
                     // frame shows (the blocks check and a capture need it).
                     let draw = bench_seconds.is_none()
                         && (std::env::var_os(CHECK_BLOCKS_ENV).is_some()
+                            || std::env::var_os(CHECK_COPY_ENV).is_some()
                             || std::env::var_os(FORCE_FRAMES_ENV).is_some_and(|v| v == "1"));
                     let forcing = if draw {
                         bench::keep_drawing(&target, cx).await
@@ -202,6 +210,9 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
                     cx.background_executor().timer(SETTLE).await;
                     if std::env::var_os(CHECK_BLOCKS_ENV).is_some_and(|v| v == "1") {
                         check_blocks(&target, cx).await;
+                    }
+                    if let Ok(how) = std::env::var(CHECK_COPY_ENV) {
+                        check_copy(&target, cx, &how).await;
                     }
                     if let Some(seconds) = bench_seconds {
                         bench::bench(seconds, mode, target, cx).await;
@@ -273,6 +284,90 @@ async fn check_blocks(target: &bench::Target, cx: &mut gpui::AsyncApp) {
             println!("blocks-check: {message}");
             std::process::exit(1);
         }
+    }
+}
+
+/// Presses in the conversation, drags down and lets go, copies (`how`: ⌘C sent to the window, or
+/// the Copy action dispatched) and reads what the clipboard then holds, which must be what the
+/// selection says it copies. Prints `copy-check: ok <n>` or why not and ends the render with exit
+/// code 1. The clipboard is the Mac's real one: it holds a made-up line first, so a stale copy
+/// can't pass, and the selection's text after.
+async fn check_copy(target: &bench::Target, cx: &mut gpui::AsyncApp, how: &str) {
+    let fail = |message: String| -> ! {
+        println!("copy-check: {message}");
+        std::process::exit(1);
+    };
+    let (Some(chat), Some(injector)) = (target.chat.clone(), target.injector.as_ref()) else {
+        fail("this view is not a Chat with a window to send events to".to_owned());
+    };
+    // The conversation loads in the background: a press before its first draw lands on nothing.
+    for _ in 0..50 {
+        if crate::chat::view::pane::ROWS.load(Ordering::Relaxed) > 0 {
+            break;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+    cx.background_executor()
+        .timer(Duration::from_millis(400))
+        .await;
+    let (top, span) = bench::lane(target.size);
+    let step = Duration::from_millis(30);
+    // Start on the first line of text from the lane's top: a press between messages holds nothing.
+    let mut expected = None;
+    for down in 0..40u32 {
+        let y = top.y + px(down as f32 * 8.0);
+        injector.press(top.x - px(150.0), y);
+        for n in 1..=20u32 {
+            injector.drag(top.x + px(150.0), y + px(span * n as f32 / 20.0));
+            cx.background_executor().timer(step / 3).await;
+        }
+        injector.release(top.x + px(150.0), y + px(span));
+        cx.background_executor().timer(step * 3).await;
+        expected = cx
+            .update(|cx| chat.read(cx).bench_selected_text(cx))
+            .ok()
+            .flatten();
+        if expected.is_some() {
+            break;
+        }
+    }
+    let Some(expected) = expected else {
+        fail("the drag selected nothing".to_owned());
+    };
+    let sentinel = "copy-check: nothing was copied";
+    cx.update(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(sentinel.to_owned())))
+        .ok();
+    let how = match how {
+        "action" => {
+            cx.update(|cx| {
+                if let Some(window) = cx.windows().first().copied() {
+                    window
+                        .update(cx, |_, window, cx| {
+                            window.dispatch_action(Box::new(dock::Copy), cx)
+                        })
+                        .ok();
+                }
+            })
+            .ok();
+            "the Copy action"
+        }
+        _ => {
+            injector.command_key("c", 8);
+            "⌘C"
+        }
+    };
+    cx.background_executor().timer(step * 4).await;
+    let copied = cx
+        .update(|cx| cx.read_from_clipboard().and_then(|item| item.text()))
+        .ok()
+        .flatten();
+    match copied {
+        Some(text) if text == expected => println!("copy-check: ok {} chars ({how})", text.len()),
+        other => fail(format!(
+            "mismatch: the selection says {expected:?}; after {how} the clipboard has {other:?}"
+        )),
     }
 }
 
