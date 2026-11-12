@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ use notchling_kit::ui::{
 };
 
 use super::pane::RENDERS;
+use super::row_select::SelState;
 use super::{conversation, message_meta, now_ms, ChatView};
 use crate::acting::Acting;
 use crate::chat::data::Tool;
@@ -59,6 +61,8 @@ pub(super) struct ConversationState {
     /// Whether a second opinion in the selected session was running at the last tick, so the
     /// tick that sees it end draws its card too.
     pub opinions_running: bool,
+    /// The selection, and the texts the last draw noted for the pointer (`row_select`).
+    pub sel: SelState,
 }
 
 impl ConversationState {
@@ -77,6 +81,7 @@ impl ConversationState {
             // The first conversation opens at its newest message, as a picked one does.
             scroll_to_end: true,
             opinions_running: false,
+            sel: Rc::default(),
         }
     }
 
@@ -270,6 +275,23 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) {
         self.chat.update(cx, f).ok();
+    }
+
+    /// The selected text, for ⌘C, read from the rows' blocks (so rows off screen count too);
+    /// `None` when nothing is selected or the column hasn't drawn yet.
+    pub fn copied(&self, _cx: &App) -> Option<String> {
+        let selected = {
+            let frame = self.s.sel.borrow();
+            frame.selection.anchor.is_some() && frame.selection.focus.is_some()
+        };
+        let input = self.input.as_ref().filter(|_| selected)?;
+        let blocks = super::row_blocks::input_blocks(input, &self.s);
+        super::row_select::copied(&self.s.sel.borrow().selection, &blocks)
+    }
+
+    /// Lets go of the selection (another session opened).
+    pub fn clear_selection(&mut self) {
+        self.s.sel.borrow_mut().selection.clear();
     }
 
     /// Opens or folds `id`, and draws.

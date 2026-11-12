@@ -268,6 +268,18 @@ fn bench_select_draws_no_sidebar_or_details() {
     assert_eq!(count(&result, "details"), 0, "{result}");
 }
 
+/// A selection drag draws the conversation (so the press reached it: a run whose press landed on
+/// nothing draws none, which a count of 0 elsewhere would never show) and draws it only: the
+/// selection belongs to the conversation's own view, and nothing else is drawn for it.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_select_draws_the_conversation_only() {
+    let result = bench_for("select", 3);
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+}
+
 /// The `bench-json:` line says whether the bench had to draw frames itself (a locked screen sends
 /// the window no display-link frames), since a forced frame's ms/frame is not a display link's.
 #[test]

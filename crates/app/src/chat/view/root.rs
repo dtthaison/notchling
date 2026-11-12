@@ -94,13 +94,16 @@ impl Render for ChatView {
             // A click in the page panel gives its web view the keyboard; a click anywhere GPUI
             // draws takes it back, or typing would go on reaching the page.
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.page.take_keys_back()))
-            // ⌘C with text selected in the conversation copies it (`select`); a press anywhere
+            // ⌘C with text selected in the conversation (`row_select`) or the file panel (`select`)
+            // copies it; a press anywhere
             // else lets that go, so the reply box's own ⌘C isn't taken. Then the command list's
             // keys, before the reply box moves its caret on Up and Down.
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let (k, m) = (&event.keystroke, &event.keystroke.modifiers);
                 if k.key == "c" && m.platform && !m.shift && !m.alt && !m.control {
-                    if let Some(text) = select::copied() {
+                    // The conversation's selection, else the file panel's own.
+                    let conversation = this.parts.conversation.read(cx).copied(cx);
+                    if let Some(text) = row_select::clipboard_text(conversation, select::copied) {
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
                         cx.stop_propagation();
                         return;

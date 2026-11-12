@@ -267,3 +267,28 @@ while the screen is locked (true of the base build too), so its 58 draws of Phas
 reproduced; rerun it on an unlocked Mac. `hover` and `typing` keep their one draw (the first
 hover; the box growing past a line). `scroll` is the conversation scrolling, which draws it by
 design.
+
+## Task 5.2 (selection anchored to the model)
+
+A release build over the generated 200-turn root, the screen locked, so every frame forced
+(`forced: true`; `ms/frame` is not comparable with the display-link rows, judge by the counts),
+10 s per run, three runs each, the commit before the task (with the bench fix below) against the
+task. Columns: frames / conversation / sidebar / details draws / rows built.
+
+| Mode | Before (3 runs) | After (3 runs) |
+| --- | --- | --- |
+| select | 121 / 57 / 0 / 0 / 28500; 125 / 61 / 0 / 0 / 30500; 132 / 61 / 0 / 0 / 30500 | 133 / 62 / 0 / 0 / 31000; 126 / 60 / 0 / 0 / 30000; 114 / 55 / 0 / 0 / 27500 |
+| scroll | 93 / 93 / 0 / 0 / 46500; 82 / 82 / 0 / 0 / 41000; 93 / 93 / 0 / 0 / 46500 | 89 / 89 / 0 / 0 / 44500; 91 / 91 / 0 / 0 / 45500; 97 / 97 / 0 / 0 / 48500 |
+| hover | 100 / 1 / 0 / 0 / 500 (x3) | 101 / 1 / 0 / 0 / 500 (x3) |
+
+The counts don't move, as expected: the selection already redrew only the conversation, and the
+conversation still lays out every row on a draw until Task 6.1. What changes is what a draw
+needs: a copy reads the model's blocks, not the drawn notes, so a row that isn't drawn is copied
+like any other (Task 6.1 will stop drawing those).
+
+**The `select` mode under a locked screen.** It showed 0 conversation draws there (the Phase 4
+section) because the injected press landed before the conversation's first draw. The press
+reaches the window's view fine when the screen is locked (AppKit events handed to our own window's
+view, as for `scroll`); `prepare` now waits until a row has been built (up to 5 s) and 300 ms more
+before pressing. The new test `bench_select_draws_the_conversation_only` asserts the conversation
+drew (so a press that missed can't pass), the Sidebar and the Details Panel didn't.

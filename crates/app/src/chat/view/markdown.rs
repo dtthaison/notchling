@@ -2,16 +2,19 @@
 //! blocks, each paragraph's spans as one styled text, links clickable (`page_panel::follow_link`:
 //! an Artifact opens beside the chat, anything else in the browser).
 
+use std::cell::Cell;
+
 use gpui::{
     div, font, img, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
-    InteractiveText, MouseButton, ObjectFit, SharedString, StrikethroughStyle, StyledText, TextRun,
-    UnderlineStyle,
+    InteractiveText, MouseButton, ObjectFit, SharedString, StrikethroughStyle, StyledText,
+    TextLayout, TextRun, UnderlineStyle,
 };
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SYSTEM_FONT};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::row_select::{self, SelState};
 use crate::chat::markdown::{LinkPress, Span};
 use crate::chat::markdown_cache::{spans_text, Inline, Item, Part};
 
@@ -20,11 +23,62 @@ const BODY_LINE: f32 = 20.0;
 /// A linked image's width under its paragraph; its height follows its shape.
 const IMAGE_WIDTH: f32 = 360.0;
 
+/// Where a text drawn here is selectable: a conversation row (its texts are numbered in the order
+/// they are drawn, which is `chat::blocks::plain_blocks`' order), or the file panel (texts keyed by
+/// name, selected in draw order: `select`).
+pub enum Sel<'a> {
+    Row {
+        row: &'a SharedString,
+        /// The block number the next selectable text takes.
+        next: &'a Cell<u16>,
+        state: &'a SelState,
+    },
+    File,
+}
+
+impl Sel<'_> {
+    /// The row's key (its item's id for a row of items), which names its groups and buttons.
+    pub fn id(&self) -> &str {
+        match self {
+            Sel::Row { row, .. } => row,
+            Sel::File => "",
+        }
+    }
+}
+
+/// `child` (a text laid out as `layout`, of `text`) made selectable the way `sel` says; `key` is
+/// the file panel's name for it.
+fn selectable(
+    sel: &Sel,
+    key: String,
+    text: String,
+    layout: TextLayout,
+    child: AnyElement,
+    a: Appearance,
+) -> AnyElement {
+    match sel {
+        Sel::Row { row, next, state } => {
+            let block = next.get();
+            next.set(block.saturating_add(1));
+            row_select::selectable((*row).clone(), block, text, layout, child, a, state)
+                .into_any_element()
+        }
+        Sel::File => super::select::selectable(key, text, layout, child, a).into_any_element(),
+    }
+}
+
 /// The spans (`markdown_cache`: parsed, paths linked) as one text element: bold, italics, code
 /// (the mono face on a raised wash), strikethrough, links (accent, underlined, clickable).
 /// `weight` is the text's own weight (a heading's), `ink` its color. `key` makes the element's id
 /// unique in the window.
-fn inline(key: &str, spans: &[Span], weight: FontWeight, ink: Ink, a: Appearance) -> AnyElement {
+fn inline(
+    key: &str,
+    sel: &Sel,
+    spans: &[Span],
+    weight: FontWeight,
+    ink: Ink,
+    a: Appearance,
+) -> AnyElement {
     let full = spans_text(spans);
     let mut runs: Vec<TextRun> = Vec::with_capacity(spans.len());
     let mut links: Vec<(std::ops::Range<usize>, String)> = Vec::new();
@@ -42,14 +96,14 @@ fn inline(key: &str, spans: &[Span], weight: FontWeight, ink: Ink, a: Appearance
     let text_layout = styled.layout().clone();
     let select_key = format!("{key}-text");
     if links.is_empty() {
-        return super::select::selectable(
+        return selectable(
+            sel,
             select_key,
             plain_text,
             text_layout,
             styled.into_any_element(),
             a,
-        )
-        .into_any_element();
+        );
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
     let layout = styled.layout().clone();
@@ -77,14 +131,14 @@ fn inline(key: &str, spans: &[Span], weight: FontWeight, ink: Ink, a: Appearance
             }
         })
         .child(text);
-    super::select::selectable(
+    selectable(
+        sel,
         select_key,
         plain_text,
         text_layout,
         linked.into_any_element(),
         a,
     )
-    .into_any_element()
 }
 
 /// An image file's width and height, read once from the first bytes of the file.
@@ -168,7 +222,7 @@ pub fn copy_button(key: &str, text: &str, a: Appearance) -> impl IntoElement {
 
 /// Monospaced text in a box with a title row (`MonoBox`): "Command", "Output", or a code block's
 /// language. `error` tints it red.
-pub fn mono_box(key: &str, title: &str, text: &str, error: bool, a: Appearance) -> Div {
+pub fn mono_box(key: &str, sel: &Sel, title: &str, text: &str, error: bool, a: Appearance) -> Div {
     let title_ink = if error { Ink::Expired } else { Ink::TextMuted };
     let (fill, edge) = if error {
         let red = Ink::Expired.color(a);
@@ -202,18 +256,25 @@ pub fn mono_box(key: &str, title: &str, text: &str, error: bool, a: Appearance) 
                 .pb(px(10.0))
                 .kit_type(TypeRole::Mono)
                 .ink(Ink::Text, a)
-                .child(plain(&format!("{key}-text"), text, a)),
+                .child(plain(&format!("{key}-text"), sel, text, a)),
         )
 }
 
-/// Text in its parent's style, selectable under `key` (`select`).
-pub fn plain(key: &str, text: &str, a: Appearance) -> AnyElement {
+/// Text in its parent's style, selectable as `sel` says (`key` names it in the file panel).
+pub fn plain(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {
     let styled = StyledText::new(SharedString::from(text.to_owned()));
     let layout = styled.layout().clone();
-    super::select::selectable(key, text, layout, styled.into_any_element(), a).into_any_element()
+    selectable(
+        sel,
+        key.to_owned(),
+        text.to_owned(),
+        layout,
+        styled.into_any_element(),
+        a,
+    )
 }
 
-fn heading(key: &str, level: usize, spans: &[Span], first: bool, a: Appearance) -> Div {
+fn heading(key: &str, sel: &Sel, level: usize, spans: &[Span], first: bool, a: Appearance) -> Div {
     let size = match level {
         1 => 18.0,
         2 => 16.0,
@@ -238,15 +299,15 @@ fn heading(key: &str, level: usize, spans: &[Span], first: bool, a: Appearance) 
         .text_size(px(size))
         .font_weight(weight)
         .ink(Ink::Text, a)
-        .child(inline(key, spans, weight, Ink::Text, a))
+        .child(inline(key, sel, spans, weight, Ink::Text, a))
 }
 
-fn paragraph(key: &str, text: &Inline, ink: Ink, a: Appearance) -> Div {
+fn paragraph(key: &str, sel: &Sel, text: &Inline, ink: Ink, a: Appearance) -> Div {
     div()
         .kit_type(TypeRole::Body)
         .line_height(px(BODY_LINE))
         .ink(ink, a)
-        .child(inline(key, &text.spans, FontWeight::NORMAL, ink, a))
+        .child(inline(key, sel, &text.spans, FontWeight::NORMAL, ink, a))
         .children(text.images.iter().map(|path| image(key, path, a)))
 }
 
@@ -275,7 +336,7 @@ fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
         )
 }
 
-fn list(key: &str, items: &[Item], a: Appearance) -> Div {
+fn list(key: &str, sel: &Sel, items: &[Item], a: Appearance) -> Div {
     div()
         .flex()
         .flex_col()
@@ -304,14 +365,14 @@ fn list(key: &str, items: &[Item], a: Appearance) -> Div {
                 .gap(px(8.0))
                 .child(marker)
                 .child(
-                    paragraph(&format!("{key}-{i}"), &item.inline, Ink::Text, a)
+                    paragraph(&format!("{key}-{i}"), sel, &item.inline, Ink::Text, a)
                         .flex_1()
                         .min_w(px(0.0)),
                 )
         }))
 }
 
-fn quote(key: &str, text: &Inline, a: Appearance) -> Div {
+fn quote(key: &str, sel: &Sel, text: &Inline, a: Appearance) -> Div {
     div()
         .flex()
         .items_start()
@@ -324,13 +385,13 @@ fn quote(key: &str, text: &Inline, a: Appearance) -> Div {
                 .bg(hsla(Ink::Accent.color(a).with_alpha(0.6))),
         )
         .child(
-            paragraph(key, text, Ink::TextMuted, a)
+            paragraph(key, sel, text, Ink::TextMuted, a)
                 .flex_1()
                 .min_w(px(0.0)),
         )
 }
 
-fn code(key: &str, language: &str, text: &str, a: Appearance) -> Div {
+fn code(key: &str, sel: &Sel, language: &str, text: &str, a: Appearance) -> Div {
     let title = if language.is_empty() {
         "code"
     } else {
@@ -363,11 +424,17 @@ fn code(key: &str, language: &str, text: &str, a: Appearance) -> Div {
                 .p(px(12.0))
                 .kit_type(TypeRole::Mono)
                 .ink(Ink::Text, a)
-                .child(plain(&format!("{key}-code"), text, a)),
+                .child(plain(&format!("{key}-code"), sel, text, a)),
         )
 }
 
-fn table(key: &str, header: &[Vec<Span>], rows: &[Vec<Vec<Span>>], a: Appearance) -> Div {
+fn table(
+    key: &str,
+    sel: &Sel,
+    header: &[Vec<Span>],
+    rows: &[Vec<Vec<Span>>],
+    a: Appearance,
+) -> Div {
     let cell = |key: String, text: &[Span], head: bool| {
         div()
             .flex_1()
@@ -385,6 +452,7 @@ fn table(key: &str, header: &[Vec<Span>], rows: &[Vec<Vec<Span>>], a: Appearance
             .ink(Ink::Text, a)
             .child(inline(
                 &key,
+                sel,
                 text,
                 if head {
                     FontWeight::SEMIBOLD
@@ -433,17 +501,17 @@ fn table(key: &str, header: &[Vec<Span>], rows: &[Vec<Vec<Span>>], a: Appearance
 /// The message as blocks, 10 pt apart. `key` makes the ids unique (the item's id); `message` is
 /// the text prepared by `ChatView`'s `markdown_cache`, its paths read against the folders the
 /// text names, then the session's (or the file's own) folder.
-pub fn render(key: &str, message: &[Part], a: Appearance) -> Div {
+pub fn render(key: &str, sel: &Sel, message: &[Part], a: Appearance) -> Div {
     let mut column = div().w_full().flex().flex_col().gap(px(10.0));
     for (i, part) in message.iter().enumerate() {
         let k = format!("{key}-{i}");
         column = column.child(match part {
-            Part::Heading { level, spans } => heading(&k, *level, spans, i == 0, a),
-            Part::Paragraph(text) => paragraph(&k, text, Ink::Text, a),
-            Part::List(items) => list(&k, items, a),
-            Part::Quote(text) => quote(&k, text, a),
-            Part::Code { language, text } => code(&k, language, text, a),
-            Part::Table { header, rows } => table(&k, header, rows, a),
+            Part::Heading { level, spans } => heading(&k, sel, *level, spans, i == 0, a),
+            Part::Paragraph(text) => paragraph(&k, sel, text, Ink::Text, a),
+            Part::List(items) => list(&k, sel, items, a),
+            Part::Quote(text) => quote(&k, sel, text, a),
+            Part::Code { language, text } => code(&k, sel, language, text, a),
+            Part::Table { header, rows } => table(&k, sel, header, rows, a),
             Part::Rule => div().h(px(1.0)).my(px(4.0)).fill(Ink::Hairline, a),
         });
     }

@@ -188,6 +188,15 @@ async fn prepare(mode: Mode, target: &mut Target, cx: &mut AsyncApp) {
             }
         }
         Mode::Select => {
+            // The conversation loads in the background: a press before its first draw lands on
+            // nothing, so wait for rows (a second or so, a locked screen included).
+            let until = Instant::now() + Duration::from_secs(5);
+            while ROWS.load(Ordering::Relaxed) == 0 && Instant::now() < until {
+                cx.background_executor().timer(FORCED_EVERY).await;
+            }
+            cx.background_executor()
+                .timer(Duration::from_millis(300))
+                .await;
             if let Some(injector) = &target.injector {
                 injector.press(lane(target.size).0.x, lane(target.size).0.y);
             }

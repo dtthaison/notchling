@@ -460,7 +460,8 @@ fn file_body(
             let message = markdown
                 .borrow_mut()
                 .message(&key, text, &folder.to_string_lossy());
-            super::markdown::render(&key, &message, a).into_any_element()
+            super::markdown::render(&key, &super::markdown::Sel::File, &message, a)
+                .into_any_element()
         }
         Body::Text { text, cut: c } => {
             cut = *c;
@@ -475,7 +476,12 @@ fn file_body(
                     .flex()
                     .flex_col()
                     .children(lines.chunks(CHUNK_LINES).enumerate().map(|(i, chunk)| {
-                        super::markdown::plain(&format!("{key}-t{i}"), chunk.concat().trim_end(), a)
+                        super::markdown::plain(
+                            &format!("{key}-t{i}"),
+                            &super::markdown::Sel::File,
+                            chunk.concat().trim_end(),
+                            a,
+                        )
                     }))
                     .into_any_element()
             }
@@ -539,6 +545,8 @@ fn file_body(
                 .flex()
                 .flex_col()
                 .gap(px(10.0))
+                // First, so each frame's texts are noted afresh before the panel places theirs.
+                .child(super::select::listener())
                 .child(content)
                 .when(cut, |d| {
                     d.child(label(

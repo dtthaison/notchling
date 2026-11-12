@@ -13,7 +13,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::conversation::chevron;
 use super::conversation_view::{ConversationInput, ConversationState, ConversationView};
-use super::markdown;
+use super::markdown::{self, Sel};
 use crate::chat::rows::ToolRow;
 use crate::chat::steps::{self, Detail};
 
@@ -137,7 +137,12 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) 
 }
 
 /// What opens under a step: its diff, or its command or input and its output.
-fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) -> Option<Div> {
+fn step_detail(
+    step: &ToolRow,
+    sel: &Sel,
+    a: Appearance,
+    cx: &mut Context<ConversationView>,
+) -> Option<Div> {
     let mut detail = div().pl(px(24.0)).flex().flex_col().gap(px(6.0));
     match steps::detail(step) {
         Detail::None => return None,
@@ -146,6 +151,7 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>
             if let (Some(title), Some(text)) = (input_title, steps::input_text(step)) {
                 detail = detail.child(markdown::mono_box(
                     &format!("{}-in", step.id),
+                    sel,
                     title,
                     &text,
                     false,
@@ -156,6 +162,7 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>
                 let title = if step.is_error { "Error" } else { "Output" };
                 detail = detail.child(markdown::mono_box(
                     &format!("{}-out", step.id),
+                    sel,
                     title,
                     &text,
                     step.is_error,
@@ -171,6 +178,7 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>
 fn step_row(
     input: &ConversationInput,
     s: &ConversationState,
+    sel: &Sel,
     step: &ToolRow,
     live: bool,
     a: Appearance,
@@ -255,7 +263,7 @@ fn step_row(
         .flex_col()
         .gap(px(6.0))
         .child(line)
-        .when(open, |d| d.children(step_detail(step, a, cx)))
+        .when(open, |d| d.children(step_detail(step, sel, a, cx)))
 }
 
 /// The chip over a run of calls (`ToolStepView`): the kinds' icons stacked, the summary, how many
@@ -318,12 +326,13 @@ fn step_chip(
 pub(super) fn step_group(
     input: &ConversationInput,
     s: &ConversationState,
-    id: &str,
+    sel: &Sel,
     steps: &[ToolRow],
     live: bool,
     a: Appearance,
     cx: &mut Context<ConversationView>,
 ) -> Div {
+    let id = sel.id();
     let open = live || s.is_open(id);
     div()
         .flex()
@@ -344,7 +353,7 @@ pub(super) fn step_group(
                     .children(
                         steps
                             .iter()
-                            .map(|step| step_row(input, s, step, live, a, cx)),
+                            .map(|step| step_row(input, s, sel, step, live, a, cx)),
                     ),
             )
         })

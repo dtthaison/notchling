@@ -222,8 +222,12 @@ impl ChatView {
             return;
         }
         self.selected = Some(id.to_owned());
+        // Both selections let go: the conversation's, and the file panel's own.
         select::clear();
-        self.conversation_state(cx, |s| s.markdown.get_mut().switched());
+        self.conversation_state(cx, |s| {
+            s.sel.borrow_mut().selection.clear();
+            s.markdown.get_mut().switched();
+        });
         self.mark_used(id);
         self.conversation = Arc::default();
         self.subagents.clear();

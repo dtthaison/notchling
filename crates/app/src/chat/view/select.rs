@@ -1,12 +1,14 @@
-//! Selecting a conversation's text with the pointer, since GPUI 0.2.2's text can't be selected:
-//! press and drag across one message or several, double-click for a word, triple-click for the
-//! paragraph, ⌘C to copy (`ChatView`'s key capture asks [`copied`]).
+//! Selecting the file panel's text with the pointer, since GPUI 0.2.2's text can't be selected:
+//! press and drag across its texts, double-click for a word, triple-click for the paragraph, ⌘C to
+//! copy (`ChatView`'s key capture asks [`copied`]). The conversation's selection is `row_select`'s,
+//! anchored to rows; this one stays in draw order, which is enough for a panel that draws all of
+//! its texts every frame.
 //!
-//! Each text drawn in the conversation is wrapped in [`selectable`], which notes its layout as it's
-//! placed (in reading order, so the order of the notes is the order of the text), paints the
-//! selected part behind it and shows the I-beam over it. [`listener`] goes first in the column: it
-//! starts each frame's notes and takes the presses, drags and releases. The positions themselves
-//! are `chat::selection`'s.
+//! Each text drawn in the panel is wrapped in [`selectable`], which notes its layout as it's placed
+//! (in reading order, so the order of the notes is the order of the text), paints the selected part
+//! behind it and shows the I-beam over it. [`listener`] goes first in the panel's body: it starts
+//! each frame's notes and takes the presses, drags and releases. The positions themselves are
+//! `chat::selection`'s.
 
 use std::cell::RefCell;
 use std::ops::Range;
@@ -157,18 +159,6 @@ pub fn copied() -> Option<String> {
     })
 }
 
-/// The texts the last frame noted, in reading order, each with its key: what the render check
-/// (`ChatView::check_blocks`) holds the model's blocks to.
-pub fn noted() -> Vec<(String, String)> {
-    STATE.with(|s| {
-        s.borrow()
-            .notes
-            .iter()
-            .map(|n| (n.key.clone(), n.text.clone()))
-            .collect()
-    })
-}
-
 /// Forgets the selection (another session opened).
 pub fn clear() {
     STATE.with(|s| {
@@ -179,7 +169,7 @@ pub fn clear() {
     });
 }
 
-/// Goes first in the conversation's column: starts the frame's notes, and takes the pointer.
+/// Goes first in the file panel's body: starts the frame's notes, and takes the pointer.
 pub fn listener() -> impl IntoElement {
     canvas(
         |_, _, _| {
@@ -268,7 +258,7 @@ pub fn listener() -> impl IntoElement {
 }
 
 /// `child` (a text whose layout is `layout`, of `text`) made selectable under `key`, which must be
-/// unique in the conversation and the same each frame.
+/// unique in the panel and the same each frame.
 pub fn selectable(
     key: impl Into<String>,
     text: impl Into<String>,
@@ -378,7 +368,7 @@ impl Element for Selectable {
 
 /// The rectangles behind `range` of a laid-out text: one per line it covers, found by asking where
 /// each character starts (a line ends where the next character jumps down a line).
-fn rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
+pub(super) fn rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
     let height = layout.line_height();
     let text = layout.text();
     let mut rows: Vec<(Pixels, Pixels, Pixels)> = Vec::new(); // (top, left, right)

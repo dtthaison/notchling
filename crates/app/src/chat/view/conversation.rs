@@ -5,6 +5,8 @@
 //! to its text; a reply is Markdown; a turn ends in "Worked for 48s · Opus 5.5" between hairlines.
 //! What is open is `ChatView::expanded`; the newest group of a working session is always open.
 
+use std::cell::Cell;
+
 use gpui::{
     div, point, prelude::*, px, relative, AnyElement, App, BoxShadow, Context, Div, SharedString,
     Stateful,
@@ -19,8 +21,10 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::conversation_view::{ConversationInput, ConversationState, ConversationView};
+use super::markdown::{self, Sel};
+use super::row_select::{self, key_of};
 use super::steps_view::{hairline, step_group, thinking};
-use super::{markdown, message_actions, opinions, ChatView};
+use super::{message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
 use crate::chat::rows::{rows, with_outgoing, Row};
 
@@ -149,7 +153,7 @@ pub(super) fn latest_pill(
 
 /// Your message: `split` is its words and the pictures it sent (`drops::split_images`).
 fn user_row(
-    id: &str,
+    sel: &Sel,
     split: (String, Vec<std::path::PathBuf>),
     images: usize,
     queued: bool,
@@ -157,6 +161,7 @@ fn user_row(
     a: Appearance,
     cx: &App,
 ) -> Div {
+    let id = sel.id();
     // The Swift names: a sent message is "Your Message", one waiting for the turn "Queued Bubble".
     let name = match (queued, sending) {
         (_, true) => "Sending Bubble",
@@ -205,7 +210,12 @@ fn user_row(
                     .kit_type(TypeRole::Body)
                     .ink(Ink::Text, a)
                     .when(queued, |d| d.opacity(0.6))
-                    .child(super::markdown::plain(&format!("{id}-mine"), &words, a))
+                    .child(super::markdown::plain(
+                        &format!("{id}-mine"),
+                        sel,
+                        &words,
+                        a,
+                    ))
                     .part_at(name, Corner::TopTrailing, a, cx),
             )
         })
@@ -252,11 +262,12 @@ fn row_element(
     input: &ConversationInput,
     s: &ConversationState,
     row: &Row,
-    id: &str,
+    sel: &Sel,
     live: bool,
     a: Appearance,
     cx: &mut Context<ConversationView>,
 ) -> Div {
+    let id = sel.id();
     match row {
         Row::User {
             text,
@@ -266,7 +277,7 @@ fn row_element(
         } => {
             // The pictures you sent show as pictures, their paths taken out of the words.
             let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
-            user_row(id, split, *images, *queued, *sending, a, cx)
+            user_row(sel, split, *images, *queued, *sending, a, cx)
         }
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
@@ -284,6 +295,7 @@ fn row_element(
                     .border_color(hsla(Ink::Hairline.color(a)))
                     .child(markdown::render(
                         id,
+                        sel,
                         &s.markdown.borrow_mut().message(id, text, folder),
                         a,
                     ))
@@ -291,7 +303,7 @@ fn row_element(
             )
         }
         Row::Thinking { title, text } => thinking(s, id, title, text, a, cx),
-        Row::Tools(tools) => step_group(input, s, id, tools, live, a, cx),
+        Row::Tools(tools) => step_group(input, s, sel, tools, live, a, cx),
         Row::TurnEnd { text } => div()
             .w_full()
             .py(px(2.0))
@@ -322,6 +334,7 @@ fn row_element(
         Row::CommandOutput { text } => div()
             .child(markdown::mono_box(
                 &format!("{id}-cmd"),
+                sel,
                 "Output",
                 text,
                 false,
@@ -344,8 +357,15 @@ fn row_with_opinions(
 ) -> AnyElement {
     super::pane::ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let item = input.shown.items.get(i);
-    let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
-    let element = row_element(input, s, row, id, live, a, cx);
+    // The row's key, and the texts it makes selectable, numbered as they are drawn.
+    let key = key_of(&input.shown.items, i, row);
+    let next = Cell::new(0);
+    let sel = Sel::Row {
+        row: &key,
+        next: &next,
+        state: &s.sel,
+    };
+    let element = row_element(input, s, row, &sel, live, a, cx);
     // A subagent's transcript is only read: no second opinions on it.
     let subjects = item
         .filter(|_| input.subagent.is_none())
@@ -385,7 +405,7 @@ fn row_with_opinions(
 
 /// The newest step group of a working session stays open with its running call spinning (the
 /// Swift app's `liveTools`): the session works, and the last item is that group.
-fn live_group_of(input: &ConversationInput) -> Option<usize> {
+pub(super) fn live_group_of(input: &ConversationInput) -> Option<usize> {
     let working = match &input.subagent {
         Some(sub) => sub.running,
         None => input.held_working || input.session.as_ref().is_some_and(|s| s.working),
@@ -402,6 +422,16 @@ pub(super) fn render(
     let shown = &*input.shown;
     // What was typed to the session isn't waiting in a subagent's transcript.
     let rows = with_outgoing(rows(shown), &input.outgoing);
+    {
+        // Where each row is, for the selection's ends; one whose row went is dropped.
+        let mut frame = s.sel.borrow_mut();
+        frame.rows = rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| (key_of(&shown.items, i, row), i))
+            .collect();
+        frame.prune();
+    }
     let column = div()
         .id("conversation")
         .flex_1()
@@ -419,8 +449,8 @@ pub(super) fn render(
         .flex()
         .flex_col()
         .gap(px(ROW_GAP))
-        // First, so each frame's texts are noted afresh before the rows place theirs.
-        .child(super::select::listener());
+        // First, so each draw's texts are noted afresh before the rows place theirs.
+        .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()));
     if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
         return column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a));
     }
@@ -453,63 +483,4 @@ pub(super) fn render(
             .enumerate()
             .map(|(i, row)| row_with_opinions(input, s, i, row, last_tools == Some(i), a, cx)),
     )
-}
-
-impl ChatView {
-    /// The render check (`NOTCHLING_RENDER_CHECK_BLOCKS=1`): the texts the last frame made
-    /// selectable, in the order they were noted, against `chat::blocks::plain_blocks` over the
-    /// rows shown, from the model alone. Meant for a window with no file panel open. The number
-    /// of texts, or what differs first.
-    pub fn check_blocks(&self, cx: &App) -> Result<usize, String> {
-        use crate::chat::blocks::{plain_blocks, Shown};
-        let input = self.conversation_input(cx);
-        let s = &self.parts.conversation.read(cx).s;
-        let rows = with_outgoing(rows(&input.shown), &input.outgoing);
-        let live = live_group_of(&input);
-        let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
-        let is_open = |key: &str| s.is_open(key);
-        let is_file = |path: &std::path::Path| s.markdown.borrow().is_file(path);
-        let mut model = Vec::new();
-        for (i, row) in rows.iter().enumerate() {
-            let id = input
-                .shown
-                .items
-                .get(i)
-                .map_or("queued", |item| item.id.as_str());
-            let message = match row {
-                Row::Assistant { text } => Some(s.markdown.borrow_mut().message(id, text, folder)),
-                _ => None,
-            };
-            let shown = Shown {
-                is_open: &is_open,
-                live: live == Some(i),
-                is_file: &is_file,
-            };
-            model.extend(plain_blocks(
-                row,
-                id,
-                message.as_deref().map(Vec::as_slice),
-                &shown,
-            ));
-        }
-        let drawn = super::select::noted();
-        for i in 0..drawn.len().max(model.len()) {
-            match (drawn.get(i), model.get(i)) {
-                (Some((_, text)), Some(block)) if text == block => {}
-                (Some((key, text)), model) => {
-                    return Err(format!(
-                        "mismatch at {i}: drawn {key} {text:?} model {:?}",
-                        model.map(String::as_str)
-                    ))
-                }
-                (None, model) => {
-                    return Err(format!(
-                        "mismatch at {i}: drawn nothing model {:?}",
-                        model.map(String::as_str)
-                    ))
-                }
-            }
-        }
-        Ok(drawn.len())
-    }
 }
