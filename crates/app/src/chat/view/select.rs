@@ -17,11 +17,13 @@ use gpui::{
     canvas, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element,
     ElementId, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Styled, TextLayout,
-    Window,
+    WeakEntity, Window,
 };
 use notchling_kit::ui::hsla;
 use notchling_kit::{Appearance, Ink};
 
+use super::copy_menu::selects;
+use super::ChatView;
 use crate::chat::selection::{copied as copy_of, floor, ordered, range_in, word_at, At};
 
 /// A text drawn this frame: its key (stable across frames), its text and where it was laid out.
@@ -169,8 +171,9 @@ pub fn clear() {
     });
 }
 
-/// Goes first in the file panel's body: starts the frame's notes, and takes the pointer.
-pub fn listener() -> impl IntoElement {
+/// Goes first in the file panel's body: starts the frame's notes, and takes the pointer. `chat` is
+/// the window's view, which opens the Copy menu on a right click.
+pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
     canvas(
         |_, _, _| {
             STATE.with(|s| {
@@ -179,11 +182,39 @@ pub fn listener() -> impl IntoElement {
                 s.at.clear();
             })
         },
-        |_, _, window, _| {
+        move |_, _, window, _| {
             // The view this paints in: a selection change draws it, not the whole window.
             let view = window.current_view();
             window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
-                if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                // The right button opens the Copy menu over text and leaves the selection as it is.
+                if event.button == MouseButton::Right {
+                    let (over, enabled) = STATE.with(|s| {
+                        let s = s.borrow();
+                        let over = s
+                            .notes
+                            .iter()
+                            .any(|n| n.layout.bounds().contains(&event.position));
+                        (over, selects(s.anchor.as_ref(), s.focus.as_ref()))
+                    });
+                    if over {
+                        let at = event.position;
+                        chat.update(cx, |chat, cx| chat.open_copy_menu(at, enabled, cx))
+                            .ok();
+                    }
+                    return;
+                }
+                if event.button != MouseButton::Left {
+                    return;
+                }
+                // With the Copy menu open a press belongs to the menu, which copies what is
+                // selected and goes away on any other click: the selection stays as it is.
+                if chat
+                    .upgrade()
+                    .is_some_and(|chat| chat.read(cx).copy_menu_open())
+                {
                     return;
                 }
                 STATE.with(|s| {

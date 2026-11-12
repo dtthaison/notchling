@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, App, Context, CursorStyle, DragMoveEvent,
-    EmptyView, ImageFormat, ObjectFit, SharedString, Window,
+    EmptyView, ImageFormat, ObjectFit, SharedString, WeakEntity, Window,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_MD, SIDEBAR_WIDTH};
@@ -362,6 +362,8 @@ impl ChatView {
         self.page.asked += 1;
         self.page.shown = None;
         self.page.web.borrow_mut().take();
+        // Its text is gone: a selection in it must not answer a later Copy.
+        super::select::clear();
         self.details_hidden = false;
         cx.notify();
     }
@@ -448,6 +450,7 @@ fn file_body(
     file: &FileState,
     width: f32,
     markdown: &RefCell<MarkdownCache>,
+    chat: WeakEntity<ChatView>,
     a: Appearance,
 ) -> AnyElement {
     let key = format!("file-panel-{}", file.path.display());
@@ -546,7 +549,7 @@ fn file_body(
                 .flex_col()
                 .gap(px(10.0))
                 // First, so each frame's texts are noted afresh before the panel places theirs.
-                .child(super::select::listener())
+                .child(super::select::listener(chat))
                 .child(content)
                 .when(cut, |d| {
                     d.child(label(
@@ -665,7 +668,13 @@ pub fn render(
 
     // A file: its text, in the room below the header.
     let page = match shown.file.as_ref() {
-        Some(file) => file_body(file, width, &view.parts.conversation.read(cx).s.markdown, a),
+        Some(file) => file_body(
+            file,
+            width,
+            &view.parts.conversation.read(cx).s.markdown,
+            cx.entity().downgrade(),
+            a,
+        ),
         None => web_page(view, shown, a),
     };
 

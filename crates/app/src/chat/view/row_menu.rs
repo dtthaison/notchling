@@ -196,16 +196,29 @@ fn confirm_card(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> D
 
 /// The menu at the click, over a layer that closes it on a click anywhere else.
 fn layer(menu: &RowMenu, items: Div, cx: &mut Context<ChatView>) -> Div {
-    let close = |this: &mut ChatView, cx: &mut Context<ChatView>| {
-        this.row_menu = None;
-        cx.notify();
-    };
+    popup("row-menu-click-away", menu.at, items, close_row_menu, cx)
+}
+
+fn close_row_menu(this: &mut ChatView, cx: &mut Context<ChatView>) {
+    this.row_menu = None;
+    cx.notify();
+}
+
+/// `items` at `at` over a layer that runs `close` on a press anywhere else, either button. The
+/// right-click menus share it (this one, `copy_menu`).
+pub(super) fn popup(
+    id: &'static str,
+    at: Point<Pixels>,
+    items: Div,
+    close: fn(&mut ChatView, &mut Context<ChatView>),
+    cx: &mut Context<ChatView>,
+) -> Div {
     div()
         .absolute()
         .size_full()
         .child(
             div()
-                .id("row-menu-click-away")
+                .id(id)
                 .absolute()
                 .size_full()
                 .occlude()
@@ -221,8 +234,8 @@ fn layer(menu: &RowMenu, items: Div, cx: &mut Context<ChatView>) -> Div {
         .child(
             div()
                 .absolute()
-                .left(menu.at.x)
-                .top(menu.at.y)
+                .left(at.x)
+                .top(at.y)
                 .occlude()
                 .rounded(px(RADIUS_MD))
                 .child(items),

@@ -230,17 +230,15 @@ impl ChatView {
         self.redraw_chrome(cx);
     }
 
-    /// `--render`'s copy check: what ⌘C would copy from the conversation now, none when nothing
-    /// is selected.
+    /// `--render`'s copy check: what is selected in the conversation or the file panel, none when
+    /// nothing is.
     pub fn bench_selected_text(&self, cx: &App) -> Option<String> {
-        self.parts.conversation.read(cx).copied(cx)
+        self.shown_selection(cx)
     }
 
-    /// `--render`'s copy check: the reply box has the keyboard, as it does once it was clicked.
-    pub fn bench_focus_reply(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
-        self.tools
-            .editor
-            .update(cx, |editor, _| editor.focus(window));
+    /// `--render`'s copy check: where the Copy menu is open and whether its Copy is on.
+    pub fn bench_copy_menu(&self) -> Option<(gpui::Point<gpui::Pixels>, bool)> {
+        self.copy_menu.as_ref().map(|menu| (menu.at, menu.enabled))
     }
 
     /// `--render`'s bench: whether the conversation is at its newest message.

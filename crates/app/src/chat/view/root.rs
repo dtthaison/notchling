@@ -30,6 +30,7 @@ impl Render for ChatView {
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.row_menu.is_some()
+            || self.copy_menu.is_some()
             || self.phone.is_some()
             || self.tools.picker.is_some()
             || self.composer.is_open()
@@ -153,6 +154,7 @@ impl Render for ChatView {
             .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))
             .children(row_menu::render(self, a, cx))
+            .children(copy_menu::render(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
             .child(resize_edges(window, TopBorder::InContent))

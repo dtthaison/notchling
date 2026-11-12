@@ -47,7 +47,9 @@ pub const CHECK_BLOCKS_ENV: &str = "NOTCHLING_RENDER_CHECK_BLOCKS";
 
 /// The environment's name for the switch that selects text in the conversation with the pointer,
 /// copies it and checks the clipboard (`check_copy`), printing `copy-check: ok <n>`: `1` or `key`
-/// sends ⌘C to the window, `action` dispatches the Copy action, as the Edit menu's item does.
+/// sends ⌘C to the window, `action` dispatches the Copy action, as the Edit menu's item does, and
+/// `menu` right-clicks the text and clicks Copy in the menu that opens. `NOTCHLING_RENDER_CHECK_COPY_IN=file`
+/// does it in the file panel (with `NOTCHLING_RENDER_FILE`) instead of the conversation.
 pub const CHECK_COPY_ENV: &str = "NOTCHLING_RENDER_CHECK_COPY";
 
 /// The environment's name for the switch that draws frames by hand when the screen sends none
@@ -312,13 +314,19 @@ async fn check_copy(target: &bench::Target, cx: &mut gpui::AsyncApp, how: &str) 
     cx.background_executor()
         .timer(Duration::from_millis(400))
         .await;
-    let (top, span) = bench::lane(target.size);
+    let (mut top, span) = bench::lane(target.size);
+    if std::env::var("NOTCHLING_RENDER_CHECK_COPY_IN").is_ok_and(|v| v == "file") {
+        // The panel takes the right 520 pt: the drag runs through its middle.
+        top.x = target.size.width - px(260.0);
+    }
     let step = Duration::from_millis(30);
     // Start on the first line of text from the lane's top: a press between messages holds nothing.
     let mut expected = None;
+    let mut pressed = top;
     for down in 0..40u32 {
         let y = top.y + px(down as f32 * 8.0);
-        injector.press(top.x - px(150.0), y);
+        pressed = point(top.x - px(150.0), y);
+        injector.press(pressed.x, pressed.y);
         for n in 1..=20u32 {
             injector.drag(top.x + px(150.0), y + px(span * n as f32 / 20.0));
             cx.background_executor().timer(step / 3).await;
@@ -353,6 +361,37 @@ async fn check_copy(target: &bench::Target, cx: &mut gpui::AsyncApp, how: &str) 
             .ok();
             "the Copy action"
         }
+        "menu" => {
+            // A right click on the text where the drag began: the menu opens at the pointer and
+            // the selection stays.
+            injector.right_click(pressed.x, pressed.y);
+            frames_drawn(3, cx).await;
+            let menu = cx
+                .update(|cx| chat.read(cx).bench_copy_menu())
+                .ok()
+                .flatten();
+            let Some((at, enabled)) = menu else {
+                fail("a right click on selected text opened no menu".to_owned());
+            };
+            if !enabled {
+                fail("the menu's Copy is off with text selected".to_owned());
+            }
+            let kept = cx
+                .update(|cx| chat.read(cx).bench_selected_text(cx))
+                .ok()
+                .flatten();
+            if kept.as_deref() != Some(expected.as_str()) {
+                fail(format!(
+                    "the right click changed the selection: it was {expected:?}, now {kept:?}"
+                ));
+            }
+            // The menu is on screen once a few frames have drawn since it opened.
+            frames_drawn(3, cx).await;
+            // The menu's only item sits under its top left corner (a 6 pt pad, a row 26 pt high).
+            injector.press(at.x + px(30.0), at.y + px(19.0));
+            injector.release(at.x + px(30.0), at.y + px(19.0));
+            "the right-click menu's Copy"
+        }
         _ => {
             injector.command_key("c", 8);
             "⌘C"
@@ -368,6 +407,20 @@ async fn check_copy(target: &bench::Target, cx: &mut gpui::AsyncApp, how: &str) 
         other => fail(format!(
             "mismatch: the selection says {expected:?}; after {how} the clipboard has {other:?}"
         )),
+    }
+}
+
+/// Waits until the window has drawn `n` more frames (two seconds at most): what a click on
+/// something that just appeared needs, since the thing is hit-tested against the last frame.
+async fn frames_drawn(n: u64, cx: &mut gpui::AsyncApp) {
+    let until = FRAMES.load(Ordering::Relaxed) + n;
+    for _ in 0..200 {
+        if FRAMES.load(Ordering::Relaxed) >= until {
+            return;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(10))
+            .await;
     }
 }
 

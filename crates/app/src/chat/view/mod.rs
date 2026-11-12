@@ -13,6 +13,7 @@ mod conversation;
 mod conversation_list;
 mod conversation_view;
 mod copy;
+mod copy_menu;
 mod drop;
 mod header;
 mod inspector;
@@ -112,6 +113,8 @@ pub const SIMULATOR_ENV: &str = simulator::RENDER_ENV;
 pub const SLASH_ENV: &str = "NOTCHLING_RENDER_SLASH";
 /// Set to `1`, a render draws the first sidebar row's right-click menu open.
 pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
+/// Set to `1` (Copy on) or `off`, a render draws the Copy menu open over the conversation.
+pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 
@@ -214,6 +217,8 @@ pub struct ChatView {
     account_menu: bool,
     /// The menu a right click on a sidebar row opened.
     row_menu: Option<row_menu::RowMenu>,
+    /// The menu a right click on text opened (`copy_menu`).
+    copy_menu: Option<copy_menu::CopyMenu>,
     /// The anchor that keeps Copy reachable when nothing has the keyboard (`copy`).
     keys: copy::Keys,
     /// When the accounts store was last read for the header (ms).
@@ -299,6 +304,12 @@ impl ChatView {
                 confirm_remove: false,
             });
         }
+        if let Ok(how) = std::env::var(COPY_MENU_ENV) {
+            view.copy_menu = Some(copy_menu::CopyMenu {
+                at: gpui::point(px(520.0), px(240.0)),
+                enabled: how != "off",
+            });
+        }
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
         }
@@ -379,7 +390,8 @@ impl ChatView {
                 popup: this.sheet.is_some()
                     || this.phone.is_some()
                     || this.account_menu
-                    || this.row_menu.is_some(),
+                    || this.row_menu.is_some()
+                    || this.copy_menu.is_some(),
                 subagent: this.open_subagent.is_some(),
                 working: this.selected_working(),
             };
@@ -395,6 +407,7 @@ impl ChatView {
                     this.phone = None;
                     this.account_menu = false;
                     this.row_menu = None;
+                    this.copy_menu = None;
                     cx.notify();
                 }
                 Escape::CloseSubagent => this.close_subagent(cx),
@@ -411,6 +424,7 @@ impl ChatView {
             limit_ring: limit_ring::State::default(),
             account_menu: false,
             row_menu: None,
+            copy_menu: None,
             keys: copy::Keys::new(cx),
             accounts_polled_ms: 0,
             codex_installed: accounts::codex_installed(&root.home),

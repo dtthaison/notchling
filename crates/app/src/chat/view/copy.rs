@@ -51,6 +51,13 @@ pub fn text_to_copy(
 }
 
 impl ChatView {
+    /// What is selected in the conversation or the file panel (not the reply box): what the
+    /// right-click menu copies.
+    pub(super) fn shown_selection(&self, cx: &gpui::App) -> Option<String> {
+        let conversation = self.parts.conversation.read(cx).copied(cx);
+        text_to_copy(conversation, select::copied, || None)
+    }
+
     /// What Copy would take now: see [`text_to_copy`]. The reply box counts only while it has the
     /// keyboard, so a selection left in it doesn't answer for another place.
     pub(super) fn selection_text(&self, window: &Window, cx: &gpui::App) -> Option<String> {

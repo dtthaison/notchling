@@ -296,6 +296,24 @@ impl ConversationView {
         super::row_select::copied(&self.s.sel.borrow().selection, &blocks)
     }
 
+    /// A right click on text at `at`: the chat opens its Copy menu there (`enabled`: something is
+    /// selected). Called from the window's mouse listener, so the chat isn't being updated.
+    pub(super) fn right_click(
+        &self,
+        at: gpui::Point<gpui::Pixels>,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.act(move |chat, cx| chat.open_copy_menu(at, enabled, cx), cx);
+    }
+
+    /// The Copy menu is open: a press on it must not let go of what it copies.
+    pub(super) fn copy_menu_open(&self, cx: &App) -> bool {
+        self.chat
+            .upgrade()
+            .is_some_and(|chat| chat.read(cx).copy_menu.is_some())
+    }
+
     /// Lets go of the selection (another session opened).
     pub fn clear_selection(&mut self) {
         self.s.sel.borrow_mut().selection.clear();
