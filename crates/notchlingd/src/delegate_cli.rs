@@ -73,6 +73,8 @@ pub fn folders(
         home: real_home.to_path_buf(),
         codex_home: layout.codex_dir_with(codex_home),
         antigravity: layout.antigravity_dir(),
+        // `~/.claude.json`, or the fixture root's own under `NOTCHLING_DATA_ROOT`: never the real one.
+        claude_json: layout.home().join(".claude.json"),
         path,
         network,
     }
@@ -176,6 +178,7 @@ mod tests {
         assert_eq!(f.home, Path::new("/home/me"));
         assert_eq!(f.codex_home, Path::new("/home/me/.codex"));
         assert_eq!(f.antigravity, Path::new("/home/me/.gemini/antigravity-cli"));
+        assert_eq!(f.claude_json, Path::new("/home/me/.claude.json"));
         assert!(f.network, "on unless the settings say off");
         let custom = folders(
             &layout(None),
@@ -203,6 +206,11 @@ mod tests {
         assert_eq!(
             f.antigravity,
             Path::new("/tmp/nl-root/gemini/antigravity-cli")
+        );
+        assert_eq!(
+            f.claude_json,
+            Path::new("/tmp/nl-root/.claude.json"),
+            "a fixture never reads the real Claude state"
         );
     }
 

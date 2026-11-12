@@ -16,6 +16,7 @@
 //! | Running a job and printing it; `delegate-models` | [`command`] |
 //! | One Codex turn (read-only sandbox unless `--write`) | [`codex_run`] |
 //! | One Antigravity turn over ACP (permissions declined and listed; edits only with `--write`) | [`agy_run`] |
+//! | A folder Claude Code trusts is added to agy's trusted workspaces before it starts | [`agy_trust`] |
 //! | Waiting for agy's subagents, by file events | [`progress`] |
 //! | The record a delegation leaves for Chat (a subagent of the session that handed it over) | [`record`] |
 //! | Generated media pickup and `--out` copies (no traversal, no symlink out) | [`media`] |
@@ -31,6 +32,7 @@
 
 pub mod agy_pick;
 pub mod agy_run;
+pub mod agy_trust;
 pub mod codex_run;
 pub mod command;
 pub mod deps;

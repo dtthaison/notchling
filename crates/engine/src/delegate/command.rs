@@ -6,6 +6,7 @@
 //! The command needs no daemon and is not behind the `acting` switch: it runs a tool only
 //! because the agent that called it asked, and it never touches a session it didn't start.
 
+use super::agy_trust::{self, Trusted};
 use super::deps::Deps;
 use super::options::{self, Tool};
 use super::outcome::{render, to_json, Outcome};
@@ -78,7 +79,10 @@ pub fn run(
     let stop = deps.stop.clone();
     let mut outcome = match options.tool {
         Tool::Codex => codex_run::run(&options, &deps),
-        Tool::Agy => agy_run::run(&options, &deps, err),
+        Tool::Agy => {
+            trust_folder(&options.folder, &deps, err);
+            agy_run::run(&options, &deps, err)
+        }
     };
     if let (Some(dir), false) = (&options.out, outcome.media.is_empty()) {
         let files: Vec<PathBuf> = outcome.media.iter().map(PathBuf::from).collect();
@@ -100,6 +104,19 @@ pub fn run(
         recorder.finish(&outcome, stop.load(Ordering::SeqCst), now_secs());
     }
     finish(&outcome, parsed.json, out)
+}
+
+/// A folder Claude Code trusts is one agy needn't ask about either: add it to agy's list, saying so.
+fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {
+    let Some(files) = &deps.agy_trust else {
+        return;
+    };
+    if let Trusted::Added(_) = agy_trust::trust(files, Path::new(folder)) {
+        let _ = writeln!(
+            err,
+            "Added {folder} to Antigravity CLI's trusted workspaces (Claude Code trusts it)."
+        );
+    }
 }
 
 fn finish(outcome: &Outcome, json: bool, out: &mut dyn Write) -> i32 {

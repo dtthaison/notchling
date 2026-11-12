@@ -390,3 +390,38 @@ fn a_refused_command_line_leaves_no_record() {
     assert_eq!(ran.code, 2);
     assert!(!dir.exists());
 }
+
+#[test]
+fn a_trusted_folder_is_added_to_agy_and_the_command_says_so_on_stderr() {
+    let mut rig = rig(AcpFake::new());
+    let claude_json = rig.root.join("claude.json");
+    let settings = rig.root.join("agy-settings.json");
+    let canonical = std::fs::canonicalize(&rig.folder).unwrap();
+    std::fs::write(
+        &claude_json,
+        format!(
+            r#"{{"projects": {{"{}": {{"hasTrustDialogAccepted": true}}}}}}"#,
+            canonical.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    std::fs::write(&settings, r#"{"trustedWorkspaces": []}"#).unwrap();
+    rig.deps.agy_trust = Some(super::agy_trust::Files {
+        claude_json,
+        settings: settings.clone(),
+    });
+    let mut err = Vec::new();
+    trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut err);
+    let said = String::from_utf8(err).unwrap();
+    assert!(
+        said.starts_with("Added ") && said.contains("trusted workspaces"),
+        "{said}"
+    );
+    assert!(std::fs::read_to_string(&settings)
+        .unwrap()
+        .contains(&*canonical.to_string_lossy()));
+    // Nothing to say the second time.
+    let mut again = Vec::new();
+    trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut again);
+    assert!(again.is_empty());
+}

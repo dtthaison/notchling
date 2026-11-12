@@ -44,6 +44,9 @@ pub struct Deps {
     pub stop: Arc<AtomicBool>,
     /// After asking agy to cancel (timeout or stop), how long it gets to end the turn cleanly.
     pub cancel_grace: Duration,
+    /// The two files that let a folder Claude Code trusts be trusted by agy ([`super::agy_trust`]);
+    /// `None` leaves agy's list alone.
+    pub agy_trust: Option<super::agy_trust::Files>,
     /// The record of this job for Chat ([`super::record`]); set by [`super::command::run`] when the
     /// caller is an agent session, so the runs only say what they learn.
     pub recorder: Option<Arc<super::record::Recorder>>,
