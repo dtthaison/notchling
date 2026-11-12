@@ -272,6 +272,15 @@ enum MachineRegistry {
         }
     }
 
+    /// The machines as `machines.json` says, for a reader that must not change anything: a v1 file is decoded
+    /// as it is (no backup, no rewrite), and `[]` stands for a missing or unreadable file.
+    static func peek(at url: URL = fileURL) -> [Machine] {
+        switch read(url) {
+        case .missing, .unreadable: return []
+        case .v1(let machines, _), .v2(let machines): return machines
+        }
+    }
+
     /// `[]` for a missing and an unreadable file.
     static func all(at url: URL = fileURL) -> [Machine] {
         if case .loaded(let machines, _) = load(at: url) { return machines }

@@ -7,6 +7,12 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let awake = AwakeController()
     private let resumer = WakeResumer()
+    /// Long sd runs: shown in the notch, their session told when one ends, and the Mac kept awake meanwhile.
+    private lazy var runs = RunWatcher(
+        extraRepos: { RunWatcher.machineRepositories() },
+        enabled: { RunWatcher.wakeOnFinish },
+        send: { job, text in try ReplySender.send(text, toJob: job) },
+        notify: { UserNotifier.post($0, $1) })
     private let monitor = AgentMonitor()
     private let notch = NotchController()
     private let accounts = AccountStore()
@@ -149,6 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .receive(on: DispatchQueue.main)
             .throttle(for: .milliseconds(600), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in self?.refresh() }
+        // before the first refresh, so the rows of runs already going show at launch
+        runs.onChange = { [weak self] in self?.notch.model.runs = $0 }
         refresh()
         if showNotch { notch.show() }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
@@ -217,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: "migratedFromAwake"),
               let old = UserDefaults(suiteName: "local.awake.menubar")?.dictionaryRepresentation() else { return }
-        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt", "codexLimitMode", "antigravityLimitMode", "codexNetwork"] {
+        for key in ["mode", "active", "keepDisplayOn", "continueAfterSleep", "hideNotch", "answerFromNotch", "keepPages", "showPet", "replyFromNotch", "showLastReply", "askedAccessibility", "notchWidth", "dismissed", "hiddenAgents", "accounts", "untrackedCostAccount", "antigravityAccounts", "claudeDesktopAccounts", "codexAccounts", "limitMode", "limitSwitchAt", "codexLimitMode", "antigravityLimitMode", "codexNetwork", "wakeOnRunFinish"] {
             if let value = old[key], defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
         defaults.set(true, forKey: "migratedFromAwake")
@@ -250,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         cost.saveNow()
         awake.stop()
+        runs.stop()
         AntigravityRunner.shared.closeAll()
     }
 
@@ -259,7 +268,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HookBridge.beat()
         let cleared = dismissed
         let requests = Dictionary(HookBridge.pendingRequests().map { ($0.sessionID, $0) }, uniquingKeysWith: { _, newer in newer })
-        agents = monitor.poll().filter { a in
+        let polled = monitor.poll()
+        agents = polled.filter { a in
             guard a.group == .completed, let at = cleared[a.id] else { return true }
             return a.since.timeIntervalSince1970 > at
         }.map { a in
@@ -301,7 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notch.model.peek(agent)
         }
         notch.model.refreshSnapshots { [weak self] old, new in self?.peekTransitions(old: old, new: new) }
-        awake.apply(agentsWorking: allAgents.contains { $0.group == .working })
+        runs.tick(agents: polled)
+        awake.apply(agentsWorking: allAgents.contains { $0.group == .working } || runs.hasActive)
         resumer.check(agents)
         limits.check(agents)
         codexLimits.check()
@@ -374,6 +385,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let display = action("Keep Display On", #selector(toggleDisplay))
         display.state = awake.keepDisplayOn ? .on : .off
         awakeMenu.addItem(display)
+        let resume = action("Continue After the Mac Wakes", #selector(toggleResume))
+        resume.state = resumer.enabled ? .on : .off
+        awakeMenu.addItem(resume)
+        let runWake = action("Wake Agents When Runs Finish", #selector(toggleRunWake))
+        runWake.state = RunWatcher.wakeOnFinish ? .on : .off
+        awakeMenu.addItem(runWake)
         let awakeItem = NSMenuItem(title: "Keep Mac Awake", action: nil, keyEquivalent: "")
         awakeItem.submenu = awakeMenu
         menu.addItem(awakeItem)
@@ -687,6 +704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if s.awakeMode != awake.mode { s.awakeMode = awake.mode }
             if s.keepDisplayOn != awake.keepDisplayOn { s.keepDisplayOn = awake.keepDisplayOn }
             if s.continueAfterSleep != resumer.enabled { s.continueAfterSleep = resumer.enabled }
+            if s.wakeOnRunFinish != RunWatcher.wakeOnFinish { s.wakeOnRunFinish = RunWatcher.wakeOnFinish }
             if s.showNotch != showNotch { s.showNotch = showNotch }
             if s.notchWidth != notch.model.width { s.notchWidth = notch.model.width }
             if s.animatePet != notch.model.showPet { s.animatePet = notch.model.showPet }
@@ -712,6 +730,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if awake.keepDisplayOn != on { toggleDisplay() }
         case .continueAfterSleep(let on):
             resumer.enabled = on
+        case .wakeOnRunFinish(let on):
+            RunWatcher.wakeOnFinish = on
         case .showNotch(let on):
             if showNotch != on { toggleNotch() }
         case .notchWidth(let width):
@@ -929,6 +949,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var cleared = dismissed
         let now = Date().timeIntervalSince1970
         for agent in allAgents where agent.group == .completed { cleared[agent.id] = now }
+        runs.clearFinished()
         // Forget entries old enough that they'd be hidden anyway.
         dismissed = cleared.filter { now - $0.value < 7 * 86400 }
         refresh()
@@ -947,6 +968,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleResume() {
         resumer.enabled.toggle()
+    }
+
+    @objc private func toggleRunWake() {
+        RunWatcher.wakeOnFinish.toggle()
     }
 
     @objc private func toggleLogin() {

@@ -29,6 +29,17 @@ final class NotchModel: ObservableObject {
     @Published var foreignPermissions: [String: ACPPermission] = [:] { didSet { layoutChanged?() } }
     /// Everything the lists show: Claude Code's agents, then the other tools'.
     var listed: [Agent] { agents + foreignAgents }
+    /// Long runs sd started (`RunWatcher`): active ones in the Working tab, ended ones in Completed.
+    @Published var runs: [RunItem] = [] { didSet { layoutChanged?() } }
+
+    /// The runs a tab shows under its agents.
+    func runs(in group: AgentGroup) -> [RunItem] {
+        switch group {
+        case .working: return runs.filter { $0.kind == .active }
+        case .completed: return runs.filter { $0.kind == .finished }
+        case .needsInput: return []
+        }
+    }
     @Published private(set) var snapshots: [String: Snapshot] = [:] { didSet { layoutChanged?() } }
     /// Prompts a hook is holding open, by session id.
     @Published var requests: [String: HookRequest] = [:] {
@@ -269,7 +280,7 @@ final class NotchModel: ObservableObject {
         pendingPeekEnd?.cancel()
         if new == .list, state == .collapsed || isPeeking {
             // Open on the tab that most likely needs you.
-            tab = AgentGroup.allCases.first { g in listed.contains { $0.group == g } } ?? .needsInput
+            tab = AgentGroup.allCases.first { g in listed.contains { $0.group == g } || !runs(in: g).isEmpty } ?? .needsInput
         }
         withAnimation(.spring(response: 0.36, dampingFraction: 0.9)) { state = new }
         if new == .collapsed { releaseKey?() }
@@ -305,6 +316,9 @@ final class NotchModel: ObservableObject {
 
     // MARK: Layout
 
+    static let runRowHeight: CGFloat = 44
+    static let runsHeaderHeight: CGFloat = 22
+
     func rowHeight(_ agent: Agent) -> CGFloat {
         agent.group == .completed || snapshots[agent.id]?.lastPrompt == nil ? 44 : 58
     }
@@ -338,7 +352,11 @@ final class NotchModel: ObservableObject {
             return CGSize(width: width.list, height: chrome + (hasText ? 100 : 56))
         case .list:
             let rows = listed.filter { $0.group == tab }
-            let content = rows.isEmpty ? 44 : rows.reduce(CGFloat(tab == .completed ? 28 : 0)) { $0 + rowHeight($1) + 4 }
+            let runRows = runs(in: tab)
+            let runsHeight = runRows.isEmpty ? 0 : Self.runsHeaderHeight + CGFloat(runRows.count) * (Self.runRowHeight + 4)
+            let content = rows.isEmpty && runRows.isEmpty
+                ? 44
+                : rows.reduce(CGFloat(tab == .completed ? 28 : 0)) { $0 + rowHeight($1) + 4 } + runsHeight
             return CGSize(width: width.list, height: chrome + 34 + min(content, 300) + 6)
         case .detail:
             if case .detail(let id) = state, question(id) != nil || permission(id) != nil || agyPermission(id) != nil {
