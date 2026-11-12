@@ -114,10 +114,14 @@ pub const TERMINAL_ENV: &str = terminal::RENDER_ENV;
 pub const SIMULATOR_ENV: &str = simulator::RENDER_ENV;
 /// Set to a text such as `/co`, a render types it in the box, so the command list shows.
 pub const SLASH_ENV: &str = "NOTCHLING_RENDER_SLASH";
-/// Set to `1`, a render draws the first sidebar row's right-click menu open.
+/// Set to `1` (a row with no session behind it), `job` (the fixture's Claude Code background
+/// session) or `confirm` (that one's Remove Session… confirmation), a render draws its right-click
+/// menu open.
 pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 /// Set to `1` (Copy on) or `off`, a render draws the Copy menu open over the conversation.
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
+/// Set to `1`, a render draws the account menu open over the reply box.
+pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 
@@ -305,14 +309,16 @@ impl ChatView {
         if let Ok(how) = std::env::var(SIMULATOR_ENV) {
             view.render_simulator(&how, cx);
         }
-        if switch(ROW_MENU_ENV) {
+        if let Ok(how) = std::env::var(ROW_MENU_ENV) {
             // The sessions load after this; the menu needs only an id.
+            let job = how == "job" || how == "confirm";
             view.row_menu = Some(row_menu::RowMenu {
-                row_id: "render-session".into(),
+                row_id: if job { "fix-the-bug" } else { "render-session" }.into(),
                 at: gpui::point(px(120.0), px(110.0)),
-                confirm_remove: false,
+                confirm_remove: how == "confirm",
             });
         }
+        view.account_menu = switch(ACCOUNT_MENU_ENV);
         if let Ok(how) = std::env::var(COPY_MENU_ENV) {
             view.copy_menu = Some(copy_menu::CopyMenu {
                 at: gpui::point(px(520.0), px(240.0)),

@@ -18,6 +18,7 @@ impl Render for ChatView {
                     .editor
                     .update(cx, |editor, cx| editor.set_text(&text, cx));
                 self.slash_typed(&text);
+                self.redraw_chrome(cx);
             }
         }
         self.sync_prompt(cx);
