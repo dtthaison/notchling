@@ -24,6 +24,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::file_panel::{self, Body, Loaded, Pic};
 use crate::chat::markdown_cache::Cache as MarkdownCache;
@@ -696,6 +697,7 @@ pub fn render(
             .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
             .child(page)
             .child(edge)
+            .window_region(a, cx)
             .part_at(
                 if is_file { "File Panel" } else { "Page Panel" },
                 Corner::TopTrailing,

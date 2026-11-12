@@ -15,6 +15,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::super::render_map::WindowRegion;
 use super::super::ChatView;
 use super::{NewSimulator, AREA_PAD, HEADER, PEN, PEN_SHARE, WIDTH};
 use crate::chat::page_panel::panel_width;
@@ -804,6 +805,7 @@ pub fn render(
             .child(area(view, a, cx))
             .child(controls(view, a, cx))
             .children(device_menu(view, a, cx))
+            .window_region(a, cx)
             .part_at("Simulator Panel", Corner::TopTrailing, a, cx)
             .into_any_element(),
     )

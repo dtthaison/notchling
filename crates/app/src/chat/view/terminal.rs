@@ -24,6 +24,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{hsla, icon, icon_button, label, KitPart, KitStyled, MONO_FONT};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::render_map::WindowRegion;
 use super::sidebar::HEADER_BUTTON;
 use super::ChatView;
 use crate::chat::format::short_path;
@@ -926,6 +927,7 @@ pub fn render(
     };
     Some(
         panel
+            .window_region(a, cx)
             .part_at("Terminal Panel", Corner::TopTrailing, a, cx)
             .into_any_element(),
     )

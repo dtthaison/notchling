@@ -17,6 +17,7 @@ use gpui::{
     div, prelude::*, AnyElement, AnyView, App, Context, Entity, StyleRefinement, Subscription,
     WeakEntity, Window,
 };
+use notchling_kit::render_map::Region;
 use notchling_kit::ui::{
     drop_spinner_host, host_spinners, spin_host, window_appearance, SpinLayer, SpinSlots,
 };
@@ -24,6 +25,7 @@ use notchling_kit::Appearance;
 
 use super::conversation_view::ConversationView;
 use super::inspector::DetailsModel;
+use super::render_map::{self, Place};
 use super::{inspector, sidebar, ChatView};
 use crate::chat::sidebar::SidebarModel;
 
@@ -167,6 +169,34 @@ fn element(part: AnyView, spins: &SpinSlots, style: StyleRefinement) -> AnyEleme
     spin_host(spins, part.cached(style)).into_any_element()
 }
 
+/// Where the render map's badges sit from the bottom of the Sidebar (over its footer buttons) and
+/// of the Details Panel: the part names take their top corners and the edges' middles.
+const SIDEBAR_BADGE_BOTTOM: f32 = 60.0;
+const DETAILS_BADGE_BOTTOM: f32 = 12.0;
+
+/// A part, and while the ? button is on, the render map over it. The map's box takes the part's
+/// style and the part fills it, so nothing moves; the outline and badge are the window's own
+/// elements next to the part, never inside it.
+fn framed(
+    region: Region,
+    place: Place,
+    part: AnyView,
+    spins: &SpinSlots,
+    style: StyleRefinement,
+    a: Appearance,
+    cx: &App,
+) -> AnyElement {
+    if !render_map::map_on(cx) {
+        return element(part, spins, style);
+    }
+    let mut frame = div().relative().flex();
+    frame.style().refine(&style);
+    frame
+        .child(element(part, spins, StyleRefinement::default().size_full()))
+        .children(render_map::overlay(region, place, a, cx))
+        .into_any_element()
+}
+
 impl Parts {
     /// The conversation: it fills the column's room above the reply box.
     pub fn conversation(&self, cx: &Context<ChatView>) -> AnyElement {
@@ -178,22 +208,30 @@ impl Parts {
     }
 
     /// The Sidebar, its own width and the window's height.
-    pub fn sidebar(&self, cx: &Context<ChatView>) -> AnyElement {
+    pub fn sidebar(&self, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
         let width = gpui::px(notchling_kit::metric::SIDEBAR_WIDTH);
-        element(
+        framed(
+            Region::Sidebar,
+            Place::Bottom(SIDEBAR_BADGE_BOTTOM),
             self.sidebar.clone().into(),
             &self.sidebar.read(cx).spins,
             StyleRefinement::default().w(width).h_full().flex_shrink_0(),
+            a,
+            cx,
         )
     }
 
     /// The Details Panel, its own width and the row's height.
-    pub fn details(&self, cx: &Context<ChatView>) -> AnyElement {
+    pub fn details(&self, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
         let width = gpui::px(inspector::WIDTH);
-        element(
+        framed(
+            Region::Details,
+            Place::Bottom(DETAILS_BADGE_BOTTOM),
             self.details.clone().into(),
             &self.details.read(cx).spins,
             StyleRefinement::default().w(width).h_full().flex_shrink_0(),
+            a,
+            cx,
         )
     }
 }

@@ -7,6 +7,7 @@ impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::pane::ROOT_RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let a = window_appearance(window);
+        super::render_map::sync(self.chrome.entity_id(), cx);
         self.take_terminal_focus(window);
         if let Some(text) = self.slash_preview.clone() {
             if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
@@ -49,6 +50,12 @@ impl Render for ChatView {
             .child(self.parts.conversation(cx))
             // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
+            .children(super::render_map::overlay(
+                notchling_kit::render_map::Region::Conversation,
+                super::render_map::Place::Bottom(12.0),
+                a,
+                cx,
+            ))
             .part_at(
                 if in_subagent {
                     "Subagent View"
@@ -111,7 +118,7 @@ impl Render for ChatView {
                 }
                 this.capture_slash_key(event, window, cx)
             }))
-            .children((!self.sidebar_hidden).then(|| self.parts.sidebar(cx)))
+            .children((!self.sidebar_hidden).then(|| self.parts.sidebar(a, cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(
                 div()
@@ -141,7 +148,7 @@ impl Render for ChatView {
                                     && !self.terminal.shown()
                                     && !self.simulator.shown()
                                     && !self.details_hidden)
-                                    .then(|| self.parts.details(cx)),
+                                    .then(|| self.parts.details(a, cx)),
                             ),
                         cx,
                     )),

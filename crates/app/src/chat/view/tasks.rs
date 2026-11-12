@@ -14,6 +14,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{card, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
+use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::inspector::{task_rows, TaskRow, TaskSummary};
 use crate::chat::tasks_bar::{self, DONE_FOR_MS};
@@ -191,6 +192,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
                 .child(close),
         )
         .children(list)
+        .window_region(a, cx)
         .part_at("Tasks Bar", Corner::Bottom, a, cx);
     Some(
         div()

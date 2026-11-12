@@ -29,6 +29,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::claude_picker::{self, Kind};
 use crate::chat::composer::{action, add_menu, is_add_files, with_slash, Action, Add, AddItem};
@@ -902,6 +903,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(card)
         .child(footer)
         .children(super::slash_menu::render(view, a, cx))
+        .window_region(a, cx)
 }
 
 #[cfg(test)]

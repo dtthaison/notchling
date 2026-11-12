@@ -26,6 +26,7 @@ mod page_panel;
 pub mod pane;
 mod phone;
 mod prompts;
+mod render_map;
 mod root;
 mod row_blocks;
 mod row_menu;
