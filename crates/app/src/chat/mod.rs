@@ -57,6 +57,9 @@ mod question_parity_tests;
 pub mod reload;
 pub mod renders;
 pub mod rows;
+pub mod run_command;
+#[cfg(test)]
+mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
 pub mod sidebar;
