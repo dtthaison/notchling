@@ -3,13 +3,16 @@
 //! polls need between reads; owns no view state, so a view sends it to the background executor
 //! and takes it back.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use notchling_engine::sessions::{Agent, Monitor};
+use notchling_engine::tools::agy::elsewhere;
+use notchling_engine::transcript::codex;
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::snapshot::PendingQuestion;
-use notchling_engine::transcript::subagents::{self, Subagent};
+use notchling_engine::transcript::subagents::{self, Origin, Subagent};
 
 use super::data::{DataRoot, Session, Tool};
 use super::log::{self, Change};
@@ -30,6 +33,9 @@ pub struct Loaded {
     /// load, another session or a draft: the view then compares the conversations itself.
     pub change: Option<(Arc<Conversation>, Change)>,
     pub subagents: Vec<Subagent>,
+    /// The Codex and Antigravity rows that are jobs another session handed over: the Sidebar leaves
+    /// them out (Search still finds them, and opening one from there brings it back).
+    pub delegated: HashSet<String>,
     /// The transcript of the subagent Chat has open ([`Loader::subagent_path`]), by that path, read
     /// again with every load so a running one follows.
     pub subagent: Option<(String, Arc<Conversation>)>,
@@ -52,8 +58,13 @@ pub struct Loader {
     /// Read the Swift hook's `requests/` folder too: set while the daemon's held prompts aren't
     /// followed (no daemon, or this isn't the app tier), as the notch does.
     pub files_prompts: bool,
-    /// The file of the subagent Chat shows in place of the conversation, read with each load.
+    /// The file of the subagent Chat shows in place of the conversation, read with each load, and
+    /// whose it is (a job handed to Codex or Antigravity is read by that tool's reader).
     pub subagent_path: Option<String>,
+    pub subagent_origin: Origin,
+    /// Antigravity's log as last read, by its path and the file's size and date, so a log that
+    /// hasn't changed gives the same conversation (and no redraw).
+    agy_log: Option<AgyLog>,
     /// The session and conversation of the last load, what the next one's change starts from.
     last: Option<(String, Arc<Conversation>)>,
 }
@@ -66,6 +77,8 @@ impl Loader {
             agy: root.new_agy_list(),
             files_prompts: false,
             subagent_path: None,
+            subagent_origin: Origin::Claude,
+            agy_log: None,
             last: None,
             root,
         }
@@ -134,12 +147,17 @@ impl Loader {
         } else {
             HashMap::new()
         };
+        let delegations = self.root.delegations();
+        let delegated = super::delegated::hidden(&delegations);
         let (conversation, subagents) = match session {
             Some(session) => {
                 let conversation = self.root.conversation_shared(session);
-                let subagents = self
-                    .root
-                    .subagents(session, &conversation, now_ms as f64 / 1000.0);
+                let subagents = self.root.subagents(
+                    session,
+                    &conversation,
+                    &delegations,
+                    now_ms as f64 / 1000.0,
+                );
                 (conversation, subagents)
             }
             None => (Arc::default(), Vec::new()),
@@ -161,18 +179,58 @@ impl Loader {
             .map(|id| (id.clone(), Arc::clone(&conversation)));
         let subagent = self
             .subagent_path
-            .as_ref()
-            .map(|path| (path.clone(), subagents::read_shared(path)));
+            .clone()
+            .filter(|path| !path.is_empty())
+            .map(|path| {
+                let read = self.read_subagent(&path);
+                (path, read)
+            });
         Loaded {
             sessions,
             selected,
             conversation,
             change,
             subagents,
+            delegated,
             subagent,
             question,
             requests,
             now_ms,
+        }
+    }
+}
+
+/// A log's last read.
+struct AgyLog {
+    path: String,
+    stamp: Option<(u64, std::time::SystemTime)>,
+    conversation: Arc<Conversation>,
+}
+
+impl Loader {
+    /// The open subagent's transcript, by whose it is.
+    fn read_subagent(&mut self, path: &str) -> Arc<Conversation> {
+        match self.subagent_origin {
+            Origin::Claude => subagents::read_shared(path),
+            Origin::Codex => codex::read_shared(path),
+            Origin::Antigravity => {
+                let stamp = std::fs::metadata(path)
+                    .ok()
+                    .and_then(|m| Some((m.len(), m.modified().ok()?)));
+                if let Some(last) = &self.agy_log {
+                    if last.path == path && last.stamp == stamp {
+                        return last.conversation.clone();
+                    }
+                }
+                let (conversation, _) = elsewhere::from_log_file(Path::new(path), None);
+                let conversation = Arc::new(conversation);
+                self.agy_log = Some(AgyLog {
+                    path: path.to_string(),
+                    stamp,
+                    conversation: conversation.clone(),
+                });
+                conversation
+            }
         }
     }
 }
@@ -303,5 +361,106 @@ mod tests {
         assert_eq!(conversation.items.len(), 1);
         // And it is listed, so the header has its row.
         assert_eq!(loaded.subagents.len(), 1);
+    }
+
+    /// A job `term-1` handed to Codex, with its rollout in the fixture's Codex folder.
+    fn handed_to_codex(s: &crate::testutil::Scratch) -> std::path::PathBuf {
+        use notchling_engine::delegate::options::{Options, Tool as DelegateTool};
+        use notchling_engine::delegate::record::{self, Delegation};
+        let options = Options {
+            tool: DelegateTool::Codex,
+            prompt: "Review the diff".into(),
+            model: Some("gpt-5.5".into()),
+            effort: Some("high".into()),
+            folder: "/work/app".into(),
+            out: None,
+            write: false,
+            session: None,
+            timeout: std::time::Duration::from_secs(30),
+        };
+        let mut job = Delegation::new(
+            "term-1",
+            "/work/app",
+            &options,
+            1_794_160_100.0,
+            std::process::id(),
+        );
+        job.session = Some("c1".into());
+        record::write(&s.path().join("notchling").join(record::FOLDER), &job)
+            .expect("write record");
+        s.write(
+            "codex/sessions/2026/11/12/rollout-2026-11-12T09-00-00-c1.jsonl",
+            concat!(
+                r#"{"timestamp":"2026-11-12T10:00:00.000Z","type":"session_meta","payload":{"id":"c1","cwd":"/work/app"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-11-12T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review the diff"}]}}"#,
+                "\n",
+            ),
+        )
+    }
+
+    #[test]
+    fn a_job_handed_to_codex_is_a_subagent_of_its_session_and_not_a_sidebar_row() {
+        let s = crate::testutil::Scratch::new("loader-delegated");
+        terminal_world(&s);
+        let rollout = handed_to_codex(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+        let loaded = loader.load(Some("term-1"), 1_794_160_200_000);
+
+        let jobs: Vec<_> = loaded
+            .subagents
+            .iter()
+            .filter(|a| a.origin == Origin::Codex)
+            .collect();
+        assert_eq!(jobs.len(), 1, "{:?}", loaded.subagents);
+        assert_eq!(jobs[0].description, "Review the diff");
+        assert_eq!(jobs[0].path, rollout.to_string_lossy());
+        assert!(loaded.delegated.contains("codex:c1"));
+        // The row is still in the loader's list (Search opens it from there); the view leaves it out.
+        assert!(loaded.sessions.iter().any(|x| x.agent.id == "codex:c1"));
+
+        // Another session shows no jobs of this one.
+        let other = loaded
+            .sessions
+            .iter()
+            .find(|x| x.agent.id == "codex:c1")
+            .map(|x| x.agent.id.clone());
+        let on_codex = loader.load(other.as_deref(), 1_794_160_200_000);
+        assert!(on_codex.subagents.is_empty());
+    }
+
+    #[test]
+    fn an_open_job_is_read_by_its_tools_reader() {
+        let s = crate::testutil::Scratch::new("loader-delegated-open");
+        terminal_world(&s);
+        let rollout = handed_to_codex(&s);
+        let mut loader = Loader::new(DataRoot::fixture(s.path()));
+        loader.subagent_path = Some(rollout.to_string_lossy().into_owned());
+        loader.subagent_origin = Origin::Codex;
+        let (_, conversation) = loader
+            .load(Some("term-1"), 1_794_160_200_000)
+            .subagent
+            .expect("the open job is read");
+        assert_eq!(conversation.items.len(), 1, "{:?}", conversation.items);
+
+        // Antigravity's log is read through its own reader, and again only when it changes.
+        let log = s.write(
+            "agy/log.jsonl",
+            "{\"type\":\"USER_INPUT\",\"step_index\":0,\"content\":{\"user_input\":\"<USER_REQUEST>hi</USER_REQUEST>\"}}\n",
+        );
+        loader.subagent_path = Some(log.to_string_lossy().into_owned());
+        loader.subagent_origin = Origin::Antigravity;
+        let first = loader
+            .load(Some("term-1"), 1_794_160_201_000)
+            .subagent
+            .expect("read");
+        let second = loader
+            .load(Some("term-1"), 1_794_160_202_000)
+            .subagent
+            .expect("read");
+        assert!(
+            Arc::ptr_eq(&first.1, &second.1),
+            "an unchanged log is the same conversation"
+        );
     }
 }

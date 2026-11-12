@@ -9,13 +9,16 @@
 //! - Under `NOTCHLING_DATA_ROOT` the tools' media folders and Codex's model list are read from the
 //!   fixture root (`codex`, `gemini/antigravity-cli`), as the daemon does, and the tools are still
 //!   found in the real home's usual places and on the real PATH.
+//! - Called from a Claude Code session (`CLAUDE_CODE_SESSION_ID` is set), it leaves a record in
+//!   `<data>/delegations/` so Chat lists the job as that session's subagent (`delegate::record`).
 //! - "Allow Network in Codex Turns" is read, never written, from `settings.json` in the data
 //!   folder; on unless it says off. It only matters with `--write`.
 
 use crate::layout::Layout;
-use notchling_engine::delegate::command::{self, Context};
+use notchling_engine::delegate::command::{self, Context, RecordTo};
 use notchling_engine::delegate::options::DEPTH_VARIABLE;
 use notchling_engine::delegate::real::{self, Folders};
+use notchling_engine::delegate::record;
 use notchling_engine::settings::Settings;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,6 +73,8 @@ pub fn folders(
         home: real_home.to_path_buf(),
         codex_home: layout.codex_dir_with(codex_home),
         antigravity: layout.antigravity_dir(),
+        // `~/.claude.json`, or the fixture root's own under `NOTCHLING_DATA_ROOT`: never the real one.
+        claude_json: layout.home().join(".claude.json"),
         path,
         network,
     }
@@ -95,7 +100,7 @@ fn setup() -> Option<(Layout, Folders)> {
 
 /// `notchling delegate <args>`: the exit code.
 pub fn run(args: &[String]) -> i32 {
-    let Some((_, folders)) = setup() else {
+    let Some((layout, folders)) = setup() else {
         return 2;
     };
     let Ok(cwd) = std::env::current_dir() else {
@@ -113,10 +118,24 @@ pub fn run(args: &[String]) -> i32 {
     let deps = real::deps(&folders, stop);
     // `~` in a path is the user's own home, even over a fixture root.
     let home: PathBuf = folders.home.clone();
+    // An agent session that hands a job over (Claude Code sets its id in every command it runs)
+    // gets the job listed as its subagent; anyone else delegates as before.
+    let parent = std::env::var(record::PARENT_VARIABLE)
+        .ok()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty());
+    let records = layout.data_dir.join(record::FOLDER);
+    let parent_cwd = cwd.to_string_lossy();
     let ctx = Context {
         cwd: &cwd,
         home: Some(&home),
         depth: raw_depth.as_deref(),
+        record: parent.as_deref().map(|parent_session| RecordTo {
+            dir: &records,
+            parent_session,
+            parent_cwd: &parent_cwd,
+            pid: std::process::id(),
+        }),
     };
     command::run(
         args,
@@ -159,6 +178,7 @@ mod tests {
         assert_eq!(f.home, Path::new("/home/me"));
         assert_eq!(f.codex_home, Path::new("/home/me/.codex"));
         assert_eq!(f.antigravity, Path::new("/home/me/.gemini/antigravity-cli"));
+        assert_eq!(f.claude_json, Path::new("/home/me/.claude.json"));
         assert!(f.network, "on unless the settings say off");
         let custom = folders(
             &layout(None),
@@ -186,6 +206,11 @@ mod tests {
         assert_eq!(
             f.antigravity,
             Path::new("/tmp/nl-root/gemini/antigravity-cli")
+        );
+        assert_eq!(
+            f.claude_json,
+            Path::new("/tmp/nl-root/.claude.json"),
+            "a fixture never reads the real Claude state"
         );
     }
 

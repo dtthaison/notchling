@@ -209,6 +209,9 @@ pub struct ChatView {
     tasks_seen: std::collections::HashMap<String, crate::chat::tasks_bar::Seen>,
     /// Codex and Antigravity rows used in Chat (`chat::used`): only these are in the Sidebar.
     used: std::collections::HashMap<String, f64>,
+    /// The Codex and Antigravity rows that are jobs another session handed over: not Sidebar rows
+    /// (`chat::delegated`).
+    delegated: std::collections::HashSet<String>,
     /// The accounts store the header's meters and account menu read, and the switch feed.
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
@@ -480,6 +483,7 @@ impl ChatView {
             pending_job: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),
+            delegated: std::collections::HashSet::new(),
             tasks_seen: std::collections::HashMap::new(),
             _appearance_changes: changes,
             _parts_escape: parts_escape,

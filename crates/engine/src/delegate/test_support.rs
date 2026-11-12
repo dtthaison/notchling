@@ -84,6 +84,8 @@ pub fn rig(agy: AcpFake) -> Rig {
         capture: Arc::new(|_, _| None),
         depth: 1,
         stop: Arc::new(AtomicBool::new(false)),
+        agy_trust: None,
+        recorder: None,
         cancel_grace: Duration::from_millis(100),
         terminate_after: Duration::from_millis(200),
     };

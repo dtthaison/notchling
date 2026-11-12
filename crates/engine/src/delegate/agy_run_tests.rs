@@ -545,3 +545,37 @@ fn it_runs_against_the_real_recording_allowing_the_edit_only_with_write() {
         "deny"
     );
 }
+
+#[test]
+fn a_recorded_agy_job_names_its_session_and_model_in_its_record() {
+    use crate::delegate::record::{self, Delegation, End, Recorder};
+    let mut rig = rig_with(agent(plain_turn()));
+    let dir = rig.root.join("data/delegations");
+    let mut options = rig.options(Tool::Agy, "Second opinion\nplease");
+    options.model = Some("claude-opus-5-5".into());
+    options.effort = Some("high".into());
+    let start = Delegation::new("parent-1", "/work", &options, 10.0, std::process::id());
+    rig.deps.recorder = Some(Arc::new(Recorder::start(&dir, start, 10.0)));
+    assert_eq!(
+        record::read_all(&dir)[0].file_name(),
+        format!("agy-pending-{}.json", std::process::id()),
+        "listed at once, before agy names the session"
+    );
+    let (outcome, _) = run_it(&rig, &options);
+    assert_eq!(outcome.error, None);
+    let records = record::read_all(&dir);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].file_name(), "agy-sess-1.json");
+    assert_eq!(records[0].model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(records[0].effort.as_deref(), Some("high"));
+    assert_eq!(
+        records[0].ended, None,
+        "the command's own end is set by command::run"
+    );
+    rig.deps
+        .recorder
+        .as_ref()
+        .unwrap()
+        .finish(&outcome, false, 20.0);
+    assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Ok));
+}

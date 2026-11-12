@@ -22,6 +22,8 @@ pub struct Folders {
     pub codex_home: PathBuf,
     /// `~/.gemini/antigravity-cli`.
     pub antigravity: PathBuf,
+    /// Claude Code's state file (`~/.claude.json`), read for the folders it trusts.
+    pub claude_json: PathBuf,
     /// The process's PATH.
     pub path: String,
     /// "Allow Network in Codex Turns".
@@ -47,6 +49,11 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
         capture: Arc::new(|program, args| capture(program, args, MODELS_TIMEOUT)),
         depth: 1,
         stop,
+        agy_trust: Some(super::agy_trust::Files {
+            claude_json: folders.claude_json.clone(),
+            settings: folders.antigravity.join("settings.json"),
+        }),
+        recorder: None,
         cancel_grace: Deps::CANCEL_GRACE,
         terminate_after: Deps::TERMINATE_AFTER,
     }
@@ -127,6 +134,7 @@ mod tests {
             home: home.clone(),
             codex_home: home.join(".codex"),
             antigravity: home.join(".gemini/antigravity-cli"),
+            claude_json: home.join(".claude.json"),
             path: String::new(),
             network: true,
         };

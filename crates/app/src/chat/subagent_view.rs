@@ -109,6 +109,7 @@ mod tests {
             started: 1.0,
             updated: 2.0,
             status: Status::Running,
+            origin: Default::default(),
         }
     }
 

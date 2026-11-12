@@ -165,7 +165,7 @@ fn header_and_inspector_read_the_facts() {
     assert_eq!(h.context.as_deref(), Some("28.1k / 400k · 7%"));
     assert_eq!(h.shells, 1);
 
-    let subagents = root.subagents(fix, &c, NOW_MS as f64 / 1000.0);
+    let subagents = root.subagents(fix, &c, &[], NOW_MS as f64 / 1000.0);
     assert_eq!(subagents.len(), 1);
     let i = inspector(&c, &subagents, &no_writers);
     assert_eq!(i.tasks.len(), 3);

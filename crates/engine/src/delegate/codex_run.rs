@@ -33,7 +33,7 @@ struct Seen {
     last_error: Option<String>,
 }
 
-fn read_event(line: &str, seen: &mut Seen) {
+fn read_event(line: &str, seen: &mut Seen, deps: &Deps, options: &Options) {
     let Ok(Value::Object(event)) = serde_json::from_str::<Value>(line.trim()) else {
         return;
     };
@@ -43,6 +43,13 @@ fn read_event(line: &str, seen: &mut Seen) {
         Some("thread.started") => {
             if seen.session.is_none() {
                 seen.session = text(&root, "thread_id");
+                if let (Some(recorder), Some(session)) = (&deps.recorder, &seen.session) {
+                    recorder.session_known(
+                        session,
+                        options.model.as_deref(),
+                        options.effort.as_deref(),
+                    );
+                }
             }
         }
         Some("item.completed") => {
@@ -203,7 +210,7 @@ pub fn run(options: &Options, deps: &Deps) -> Outcome {
     let exit: ExitInfo = loop {
         match process.next() {
             Next::Line(line) => match line.stream {
-                Stream::Out => read_event(&line.text, &mut seen),
+                Stream::Out => read_event(&line.text, &mut seen, deps, options),
                 Stream::Err => {
                     if line.text.contains("rror") {
                         stderr_line = Some(line.text);

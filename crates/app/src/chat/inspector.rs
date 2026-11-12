@@ -1,9 +1,12 @@
 //! The inspector beside the conversation: tasks, the session's facts, subagents, background shells.
 
+use notchling_engine::transcript::codex;
 use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
 use notchling_engine::transcript::shells::{self, ShellState};
-use notchling_engine::transcript::subagents::{Status as SubagentStatus, Subagent};
+use notchling_engine::transcript::subagents::{
+    Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
+};
 use notchling_kit::{Icon, Ink, Status};
 
 use super::format::{model_name, tokens};
@@ -145,15 +148,23 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
         .join(" ");
     let kind = (agent.agent_type != "general-purpose" && !agent.agent_type.is_empty())
         .then_some(agent.agent_type.as_str());
-    let detail = [
-        Some(word),
-        (!model.is_empty()).then_some(model.as_str()),
-        kind,
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" · ");
+    // A job handed to Codex or Antigravity names the tool before its model ("Running · Codex ·
+    // gpt-5.5 high"); a Claude Code subagent says its model, then its type.
+    let handed_over = agent.origin != SubagentOrigin::Claude;
+    let parts = if handed_over {
+        [
+            Some(word),
+            Some(agent.agent_type.as_str()).filter(|t| !t.is_empty()),
+            (!model.is_empty()).then_some(model.as_str()),
+        ]
+    } else {
+        [
+            Some(word),
+            (!model.is_empty()).then_some(model.as_str()),
+            kind,
+        ]
+    };
+    let detail = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
     SubagentRow {
         description: agent.description.clone(),
         detail,
@@ -162,7 +173,17 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
         running: agent.is_running(),
         mark,
         doing: (agent.is_running() && !agent.path.is_empty())
-            .then(|| super::activity::doing(&conversation::read_subagent_shared(&agent.path))),
+            .then(|| match agent.origin {
+                SubagentOrigin::Claude => Some(super::activity::doing(
+                    &conversation::read_subagent_shared(&agent.path),
+                )),
+                SubagentOrigin::Codex => {
+                    Some(super::activity::doing(&codex::read_shared(&agent.path)))
+                }
+                // Antigravity's log is read whole when opened; too much for every redraw.
+                SubagentOrigin::Antigravity => None,
+            })
+            .flatten(),
     }
 }
 
@@ -503,6 +524,7 @@ mod tests {
             started: 0.0,
             updated: 0.0,
             status: SubagentStatus::Completed,
+            origin: Default::default(),
         };
         let i = inspector(&Conversation::default(), &[agent], &no_writers);
         assert_eq!(
@@ -534,6 +556,7 @@ mod tests {
             started: 0.0,
             updated: 0.0,
             status,
+            origin: Default::default(),
         }
     }
 
@@ -551,6 +574,42 @@ mod tests {
         assert_eq!(i.subagents[0].detail, "Running");
         assert_eq!(i.subagents[1].detail, "Failed · Plan");
         assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn a_job_handed_to_another_tool_names_the_tool_before_its_model() {
+        let mut job = agent(SubagentStatus::Running, "Codex");
+        job.origin = SubagentOrigin::Codex;
+        job.model = Some("gpt-5.5".into());
+        job.effort = Some("high".into());
+        let mut gone = agent(SubagentStatus::Stopped, "Antigravity CLI");
+        gone.origin = SubagentOrigin::Antigravity;
+        let i = inspector(&Conversation::default(), &[job, gone], &no_writers);
+        assert_eq!(i.subagents[0].detail, "Running · Codex · gpt-5.5 high");
+        assert_eq!(i.subagents[0].doing, None, "no rollout yet, nothing to say");
+        assert_eq!(i.subagents[1].detail, "Stopped · Antigravity CLI");
+        assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn a_running_codex_job_says_what_it_is_doing_from_its_rollout() {
+        let s = crate::testutil::Scratch::new("codex-job-doing");
+        let rollout = s.write(
+            "rollout.jsonl",
+            concat!(
+                r#"{"timestamp":"2026-11-12T10:00:00.000Z","type":"session_meta","payload":{"id":"c1","cwd":"/w"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-11-12T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cargo test\"}","call_id":"k1"}}"#,
+                "\n",
+            ),
+        );
+        let mut job = agent(SubagentStatus::Running, "Codex");
+        job.origin = SubagentOrigin::Codex;
+        job.path = rollout.to_string_lossy().into_owned();
+        let i = inspector(&Conversation::default(), &[job], &no_writers);
+        let doing = i.subagents[0].doing.as_deref().expect("a running job says");
+        assert!(doing.ends_with('…'), "{doing}");
+        assert_ne!(doing, "Thinking…", "it is running a command");
     }
 
     #[test]
