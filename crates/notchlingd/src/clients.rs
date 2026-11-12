@@ -66,8 +66,21 @@ fn fail(e: ClientError) -> i32 {
     }
 }
 
-pub fn status(socket: &Path) -> i32 {
+pub fn status(socket: &Path, json: bool) -> i32 {
     match connect(socket).and_then(|mut c| c.status()) {
+        Ok(s) if json => {
+            // The wire's own shape: version, pid, uptimeSecs, clients {app, cli, hook}, acting?.
+            match serde_json::to_string_pretty(&s) {
+                Ok(text) => {
+                    println!("{text}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("notchling: {e}");
+                    1
+                }
+            }
+        }
         Ok(s) => {
             println!("{}", status_line(&s));
             0

@@ -129,6 +129,63 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
     0
 }
 
+/// `notchling delegate-models [codex|agy] --json`: the same listing as one JSON value, camelCase
+/// like `delegate --json`: `{"codex": {"models": [{"slug", "name", "summary", "efforts",
+/// "defaultEffort"?, "contextWindow"?}]}, "agy": {"available": bool, "models": [{"model",
+/// "efforts"}]}}`; only the tool asked for when one is named. A tool with nothing to list has
+/// `"models": []` (agy also `"available": false` when `agy models` can't run). Exit 0.
+pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
+    let only = args.first().and_then(|a| Tool::from_name(a));
+    let mut root = serde_json::Map::new();
+    if only != Some(Tool::Agy) {
+        let models: Vec<serde_json::Value> = models::load(&deps.codex_home)
+            .into_iter()
+            .map(|m| {
+                let mut v = serde_json::json!({
+                    "slug": m.slug,
+                    "name": m.name,
+                    "summary": m.summary,
+                    "efforts": m.efforts,
+                });
+                if let Some(d) = m.default_effort {
+                    v["defaultEffort"] = d.into();
+                }
+                if let Some(w) = m.context_window {
+                    v["contextWindow"] = w.into();
+                }
+                v
+            })
+            .collect();
+        root.insert("codex".into(), serde_json::json!({ "models": models }));
+    }
+    if only != Some(Tool::Codex) {
+        let listing = deps
+            .agy_binary
+            .as_deref()
+            .and_then(|agy| (deps.capture)(Path::new(agy), &["models"]));
+        let available = listing.is_some();
+        let models: Vec<serde_json::Value> = listing
+            .map(|l| {
+                agy_pick::models(&l)
+                    .into_iter()
+                    .map(|(model, efforts)| serde_json::json!({"model": model, "efforts": efforts}))
+                    .collect()
+            })
+            .unwrap_or_default();
+        root.insert(
+            "agy".into(),
+            serde_json::json!({ "available": available, "models": models }),
+        );
+    }
+    let value = serde_json::Value::Object(root);
+    let _ = writeln!(
+        out,
+        "{}",
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+    );
+    0
+}
+
 #[cfg(test)]
 #[path = "command_tests.rs"]
 mod tests;

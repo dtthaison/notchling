@@ -120,6 +120,39 @@ fn a_saved_request_says_how_to_use_it() {
 }
 
 #[test]
+fn find_words_socket_and_json() {
+    assert_eq!(
+        parse_find(&args(&["api", "github", "--json", "--socket", "/s"])),
+        ("api github".into(), Some(PathBuf::from("/s")), true)
+    );
+    assert_eq!(parse_find(&args(&[])), (String::new(), None, false));
+}
+
+#[test]
+fn find_json_lists_names_and_never_a_value() {
+    let gh = json!({"name": "gh", "kind": "token", "secretVar": "GH_TOKEN", "url": "https://api.github.com",
+                    "note": "my repos", "expires": "2026-11-09", "ask": true, "userVar": "", "updated": "",
+                    // Fields no list entry has: whatever sits in a reply, none of it comes out.
+                    "secret": "ghp_TOPSECRET", "value": "ghp_TOPSECRET", "password": "ghp_TOPSECRET"});
+    let (code, value) = find_json(&json!({"entries": [gh], "saved": ["gh", "npm"]}), "github");
+    assert_eq!(code, 0);
+    assert_eq!(value["query"], "github");
+    assert_eq!(value["saved"], json!(["gh", "npm"]));
+    assert_eq!(value["entries"][0]["name"], "gh");
+    assert_eq!(value["entries"][0]["secretVar"], "GH_TOKEN");
+    let text = value.to_string();
+    assert!(!text.contains("TOPSECRET"), "{text}");
+    for key in ["secret", "value", "password"] {
+        assert!(value["entries"][0].get(key).is_none(), "{key}");
+    }
+
+    let (code, value) = find_json(&json!({"entries": [], "saved": ["gh"]}), "gitlab");
+    assert_eq!((code, value["entries"].clone()), (1, json!([])));
+    let (code, value) = find_json(&json!({"entries": [], "saved": []}), "");
+    assert_eq!((code, value["saved"].clone()), (1, json!([])));
+}
+
+#[test]
 fn usage_names_all_three() {
     let text = usage();
     assert!(text.contains("notchling secret <name>"));

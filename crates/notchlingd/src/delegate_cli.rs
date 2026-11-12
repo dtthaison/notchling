@@ -127,13 +127,18 @@ pub fn run(args: &[String]) -> i32 {
     )
 }
 
-/// `notchling delegate-models [codex|agy]`.
+/// `notchling delegate-models [codex|agy] [--json]`.
 pub fn models(args: &[String]) -> i32 {
     let Some((_, folders)) = setup() else {
         return 2;
     };
+    let json = args.iter().any(|a| a == "--json");
+    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
     let deps = real::deps(&folders, Arc::new(AtomicBool::new(false)));
-    command::models_listing(args, &deps, &mut std::io::stdout())
+    if json {
+        return command::models_listing_json(&args, &deps, &mut std::io::stdout());
+    }
+    command::models_listing(&args, &deps, &mut std::io::stdout())
 }
 
 #[cfg(test)]

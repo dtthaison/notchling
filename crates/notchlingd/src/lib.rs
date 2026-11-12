@@ -131,20 +131,28 @@ pub fn run(command: Command) -> i32 {
             0
         }
         Command::Daemon { socket } => run_daemon(socket.as_deref()),
-        Command::Status { socket } => match layout_for(socket.as_deref()) {
-            Some(l) => clients::status(&l.socket),
+        Command::Status { json, socket } => match layout_for(socket.as_deref()) {
+            Some(l) => clients::status(&l.socket, json),
             None => 1,
         },
         Command::Sessions { json, socket } => match layout_for(socket.as_deref()) {
             Some(l) => clients::sessions(&l.socket, json),
             None => 1,
         },
-        Command::Pages { query, socket } => match layout_for(socket.as_deref()) {
-            Some(l) => pages_cli::run(&l, &query, true),
+        Command::Pages {
+            query,
+            json,
+            socket,
+        } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, true, json),
             None => 1,
         },
-        Command::Page { query, socket } => match layout_for(socket.as_deref()) {
-            Some(l) => pages_cli::run(&l, &query, false),
+        Command::Page {
+            query,
+            json,
+            socket,
+        } => match layout_for(socket.as_deref()) {
+            Some(l) => pages_cli::run(&l, &query, false, json),
             None => 1,
         },
         Command::Delegate { args } => delegate_cli::run(&args),

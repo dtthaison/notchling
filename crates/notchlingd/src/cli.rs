@@ -20,6 +20,7 @@ pub enum Command {
         socket: Option<PathBuf>,
     },
     Status {
+        json: bool,
         socket: Option<PathBuf>,
     },
     Sessions {
@@ -37,11 +38,13 @@ pub enum Command {
     /// `notchling pages [words]`: the saved Artifact pages, one line each.
     Pages {
         query: String,
+        json: bool,
         socket: Option<PathBuf>,
     },
     /// `notchling page <link|id|words>`: where a saved page is and who can republish it.
     Page {
         query: String,
+        json: bool,
         socket: Option<PathBuf>,
     },
     /// `notchling delegate <codex|agy> … -- <prompt>`: hands a job to another tool. `args` are
@@ -78,14 +81,14 @@ pub fn version_line() -> String {
 pub fn usage() -> &'static str {
     "usage:\n  \
      notchling daemon [--socket <path>]          serve the local API\n  \
-     notchling status [--socket <path>]          the daemon's version, pid, uptime and clients\n  \
+     notchling status [--json] [--socket <path>]  the daemon's version, pid, uptime and clients\n  \
      notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
-     notchling pages [words] [--socket <path>]   the saved Artifact pages (id, title, account), newest first\n  \
-     notchling page <link|id|words> [--socket <path>]  where a saved page is, and who can republish it\n  \
+     notchling pages [words] [--json] [--socket <path>]  the saved Artifact pages (id, title, account), newest first\n  \
+     notchling page <link|id|words> [--json] [--socket <path>]  where a saved page is, and who can republish it\n  \
      notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
      \u{20}                                           hand a job to another tool and wait (read-only unless --write)\n  \
-     notchling delegate-models [codex|agy]       the models and efforts each tool offers\n  \
-     notchling secrets [words]                   the saved secrets that fit a URL, host or words (never values)\n  \
+     notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers\n  \
+     notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \
      notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason]\n  \
@@ -166,17 +169,20 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
             }
             "--socket" if action.is_none() => socket = Some(value(&mut args, "--socket")?),
             "--dir" if action.is_some() => dir = Some(value(&mut args, "--dir")?),
-            "--json" if first == "sessions" => json = true,
+            "--json" if matches!(first.as_str(), "sessions" | "status" | "pages" | "page") => {
+                json = true
+            }
             other => return Err(format!("unknown argument for {first}: {other}")),
         }
     }
     match (first.as_str(), action) {
         ("daemon", _) => Ok(Command::Daemon { socket }),
-        ("status", _) => Ok(Command::Status { socket }),
+        ("status", _) => Ok(Command::Status { json, socket }),
         ("sessions", _) => Ok(Command::Sessions { json, socket }),
         ("hook", _) => Ok(Command::Hook { socket }),
         ("pages", _) => Ok(Command::Pages {
             query: words.join(" "),
+            json,
             socket,
         }),
         ("page", _) if words.is_empty() => {
@@ -184,6 +190,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         ("page", _) => Ok(Command::Page {
             query: words.join(" "),
+            json,
             socket,
         }),
         ("service", Some(action)) => Ok(Command::Service { action, dir }),
@@ -208,7 +215,20 @@ mod tests {
                 socket: Some("/tmp/s.sock".into())
             })
         );
-        assert_eq!(p(&["status"]), Ok(Command::Status { socket: None }));
+        assert_eq!(
+            p(&["status"]),
+            Ok(Command::Status {
+                json: false,
+                socket: None
+            })
+        );
+        assert_eq!(
+            p(&["status", "--json", "--socket", "/tmp/s.sock"]),
+            Ok(Command::Status {
+                json: true,
+                socket: Some("/tmp/s.sock".into())
+            })
+        );
         assert_eq!(
             p(&["sessions", "--json"]),
             Ok(Command::Sessions {
@@ -239,6 +259,7 @@ mod tests {
             p(&["pages"]),
             Ok(Command::Pages {
                 query: String::new(),
+                json: false,
                 socket: None
             })
         );
@@ -246,6 +267,7 @@ mod tests {
             p(&["pages", "cost", "report", "--socket", "/tmp/s.sock"]),
             Ok(Command::Pages {
                 query: "cost report".into(),
+                json: false,
                 socket: Some("/tmp/s.sock".into())
             })
         );
@@ -253,11 +275,31 @@ mod tests {
             p(&["page", "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv"]),
             Ok(Command::Page {
                 query: "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv".into(),
+                json: false,
                 socket: None
             })
         );
         assert!(p(&["page"]).is_err(), "a page needs something to look for");
-        assert!(p(&["page", "x", "--json"]).is_err());
+        assert_eq!(
+            p(&["pages", "--json", "cost"]),
+            Ok(Command::Pages {
+                query: "cost".into(),
+                json: true,
+                socket: None
+            })
+        );
+        assert_eq!(
+            p(&["page", "x", "--json"]),
+            Ok(Command::Page {
+                query: "x".into(),
+                json: true,
+                socket: None
+            })
+        );
+        assert!(
+            p(&["page", "--json"]).is_err(),
+            "--json is not a search word"
+        );
         assert!(p(&["status", "word"]).is_err());
         assert!(usage().contains("notchling page <link|id|words>"));
     }
@@ -277,6 +319,12 @@ mod tests {
             p(&["delegate-models", "agy"]),
             Ok(Command::DelegateModels {
                 args: vec!["agy".into()]
+            })
+        );
+        assert_eq!(
+            p(&["delegate-models", "--json"]),
+            Ok(Command::DelegateModels {
+                args: vec!["--json".into()]
             })
         );
         let text = usage();
@@ -305,6 +353,12 @@ mod tests {
             p(&["secret-request", "gh", "--note", "--odd"]),
             Ok(Command::SecretRequest {
                 args: ["gh", "--note", "--odd"].map(String::from).to_vec()
+            })
+        );
+        assert_eq!(
+            p(&["secrets", "--json", "github"]),
+            Ok(Command::Secrets {
+                args: ["--json", "github"].map(String::from).to_vec()
             })
         );
         let text = usage();
@@ -337,9 +391,29 @@ mod tests {
     #[test]
     fn bad_arguments_are_errors() {
         assert!(p(&["daemon", "--socket"]).is_err());
-        assert!(p(&["status", "--json"]).is_err());
+        assert!(p(&["daemon", "--json"]).is_err());
+        assert!(p(&["service", "print", "--json"]).is_err());
         assert!(p(&["fly"]).is_err());
         assert!(p(&["daemon", "--dir", "/x"]).is_err());
+    }
+
+    #[test]
+    fn every_client_command_shows_json_in_the_usage() {
+        let lines: Vec<&str> = usage().lines().collect();
+        for command in [
+            "status",
+            "sessions",
+            "pages",
+            "page",
+            "delegate-models",
+            "secrets",
+        ] {
+            let line = lines
+                .iter()
+                .find(|l| l.trim_start().starts_with(&format!("notchling {command} ")))
+                .unwrap_or_else(|| panic!("no usage line for {command}"));
+            assert!(line.contains("[--json]"), "{line}");
+        }
     }
 
     #[test]

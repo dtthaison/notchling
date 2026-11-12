@@ -6,7 +6,9 @@
 //! None of them touches the Keychain or a vault file: they ask the daemon's vault service, which
 //! answers only while the `vault` switch is on. Output and exit codes are the Swift command's:
 //!
-//! - `secrets`: the entries that fit, best first (0); none saved or none fits (1).
+//! - `secrets [--json]`: the entries that fit, best first (0); none saved or none fits (1). With
+//!   `--json`, one JSON value on stdout ([`find_json`]), the same exit codes; errors stay text on
+//!   stderr.
 //! - `secret`: the command's own exit code; the user denied it (3); anything else (2). One
 //!   argument after `--` runs through `/bin/sh -c`. Output comes back with values hidden.
 //! - `secret-request`: `Saved.`, the entry and how to use it (0); the user cancelled (1);
@@ -131,19 +133,22 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
     Ok((request, socket))
 }
 
-/// `secrets`' words and socket.
-pub fn parse_find(args: &[String]) -> (String, Option<PathBuf>) {
+/// `secrets`' words, socket and `--json`.
+pub fn parse_find(args: &[String]) -> (String, Option<PathBuf>, bool) {
     let mut words = Vec::new();
     let mut socket = None;
+    let mut json = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         if arg == "--socket" {
             socket = rest.next().map(PathBuf::from);
+        } else if arg == "--json" {
+            json = true;
         } else {
             words.push(arg.clone());
         }
     }
-    (words.join(" "), socket)
+    (words.join(" "), socket, json)
 }
 
 /// The command as the approval shows it: one argument as it is, several quoted for a shell.
@@ -194,6 +199,29 @@ pub fn find_report(reply: &Value, query: &str, today: i64) -> (i32, String) {
     }
     let text: Vec<String> = shown.iter().map(|e| describe(e, today)).collect();
     (0, text.join("\n"))
+}
+
+/// What `secrets --json` prints for the daemon's `vault.find` reply: (exit code, the JSON value).
+/// `{"query", "saved": [names of every secret], "entries": [the ones that fit, best first]}`; an
+/// entry is the list's part of a secret (`name`, `kind`, `url`, `note`, `howTo`, `expires`, `ask`,
+/// `secretVar`, `userVar`, `updated`) and never a value: the reply is read through [`VaultEntry`],
+/// which has no field for one. The exit code is `find_report`'s.
+pub fn find_json(reply: &Value, query: &str) -> (i32, Value) {
+    let saved: Vec<String> = reply
+        .get("saved")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let shown = entries(reply, "entries");
+    let code = if saved.is_empty() || shown.is_empty() {
+        1
+    } else {
+        0
+    };
+    (
+        code,
+        json!({"query": query, "saved": saved, "entries": shown}),
+    )
 }
 
 /// What `secret-request` prints for a saved entry.
@@ -256,7 +284,7 @@ fn ask(
 
 /// `notchling secrets [words]`.
 pub fn secrets(args: &[String]) -> i32 {
-    let (query, socket) = parse_find(args);
+    let (query, socket, json) = parse_find(args);
     let reply = ask(
         socket.as_deref(),
         ops::VAULT_FIND,
@@ -266,6 +294,14 @@ pub fn secrets(args: &[String]) -> i32 {
     );
     match reply {
         Ok(reply) => {
+            if json {
+                let (code, value) = find_json(&reply, &query);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+                );
+                return code;
+            }
             let (code, text) = find_report(&reply, &query, today());
             println!("{text}");
             code

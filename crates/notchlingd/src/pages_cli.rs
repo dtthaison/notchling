@@ -11,6 +11,9 @@
 //! - `pages`: one tab-separated line per page, `id`, `title`, `account` (`-` where unknown),
 //!   newest first. No query lists every page.
 //! - Nothing found: `No saved page matches "<query>".` on stderr and exit 1, for both.
+//! - `--json`: the reply itself on stdout, pretty (`{"pages": [...], "truncated": bool}`, the same
+//!   for `page` and `pages`, every page found); the exit code and the nothing-found message on
+//!   stderr are the same.
 //!
 //! One difference from the Swift text: its "more" line says "use --pages"; here it says "use
 //! `notchling pages`".
@@ -93,11 +96,12 @@ fn lookup(layout: &Layout, query: &str) -> Result<Value, String> {
 }
 
 /// Runs `pages` (`list`) or `page`; the exit code.
-pub fn run(layout: &Layout, query: &str, list: bool) -> i32 {
+pub fn run(layout: &Layout, query: &str, list: bool, json: bool) -> i32 {
     run_to(
         layout,
         query,
         list,
+        json,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     )
@@ -107,6 +111,7 @@ fn run_to(
     layout: &Layout,
     query: &str,
     list: bool,
+    json: bool,
     out: &mut dyn std::io::Write,
     err: &mut dyn std::io::Write,
 ) -> i32 {
@@ -117,6 +122,20 @@ fn run_to(
             return 1;
         }
     };
+    if json {
+        // The reply as the daemon (or the library) built it, whole: every page found, each with
+        // its id, title, link, account, project, dates, paths and `describe`. Nothing found is
+        // `{"pages": [], "truncated": false}` on stdout, and the same message and exit 1 as without the flag.
+        let text = serde_json::to_string_pretty(&reply).unwrap_or_else(|_| reply.to_string());
+        let _ = writeln!(out, "{text}");
+        return match report(&reply, query, list) {
+            Ok(_) => 0,
+            Err(message) => {
+                let _ = writeln!(err, "{message}");
+                1
+            }
+        };
+    }
     match report(&reply, query, list) {
         Ok(text) => {
             let _ = writeln!(out, "{text}");
@@ -189,7 +208,7 @@ mod tests {
         let mut out = Vec::new();
         let mut err = Vec::new();
         // No daemon is listening on the fixture's socket: the library is read directly.
-        assert_eq!(run_to(&layout, "cost", false, &mut out, &mut err), 0);
+        assert_eq!(run_to(&layout, "cost", false, false, &mut out, &mut err), 0);
         let text = String::from_utf8(out).unwrap();
         assert!(
             text.starts_with("Title: Cost Report\nLink: https://claude.ai/artifact/AbCd"),
@@ -200,7 +219,7 @@ mod tests {
         assert!(err.is_empty());
 
         let mut out = Vec::new();
-        assert_eq!(run_to(&layout, "", true, &mut out, &mut err), 0);
+        assert_eq!(run_to(&layout, "", true, false, &mut out, &mut err), 0);
         let lines: Vec<String> = String::from_utf8(out)
             .unwrap()
             .lines()
@@ -221,6 +240,7 @@ mod tests {
             &layout,
             "https://claude.ai/code/artifact/ZZZZZZZZZZZZZZZZZZZZZZ",
             false,
+            false,
             &mut out,
             &mut err,
         );
@@ -230,10 +250,52 @@ mod tests {
             .starts_with("Title: Release Plan"));
         let mut out = Vec::new();
         assert_eq!(
-            run_to(&layout, "nothing here", false, &mut out, &mut err),
+            run_to(&layout, "nothing here", false, false, &mut out, &mut err),
             1
         );
         assert!(out.is_empty());
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "No saved page matches \"nothing here\".\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn json_prints_the_whole_reply_and_keeps_the_exit_codes() {
+        let (root, layout) = root_with_pages("json");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(run_to(&layout, "", true, true, &mut out, &mut err), 0);
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["pages"].as_array().unwrap().len(), 2, "{v}");
+        let cost = v["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["title"] == "Cost Report")
+            .unwrap();
+        assert_eq!(cost["id"], "AbCdEfGhIjKlMnOpQrStUv");
+        assert_eq!(cost["account"], "me@example.com");
+        assert!(cost["describe"]
+            .as_str()
+            .unwrap()
+            .starts_with("Title: Cost Report"));
+        assert!(err.is_empty());
+
+        // `page` gives the same shape.
+        let mut out = Vec::new();
+        assert_eq!(run_to(&layout, "cost", false, true, &mut out, &mut err), 0);
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["pages"].as_array().unwrap().len(), 1);
+
+        let mut out = Vec::new();
+        assert_eq!(
+            run_to(&layout, "nothing here", false, true, &mut out, &mut err),
+            1
+        );
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert!(v["pages"].as_array().unwrap().is_empty());
         assert_eq!(
             String::from_utf8(err).unwrap(),
             "No saved page matches \"nothing here\".\n"
@@ -246,7 +308,10 @@ mod tests {
         let root = temp("none");
         let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
         let mut err = Vec::new();
-        assert_eq!(run_to(&layout, "", true, &mut Vec::new(), &mut err), 1);
+        assert_eq!(
+            run_to(&layout, "", true, false, &mut Vec::new(), &mut err),
+            1
+        );
         assert_eq!(
             String::from_utf8(err).unwrap(),
             "No saved page matches \"\".\n"
