@@ -11,7 +11,7 @@ use crate::transcript::codex as codex_transcript;
 use crate::transcript::scan::{scan_lines, Line};
 use crate::transcript::tail::{tail_start_with, LONG_LINE_SCAN};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 /// What reading a file gave.
 pub(super) enum Read1 {
