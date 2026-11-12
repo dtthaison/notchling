@@ -31,6 +31,7 @@ pub mod conversation;
 pub mod errors;
 pub mod locate;
 pub mod model;
+pub mod scan;
 pub mod shells;
 pub mod snapshot;
 pub mod subagents;
