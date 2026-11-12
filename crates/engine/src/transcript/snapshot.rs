@@ -2,7 +2,7 @@
 //! since the last text, the current activity and the last question asked.
 
 use super::subagents;
-use super::tail::{Cursors, LineParser, MAX_LINE_BYTES, TAIL_BYTES};
+use super::tail::{Cursors, LineParser, LONG_LINE_SCAN, MAX_LINE_BYTES, TAIL_BYTES};
 use super::tally::{describe, ToolTally};
 use super::text::{collapse_pastes, suffix_chars};
 use super::util::{now_secs, parse_object, str_of};
@@ -278,10 +278,14 @@ impl SnapshotParser {
 
 fn cursors() -> &'static Cursors<SnapshotParser, Snapshot> {
     static CURSORS: OnceLock<Cursors<SnapshotParser, Snapshot>> = OnceLock::new();
-    CURSORS.get_or_init(|| Cursors::new(TAIL_BYTES, 300, SnapshotParser::snapshot))
+    // The last 2 MB of lines it reads: pictures (over its own 100 KB cap) don't use the window.
+    CURSORS.get_or_init(|| {
+        Cursors::new(TAIL_BYTES, 300, SnapshotParser::snapshot)
+            .skipping_lines_over(MAX_LINE_BYTES, LONG_LINE_SCAN)
+    })
 }
 
-/// The snapshot of a transcript. The first call parses the last 2 MB; later calls parse only the lines
+/// The snapshot of a transcript. The first call parses the last 2 MB of lines (pictures don't count); later calls parse only the lines
 /// appended since. Subagents run on while the session's own transcript stays still, so their count
 /// is taken fresh each call.
 pub fn read(path: &str) -> Snapshot {

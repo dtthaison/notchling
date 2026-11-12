@@ -230,3 +230,24 @@ fn a_transcript_without_pictures_reads_the_same_either_way() {
     assert_eq!(plain.read(&path), skipping.read(&path));
     assert_eq!(plain.parsed_bytes(), skipping.parsed_bytes());
 }
+
+#[test]
+fn the_notch_keeps_the_last_prompt_behind_a_run_of_pictures() {
+    use notchling_engine::transcript::snapshot;
+    let scratch = Scratch::new("longlines-notch");
+    // The last prompt, then the agent reads four pictures: the last 2 MB of the file is all base64.
+    let mut text = session(5, 0, 0, 0);
+    text.push_str(&format!("{}\n", prompt(5)));
+    for i in 0..4 {
+        let id = format!("toolu_n{i}");
+        text.push_str(&format!(
+            "{}\n{}\n",
+            read_call(&id),
+            image_result(&id, 1_200_000)
+        ));
+    }
+    let path = s(&scratch.write("s.jsonl", &text));
+    let shot = snapshot::read(&path);
+    assert_eq!(shot.last_prompt.as_deref(), Some("prompt 5"));
+    assert!(shot.lines.iter().any(|l| l.text == "answer 4"));
+}
