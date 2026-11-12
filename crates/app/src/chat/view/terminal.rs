@@ -195,6 +195,25 @@ fn start_program(
 }
 
 impl ChatView {
+    /// `--render`'s bench: opens the render's panel and starts the timer that redraws it.
+    pub(crate) fn bench_terminal_start(&mut self, cx: &mut Context<Self>) {
+        self.render_terminal(false, cx);
+        self.tick_terminals(cx);
+    }
+
+    /// `--render`'s bench: one more line on the active tab, marked changed as the pty reader does.
+    pub(crate) fn bench_terminal_feed(&mut self) {
+        let Some(shell) = self.terminal.tabs.active() else {
+            return;
+        };
+        shell
+            .screen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .feed(b"bench line\r\n");
+        shell.dirty.store(true, Ordering::Relaxed);
+    }
+
     /// The render's panel: two tabs on `/bin/cat`, which prints nothing, over the sample screen.
     pub(super) fn render_terminal(&mut self, expanded: bool, cx: &mut Context<Self>) {
         let home = self.root.home.clone();

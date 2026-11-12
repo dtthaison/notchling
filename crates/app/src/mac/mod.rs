@@ -2,6 +2,8 @@
 //! `--render`, which captures a view's window to a PNG (GPUI has no offscreen path; spike S4).
 
 pub mod app_icons;
+pub mod bench;
+pub mod bench_events;
 pub mod capture;
 pub mod dock;
 pub mod gate;

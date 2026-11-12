@@ -11,6 +11,7 @@
 //! [`view`], macOS only for now.
 
 pub mod activity;
+pub mod bench_fixture;
 pub mod claude_picker;
 pub mod closed;
 pub mod codex_list;

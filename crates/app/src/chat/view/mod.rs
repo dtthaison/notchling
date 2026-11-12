@@ -113,6 +113,14 @@ fn switch(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| v == "1")
 }
 
+/// The middle of the conversation column in a window of `size`, in window points: what the bench
+/// moves the mouse and the wheel over.
+pub fn bench_point(size: gpui::Size<gpui::Pixels>) -> gpui::Point<gpui::Pixels> {
+    let sidebar = notchling_kit::metric::SIDEBAR_WIDTH;
+    let column = (f32::from(size.width) - sidebar - inspector::WIDTH).max(0.0);
+    gpui::point(px(sidebar + column / 2.0), size.height / 2.0)
+}
+
 pub struct ChatView {
     root: DataRoot,
     sessions: Vec<Session>,
@@ -514,6 +522,23 @@ impl ChatView {
         })
         .detach();
         view
+    }
+
+    /// `--render`'s bench: types into the reply box, as a person would.
+    pub fn bench_type(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.tools
+            .editor
+            .update(cx, |editor, cx| editor.insert(text, cx));
+    }
+
+    /// `--render`'s bench: a reload that finds nothing changed on disk.
+    pub fn bench_reload(&mut self, cx: &mut Context<Self>) {
+        self.reload_now(cx);
+    }
+
+    /// `--render`'s bench: opens or closes the account menu, a change no cached part shows.
+    pub fn bench_menu(&mut self, cx: &mut Context<Self>) {
+        self.toggle_account_menu(cx);
     }
 
     /// The session the conversation shows.

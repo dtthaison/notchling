@@ -1,0 +1,207 @@
+//! A generated data root for `--render chat`'s bench: one working Claude Code job with a long
+//! transcript (the cost of a conversation shows only when it is long) and three done jobs with
+//! two turns each. Pure: the same arguments give the same files, and the root is made at run
+//! time by the bench, never checked in (a 200-turn transcript under `crates/` would pass
+//! `LINT-FILE-SIZE`).
+
+use serde_json::{json, Value};
+
+use notchling_engine::bridge::net::files::iso8601;
+
+/// The working job's id, its project folder under `claude/projects/` and its transcript's name:
+/// where a bench that appends to the open conversation writes.
+pub const WORKING_JOB: &str = "bn000001";
+pub const PROJECT: &str = "-Users-me-work-bench";
+pub const WORKING_TRANSCRIPT: &str = "claude/projects/-Users-me-work-bench/bench-working.jsonl";
+
+/// Milliseconds between two lines of a transcript: whole seconds, which is all `iso8601` writes.
+const LINE_GAP_MS: i64 = 1000;
+
+/// The files of a data root, as relative paths and texts: the working job first, then three done
+/// ones. `now_ms` is the time the newest working line carries, so the sessions are recent when
+/// the bench passes the current time.
+pub fn files(turns: usize, now_ms: i64) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    out.push(job(WORKING_JOB, "bench-working", "working", now_ms));
+    out.push((
+        WORKING_TRANSCRIPT.to_owned(),
+        transcript("bench-working", turns, now_ms),
+    ));
+    for n in 1..=3 {
+        let (id, session) = (format!("bd00000{n}"), format!("bench-done-{n}"));
+        // An hour apart, newest first, so the Done section's order is the same every time.
+        let at = now_ms - n as i64 * 3_600_000;
+        out.push(job(&id, &session, "done", at));
+        out.push((
+            format!("claude/projects/{PROJECT}/{session}.jsonl"),
+            transcript(&session, 2, at),
+        ));
+    }
+    out
+}
+
+/// A job's `state.json`.
+fn job(id: &str, session: &str, state: &str, at_ms: i64) -> (String, String) {
+    let state = json!({
+        "state": state,
+        "sessionId": session,
+        "name": session.replace('-', " "),
+        "cwd": "/Users/me/work/bench",
+        "updatedAt": iso8601(at_ms),
+        "linkScanPath": format!("claude/projects/{PROJECT}/{session}.jsonl"),
+    });
+    (format!("claude/jobs/{id}/state.json"), state.to_string())
+}
+
+/// `turns` turns ending at `end_ms`, one JSON line each and a newline after every one: a user
+/// line, an assistant line with a Bash call, its result and a Markdown reply.
+fn transcript(session: &str, turns: usize, end_ms: i64) -> String {
+    let lines = turns as i64 * 4;
+    let start = end_ms - lines * LINE_GAP_MS;
+    let mut out = String::new();
+    for turn in 0..turns {
+        let at = |k: i64| iso8601(start + (turn as i64 * 4 + k) * LINE_GAP_MS);
+        for line in turn_lines(session, turn, &at) {
+            out.push_str(&line.to_string());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// One turn's four lines. `at(k)` is the time of its `k`-th line.
+fn turn_lines(session: &str, turn: usize, at: &dyn Fn(i64) -> String) -> [Value; 4] {
+    let tool = format!("{session}-t{turn}");
+    let output = (1..=20)
+        .map(|i| {
+            format!(
+                "   Compiling bench-crate-{turn}-{i} v0.{i}.0 (/Users/me/work/bench/crates/c{i})"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    [
+        json!({
+            "type": "user",
+            "timestamp": at(0),
+            "gitBranch": "bench",
+            "message": {"role": "user", "content": format!(
+                "Turn {turn}: run the checks on the parser crate, then tell me which of them failed and why, in a few lines."
+            )},
+        }),
+        json!({
+            "type": "assistant",
+            "timestamp": at(1),
+            "effort": "high",
+            "message": {
+                "id": format!("{session}-a{turn}"),
+                "model": "claude-opus-5-5",
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool,
+                    "name": "Bash",
+                    "input": {"command": "cargo test -p parser 2>&1 | tail -30", "description": "Run the parser tests"},
+                }],
+                "usage": {"input_tokens": 1200, "output_tokens": 40},
+            },
+        }),
+        json!({
+            "type": "user",
+            "timestamp": at(2),
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool,
+                "content": output,
+            }]},
+        }),
+        json!({
+            "type": "assistant",
+            "timestamp": at(3),
+            "effort": "high",
+            "message": {
+                "id": format!("{session}-b{turn}"),
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": reply(turn)}],
+                "usage": {"input_tokens": 1400, "output_tokens": 180},
+            },
+        }),
+    ]
+}
+
+/// A reply with a heading, a paragraph, a three-item list, an eight-line code block and a 3x3
+/// table: the parts a real conversation lays out.
+fn reply(turn: usize) -> String {
+    format!(
+        "## Result of turn {turn}\n\n\
+         The parser tests ran to the end and one of them failed: the table reader keeps a trailing \
+         space in the last cell, so the comparison against the expected row never matches.\n\n\
+         - the reader trims only the first cell\n\
+         - the writer pads every cell to the widest one\n\
+         - the test compares the padded text\n\n\
+         ```rust\n\
+         fn cell(text: &str) -> &str {{\n\
+         \x20   let text = text.trim_start();\n\
+         \x20   match text.find('|') {{\n\
+         \x20       Some(end) => text[..end].trim_end(),\n\
+         \x20       None => text.trim_end(),\n\
+         \x20   }}\n\
+         }}\n\
+         // used by every row of every table\n\
+         ```\n\n\
+         | Check | Result | Time |\n\
+         | --- | --- | --- |\n\
+         | fmt | ok | 1s |\n\
+         | tests | 1 failed | {turn}s |\n\
+         | clippy | ok | 41s |\n"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use notchling_engine::transcript::conversation::Parser;
+
+    use super::*;
+    use crate::chat::data::DataRoot;
+    use crate::testutil::Scratch;
+
+    /// Mid-November 2026, whatever the day: only the order and the recency matter.
+    const T: i64 = 1_794_000_000_000;
+
+    #[test]
+    fn the_fixture_lists_one_working_job_first() {
+        let dir = Scratch::new("bench-fixture");
+        for (path, text) in files(5, T) {
+            dir.write(&path, &text);
+        }
+        let sessions = DataRoot::fixture(dir.path()).sessions(T);
+        let names: Vec<&str> = sessions.iter().map(|s| s.agent.name.as_str()).collect();
+        assert_eq!(sessions.len(), 4, "{names:?}");
+        assert_eq!(names[0], "bench working", "{names:?}");
+        assert!(
+            sessions[0]
+                .transcript
+                .as_ref()
+                .is_some_and(|path| path.is_file()),
+            "the working job's transcript is found"
+        );
+    }
+
+    #[test]
+    fn a_long_fixture_fills_the_conversation() {
+        let (_, text) = files(200, T)
+            .into_iter()
+            .find(|(path, _)| path == WORKING_TRANSCRIPT)
+            .expect("the working transcript");
+        let mut parser = Parser::default();
+        for line in text.lines() {
+            parser.consume(line.as_bytes());
+        }
+        let items = parser.conversation().items.len();
+        assert!((400..=500).contains(&items), "{items} items");
+    }
+
+    #[test]
+    fn the_fixture_is_the_same_every_time() {
+        assert_eq!(files(3, T), files(3, T));
+    }
+}
