@@ -309,7 +309,8 @@ impl ChatView {
                                 }
                             }
                             v.simulator.listed = true;
-                            cx.notify();
+                            // The panel is drawn by the root: the cached parts have no news.
+                            v.redraw_chrome(cx);
                             true
                         })
                         .unwrap_or(false);
@@ -388,7 +389,8 @@ impl ChatView {
                                 last = None;
                             }
                         }
-                        cx.notify();
+                        // Each frame is the panel's alone: the cached parts keep their drawing.
+                        v.redraw_chrome(cx);
                         true
                     })
                     .unwrap_or(false);
