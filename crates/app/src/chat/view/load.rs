@@ -51,6 +51,10 @@ impl ChatView {
         // The Swift hook's files are read only while the daemon's held prompts aren't followed.
         loader.files_prompts = view.prompts.is_none();
         loader.subagent_path = self.open_subagent.as_ref().map(|o| o.agent.path.clone());
+        loader.subagent_origin = self
+            .open_subagent
+            .as_ref()
+            .map_or_else(Default::default, |o| o.agent.origin);
         cx.spawn(async move |this, cx| {
             let (loader, loaded) = cx
                 .background_executor()
@@ -77,6 +81,7 @@ impl ChatView {
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
         let mut all = loaded.sessions;
+        self.delegated = loaded.delegated;
         let (selected, starting) = (self.selected.clone(), &self.tools.starting);
         self.new_drafts.retain(|d| {
             selected.as_deref() == Some(d.agent.id.as_str()) || starting.contains_key(&d.agent.id)

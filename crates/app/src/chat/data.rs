@@ -7,6 +7,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use notchling_engine::delegate::record::{self, Delegation};
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::{self, Subagent};
@@ -328,11 +329,18 @@ impl DataRoot {
         (*self.conversation_shared(session)).clone()
     }
 
-    /// The subagents a Claude Code session started, with how each ended.
+    /// The jobs agent sessions handed to Codex or Antigravity CLI (`notchling delegate`).
+    pub fn delegations(&self) -> Vec<Delegation> {
+        super::delegated::read(&self.data_dir)
+    }
+
+    /// The subagents a Claude Code session started, with how each ended, and the jobs it handed
+    /// to Codex or Antigravity CLI (`delegations`, read once per load by the caller).
     pub fn subagents(
         &self,
         session: &Session,
         conversation: &Conversation,
+        delegations: &[Delegation],
         now_secs: f64,
     ) -> Vec<Subagent> {
         match (&session.transcript, session.tool) {
@@ -344,6 +352,21 @@ impl DataRoot {
                     if !list.iter().any(|a| a.id == agent.id) {
                         list.push(agent);
                     }
+                }
+                if !delegations.is_empty() {
+                    let parents = super::delegated::parent_ids(&path, &session.agent.name);
+                    let sessions = self.codex_dir.join("sessions");
+                    let places = super::delegated::Places {
+                        codex_sessions: &sessions,
+                        antigravity: &self.antigravity_dir,
+                    };
+                    list.extend(super::delegated::subagents(
+                        delegations,
+                        &parents,
+                        &places,
+                        now_secs,
+                        &record::pid_alive,
+                    ));
                 }
                 list.sort_by(|a, b| a.started.total_cmp(&b.started));
                 list

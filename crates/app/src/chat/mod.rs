@@ -21,6 +21,7 @@ pub mod closed;
 pub mod codex_list;
 pub mod composer;
 pub mod data;
+pub mod delegated;
 pub mod drafts;
 pub mod drops;
 pub mod escape;

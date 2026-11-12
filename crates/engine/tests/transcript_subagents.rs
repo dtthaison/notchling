@@ -80,6 +80,7 @@ fn bare(background: bool) -> Subagent {
         started: 0.0,
         updated: 0.0,
         status: Status::Quiet,
+        origin: Default::default(),
     }
 }
 

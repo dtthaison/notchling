@@ -35,6 +35,17 @@ pub fn shown(session: &Session, used: &HashMap<String, f64>, now_s: f64) -> bool
         || now_s - agent.since_ms as f64 / 1000.0 < RECENT_S
 }
 
+/// Whether the Sidebar leaves `id` out because another session handed it over as a job
+/// (`chat::delegated`): it is that session's subagent. Using it here (opening it from Search) brings
+/// it into the Sidebar like any other row.
+pub fn is_delegated_job(
+    id: &str,
+    delegated: &std::collections::HashSet<String>,
+    used: &HashMap<String, f64>,
+) -> bool {
+    delegated.contains(id) && !used.contains_key(id)
+}
+
 /// Records a use of `id` at `now_s`, forgetting uses older than a month. False when nothing
 /// changed that needs saving (a Claude Code row, a draft, or used already today).
 pub fn mark(used: &mut HashMap<String, f64>, id: &str, now_s: f64) -> bool {
@@ -110,6 +121,18 @@ mod tests {
         assert!(!mark(&mut used, "codex:a", 200.0), "already today");
         assert!(!mark(&mut used, "abc", 200.0));
         assert!(!mark(&mut used, "agy-new:1", 200.0));
+    }
+
+    #[test]
+    fn a_delegated_job_is_left_out_until_it_is_used_here() {
+        let delegated = std::collections::HashSet::from(["codex:job".to_owned()]);
+        let mut used = HashMap::new();
+        assert!(is_delegated_job("codex:job", &delegated, &used));
+        assert!(!is_delegated_job("codex:other", &delegated, &used));
+        assert!(!is_delegated_job("abc", &delegated, &used));
+        // Opened from Search.
+        assert!(mark(&mut used, "codex:job", 100.0));
+        assert!(!is_delegated_job("codex:job", &delegated, &used));
     }
 
     #[test]

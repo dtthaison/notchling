@@ -28,6 +28,17 @@ pub enum Status {
     Quiet,
 }
 
+/// Where a subagent's transcript comes from, and so how it is read: Claude Code's own subagent
+/// files, or a job the session handed to Codex or Antigravity CLI (`delegate::record`), whose
+/// session is the other tool's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Origin {
+    #[default]
+    Claude,
+    Codex,
+    Antigravity,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subagent {
     pub id: String,
@@ -41,6 +52,7 @@ pub struct Subagent {
     pub started: Timestamp,
     pub updated: Timestamp,
     pub status: Status,
+    pub origin: Origin,
 }
 
 impl Subagent {
@@ -120,6 +132,7 @@ pub fn list(
             started,
             updated,
             status: Status::Quiet,
+            origin: Origin::Claude,
         };
         agent.status = status_of(&agent, finished, now);
         // The session's notice can be older than the part of its transcript that was read.

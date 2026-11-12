@@ -232,6 +232,10 @@ impl Source {
             .filter_map(|path| codex_list::session(path))
             .collect();
         rows.extend(self.agy_list.rows(now_ms));
+        // Jobs another session handed over are its subagents, not rows (`chat::delegated`).
+        let delegated =
+            crate::chat::delegated::hidden(&crate::chat::delegated::read(&self.root.data_dir));
+        rows.retain(|row| !delegated.contains(&row.id));
         live.overlay(&mut rows);
         foreign::visible(rows, now_ms)
     }
@@ -391,5 +395,40 @@ mod tests {
         assert!(source.locator.has_missed("no-such-session"));
         assert_eq!(source.locator.find(&ghost, &projects, 2_000), None);
         assert_eq!(fixture_clock(&[]), 60_000);
+    }
+
+    #[test]
+    fn a_job_another_session_handed_to_codex_is_not_a_notch_row() {
+        use notchling_engine::delegate::options::{Options, Tool};
+        use notchling_engine::delegate::record::{self, Delegation};
+        let s = crate::testutil::Scratch::new("notch-delegated");
+        let rollout = |id: &str| {
+            s.write(
+                &format!("codex/sessions/2026/11/12/rollout-2026-11-12T09-00-00-{id}.jsonl"),
+                &format!(
+                    "{{\"timestamp\":\"2026-11-12T10:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"cwd\":\"/w\"}}}}\n"
+                ),
+            )
+        };
+        rollout("mine");
+        rollout("job");
+        let options = Options {
+            tool: Tool::Codex,
+            prompt: "x".into(),
+            model: None,
+            effort: None,
+            folder: "/w".into(),
+            out: None,
+            write: false,
+            session: None,
+            timeout: std::time::Duration::from_secs(1),
+        };
+        let mut job = Delegation::new("parent", "/w", &options, 1.0, 1);
+        job.session = Some("job".into());
+        record::write(&s.path().join("notchling").join(record::FOLDER), &job).unwrap();
+        let mut source = Source::keeping_everything(DataRoot::fixture(s.path()));
+        let rows = source.foreign_rows(&ToolLive::default(), 1_794_160_000_000);
+        let ids: Vec<&str> = rows.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["codex:mine"]);
     }
 }

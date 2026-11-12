@@ -62,6 +62,15 @@ fn a_new_record_is_pending_until_the_session_is_known() {
 }
 
 #[test]
+fn a_jobs_id_survives_its_session_getting_an_id() {
+    let mut r = started(Tool::Codex, 100.5, 4242);
+    let before = r.id();
+    assert_eq!(before, "codex-4242-100500");
+    r.session = Some("sess".into());
+    assert_eq!(r.id(), before);
+}
+
+#[test]
 fn a_session_id_that_could_name_a_path_is_not_used() {
     let mut o = options(Tool::Codex, "x");
     o.session = Some("../../etc/passwd".into());

@@ -276,6 +276,7 @@ impl ChatView {
         let remembers = self.root.fixture.is_none();
         let now_s = now_ms() as f64 / 1000.0;
         all.into_iter()
+            .filter(|s| !used::is_delegated_job(&s.agent.id, &self.delegated, &self.used))
             .filter(|s| {
                 !remembers
                     || used::shown(s, &self.used, now_s)

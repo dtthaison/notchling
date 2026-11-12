@@ -106,6 +106,17 @@ impl Delegation {
         }
     }
 
+    /// A name for the job that doesn't change when its session gets an id: Chat's subagent list
+    /// and an open subagent keep following it through that.
+    pub fn id(&self) -> String {
+        format!(
+            "{}-{}-{}",
+            self.tool,
+            self.pid,
+            (self.started * 1000.0) as i64
+        )
+    }
+
     /// The Sidebar row of the tool's session (`codex:<id>`, `agy:<id>`), once there is one.
     pub fn row_id(&self) -> Option<String> {
         let session = self.session.as_deref().filter(|s| plain_id(s))?;

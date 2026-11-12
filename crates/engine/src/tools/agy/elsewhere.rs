@@ -132,7 +132,13 @@ pub fn log_stamp(root: &Path, session: &str) -> Option<(u64, std::time::SystemTi
 /// steps, and `note` at the end; and whether a turn is still going. While one is, `activity`
 /// names the call still waiting for its result.
 pub fn from_log(root: &Path, session: &str, note: &str) -> (Conversation, bool) {
-    let lines = read_tail(&log_path(root, session));
+    from_log_file(&log_path(root, session), Some(note))
+}
+
+/// [`from_log`] for a log at `path`, with no note at the end when `note` is `None` (a delegation
+/// shown as a subagent has nothing to say about who holds it).
+pub fn from_log_file(path: &Path, note: Option<&str>) -> (Conversation, bool) {
+    let lines = read_tail(path);
     let (mut conversation, working) = from_lines(&lines);
     if working {
         let open = match conversation.items.last().map(|i| &i.kind) {
@@ -144,11 +150,13 @@ pub fn from_log(root: &Path, session: &str, note: &str) -> (Conversation, bool) 
                 .unwrap_or_else(|| "Working elsewhere…".into()),
         );
     }
-    conversation.items.push(ChatItem {
-        id: "agy-elsewhere".into(),
-        kind: ItemKind::notice(note, "lock"),
-        date: None,
-    });
+    if let Some(note) = note {
+        conversation.items.push(ChatItem {
+            id: "agy-elsewhere".into(),
+            kind: ItemKind::notice(note, "lock"),
+            date: None,
+        });
+    }
     (conversation, working)
 }
 
