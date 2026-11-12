@@ -251,3 +251,37 @@ fn the_notch_keeps_the_last_prompt_behind_a_run_of_pictures() {
     assert_eq!(shot.last_prompt.as_deref(), Some("prompt 5"));
     assert!(shot.lines.iter().any(|l| l.text == "answer 4"));
 }
+
+#[test]
+fn a_request_blob_repeating_a_result_does_not_finish_a_step() {
+    let scratch = Scratch::new("longlines-blob");
+    let id = "toolu_blob";
+    let data = "A".repeat(600_000);
+    // Claude Code logs what it sent to the API too, tool results and all; that isn't the result.
+    let blob = format!(
+        r#"{{"type":"api-request-blob","sessionId":"s","hash":"h","message":{{"role":"user","content":[{{"tool_use_id":"{id}","type":"tool_result","content":[{{"type":"image","source":{{"type":"base64","data":"{data}"}}}}]}}]}}}}"#
+    );
+    let text = format!("{}\n{blob}\n", read_call(id));
+    let path = s(&scratch.write("s.jsonl", &text));
+    let c = conversation::read(&path);
+    let ItemKind::Tools(calls) = &c.items[0].kind else {
+        panic!("expected the call, got {:?}", c.items[0].kind)
+    };
+    assert!(
+        !calls[0].finished,
+        "only the user's own result line answers a call"
+    );
+    assert_eq!(c.activity.as_deref(), Some(calls[0].title.as_str()));
+}
+
+#[test]
+fn a_parser_given_a_huge_line_whole_finishes_the_step_too() {
+    let mut parser = Parser::new();
+    parser.consume(read_call("toolu_whole").as_bytes());
+    parser.consume(image_result("toolu_whole", 600_000).as_bytes());
+    let c = parser.conversation();
+    let ItemKind::Tools(calls) = &c.items[0].kind else {
+        panic!("expected the call")
+    };
+    assert!(calls[0].finished);
+}

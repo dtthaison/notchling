@@ -5,6 +5,7 @@ use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::model::*;
+use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
 use crate::transcript::subagents::notification_statuses;
@@ -138,6 +139,7 @@ impl Parser {
 
     fn parse_line(&mut self, line: &[u8]) {
         if line.len() > MAX_LINE {
+            self.oversized_result(&line[..line.len().min(HEAD_BYTES)]);
             return;
         }
         let Some(map) = parse_object(line) else {
