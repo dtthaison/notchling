@@ -2,7 +2,7 @@
 //! dropped on a row select it and go into its reply box at the caret. Its
 //! footer holds the ? button, which names every part on screen (`notchling_kit::ui::KitPart`).
 
-use gpui::{div, prelude::*, px, Context, Div, ExternalPaths, SharedString};
+use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
@@ -16,7 +16,7 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::data::Tool;
-use crate::chat::sidebar::{row_account, sections};
+use crate::chat::sidebar::{sidebar_model, SidebarModel};
 use crate::mac::gate;
 
 /// A footer button, an icon with its words as the tooltip as in the Swift sidebar, named
@@ -191,10 +191,20 @@ fn mark_of(tool: Tool) -> ToolMark {
     }
 }
 
-pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
-    let sections = sections(&view.sessions, view.now_ms);
-    // Each row names its account from what the accounts store holds now.
-    let accounts = view.accounts.snapshot();
+/// What the Sidebar shows, from the chat now: its rows and their accounts (from what the accounts
+/// store holds), the selection and the footer's note.
+pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
+    sidebar_model(
+        &view.sessions,
+        view.now_ms,
+        view.selected.as_deref(),
+        &view.accounts.snapshot(),
+        view.daemon_note,
+    )
+}
+
+/// The Sidebar, drawn from its model alone.
+pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
     let mut list = div()
         .id("sessions")
         .flex_1()
@@ -205,7 +215,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         .flex()
         .flex_col()
         .gap(px(4.0));
-    if sections.is_empty() {
+    if m.sections.is_empty() {
         list = list.child(div().px(px(8.0)).child(label(
             "No sessions in the last day",
             TypeRole::Meta,
@@ -213,7 +223,8 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             a,
         )));
     }
-    for section in sections {
+    let mut accounts = m.accounts.iter();
+    for section in &m.sections {
         list = list.child(
             div()
                 .px(px(8.0))
@@ -240,9 +251,9 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                     .part_at("Group Count", Corner::Bottom, a, cx),
                 ),
         );
-        for row in section.rows {
+        for row in &section.rows {
             let id = row.id.clone();
-            let state = if view.selected.as_deref() == Some(row.id.as_str()) {
+            let state = if m.selected.as_deref() == Some(row.id.as_str()) {
                 PartState::Selected
             } else {
                 PartState::Rest
@@ -254,7 +265,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
                 a,
             )
             .part_at("Tool Icon", Corner::Leading, a, cx);
-            let account = row_account(row.tool, row.config_dir.as_deref(), &accounts).map(|acc| {
+            let account = accounts.next().and_then(Option::as_ref).map(|acc| {
                 account_line(&acc.text, acc.lane, a).part_at(
                     "Session Account",
                     Corner::Trailing,
@@ -310,6 +321,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
         // The traffic lights and the two buttons beside them (drawn over this row) sit here.
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
         .child(scrollable(list))
-        .child(footer(a, view.daemon_note, cx))
+        .child(footer(a, m.daemon_note, cx))
         .part_inside("Sidebar", Corner::Trailing, a, cx)
+        .into_any_element()
 }

@@ -276,3 +276,21 @@ fn bench_says_whether_frames_were_forced() {
     let result = bench_for("idle", 2);
     assert!(result["forced"].is_boolean(), "{result}");
 }
+
+/// A reload that finds nothing changed in the open session redraws the Sidebar only when a row's
+/// age, status or account changed (an age may tick over once in the run).
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_reload_draws_no_sidebar() {
+    let result = bench_for("reload", 3);
+    assert!(count(&result, "sidebar") <= 1, "{result}");
+}
+
+/// Opening and closing the account menu is a `ChatView` change no part shows: the Sidebar's model
+/// stays equal, so it isn't drawn.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_menu_draws_no_sidebar() {
+    let result = bench_for("menu", 3);
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+}

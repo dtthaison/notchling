@@ -255,6 +255,41 @@ pub fn sections(sessions: &[Session], now_ms: i64) -> Vec<Section> {
     .collect()
 }
 
+/// What the Sidebar draws: everything its draw function reads, so a part can draw only when it
+/// changes. Equal for two states that differ only in what no row shows (a draft, a menu).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SidebarModel {
+    pub sections: Vec<Section>,
+    /// Each row's account, in row order across the sections.
+    pub accounts: Vec<Option<RowAccount>>,
+    pub selected: Option<String>,
+    pub daemon_note: Option<&'static str>,
+}
+
+/// The Sidebar's model: its sections (ages and statuses as strings, so a tick that changes none
+/// changes nothing), each row's account from the accounts store, the selection and the footer's
+/// note about the daemon.
+pub fn sidebar_model(
+    sessions: &[Session],
+    now_ms: i64,
+    selected: Option<&str>,
+    snapshot: &Snapshot,
+    daemon_note: Option<&'static str>,
+) -> SidebarModel {
+    let sections = sections(sessions, now_ms);
+    let accounts: Vec<Option<RowAccount>> = sections
+        .iter()
+        .flat_map(|s| &s.rows)
+        .map(|r| row_account(r.tool, r.config_dir.as_deref(), snapshot))
+        .collect();
+    SidebarModel {
+        sections,
+        accounts,
+        selected: selected.map(str::to_owned),
+        daemon_note,
+    }
+}
+
 /// The session id a row's Copy Session ID puts on the clipboard: the tool's own id (Claude Code's
 /// session UUID is the row id; Codex and Antigravity rows carry a `codex:` or `agy:` prefix). A
 /// draft that hasn't started has none.
@@ -601,5 +636,85 @@ pub(crate) mod tests {
             Pending::GaveUp
         );
         // It found nothing, so a later load listing it does not matter: the caller dropped it.
+    }
+
+    fn model(sessions: &[Session], selected: Option<&str>, snapshot: &Snapshot) -> SidebarModel {
+        sidebar_model(sessions, 1_000_000_000_000, selected, snapshot, None)
+    }
+
+    fn two() -> Vec<Session> {
+        vec![
+            session("a", AgentGroup::Working, None, Tool::Claude),
+            session("b", AgentGroup::Completed, None, Tool::Codex),
+        ]
+    }
+
+    #[test]
+    fn the_model_is_equal_when_nothing_shown_changed() {
+        // The model takes only what the Sidebar draws: the same inputs, whatever else the window
+        // holds (a draft, an open menu), give an equal model, and a later clock that rounds to the
+        // same age too.
+        let (sessions, snapshot) = (two(), accounts());
+        let before = model(&sessions, Some("a"), &snapshot);
+        assert_eq!(before, model(&sessions, Some("a"), &snapshot));
+        let later = sidebar_model(
+            &sessions,
+            1_000_000_000_000 + 5_000,
+            Some("a"),
+            &snapshot,
+            None,
+        );
+        assert_eq!(before, later);
+    }
+
+    #[test]
+    fn a_new_age_or_status_changes_the_model() {
+        let (mut sessions, snapshot) = (two(), accounts());
+        let before = model(&sessions, None, &snapshot);
+        let older = sidebar_model(
+            &sessions,
+            1_000_000_000_000 + 120_000,
+            None,
+            &snapshot,
+            None,
+        );
+        assert_ne!(before, older, "the age 2m became 4m");
+        sessions[0].agent.group = AgentGroup::NeedsInput;
+        assert_ne!(before, model(&sessions, None, &snapshot));
+        let mut with_note = model(&sessions, None, &snapshot);
+        assert_eq!(with_note.daemon_note, None);
+        with_note.daemon_note = Some("Daemon not running");
+        assert_ne!(with_note, model(&sessions, None, &snapshot));
+    }
+
+    #[test]
+    fn a_changed_row_account_changes_the_model() {
+        let sessions = vec![session("a", AgentGroup::Working, None, Tool::Claude)];
+        let mut snapshot = accounts();
+        let before = model(&sessions, None, &snapshot);
+        assert_eq!(
+            before.accounts,
+            [Some(RowAccount {
+                text: "me@example.com".into(),
+                lane: false
+            })]
+        );
+        snapshot.claude.accounts[0].email = "other@example.com".into();
+        assert_ne!(before, model(&sessions, None, &snapshot));
+        snapshot.claude.active = None;
+        assert_eq!(model(&sessions, None, &snapshot).accounts, [None]);
+    }
+
+    #[test]
+    fn selecting_another_row_changes_the_model() {
+        let (sessions, snapshot) = (two(), accounts());
+        assert_ne!(
+            model(&sessions, Some("a"), &snapshot),
+            model(&sessions, Some("b"), &snapshot)
+        );
+        assert_ne!(
+            model(&sessions, None, &snapshot),
+            model(&sessions, Some("a"), &snapshot)
+        );
     }
 }

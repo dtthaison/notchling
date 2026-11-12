@@ -386,7 +386,12 @@ impl ChatView {
     ) -> Self {
         let this = cx.weak_entity();
         let changes = window.observe_window_appearance(move |_, cx| {
-            this.update(cx, |_, cx| cx.notify()).ok();
+            // The parts read the appearance as they draw: ask each for a draw whatever its model.
+            this.update(cx, |view, cx| {
+                cx.notify();
+                view.redraw_parts(cx);
+            })
+            .ok();
         });
         let watch = Watcher::start(root.watch_folders(), watch_config()).ok();
         // Esc turns the part names off from any window; the editor lets Esc through.
