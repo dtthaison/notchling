@@ -18,6 +18,7 @@ mod markdown;
 mod message_actions;
 mod opinions;
 mod page_panel;
+pub mod pane;
 mod phone;
 mod prompts;
 mod row_menu;
@@ -46,7 +47,7 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 use notchling_kit::labels::Corner;
 use notchling_kit::ui::{
-    parts_on, resize_edges, scrollable, set_parts, window_appearance, KitPart, KitStyled, TopBorder,
+    parts_on, resize_edges, set_parts, window_appearance, KitPart, KitStyled, TopBorder,
 };
 use notchling_kit::Ink;
 use notchling_platform::watch::{Batch, Watcher};
@@ -148,6 +149,12 @@ pub struct ChatView {
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     watch: Option<(Watcher, Receiver<Batch>)>,
     conversation_scroll: ScrollHandle,
+    /// Each drawn message's Markdown, parsed once and its paths looked up once per load.
+    markdown: std::cell::RefCell<crate::chat::markdown_cache::Cache>,
+    /// The conversation's column, drawn cached apart from the rest of the window (`pane`).
+    pane: Entity<pane::ConversationPane>,
+    /// Woken for a redraw of everything but the conversation (`redraw_chrome`).
+    chrome: Entity<pane::Chrome>,
     /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
     /// the Swift app). Kept outside the rows so a reload doesn't fold them.
     expanded: HashSet<String>,
@@ -173,8 +180,6 @@ pub struct ChatView {
     drawn_ms: i64,
     /// A message was sent and hasn't shown up in a reload yet: that reload goes to the end.
     follow_sent: bool,
-    /// The wall-clock second the live line was last redrawn for (its clock ticks once a second).
-    clock_second: i64,
     /// Whether a sheet, menu, panel or the part names were up when last drawn: Esc then belongs
     /// to them, not to Stop.
     overlay_open: bool,
@@ -452,6 +457,12 @@ impl ChatView {
             source,
             watch,
             conversation_scroll: ScrollHandle::new(),
+            markdown: Default::default(),
+            pane: {
+                let chat = cx.entity();
+                cx.new(|cx| pane::ConversationPane::new(&chat, cx))
+            },
+            chrome: cx.new(|_| pane::Chrome),
             expanded: HashSet::new(),
             expand_all: false,
             tasks_open_preview: false,
@@ -471,7 +482,6 @@ impl ChatView {
             slash_commands: None,
             slash_preview: None,
             follow_sent: false,
-            clock_second: 0,
             overlay_open: false,
             page_covered: false,
             tools: tools::ChatTools::new(cx),
@@ -614,6 +624,8 @@ impl ChatView {
                 Pending::GaveUp => self.pending_job = None,
             }
         }
+        // What the disk says about the paths in messages is asked again once per load.
+        self.markdown.get_mut().reloaded();
         self.sessions = self.open_rows(all);
         if self.selected == asked {
             let was = self.selected.take();
@@ -751,6 +763,7 @@ impl ChatView {
         }
         self.selected = Some(id.to_owned());
         select::clear();
+        self.markdown.get_mut().switched();
         self.mark_used(id);
         self.conversation = Conversation::default();
         self.subagents.clear();
@@ -791,21 +804,17 @@ impl ChatView {
             );
             cx.notify();
         }
+        // The live line's clock needs no redraw of its own: its spinner draws the window's outer
+        // parts ten times a second while it shows, which reads the clock again.
         let dot = self.bridge_on();
         if dot != self.phone_dot {
             self.phone_dot = dot;
-            cx.notify();
+            self.redraw_chrome(cx);
         }
         if let Some((_, batches)) = &self.watch {
             while batches.try_recv().is_ok() {
                 self.gate.changed();
             }
-        }
-        // The live line's clock: a redraw each second while it shows, none while nothing runs.
-        let clock = now_ms() / 1000;
-        if clock != self.clock_second && self.activity_line().is_some() {
-            self.clock_second = clock;
-            cx.notify();
         }
         // The check on Copy goes after a moment; a hovered row's time is kept fresh.
         if let Some((_, at)) = &self.copied {
@@ -839,7 +848,6 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        self.drawn_ms = now_ms();
         self.take_terminal_focus(window);
         if let Some(text) = self.slash_preview.clone() {
             if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
@@ -873,9 +881,7 @@ impl Render for ChatView {
             .min_h(px(0.0))
             .flex()
             .flex_col()
-            .child(
-                scrollable(conversation::render(self, a, cx)).tracking(&self.conversation_scroll),
-            )
+            .child(pane::element(&self.pane))
             // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
             .children(conversation::latest_pill(self, a, cx))
@@ -981,5 +987,6 @@ impl Render for ChatView {
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
             .child(resize_edges(window, TopBorder::InContent))
+            .child(self.chrome.clone())
     }
 }

@@ -2,11 +2,13 @@
 
 use std::borrow::Cow;
 use std::f32::consts::TAU;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use gpui::{
-    div, prelude::*, px, radians, svg, Animation, AnimationExt, AssetSource, Div, ElementId,
-    FontWeight, SharedString, Transformation,
+    div, prelude::*, px, radians, svg, AnyElement, AnyView, App, AssetSource, Bounds, Context, Div,
+    Element, ElementId, Entity, FontWeight, GlobalElementId, InspectorElementId, LayoutId, Pixels,
+    SharedString, Transformation, Window,
 };
 
 use super::hsla;
@@ -52,7 +54,12 @@ pub fn icon_in(icon: Icon, points: f32, color: Color) -> Div {
 }
 
 /// How long a spinner takes to turn once (the macOS ring turns about once a second).
-const SPIN: Duration = Duration::from_millis(900);
+const SPIN: Duration = Duration::from_secs(1);
+/// How often a spinner moves on: ten times a second (36 degrees a step), not once per display
+/// frame. GPUI draws
+/// every view above a spinner again for each of its frames, so a spinner asking for the display's
+/// 60 or 120 a second kept a whole window drawing (Chat with a working session took a core).
+const SPIN_FRAME: Duration = Duration::from_millis(100);
 /// Lucide's `loader-circle` fills 21 of its 24 units, so its box is this much bigger than the
 /// spinner.
 const SPIN_BOX: f32 = 1.2;
@@ -64,26 +71,161 @@ fn spin_turns(t: f32) -> f32 {
     t.clamp(0.0, 1.0) % 1.0
 }
 
+/// Where every spinner is `since` the clock they share started, in turns: they all turn
+/// together, and a spinner drawn by another redraw (a hover, a scroll) is where the clock says.
+fn turns_at(since: Duration) -> f32 {
+    let turn = SPIN.as_nanos();
+    spin_turns((since.as_nanos() % turn) as f32 / turn as f32)
+}
+
+/// How long until the next spinner frame, on one grid for every spinner, so several spinners on
+/// screen move in the same frame rather than each asking for its own.
+fn until_next_frame(since: Duration) -> Duration {
+    let frame = SPIN_FRAME.as_nanos();
+    Duration::from_nanos((frame - since.as_nanos() % frame) as u64)
+}
+
+/// The clock every spinner reads.
+fn spin_clock() -> Duration {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed()
+}
+
 /// The loading spinner (the Swift `ProgressView().controlSize(...)`: 10 pt mini, 16 pt small):
-/// Lucide's `loader-circle`, an open ring in `ink` turning once every 0.9 s. `id` names its
-/// animation, so two spinners in one place need two ids. GPUI draws frames only for what is on
-/// screen, so nothing animates while no spinner is drawn.
+/// Lucide's `loader-circle`, an open ring in `ink` turning once a second, moved on ten times a
+/// second. `id` keeps the spinner's own small view between frames, so two spinners in one
+/// place need two ids. It turns only while drawn: nothing asks for its next frame once it's gone.
 pub fn spinner(id: impl Into<ElementId>, diameter: f32, ink: Ink, a: Appearance) -> Div {
     let size = px(diameter * SPIN_BOX);
-    let turning = svg()
-        .path(Icon::Spinner.svg().unwrap_or("icons/loader-circle.svg"))
-        .size(size)
-        .text_color(hsla(ink.color(a)))
-        .with_animation(id, Animation::new(SPIN).repeat(), |svg, t| {
-            svg.with_transformation(Transformation::rotate(radians(spin_turns(t) * TAU)))
-        });
     div()
         .flex_shrink_0()
         .size(size)
         .flex()
         .items_center()
         .justify_center()
-        .child(turning)
+        .child(Spin {
+            id: id.into(),
+            size,
+            color: ink.color(a),
+        })
+}
+
+/// The ring itself, a view of its own: its timer wakes only it, so the views above it draw again
+/// (GPUI redraws a view's ancestors) but nothing beside them does, and a view that observes
+/// another (Chat's conversation, cached apart from the window) isn't told the window changed.
+struct Turning {
+    size: Pixels,
+    color: Color,
+    /// A timer for the next frame is set; one at a time.
+    ticking: bool,
+}
+
+impl Render for Turning {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let since = spin_clock();
+        if !self.ticking {
+            self.ticking = true;
+            let wait = until_next_frame(since);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                this.update(cx, |turning, cx| {
+                    turning.ticking = false;
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
+        svg()
+            .path(Icon::Spinner.svg().unwrap_or("icons/loader-circle.svg"))
+            .size(self.size)
+            .text_color(hsla(self.color))
+            .with_transformation(Transformation::rotate(radians(turns_at(since) * TAU)))
+    }
+}
+
+/// Puts the spinner's [`Turning`] view in the tree, kept in element state under its id.
+struct Spin {
+    id: ElementId,
+    size: Pixels,
+    color: Color,
+}
+
+impl IntoElement for Spin {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for Spin {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, AnyElement) {
+        let (size, color) = (self.size, self.color);
+        let new = |cx: &mut App| {
+            cx.new(|_| Turning {
+                size,
+                color,
+                ticking: false,
+            })
+        };
+        let view = match id {
+            Some(id) => window.with_element_state(id, |kept: Option<Entity<Turning>>, _| {
+                let view = kept.unwrap_or_else(|| new(cx));
+                (view.clone(), view)
+            }),
+            None => new(cx),
+        };
+        // Its look follows the caller's (an appearance switch); not a redraw of its own.
+        view.update(cx, |turning, _| {
+            turning.size = size;
+            turning.color = color;
+        });
+        let mut element = AnyView::from(view).into_any_element();
+        (element.request_layout(window, cx), element)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        element: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        element: &mut AnyElement,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.paint(window, cx);
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +239,36 @@ mod tests {
         assert!(spin_turns(0.13) > spin_turns(0.125), "no 45 degree steps");
         assert_eq!(spin_turns(0.5), 0.5);
         assert_eq!(spin_turns(1.0), 0.0, "the turn ends where the next begins");
+    }
+
+    #[test]
+    fn every_spinner_reads_one_clock() {
+        assert_eq!(turns_at(Duration::ZERO), 0.0);
+        assert!((turns_at(SPIN / 4) - 0.25).abs() < 1e-4);
+        assert!(
+            (turns_at(SPIN * 3 + SPIN / 2) - 0.5).abs() < 1e-4,
+            "whole turns drop"
+        );
+    }
+
+    #[test]
+    fn spinners_wait_for_the_same_frame_ten_times_a_second() {
+        assert_eq!(SPIN_FRAME.as_millis(), 100);
+        assert_eq!(
+            until_next_frame(Duration::ZERO),
+            SPIN_FRAME,
+            "on a frame: the next one"
+        );
+        let a = until_next_frame(Duration::from_millis(20));
+        let b = until_next_frame(Duration::from_millis(50));
+        assert_eq!(
+            Duration::from_millis(20) + a,
+            Duration::from_millis(50) + b,
+            "two spinners at different moments wake together"
+        );
+        assert_eq!(
+            until_next_frame(Duration::from_millis(130)),
+            Duration::from_millis(70)
+        );
     }
 }

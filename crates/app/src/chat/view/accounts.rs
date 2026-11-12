@@ -48,7 +48,8 @@ impl ChatView {
             cx.background_executor()
                 .spawn(async move { store.refresh(&switches) })
                 .await;
-            this.update(cx, |_, cx| cx.notify()).ok();
+            // The meters and the menu are outside the conversation, which needn't draw again.
+            this.update(cx, |view, cx| view.redraw_chrome(cx)).ok();
         })
         .detach();
     }

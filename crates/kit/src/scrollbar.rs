@@ -119,6 +119,26 @@ pub fn is_animating(since: f32) -> bool {
     since < HOLD_SECONDS + FADE_SECONDS
 }
 
+/// How often the fading bar is drawn again: 30 times a second, not every display frame, since a
+/// frame draws the whole list the bar is over again.
+pub const FADE_STEP_SECONDS: f32 = 1.0 / 30.0;
+
+/// When the bar next looks different, `since` seconds after the last scroll: when the fade starts,
+/// while it holds (nothing changes until then), then a step of the fade; `None` once it's hidden.
+pub fn next_frame_in(since: f32) -> Option<f32> {
+    if !is_animating(since) {
+        return None;
+    }
+    if since < HOLD_SECONDS {
+        return Some(HOLD_SECONDS - since);
+    }
+    Some(
+        FADE_STEP_SECONDS
+            .min(HOLD_SECONDS + FADE_SECONDS - since)
+            .max(0.001),
+    )
+}
+
 /// Whether the pointer holds the bar on screen: only one scrolling already showed (`shown`), or
 /// that it already holds, so it can be grabbed. Passing over a hidden bar shows nothing.
 pub fn holds(over: bool, shown: bool, hovered: bool) -> bool {
@@ -284,6 +304,17 @@ mod tests {
         // "About a second" after scrolling stops.
         let total = HOLD_SECONDS + FADE_SECONDS;
         assert!((total - 1.0).abs() < 0.05, "{total}");
+    }
+
+    #[test]
+    fn a_held_bar_waits_for_its_fade_and_the_fade_steps_thirty_times_a_second() {
+        assert!((next_frame_in(0.0).unwrap() - HOLD_SECONDS).abs() < 1e-6);
+        assert!((next_frame_in(0.5).unwrap() - (HOLD_SECONDS - 0.5)).abs() < 1e-6);
+        assert_eq!(next_frame_in(HOLD_SECONDS), Some(FADE_STEP_SECONDS));
+        let near_end = HOLD_SECONDS + FADE_SECONDS - 0.01;
+        assert!((next_frame_in(near_end).unwrap() - 0.01).abs() < 1e-4);
+        assert_eq!(next_frame_in(HOLD_SECONDS + FADE_SECONDS), None);
+        assert_eq!(next_frame_in(5.0), None);
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub mod lane_limits;
 pub mod limit_ring;
 pub mod loader;
 pub mod markdown;
+pub mod markdown_cache;
 pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;

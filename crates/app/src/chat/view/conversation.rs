@@ -45,8 +45,8 @@ fn chevron(open: bool, points: f32, a: Appearance) -> Div {
 }
 
 /// The live line after the last row (the Swift app's live row): a spinner, what the session is
-/// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. The
-/// view redraws it once a second while it shows (`ChatView::tick`).
+/// doing, "(50s · ↓ 2.9k tokens)" faint after it, and any background command still running. Its
+/// spinner's frames draw it again, so its clock moves with them.
 /// The activity line, just above the reply box: one line, its words cut with an ellipsis before
 /// the counts beside them. A prompt with nothing back for a while (`stalled`) gets "No reply
 /// yet" and Retry, which stops the stuck turn and sends the prompt again. With a background
@@ -531,9 +531,10 @@ fn thinking(
         })
 }
 
+/// Your message: `split` is its words and the pictures it sent (`drops::split_images`).
 fn user_row(
     id: &str,
-    text: &str,
+    split: (String, Vec<std::path::PathBuf>),
     images: usize,
     queued: bool,
     sending: bool,
@@ -547,8 +548,7 @@ fn user_row(
         (false, false) => "Your Message",
     };
     let note = if sending { "Sending…" } else { "Queued" };
-    // The pictures you sent show as pictures, their paths taken out of the words.
-    let (words, pictures) = crate::chat::drops::split_images(text, |p| p.is_file());
+    let (words, pictures) = split;
     // Under the bubble where its delivered mark, time and Copy go once it's in (same gray, same
     // row height), so nothing moves when it lands.
     let status = queued.then(|| {
@@ -646,7 +646,12 @@ fn row_element(
             images,
             queued,
             sending,
-        } => user_row(id, text, *images, *queued, *sending, a, cx),
+        } => {
+            // The pictures you sent show as pictures, their paths taken out of the words.
+            let split =
+                crate::chat::drops::split_images(text, |p| view.markdown.borrow().is_file(p));
+            user_row(id, split, *images, *queued, *sending, a, cx)
+        }
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => {
@@ -664,7 +669,11 @@ fn row_element(
                     .fill(Ink::Card, a)
                     .border(px(1.0))
                     .border_color(hsla(Ink::Hairline.color(a)))
-                    .child(markdown::render(id, text, folder, a))
+                    .child(markdown::render(
+                        id,
+                        &view.markdown.borrow_mut().message(id, text, folder),
+                        a,
+                    ))
                     .part("Claude's Reply", a, cx),
             )
         }

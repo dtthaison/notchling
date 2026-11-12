@@ -26,6 +26,7 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::file_panel::{self, Body, Loaded, Pic};
+use crate::chat::markdown_cache::Cache as MarkdownCache;
 use crate::chat::page_panel::{
     artifact_link, decide, dragged_width, panel_width, subtitle, ArtifactLink, Frame, Opens,
     DEFAULT_WIDTH,
@@ -443,7 +444,12 @@ const CHUNK_LINES: usize = 80;
 
 /// A file's content, scrolling below the header: Markdown as a message is drawn, text in the mono
 /// face, a picture at the panel's width, and for anything else a note and a button to its own app.
-fn file_body(file: &FileState, width: f32, a: Appearance) -> AnyElement {
+fn file_body(
+    file: &FileState,
+    width: f32,
+    markdown: &RefCell<MarkdownCache>,
+    a: Appearance,
+) -> AnyElement {
     let key = format!("file-panel-{}", file.path.display());
     let note = |text: &str, ink: Ink| label(text, TypeRole::Meta, ink, a).into_any_element();
     let mut cut = false;
@@ -451,7 +457,10 @@ fn file_body(file: &FileState, width: f32, a: Appearance) -> AnyElement {
         Body::Markdown { text, cut: c } => {
             cut = *c;
             let folder = file_panel::folder_of(&file.path);
-            super::markdown::render(&key, text, &folder.to_string_lossy(), a).into_any_element()
+            let message = markdown
+                .borrow_mut()
+                .message(&key, text, &folder.to_string_lossy());
+            super::markdown::render(&key, &message, a).into_any_element()
         }
         Body::Text { text, cut: c } => {
             cut = *c;
@@ -648,7 +657,7 @@ pub fn render(
 
     // A file: its text, in the room below the header.
     let page = match shown.file.as_ref() {
-        Some(file) => file_body(file, width, a),
+        Some(file) => file_body(file, width, &view.markdown, a),
         None => web_page(view, shown, a),
     };
 

@@ -5,9 +5,13 @@
 //! `NOTCHLING_RENDER_APPEARANCE=light|dark` draws the view in that appearance instead of the
 //! system's, for checking both without changing the Mac's setting. `NOTCHLING_RENDER_SCROLLBARS=1`
 //! draws every overlay scroll bar as if it had just scrolled, since a still frame has no scroll.
+//! `NOTCHLING_RENDER_BENCH=<seconds>` keeps the view up that long before the capture and prints
+//! `bench: <frames> frames in <s> s (<n> drew the conversation), <cpu> ms CPU (<ms>/frame, <fps> fps, <pct>% of a core)`: what
+//! the window costs while nothing happens but what it animates (a spinner, a clock, a reload).
 
 use std::path::Path;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use gpui::{
     point, prelude::*, px, size, AnyView, App, Application, Bounds, Context, Render, Window,
@@ -32,6 +36,60 @@ pub const APPEARANCE_ENV: &str = "NOTCHLING_RENDER_APPEARANCE";
 /// The environment's name for the switch that pins the scroll bars on.
 pub const SCROLLBARS_ENV: &str = "NOTCHLING_RENDER_SCROLLBARS";
 
+/// The environment's name for the bench's length in seconds.
+pub const BENCH_ENV: &str = "NOTCHLING_RENDER_BENCH";
+
+/// Frames the window has drawn: the root view renders once per frame, whatever made it.
+static FRAMES: AtomicU64 = AtomicU64::new(0);
+
+/// The process's CPU time so far (user and system), in milliseconds.
+fn cpu_ms() -> f64 {
+    #[repr(C)]
+    struct TimeVal {
+        sec: i64,
+        usec: i32,
+    }
+    #[repr(C)]
+    struct RUsage {
+        user: TimeVal,
+        system: TimeVal,
+        rest: [i64; 14],
+    }
+    extern "C" {
+        fn getrusage(who: i32, usage: *mut RUsage) -> i32;
+    }
+    let mut usage = RUsage {
+        user: TimeVal { sec: 0, usec: 0 },
+        system: TimeVal { sec: 0, usec: 0 },
+        rest: [0; 14],
+    };
+    // RUSAGE_SELF is 0; the struct is the size and layout of macOS's `struct rusage`.
+    if unsafe { getrusage(0, &mut usage) } != 0 {
+        return 0.0;
+    }
+    let ms = |t: &TimeVal| t.sec as f64 * 1000.0 + t.usec as f64 / 1000.0;
+    ms(&usage.user) + ms(&usage.system)
+}
+
+/// Keeps the window up for `seconds` and prints what it drew and spent meanwhile.
+async fn bench(seconds: f64, cx: &gpui::AsyncApp) {
+    let drawn = || crate::chat::view::pane::RENDERS.load(Ordering::Relaxed);
+    let (frames, conversations) = (FRAMES.load(Ordering::Relaxed), drawn());
+    let (cpu, at) = (cpu_ms(), Instant::now());
+    cx.background_executor()
+        .timer(Duration::from_secs_f64(seconds))
+        .await;
+    let frames = FRAMES.load(Ordering::Relaxed) - frames;
+    let conversations = drawn() - conversations;
+    let (cpu, wall) = (cpu_ms() - cpu, at.elapsed().as_secs_f64());
+    println!(
+        "bench: {frames} frames in {wall:.1} s ({conversations} drew the conversation), {cpu:.0} ms CPU ({:.2} ms/frame, {:.1} fps, {:.1}% of a core)",
+        cpu / frames.max(1) as f64,
+        frames as f64 / wall,
+        cpu / wall / 10.0
+    );
+}
+
 /// Forces the app's appearance, so every window (and `window_appearance`) follows it.
 fn force_appearance(appearance: Appearance) {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -52,6 +110,7 @@ struct Root {
 
 impl Render for Root {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+        FRAMES.fetch_add(1, Ordering::Relaxed);
         self.view.clone()
     }
 }
@@ -69,6 +128,10 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
     let forced = std::env::var(APPEARANCE_ENV)
         .ok()
         .and_then(|v| Appearance::parse(&v));
+    let bench_seconds = std::env::var(BENCH_ENV)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|s| *s > 0.0);
     let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
     app.run(move |cx: &mut App| {
         // Real app icons from this Mac, as the live app draws them; a render over made-up data
@@ -119,6 +182,9 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
             cx.new(|cx| {
                 cx.spawn(async move |_, cx| {
                     cx.background_executor().timer(SETTLE).await;
+                    if let Some(seconds) = bench_seconds {
+                        bench(seconds, cx).await;
+                    }
                     let result = ns
                         .as_deref()
                         .ok_or_else(|| "no NSWindow behind the GPUI window".to_owned())

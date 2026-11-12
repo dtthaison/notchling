@@ -5,9 +5,12 @@
 //! `h`, padding and the rest keep meaning what they did) and takes no room of its own.
 //!
 //! - The thumb is thin and rounded, 7 pt wide and 9 under the pointer, 2 pt in from the edge, with
-//!   no track behind it. It shows only while the content scrolls and fades about a second after it
-//!   stops; the pointer over a shown bar keeps it (so it can be grabbed), but never shows a hidden
-//!   one. Frames are drawn for the fade only while the bar is visible.
+//!   no track behind it. It shows while you scroll (the wheel or trackpad, a drag, a press in the
+//!   track), never for a scroll the app makes (following new messages, opening at the end), as on
+//!   macOS, and fades about a second after you stop; the pointer over a shown bar keeps it (so it
+//!   can be grabbed), but never shows a hidden one. Its frames come from a timer, at the fade's
+//!   start and 30 times a second through it, not every display frame: each one draws the whole
+//!   view the bar is in again (Chat's conversation, with every message).
 //! - Dragging the thumb scrolls; a press in the track pages toward it. Both take the press, so the
 //!   content under the 14 pt strip doesn't also get it, and the pointer stays an arrow there. While
 //!   the bar is hidden its strip passes presses and the pointer through; wheel scrolling over it
@@ -20,7 +23,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::{
     fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div, Element,
@@ -78,8 +81,8 @@ impl Scrollable {
 struct Bar {
     /// The handle when the view gave none.
     own: ScrollHandle,
-    /// Where the content was last frame (points scrolled down), to see it move.
-    scrolled: Option<f32>,
+    /// A timer will draw the bar again (its fade); one at a time.
+    waking: bool,
     /// When it last moved, or the pointer last left.
     active: Option<Instant>,
     hovered: bool,
@@ -138,7 +141,7 @@ impl Element for Scrollable {
                 let bar = state.unwrap_or_else(|| {
                     Rc::new(RefCell::new(Bar {
                         own: ScrollHandle::new(),
-                        scrolled: None,
+                        waking: false,
                         active: None,
                         hovered: false,
                         drag: None,
@@ -149,7 +152,7 @@ impl Element for Scrollable {
             }),
             None => Rc::new(RefCell::new(Bar {
                 own: ScrollHandle::new(),
-                scrolled: None,
+                waking: false,
                 active: None,
                 hovered: false,
                 drag: None,
@@ -217,14 +220,6 @@ impl Element for Scrollable {
 
         let (alpha, hovered, dragging) = {
             let mut state = bar.borrow_mut();
-            let scrolled = geometry.scrolled;
-            if state
-                .scrolled
-                .is_some_and(|last| (last - scrolled).abs() > 0.01)
-            {
-                state.active = Some(now);
-            }
-            state.scrolled = Some(scrolled);
             if pinned {
                 state.active = Some(now);
             }
@@ -248,9 +243,23 @@ impl Element for Scrollable {
                 math::visibility(since)
             };
             state.shown = alpha > 0.0;
-            // Frames only while the bar is on screen and still changing.
-            if !hovered && state.shown && math::is_animating(since) && !pinned {
-                window.request_animation_frame();
+            // Frames only while the bar is on screen and changing: a timer at the fade's start and
+            // for each of its steps, never every display frame, since each draws the whole list
+            // again (the view the bar is in).
+            if !hovered && state.shown && !pinned && !state.waking {
+                if let Some(wait) = math::next_frame_in(since) {
+                    state.waking = true;
+                    let (bar, view) = (bar.clone(), window.current_view());
+                    window
+                        .spawn(cx, async move |cx| {
+                            cx.background_executor()
+                                .timer(Duration::from_secs_f32(wait))
+                                .await;
+                            bar.borrow_mut().waking = false;
+                            cx.update(|_, cx| cx.notify(view)).ok();
+                        })
+                        .detach();
+                }
             }
             (alpha, hovered, dragging)
         };

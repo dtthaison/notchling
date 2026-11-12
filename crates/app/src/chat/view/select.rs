@@ -39,6 +39,10 @@ struct Spot {
 #[derive(Default)]
 struct State {
     notes: Vec<Note>,
+    /// Where each key's note is in `notes`. The conversation is drawn cached (`pane`), so a frame
+    /// can skip its listener, which starts the notes afresh, while a text outside it (the file
+    /// panel's) notes itself again: that replaces its note rather than adding one each frame.
+    at: std::collections::HashMap<String, usize>,
     anchor: Option<Spot>,
     focus: Option<Spot>,
     /// What the press took: a word or a paragraph widens the drag to whole ones of those.
@@ -61,7 +65,7 @@ thread_local! {
 
 impl State {
     fn order(&self, spot: &Spot) -> Option<At> {
-        let order = self.notes.iter().position(|n| n.key == spot.key)?;
+        let order = *self.at.get(&spot.key)?;
         Some(At {
             order,
             index: spot.index,
@@ -102,8 +106,19 @@ impl State {
         })
     }
 
+    /// A text drawn this frame: its note replaces the one under its key, else goes last.
+    fn note_drawn(&mut self, note: Note) {
+        match self.at.get(&note.key) {
+            Some(&i) if i < self.notes.len() => self.notes[i] = note,
+            _ => {
+                self.at.insert(note.key.clone(), self.notes.len());
+                self.notes.push(note);
+            }
+        }
+    }
+
     fn note(&self, key: &str) -> Option<&Note> {
-        self.notes.iter().find(|n| n.key == key)
+        self.at.get(key).and_then(|&i| self.notes.get(i))
     }
 
     /// Where the drag ends with `unit`: past the whole word or paragraph it's in, on the side
@@ -155,7 +170,13 @@ pub fn clear() {
 /// Goes first in the conversation's column: starts the frame's notes, and takes the pointer.
 pub fn listener() -> impl IntoElement {
     canvas(
-        |_, _, _| STATE.with(|s| s.borrow_mut().notes.clear()),
+        |_, _, _| {
+            STATE.with(|s| {
+                let mut s = s.borrow_mut();
+                s.notes.clear();
+                s.at.clear();
+            })
+        },
         |_, _, window, _| {
             window.on_mouse_event(|event: &MouseDownEvent, phase, window, _| {
                 if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
@@ -302,13 +323,12 @@ impl Element for Selectable {
         cx: &mut App,
     ) -> Hitbox {
         child.prepaint(window, cx);
-        STATE.with(|s| {
-            s.borrow_mut().notes.push(Note {
-                key: self.key.clone(),
-                text: std::mem::take(&mut self.text),
-                layout: self.layout.clone(),
-            })
-        });
+        let note = Note {
+            key: self.key.clone(),
+            text: std::mem::take(&mut self.text),
+            layout: self.layout.clone(),
+        };
+        STATE.with(|s| s.borrow_mut().note_drawn(note));
         window.insert_hitbox(bounds, HitboxBehavior::Normal)
     }
 
@@ -326,8 +346,8 @@ impl Element for Selectable {
         let selected = STATE.with(|s| {
             let s = s.borrow();
             let (start, end) = s.ends()?;
-            let order = s.notes.iter().position(|n| n.key == self.key)?;
-            let len = s.notes[order].text.len();
+            let order = *s.at.get(&self.key)?;
+            let len = s.notes.get(order)?.text.len();
             range_in(start, end, order, len)
         });
         // Over the text, not behind it: inline code paints its own background, which hid a wash
@@ -386,4 +406,35 @@ fn rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
             size: size((right - left).max(px(2.0)), height),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(key: &str, text: &str) -> Note {
+        Note {
+            key: key.to_owned(),
+            text: text.to_owned(),
+            layout: TextLayout::default(),
+        }
+    }
+
+    #[test]
+    fn a_text_noted_again_replaces_its_note_in_place() {
+        let mut s = State::default();
+        s.note_drawn(note("a", "one"));
+        s.note_drawn(note("b", "two"));
+        // A frame that kept the conversation's drawing: only the panel's text notes itself again.
+        s.note_drawn(note("a", "one, edited"));
+        s.note_drawn(note("a", "one, edited"));
+        let texts: Vec<&str> = s.notes.iter().map(|n| n.text.as_str()).collect();
+        assert_eq!(texts, vec!["one, edited", "two"], "no note piles up");
+        assert_eq!(s.note("b").map(|n| n.text.as_str()), Some("two"));
+        let spot = Spot {
+            key: "b".into(),
+            index: 1,
+        };
+        assert_eq!(s.order(&spot), Some(At { order: 1, index: 1 }));
+    }
 }
