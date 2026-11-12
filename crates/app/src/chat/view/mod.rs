@@ -12,6 +12,7 @@ mod composer;
 mod conversation;
 mod conversation_list;
 mod conversation_view;
+mod copy;
 mod drop;
 mod header;
 mod inspector;
@@ -213,6 +214,8 @@ pub struct ChatView {
     account_menu: bool,
     /// The menu a right click on a sidebar row opened.
     row_menu: Option<row_menu::RowMenu>,
+    /// The anchor that keeps Copy reachable when nothing has the keyboard (`copy`).
+    keys: copy::Keys,
     /// When the accounts store was last read for the header (ms).
     accounts_polled_ms: i64,
     /// Whether `codex` is installed (the account menu's Codex Accounts…), looked up with the
@@ -408,6 +411,7 @@ impl ChatView {
             limit_ring: limit_ring::State::default(),
             account_menu: false,
             row_menu: None,
+            keys: copy::Keys::new(cx),
             accounts_polled_ms: 0,
             codex_installed: accounts::codex_installed(&root.home),
             loader: Some(Loader::new(root.clone())),

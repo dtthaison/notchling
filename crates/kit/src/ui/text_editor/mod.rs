@@ -210,6 +210,11 @@ impl TextEditor {
         self.enabled && self.focus.is_focused(window)
     }
 
+    /// The selected text, or `None` when nothing is selected: what a Copy takes.
+    pub fn selected_text(&self) -> Option<String> {
+        (!self.edit.selection().is_empty()).then(|| self.edit.selected_text().to_owned())
+    }
+
     /// After anything the user did: the caret shows and comes into view; `changed` tells the owner.
     fn touched(&mut self, changed: bool, cx: &mut Context<Self>) {
         self.reveal_caret = true;
@@ -288,8 +293,7 @@ impl TextEditor {
             "end" => self.edit.move_right(Unit::Document, extend),
             "a" if cmd && !m.shift && !m.alt => self.edit.select_all(),
             "c" if cmd => {
-                if !self.edit.selection().is_empty() {
-                    let text = self.edit.selected_text().to_owned();
+                if let Some(text) = self.selected_text() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
             }
