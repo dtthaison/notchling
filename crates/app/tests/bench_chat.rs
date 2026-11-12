@@ -294,3 +294,22 @@ fn bench_menu_draws_no_sidebar() {
     let result = bench_for("menu", 3);
     assert_eq!(count(&result, "sidebar"), 0, "{result}");
 }
+
+/// A reload that finds nothing changed in the open session draws no part but, once in a while, a
+/// Sidebar row's age that ticked over.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_reload_draws_no_part() {
+    let result = bench_for("reload", 3);
+    assert_eq!(count(&result, "conversation"), 0, "{result}");
+    assert!(count(&result, "sidebar") <= 1, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+}
+
+/// The account menu opening and closing changes nothing the Details Panel shows.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_menu_draws_no_details() {
+    let result = bench_for("menu", 3);
+    assert_eq!(count(&result, "details"), 0, "{result}");
+}

@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use gpui::{
-    div, prelude::*, px, relative, App, Context, Div, Global, SharedString, Stateful, WeakEntity,
-    Window, WindowId,
+    div, prelude::*, px, relative, AnyElement, App, Context, Div, Global, SharedString, Stateful,
+    WeakEntity, Window, WindowId,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
@@ -23,6 +23,8 @@ use crate::chat::format::short_path;
 use crate::chat::inspector::{
     fact_icon, fact_text, inspector, Fold, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
+use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::subagents::Subagent;
 
 pub(super) const WIDTH: f32 = 260.0;
 /// A row's mark sits in a box this wide, so the text lines up whatever the mark.
@@ -53,22 +55,55 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
     }
 }
 
-/// The inspector panel, for the selected session.
-pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
-    let i = inspector(&view.conversation, &view.subagents, &|p: &str| {
-        view.shell_probe.writers(p)
-    });
+/// What the Details Panel shows from the chat: the inspector's rows, the session's folder as
+/// shown (`~/…`) and as a path, and the agent id of each subagent row (what a click opens). The
+/// fold state stays in its global; a fold click redraws the part through `redraw_details`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetailsModel {
+    pub i: Inspector,
+    pub folder: Option<(String, String)>,
+    pub agent_ids: Vec<String>,
+}
+
+/// The model from its inputs: the conversation shown, its subagents, which pids write a shell's
+/// output file and the session's folder.
+fn model_of(
+    conversation: &Conversation,
+    subagents: &[Subagent],
+    writers: &dyn Fn(&str) -> Vec<i32>,
+    folder: Option<(String, String)>,
+) -> DetailsModel {
+    DetailsModel {
+        i: inspector(conversation, subagents, writers),
+        folder,
+        agent_ids: subagents.iter().map(|s| s.id.clone()).collect(),
+    }
+}
+
+/// What the Details Panel shows now.
+pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     let folder = view.selected_session().map(|s| {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    Panel {
-        i,
+    model_of(
+        &view.conversation,
+        &view.subagents,
+        &|p: &str| view.shell_probe.writers(p),
         folder,
+    )
+}
+
+/// The inspector panel, for the selected session.
+pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
+    Panel {
+        i: m.i.clone(),
+        folder: m.folder.clone(),
         a,
         chat: cx.entity().downgrade(),
-        agent_ids: view.subagents.iter().map(|s| s.id.clone()).collect(),
+        agent_ids: m.agent_ids.clone(),
     }
+    .into_any_element()
 }
 
 #[derive(IntoElement)]
@@ -463,4 +498,85 @@ fn fold_row(window: WindowId, key: &'static str, text: &str, expand: bool, a: Ap
                 window_ref.refresh();
             }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use notchling_engine::transcript::model::{BackgroundShell, TaskEntry, TaskStatus};
+
+    use super::*;
+    use crate::chat::inspector::no_writers;
+
+    fn with_task(subject: &str) -> Conversation {
+        Conversation {
+            tasks: vec![TaskEntry {
+                id: "1".into(),
+                subject: subject.into(),
+                status: TaskStatus::InProgress,
+            }],
+            ..Conversation::default()
+        }
+    }
+
+    fn folder() -> Option<(String, String)> {
+        Some(("~/w".into(), "/Users/me/w".into()))
+    }
+
+    #[test]
+    fn the_details_model_is_equal_for_the_same_inputs() {
+        let c = with_task("Port");
+        let a = model_of(&c, &[], &no_writers, folder());
+        // Another conversation value with the same content (a reload that changed nothing).
+        let b = model_of(&with_task("Port"), &[], &no_writers, folder());
+        assert_eq!(a, b);
+        assert_ne!(a, model_of(&c, &[], &no_writers, None), "the folder line");
+    }
+
+    #[test]
+    fn a_new_task_changes_the_details_model() {
+        let before = model_of(&with_task("Port"), &[], &no_writers, folder());
+        let mut more = with_task("Port");
+        more.tasks.push(TaskEntry {
+            id: "2".into(),
+            subject: "Test".into(),
+            status: TaskStatus::Pending,
+        });
+        assert_ne!(before, model_of(&more, &[], &no_writers, folder()));
+        assert_ne!(
+            before,
+            model_of(&with_task("Port it"), &[], &no_writers, folder())
+        );
+    }
+
+    #[test]
+    fn a_shell_writer_appearing_changes_the_details_model() {
+        let c = Conversation {
+            shells: vec![BackgroundShell {
+                id: "b1".into(),
+                command: "cargo test".into(),
+                title: String::new(),
+                output_path: "/tmp/b1.output".into(),
+                started: None,
+            }],
+            ..Conversation::default()
+        };
+        let idle = model_of(&c, &[], &no_writers, None);
+        let writing = model_of(
+            &c,
+            &[],
+            &|p: &str| {
+                if p == "/tmp/b1.output" {
+                    vec![4242]
+                } else {
+                    vec![]
+                }
+            },
+            None,
+        );
+        assert_ne!(
+            idle, writing,
+            "a process holds the output file open: Running"
+        );
+        assert!(writing.i.shells[0].running && !idle.i.shells[0].running);
+    }
 }

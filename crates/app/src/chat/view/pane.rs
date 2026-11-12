@@ -23,6 +23,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::Appearance;
 
+use super::inspector::DetailsModel;
 use super::{conversation, inspector, now_ms, sidebar, ChatView};
 use crate::chat::follow::{self, Scroll};
 use crate::chat::sidebar::SidebarModel;
@@ -177,7 +178,7 @@ impl<M: PartialEq + 'static> Render for ModelPart<M> {
 pub struct Parts {
     pub conversation: Entity<RawPart>,
     pub sidebar: Entity<ModelPart<SidebarModel>>,
-    pub details: Entity<RawPart>,
+    pub details: Entity<ModelPart<DetailsModel>>,
     pub spins: Entity<SpinLayer>,
 }
 
@@ -186,7 +187,15 @@ impl Parts {
         let conversation = cx.new(|cx| RawPart::new(chat, draw_conversation, &RENDERS, cx));
         let sidebar = cx
             .new(|cx| ModelPart::new(chat, sidebar::model, sidebar::render, &SIDEBAR_RENDERS, cx));
-        let details = cx.new(|cx| RawPart::new(chat, draw_details, &DETAILS_RENDERS, cx));
+        let details = cx.new(|cx| {
+            ModelPart::new(
+                chat,
+                inspector::model,
+                inspector::render,
+                &DETAILS_RENDERS,
+                cx,
+            )
+        });
         let hosts = vec![
             conversation.read(cx).spins.clone(),
             sidebar.read(cx).spins.clone(),
@@ -210,10 +219,6 @@ fn draw_conversation(chat: &mut ChatView, a: Appearance, cx: &mut Context<ChatVi
         .flex_col()
         .child(scrollable(conversation::render(chat, a, cx)).tracking(&chat.conversation_scroll))
         .into_any_element()
-}
-
-fn draw_details(chat: &mut ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
-    inspector::render(chat, a, cx).into_any_element()
 }
 
 /// A part as an element of `ChatView`'s tree, in a box of `style`.
@@ -269,7 +274,7 @@ impl ChatView {
     pub(super) fn redraw_parts(&self, cx: &mut Context<ChatView>) {
         self.parts.sidebar.update(cx, |part, pcx| part.redraw(pcx));
         self.parts.conversation.update(cx, |_, pcx| pcx.notify());
-        self.parts.details.update(cx, |_, pcx| pcx.notify());
+        self.parts.details.update(cx, |part, pcx| part.redraw(pcx));
     }
 
     /// Draws the window again but not its cached parts, whose drawing stays: for a change shown
@@ -292,10 +297,17 @@ impl ChatView {
             .update(cx, |part, pcx| part.refresh(self, pcx));
     }
 
-    /// Draws the Details Panel again (and the window's outer parts), not the conversation: for a
-    /// change only it shows (a section folded).
+    /// Draws the Details Panel again whatever its model says: for a change only it shows and its
+    /// model can't (a section folded).
     pub(super) fn redraw_details(&self, cx: &mut Context<ChatView>) {
-        self.parts.details.update(cx, |_, cx| cx.notify());
+        self.parts.details.update(cx, |part, pcx| part.redraw(pcx));
+    }
+
+    /// Draws the Details Panel again if what it shows changed.
+    pub(super) fn refresh_details(&self, cx: &mut Context<ChatView>) {
+        self.parts
+            .details
+            .update(cx, |part, pcx| part.refresh(self, pcx));
     }
 
     /// After a load that changed nothing the conversation shows (another session's files did):
@@ -303,7 +315,7 @@ impl ChatView {
     /// the window's other parts.
     pub(super) fn redraw_all_but_conversation(&self, cx: &mut Context<ChatView>) {
         self.redraw_sidebar(cx);
-        self.redraw_details(cx);
+        self.refresh_details(cx);
         self.redraw_chrome(cx);
     }
 
