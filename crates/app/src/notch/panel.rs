@@ -244,10 +244,10 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 })
                 .await;
             let applied = this.update(cx, |view, cx| {
+                let before = view.model.drawn();
+                let geometry_before = view.geometry;
                 view.source = Some(source);
-                if let Some(prefs) = prefs {
-                    view.apply_prefs(prefs);
-                }
+                let prefs_changed = prefs.is_some_and(|prefs| view.apply_prefs(prefs));
                 view.model.daemon_note = note;
                 // What Chat answered is answered here too.
                 view.model.answered.extend(answered);
@@ -264,7 +264,11 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 if let Some(id) = peek {
                     view.model.peek(&id, now);
                 }
-                cx.notify();
+                // A poll that changed nothing on screen draws nothing.
+                if prefs_changed || view.model.drawn() != before || view.geometry != geometry_before
+                {
+                    cx.notify();
+                }
             });
             if applied.is_err() {
                 break;

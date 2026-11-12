@@ -18,6 +18,7 @@ pub mod answering;
 pub mod backdrop;
 #[cfg(target_os = "macos")]
 pub mod cards;
+pub mod drawn;
 pub mod layout;
 pub mod model;
 #[cfg(target_os = "macos")]
