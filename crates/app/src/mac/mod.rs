@@ -8,6 +8,8 @@ pub mod capture;
 pub mod dock;
 pub mod gate;
 pub mod hotkey;
+pub mod native_spin;
+pub mod native_spin_geometry;
 pub mod pair_prompt;
 pub mod render;
 pub mod restart_notice;

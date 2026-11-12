@@ -354,6 +354,8 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         "parsed_bytes": parsed,
         "forced": forced,
         "at_end": at_end,
+        // Spinner rings Core Animation turns for the window: the working session's Activity Line.
+        "native_rings": super::native_spin::probe().len(),
     });
     println!("bench-json: {json}");
 }
