@@ -110,3 +110,58 @@ conversation draw is the box growing past a line, which resizes the column), `se
 Sidebar or Details Panel. `scroll`, `hover`, `reload` and `menu` are unchanged, as expected: they
 are Phases 3 to 6. Tasks 1.2 (simulator) and 1.4 (notch) have no bench mode; 1.4 is held by the
 `notch::drawn::tests`.
+
+## List spike (Task 2.1)
+
+**Decision: go.** G1 to G5 pass; G6 fails alone, which the plan still calls go (Task 6.1 then draws
+the live row's spinner as a plain kit spinner view inside the row, not a slot). Task 6.1 and 6.2
+stand; 6.1-alt is not needed.
+
+The probe is `--render chat-list-probe` (`chat/view/list_probe.rs`, its checks in
+`list_probe_run.rs`): a cached child view holding a bottom-aligned `ListState` (overdraw 600 pt)
+over 300 made-up rows of 1 to 12 wrapped lines (`pt(14)`, 16 pt side padding), a kit spinner in the
+last row, drawn through a spinner host and a `SpinLayer`, in a 600 x 600 pt column. Run it with
+`caffeinate -d -u cargo test --release --locked -p notchling-app --test render_list_probe -- --ignored --nocapture`
+(`NOTCHLING_RENDER_BENCH=<s>` on `--render` makes the probe run its checks and print
+`list-probe: {...}`). Vendored gpui 0.2.2, a release build, 2026-11-12, two runs with identical
+numbers. Each step is one frame: change the list, notify, wait for the child to paint, read.
+
+What each check reads is what the rows recorded while they painted (their bounds and the
+viewport's, in window coordinates), not the list's bookkeeping: `bounds_for_item` returns `None`
+for every row while the list follows the bottom (`logical_scroll_top` is `None`, which that method
+takes as "item count"), so it can't judge G1 at all. Task 6.1 must not use it for "at the
+bottom" or for the last row's place; it needs the rows' own painted bounds or the list's
+following state.
+
+| Gate | What it checks | Result | Evidence | Verdict |
+| --- | --- | --- | --- | --- |
+| G1 follow | the last row grows by a line, ten times, while following | max gap between its painted bottom and the viewport's bottom 0.0 px (limit 1); again after the resize, 0.0 px (the last row was then 720 pt, taller than the viewport) | `bounds_for_item` was `None` all 10 times | go |
+| G2 anchor | with rows above the bottom, splice a row above the first visible one; then splice that row through a remeasure (`logical_scroll_top`, splice, `scroll_to` the saved offset) | first visible row (row 241, 14 pt into it) moved 0.0 px for a splice above and 0.0 px for the remeasure (limit 1); a bare splice of that row moved 14.0 px (203.5 px after the resize): the offset resets | the same two numbers after the resize with anchor row 238: 0.0 / 0.0 | go |
+| G3 cost | 60 frames of `scroll_by(+-40)`: `render_item` calls per frame against rows on screen | 5.0 calls per frame for 5.0 rows on screen (limit rows + 2) with `ListSizingBehavior::Auto` | with the default `Infer` sizing: 23.5 calls for 5.0 rows, because `request_layout` lays the rows out again | go (with `Auto`) |
+| G4 resize | column 600 -> 480 pt | average painted row height 153.75 -> 242.5 pt (the heights were measured again), smallest visible row 56 pt (> 0), G1 and G2 hold again (numbers above) | | go |
+| G5 at the bottom | `set_offset_from_scrollbar` to the middle, then to the end | middle: top item 271; end: `logical_scroll_top().item_ix` 300 == `item_count()` 300, last row's bottom 0.0 px from the viewport's | a fresh `max_offset_for_scrollbar` is read before each call (it counts only rows measured so far) | go |
+| G6 spinners | slots a spinner host records in a frame in which the list's autoscroll retry laid the rows out twice | 2 slots for 1 spinner on screen; 1 in a plain frame before and 1 a plain frame later | `SpinSlots::len` (new, kit) | fail: fallback below |
+
+What the Phase 6 implementer must know, from what the probe found:
+
+- Use `ListSizingBehavior::Auto` with a sized style (`size_full()` or `flex_1()`). The default
+  `Infer` lays every visible row out in `request_layout` and again in prepaint: 4 to 5 times the
+  `render_item` calls here.
+- A list is never "following" in `logical_scroll_top()`: `None` means follow the bottom for a
+  `Bottom` list, and `bounds_for_item` gives `None` then. Decide "at the bottom" from
+  `logical_scroll_top().item_ix == item_count()` (or `None` internally), and read row places from
+  what the rows paint.
+- A jump of 3000 pt up from the end landed on row 291 of 300: rows never drawn have no height, so
+  `scroll_by` from the end can't go further than the rows measured so far (about 9 rows after the
+  first frames). Walking up in wheel-sized steps reaches unseen rows (the probe does 400 pt steps
+  to row 241). The scroll bar's thumb is approximate for the same reason.
+- A splice of the row at the scroll top resets its offset (a 14 px jump here, 203 px after a
+  resize). Save `logical_scroll_top()`, splice, `scroll_to(saved)`: the row stays put.
+- A width change measures every row again by itself; no stale height survived the resize.
+- A row that asks for autoscroll (a text editor's cursor) makes the list prepaint twice, and a
+  spinner slot pushed in the first prepaint stays: two slots for one spinner (G6). Task 6.1's
+  fallback applies: draw the live row's spinner as the plain kit spinner view inside the row, and
+  clear or de-duplicate nothing in the host.
+- `canvas(...).absolute().size_full()` needs `.top_0().left_0()` too: without them GPUI puts it
+  after its siblings, and the bounds it records are the wrong place (the first run of the probe
+  read a 584 px gap for exactly that reason).

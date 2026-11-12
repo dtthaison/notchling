@@ -52,6 +52,7 @@ pub fn spec(name: &str) -> Option<&'static ViewSpec> {
 /// Every renderable view: these, then each part's own (the notch's, the sheets').
 pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
     ALL.iter()
+        .chain(crate::chat::renders::VIEWS.iter())
         .chain(crate::notch::renders::VIEWS.iter())
         .chain(crate::sheets::renders::VIEWS.iter())
         .chain(crate::phone::renders::VIEWS.iter())

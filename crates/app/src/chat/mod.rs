@@ -40,6 +40,7 @@ pub mod paths;
 pub mod pickers;
 pub mod prompts;
 pub mod reload;
+pub mod renders;
 pub mod rows;
 pub mod selection;
 pub mod sidebar;

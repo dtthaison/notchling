@@ -14,6 +14,8 @@ mod drop;
 mod header;
 mod inspector;
 mod limit_ring;
+pub mod list_probe;
+mod list_probe_run;
 mod load;
 mod markdown;
 mod message_actions;

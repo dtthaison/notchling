@@ -39,7 +39,8 @@ pub fn build(
             Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
         }
         notch if notch.starts_with("notch-") => crate::notch::backdrop::build_render(notch, cx),
-        other => crate::phone::view::build_render(other, cx)
+        other => crate::chat::view::list_probe::build_render(other, cx)
+            .or_else(|| crate::phone::view::build_render(other, cx))
             .or_else(|| crate::phone::prompt_view::build_render(other, cx))
             .or_else(|| crate::sheets::view::build_render(other, cx))
             .or_else(|| crate::search::view::build_render(other, cx))

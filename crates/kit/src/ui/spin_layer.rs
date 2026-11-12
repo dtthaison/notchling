@@ -62,6 +62,16 @@ impl SpinSlots {
         self.0.borrow_mut().slots.push(slot);
     }
 
+    /// How many slots the host holds: a spinner laid out twice in a frame (a list's autoscroll
+    /// retry lays its rows out again) leaves two.
+    pub fn len(&self) -> usize {
+        self.0.borrow().slots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// The slots to paint this frame (none if the host wasn't in the tree), and marks the host
     /// as not seen for the next frame.
     pub fn take_shown(&self) -> Vec<SpinSlot> {
