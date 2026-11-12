@@ -14,7 +14,7 @@ use std::time::Duration;
 use gpui::{
     canvas, div, prelude::*, px, rgb, AnyElement, ClipboardItem, Context, DispatchPhase, Div,
     FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollWheelEvent, SharedString, Window,
+    Point, ScrollWheelEvent, SharedString, WeakEntity, Window,
 };
 use notchling_engine::terminal::pty::Signal;
 use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TermCell, TerminalScreen};
@@ -404,7 +404,8 @@ impl ChatView {
                         changed |= shell.dirty.swap(false, Ordering::Relaxed);
                     }
                     if changed {
-                        cx.notify();
+                        // The panel is drawn by the root: the cached parts have no news.
+                        view.redraw_chrome(cx);
                     }
                     let more = !view.terminal.tabs.is_empty();
                     view.terminal.ticking = more;
@@ -584,7 +585,7 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
 
 /// The active shell's screen: rows of styled runs, the cursor over them, and a canvas that sizes
 /// the pty to the room it has.
-fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
+fn screen(shell: &Shell, a: Appearance, window: &Window, chat: WeakEntity<ChatView>) -> AnyElement {
     let fg = Ink::Text.color(a);
     let bg = Ink::Window.color(a);
     let (cells, cursor, cursor_on, ended) = {
@@ -661,6 +662,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         shell.dragging.clone(),
         shell.selection.clone(),
     );
+    let fit_chat = chat.clone();
     let fit = canvas(
         |bounds, _, _| bounds,
         move |_, bounds, window, _| {
@@ -673,7 +675,8 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                     picked.clone(),
                     size.clone(),
                 );
-                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
+                let chat = fit_chat.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                     if phase != DispatchPhase::Bubble || !dragging.get() {
                         return;
                     }
@@ -693,7 +696,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                         if s.head != head {
                             s.head = head;
                             picked.set(Some(s));
-                            window.refresh();
+                            chat.update(cx, |v, cx| v.redraw_chrome(cx)).ok();
                         }
                     }
                 });
@@ -734,7 +737,8 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
             shell.selection.clone(),
             shell.back.clone(),
         );
-        move |event: &MouseDownEvent, window: &mut Window, _: &mut gpui::App| {
+        let chat = chat.clone();
+        move |event: &MouseDownEvent, window: &mut Window, cx: &mut gpui::App| {
             focus.focus(window);
             let at = event.position - origin.get();
             let cells = on_show(&screen.lock().unwrap_or_else(|e| e.into_inner()), &back);
@@ -755,7 +759,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
                 head: (row, to),
             }));
             dragging.set(event.click_count == 1);
-            window.refresh();
+            chat.update(cx, |v, cx| v.redraw_chrome(cx)).ok();
         }
     };
     let (picked, cells_for_copy, back) = (
@@ -770,7 +774,8 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
             shell.wheel.clone(),
             shell.selection.clone(),
         );
-        move |event: &ScrollWheelEvent, window: &mut Window, cx: &mut gpui::App| {
+        let chat = chat.clone();
+        move |event: &ScrollWheelEvent, _: &mut Window, cx: &mut gpui::App| {
             let screen = screen.lock().unwrap_or_else(|e| e.into_inner());
             // A full-screen program (an editor, `less`) has no scrollback of its own here.
             if screen.alt_screen() {
@@ -784,7 +789,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
             if to != back.get() {
                 back.set(to);
                 picked.set(None);
-                window.refresh();
+                chat.update(cx, |v, cx| v.redraw_chrome(cx)).ok();
             }
             cx.stop_propagation();
         }
@@ -805,7 +810,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
         .cursor_text()
         .on_mouse_down(MouseButton::Left, press)
         .on_scroll_wheel(scroll)
-        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+        .on_key_down(move |event: &KeyDownEvent, _, cx| {
             let keys = &event.keystroke;
             let m = &keys.modifiers;
             let (app_cursor, bracketed) = {
@@ -845,7 +850,7 @@ fn screen(shell: &Shell, a: Appearance, window: &Window) -> AnyElement {
             };
             if let Some(out) = out {
                 if picked.take().is_some() || back.replace(0) != 0 {
-                    window.refresh();
+                    chat.update(cx, |v, cx| v.redraw_chrome(cx)).ok();
                 }
                 let _ = pty.write_all_timeout(out.as_bytes(), Duration::from_millis(500));
                 cx.stop_propagation();
@@ -910,7 +915,7 @@ pub fn render(
         .fill(Ink::Window, a)
         .child(header(view, a, cx))
         .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
-        .child(screen(shell, a, window));
+        .child(screen(shell, a, window, cx.entity().downgrade()));
     let panel = if expanded {
         panel.flex_1()
     } else {

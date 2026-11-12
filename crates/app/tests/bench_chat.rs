@@ -135,8 +135,12 @@ fn run(mode: &str, seconds: u64, root: &TempRoot, mut during: impl FnMut(&Path))
 }
 
 fn bench(mode: &str) -> Value {
+    bench_for(mode, seconds())
+}
+
+fn bench_for(mode: &str, seconds: u64) -> Value {
     let root = TempRoot::new(TURNS);
-    let result = run(mode, seconds(), &root, |_| {});
+    let result = run(mode, seconds, &root, |_| {});
     check(mode, &result);
     result
 }
@@ -222,4 +226,23 @@ fn bench_append() {
     });
     check("idle", &result);
     assert!(n > 0, "nothing was appended");
+}
+
+/// Counts of the parts' draws in a run, from its `bench-json:` line.
+fn count(result: &Value, key: &str) -> u64 {
+    result[key]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no {key}: {result}"))
+}
+
+/// A terminal's output redraws the window's outer parts, not the conversation, the Sidebar or the
+/// Details Panel.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_terminal_draws_no_part() {
+    let result = bench_for("terminal", 3);
+    assert_eq!(count(&result, "conversation"), 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+    assert!(count(&result, "frames") >= 30, "{result}");
 }
