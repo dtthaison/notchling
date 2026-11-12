@@ -141,3 +141,28 @@ fn a_job_after_clear_shows_the_file_clear_started() {
         Some("after clear")
     );
 }
+
+#[test]
+fn a_job_whose_file_moved_into_a_worktree_folder_is_found_by_the_file_name() {
+    // EnterWorktree moves the transcript to the worktree's project folder; the job's state keeps
+    // the old path and names no worktree.
+    let w = World::new();
+    let gone = w.0.join("claude/projects/-work-app/conv-1.jsonl");
+    let moved = w.write(
+        "claude/projects/-work-app--claude-worktrees-fix/conv-1.jsonl",
+        &user("in the worktree"),
+    );
+    w.job("ef56ab78", "job-1", "worker", &gone);
+
+    let root = DataRoot::fixture(&w.0);
+    let sessions = root.sessions(NOW_MS);
+    let session = sessions
+        .iter()
+        .find(|s| s.agent.id == "job-1")
+        .expect("the job is listed");
+    assert_eq!(session.transcript.as_deref(), Some(moved.as_path()));
+    assert!(has_user_text(
+        &root.conversation(session),
+        "in the worktree"
+    ));
+}
