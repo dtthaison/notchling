@@ -687,7 +687,7 @@ impl ChatView {
         }
         activity::line(
             &self.conversation,
-            self.selected_working(),
+            self.selected_working() || self.selected_held_working(),
             now_ms() as f64 / 1000.0,
         )
     }

@@ -80,7 +80,7 @@ fn present(call: &ToolCall) -> String {
 
 /// What the newest item says is going on, as a verb with its object.
 fn doing(conversation: &Conversation) -> String {
-    match conversation.items.last().map(|item| &item.kind) {
+    match newest_step(conversation).map(|(_, kind)| kind) {
         Some(ItemKind::Tools(calls)) => match calls.iter().rev().find(|call| !call.finished) {
             Some(call) => format!("{}…", present(call).trim_end_matches('…')),
             // Every call has its result: the model is reading them.
@@ -142,6 +142,27 @@ pub fn line(conversation: &Conversation, working: bool, now_s: f64) -> Option<Ac
         stats,
         shells: (shells > 0).then(|| shells_text(shells)),
     })
+}
+
+/// The newest item that is a real step, past the notices at the end of the conversation (a session
+/// another `agy` runs ends with its lock note).
+fn newest_step(conversation: &Conversation) -> Option<(usize, &ItemKind)> {
+    conversation
+        .items
+        .iter()
+        .enumerate()
+        .rev()
+        .map(|(i, item)| (i, &item.kind))
+        .find(|(_, kind)| !matches!(kind, ItemKind::Notice { .. }))
+}
+
+/// The index of the step group that stays open with its running call spinning: a working
+/// session's newest item is that group, notices after it aside.
+pub fn live_group(conversation: &Conversation, working: bool) -> Option<usize> {
+    match newest_step(conversation) {
+        Some((i, ItemKind::Tools(_))) if working => Some(i),
+        _ => None,
+    }
 }
 
 /// How long a prompt may go with nothing back before the live line offers Retry.
@@ -283,6 +304,50 @@ mod tests {
             line(&described, true, 0.0).unwrap().text,
             "Run the test suite…"
         );
+    }
+
+    #[test]
+    fn a_notice_at_the_end_does_not_hide_what_the_session_is_doing() {
+        // A session another `agy` runs: Chat ends its conversation with the lock note.
+        let note = ItemKind::notice("A delegation is running this session.", "lock");
+        let running = conversation(vec![
+            ItemKind::user("Check the image."),
+            ItemKind::Tools(vec![call(
+                "Ran sips -g pixelWidth logo.png",
+                ToolKind::Shell,
+                false,
+            )]),
+            note.clone(),
+        ]);
+        assert_eq!(
+            line(&running, true, 0.0).unwrap().text,
+            "Running sips -g pixelWidth logo.png…"
+        );
+        let reading = conversation(vec![
+            ItemKind::user("Go."),
+            ItemKind::Tools(vec![call("Read a.rs", ToolKind::Read, true)]),
+            note.clone(),
+        ]);
+        assert_eq!(line(&reading, true, 0.0).unwrap().text, "Thinking…");
+        let writing = conversation(vec![ItemKind::Assistant { text: "A".into() }, note.clone()]);
+        assert_eq!(line(&writing, true, 0.0).unwrap().text, "Writing…");
+        let only = conversation(vec![note]);
+        assert_eq!(line(&only, true, 0.0).unwrap().text, "Thinking…");
+    }
+
+    #[test]
+    fn the_live_group_is_the_newest_steps_with_only_notices_after_them() {
+        let note = ItemKind::notice("Read only here.", "lock");
+        let steps = ItemKind::Tools(vec![call("Read a.rs", ToolKind::Read, false)]);
+        let reply = ItemKind::Assistant { text: "A".into() };
+        let c = conversation(vec![ItemKind::user("Go."), steps.clone()]);
+        assert_eq!(live_group(&c, true), Some(1));
+        assert_eq!(live_group(&c, false), None, "an idle session has none");
+        let held = conversation(vec![ItemKind::user("Go."), steps.clone(), note.clone()]);
+        assert_eq!(live_group(&held, true), Some(1));
+        let answered = conversation(vec![steps.clone(), reply, note]);
+        assert_eq!(live_group(&answered, true), None, "a reply came after them");
+        assert_eq!(live_group(&Conversation::default(), true), None);
     }
 
     #[test]

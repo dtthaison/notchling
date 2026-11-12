@@ -823,15 +823,14 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
     // Swift app's `liveTools`): the session works, and the last item is that group.
     let working = match &view.open_subagent {
         Some(open) => open.agent.is_running(),
-        None => view
-            .selected_session()
-            .is_some_and(|s| s.agent.group == AgentGroup::Working),
+        None => {
+            view.selected_held_working()
+                || view
+                    .selected_session()
+                    .is_some_and(|s| s.agent.group == AgentGroup::Working)
+        }
     };
-    let last_tools = shown
-        .items
-        .len()
-        .checked_sub(1)
-        .filter(|_| working && matches!(rows.get(shown.items.len() - 1), Some(Row::Tools(_))));
+    let last_tools = crate::chat::activity::live_group(shown, working);
     column.children(
         rows.iter()
             .enumerate()

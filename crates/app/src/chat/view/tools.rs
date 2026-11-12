@@ -293,6 +293,15 @@ impl ChatView {
         })
     }
 
+    /// Whether another `agy` (a delegation) is working the selected Antigravity row: the live
+    /// line and the open step group show it, but it is not a turn Stop can reach (`agy.cancel`
+    /// only ends this daemon's own), so Stop and Esc keep using [`Self::selected_working`].
+    pub(super) fn selected_held_working(&self) -> bool {
+        self.selected_session()
+            .is_some_and(|s| s.tool == Tool::Antigravity)
+            && self.tools.agy.as_ref().is_some_and(|a| a.held_working())
+    }
+
     /// Whether a Stop sent to the selected row is still on its way (a second Esc to a session
     /// that has just stopped would open the terminal's rewind menu).
     pub(super) fn stopping(&self) -> bool {

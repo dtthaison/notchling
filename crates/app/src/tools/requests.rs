@@ -180,6 +180,15 @@ pub struct AgyConversation {
     pub elsewhere: Option<String>,
 }
 
+impl AgyConversation {
+    /// Whether another `agy` (a delegation) holds the session and is mid-turn: the daemon reads
+    /// that from Antigravity's log. The live set only tracks this daemon's own turns, so without
+    /// this the session would look idle. It is not a turn Stop can reach.
+    pub fn held_working(&self) -> bool {
+        self.elsewhere.is_some() && self.working
+    }
+}
+
 /// Reads an `agy.conversation` reply; `None` when it isn't one.
 pub fn parse_conversation(reply: &Value) -> Option<AgyConversation> {
     let open = reply.get("open")?.as_bool()?;
@@ -319,6 +328,23 @@ mod tests {
             json!({"id": "agy:s1", "peek": true})
         );
         assert_eq!(agy_state("agy:s1").op, "agy.state");
+    }
+
+    #[test]
+    fn only_a_held_session_with_a_turn_going_is_working_elsewhere() {
+        let note = "A delegation is running this session. Read only here until it ends.";
+        let held = |working: bool| {
+            parse_conversation(&json!({"open": false, "working": working,
+                "conversation": {"items": []}, "elsewhere": note}))
+            .unwrap()
+        };
+        assert!(held(true).held_working());
+        assert!(!held(false).held_working(), "the delegation answered");
+        // A turn this daemon runs is the runners' to report, and Stop's.
+        let own = parse_conversation(&json!({"open": true, "working": true,
+            "conversation": {"items": []}}))
+        .unwrap();
+        assert!(!own.held_working());
     }
 
     #[test]
