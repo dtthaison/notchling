@@ -147,6 +147,15 @@ pub(super) fn scroll_to_end(state: &ListState) {
     });
 }
 
+/// Whether a sync puts the list at its end. Being at the bottom (within `follow::TOLERANCE` of
+/// it) only says that content which *changes* keeps following; a draw with nothing new in it
+/// leaves the reader where they are. Pulling back on every draw undid each scroll step of a few
+/// points taken from the end, until one step alone passed the tolerance: the first moment of every
+/// scroll up stuck. `forced` (a message just sent, another session picked) goes whatever was read.
+pub(super) fn goes_to_end(at_bottom: bool, forced: bool, changed: bool) -> bool {
+    forced || (at_bottom && changed)
+}
+
 /// Where the scroll bar's offset goes when the list moves `delta` points down (negative: up) from
 /// `offset` (the scroll bar's number, `-y` from the top; a list that follows its end reads past
 /// `max`), kept within `0..=max`. Going through the bar's offset, not `scroll_by`, moves a list
@@ -276,7 +285,11 @@ impl ListRows {
             }
         };
         let replaced = !Arc::ptr_eq(&old.shown, &next.shown);
-        let follow = self.at_bottom() || force_follow;
+        let changed = !matches!(plan, Plan::Nothing)
+            || old.tail != next.tail
+            || old.live != next.live
+            || old.inset != next.inset;
+        let follow = goes_to_end(self.at_bottom(), force_follow, changed);
         let mut keys_changed = old.keys != next.keys;
         match plan {
             Plan::Rebuild => {
