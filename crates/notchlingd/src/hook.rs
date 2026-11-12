@@ -1,18 +1,28 @@
-//! `notchling hook`: Claude Code runs it as a hook. It reads the hook's JSON on stdin, asks the
-//! daemon (`hook.request`) and prints the answer as the Swift `HookBridge` does
-//! ([`crate::hook_output`]). It must never hang Claude Code, so everything that isn't a decision is
-//! a pass (no output, exit 0), and at once where it can be:
+//! `notchling hook`: Claude Code runs it as a hook. It reads the hook's JSON on stdin and answers
+//! one of two ways, as the Swift `HookBridge` did:
 //!
-//! - not a permission or AskUserQuestion event;
+//! - an Artifact tool event (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`) is answered here,
+//!   from the local pages library, with no daemon or app needed ([`crate::hook_pages`]);
+//! - a permission or AskUserQuestion event is asked of the daemon (`hook.request`) and the answer
+//!   printed as the Swift `HookBridge` does ([`crate::hook_output`]).
+//!
+//! It must never hang Claude Code, so everything that isn't an answer is a pass (no output,
+//! exit 0), and at once where it can be:
+//!
+//! - not an Artifact, permission or AskUserQuestion event;
 //! - a `claude -p` session (entrypoint `sdk-cli`): nobody watches it;
 //! - no daemon on the socket, or any socket error;
 //! - the daemon says pass: acting is off, no app is attached, or the deadline came;
-//! - its own deadline ([`HOOK_WAIT`] plus a little), whatever the daemon does.
+//! - its own deadline ([`HOOK_WAIT`] plus a little, or [`crate::hook_pages::DEADLINE`] for an
+//!   Artifact event), whatever the daemon or the disk does.
 //!
-//! It is not installed anywhere in Milestone 3 (that's E13, in M6).
+//! Only the app's Install Hook writes it into `~/.claude/settings.json` (E13).
 
 use crate::acting_ops::HOOK_WAIT;
 use crate::hook_output::{is_prompt_event, output};
+use crate::hook_pages::{self, PagesEnv};
+use crate::layout::Layout;
+use notchling_engine::pages;
 use notchling_local_api::{ops, Client, ClientKind, ConnectOptions};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -58,11 +68,14 @@ impl HookOptions {
     }
 }
 
-/// The hook's stdout for `input`, or `None` to pass.
+/// The hook's stdout for `input`, or `None` to pass. A prompt event is asked of the daemon.
 pub fn decide(input: &[u8], options: &HookOptions) -> Option<Value> {
     let event: Value = serde_json::from_slice(input).ok()?;
-    if !is_prompt_event(&event)
-        || headless(&options.claude_dir.join("sessions"), &options.ancestors)
+    decide_event(&event, options)
+}
+
+fn decide_event(event: &Value, options: &HookOptions) -> Option<Value> {
+    if !is_prompt_event(event) || headless(&options.claude_dir.join("sessions"), &options.ancestors)
     {
         return None;
     }
@@ -84,11 +97,23 @@ pub fn decide(input: &[u8], options: &HookOptions) -> Option<Value> {
         "waitMs": options.wait.as_millis() as u64,
     });
     let response = client.call(ops::HOOK_REQUEST, args).ok()?;
-    output(&response, &event)
+    output(&response, event)
+}
+
+/// The hook's stdout for `input` as the real process runs it: an Artifact event is answered from
+/// the pages library at once ([`crate::hook_pages`], no daemon involved), anything else goes to
+/// [`decide`]. `None` passes.
+fn answer(input: &[u8], layout: &Layout) -> Option<Value> {
+    let event: Value = serde_json::from_slice(input).ok()?;
+    if pages::hook::handles(&event) {
+        return hook_pages::answer(event, PagesEnv::for_process(layout));
+    }
+    let options = HookOptions::for_process(layout.socket.clone(), layout.claude_dir.clone());
+    decide_event(&event, &options)
 }
 
 /// `notchling hook`: reads stdin, prints the answer (or nothing), always exits 0.
-pub fn run(socket: &Path, claude_dir: &Path) -> i32 {
+pub fn run(layout: &Layout) -> i32 {
     let mut input = Vec::new();
     if std::io::stdin()
         .take(MAX_INPUT)
@@ -97,8 +122,7 @@ pub fn run(socket: &Path, claude_dir: &Path) -> i32 {
     {
         return 0;
     }
-    let options = HookOptions::for_process(socket.to_path_buf(), claude_dir.to_path_buf());
-    if let Some(out) = decide(&input, &options) {
+    if let Some(out) = answer(&input, layout) {
         if let Ok(text) = serde_json::to_vec(&out) {
             let mut stdout = std::io::stdout();
             let _ = stdout.write_all(&text);

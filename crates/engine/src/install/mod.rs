@@ -28,9 +28,11 @@
 //!
 //! # Not yet
 //!
-//! - `notchling hook` still passes every Artifact event ([`crate::pages::hook`] is not wired
-//!   into it: that would write the Swift app's pages folder), so the page entries this installs
-//!   do nothing until the maintainer hands the page hook over.
+//! - The page entries this installs are answered: `notchling hook` handles every Artifact event
+//!   itself ([`crate::pages::hook`], in `notchlingd::hook_pages`), over `<data dir>/pages`. Only
+//!   publishing to a page another saved account owns is left to Claude Code, since
+//!   [`crate::pages::owner`] has no real login source or network yet (the `PreToolUse` entry's
+//!   60 s timeout is for it).
 //! - Retiring the Swift app's entries (rewriting their command to the new binary) is a later
 //!   step; here they are only reported.
 

@@ -3,8 +3,11 @@
 //! and point a failed read at the local copy (`PostToolUseFailure`, or a `PostToolUse` that reads
 //! like a 404). They return the JSON the hook prints, or `None` for "print nothing".
 //!
-//! Not wired into `notchling hook` until E13 (M6) installs the hook; the Swift app's `--hook`
-//! still owns these events until then (decision 0011).
+//! `notchling hook` runs [`answer`] for every Artifact event, in its own process and over the
+//! library in the data folder (`notchlingd::hook_pages`), so saving a page needs no daemon or app,
+//! as the Swift hook needed none. A publish to a page another saved account owns is not handled
+//! here: [`super::owner`] has no real token source or network yet, so `pre_tool_use` is called
+//! with no owner outcome and that publish runs as Claude Code would run it.
 
 use super::content;
 use super::library::PageLibrary;
@@ -21,6 +24,32 @@ pub fn handles(event: &Value) -> bool {
             event.get("hook_event_name").and_then(Value::as_str),
             Some("PreToolUse" | "PostToolUse" | "PostToolUseFailure")
         )
+}
+
+/// True for a `PostToolUse` that may be a publish (no `action`, or `publish`): the only event
+/// that needs the account in use, which is read from disk, so a caller asks before it looks.
+pub fn may_publish(event: &Value) -> bool {
+    event.get("hook_event_name").and_then(Value::as_str) == Some("PostToolUse")
+        && matches!(
+            event
+                .get("tool_input")
+                .and_then(|i| i.get("action"))
+                .and_then(Value::as_str),
+            None | Some("publish")
+        )
+}
+
+/// What `notchling hook` prints for `event`: [`pre_tool_use`] (with no owner outcome) for a
+/// `PreToolUse`, [`post_tool_use`] for the other two. `None` prints nothing, which is also what an
+/// event that isn't one of ours gets ([`handles`] says which are).
+pub fn answer(lib: &PageLibrary, event: &Value, ctx: &RecordContext<'_>) -> Option<Value> {
+    if !handles(event) {
+        return None;
+    }
+    match event.get("hook_event_name").and_then(Value::as_str)? {
+        "PreToolUse" => pre_tool_use(lib, event, None),
+        _ => post_tool_use(lib, event, ctx),
+    }
 }
 
 /// The saved page an `Artifact read` of a whole page asks for. Reads of one file (`path`/`paths`)

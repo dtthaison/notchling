@@ -1,6 +1,6 @@
 //! E7 in the daemon: the pages library and the session index as agent-tier read ops (Milestone 5).
-//! Reads always work, whatever the `acting` switch says; nothing here acts or writes the Swift
-//! app's folders.
+//! Reads always work, whatever the `acting` switch says; nothing here acts or writes the library
+//! (`notchling hook` does, in its own process: `hook_pages.rs`).
 //!
 //! | Op | Args | Reply |
 //! | --- | --- | --- |
@@ -88,7 +88,8 @@ pub const MAX_PAGES_BYTES: usize = 700_000;
 pub struct PagesSetup {
     /// The pages library (`<data dir>/pages`).
     pub pages_dir: PathBuf,
-    /// True only for a test folder; the daemon's ops never write either way.
+    /// True only for a test folder; the daemon's ops never write either way (the writer is
+    /// `notchling hook`).
     pub writable: bool,
     /// `~/.claude` and the lanes.
     pub roots: Roots,
@@ -99,8 +100,8 @@ pub struct PagesSetup {
 }
 
 impl PagesSetup {
-    /// From the daemon's layout. The library is the data folder's `pages`, which on a real run is
-    /// the Swift app's folder, so it is read-only. The cache is the daemon's own file
+    /// From the daemon's layout. The library is the data folder's `pages` (the Swift app's folder,
+    /// which the hook carries on), read-only here. The cache is the daemon's own file
     /// (`<data dir>/daemon/search.db`), never the Swift app's `search-index.json`; a
     /// daemon given `--socket` (a test) keeps none.
     pub fn from_layout(layout: &Layout) -> PagesSetup {

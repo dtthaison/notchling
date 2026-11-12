@@ -52,6 +52,7 @@ pub mod delegate_cli;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
+pub mod hook_pages;
 pub mod install_ops;
 pub mod late_reply;
 pub mod layout;
@@ -94,6 +95,8 @@ mod cost_ops_tests;
 mod daemon_tests;
 #[cfg(test)]
 mod hook_ops_tests;
+#[cfg(test)]
+mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
 #[cfg(test)]
@@ -163,7 +166,7 @@ pub fn run(command: Command) -> i32 {
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         // Quiet and 0 whatever happens: a hook's exit 2 would block the tool in Claude Code.
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
-            Some(l) => hook::run(&l.socket, &l.claude_dir),
+            Some(l) => hook::run(&l),
             None => 0,
         },
     }

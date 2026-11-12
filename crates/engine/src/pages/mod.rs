@@ -17,8 +17,9 @@
 //! # Rules
 //!
 //! - A library is opened [`PageLibrary::read_only`] or [`PageLibrary::writable`]. The daemon opens
-//!   the Swift app's folder read-only (decision 0011: the Swift app owns the page hook until E13);
-//!   only a test folder is writable there.
+//!   `<data dir>/pages` read-only (its ops only look); the writer is `notchling hook`, a short-lived
+//!   process of its own that opens the same folder writable (the Swift app retired on 2026-11-11, so
+//!   nothing else owns the page hook), and a test folder.
 //! - `pages.json` is only written holding an exclusive `flock` on `.lock`, so two publishes landing
 //!   at once keep both entries.
 //! - The first publisher is the page's `account` and stays it on republish, since only that account
@@ -33,13 +34,15 @@
 //!   words, via [`crate::search::find_pages`]), [`describe`](PageLibrary::describe),
 //!   [`local_path`](PageLibrary::local_path), [`record`](PageLibrary::record) (a `PostToolUse`
 //!   event), [`remove`](PageLibrary::remove).
-//! - [`hook`]: the Artifact hook events as pure functions ([`hook::pre_tool_use`],
-//!   [`hook::post_tool_use`]). Not wired into `notchling hook` until E13.
+//! - [`hook`]: the Artifact hook events as pure functions ([`hook::answer`], [`hook::pre_tool_use`],
+//!   [`hook::post_tool_use`]), run by `notchling hook`.
+//! - [`account`]: the account in use where a session runs, which a first publish is saved under.
 //! - [`owner`]: publishing as a page's owner, over an [`owner::HttpClient`] and an
 //!   [`owner::TokenSource`]; base58 link id to UUID ([`owner::uuid_from_short_id`]).
 //! - [`content`]: titles, the wrapper, folder names, facts in a tool result.
 //! - [`skill`]: the text of the `notchling-pages` skill, which `install` writes (E13).
 
+pub mod account;
 pub mod clock;
 pub mod content;
 pub mod hook;
@@ -58,6 +61,8 @@ pub use record::{
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_account;
 #[cfg(test)]
 mod tests_hook;
 #[cfg(test)]

@@ -172,3 +172,52 @@ fn the_outputs_have_the_shape_claude_code_reads() {
         json!({"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": "c"}})
     );
 }
+
+#[test]
+fn answer_runs_the_event_by_its_name_and_leaves_the_rest_alone() {
+    let dir = TempDir::new("hook-answer");
+    let lib = library_with_page(&dir);
+    let c = ctx("x", dir.root());
+    // PreToolUse: a read of a saved page is denied with the local copy's path.
+    let out = answer(&lib, &event(PRE_READ_SAVED), &c).unwrap();
+    assert_eq!(out["hookSpecificOutput"]["permissionDecision"], "deny");
+    assert!(out["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap()
+        .contains("Local copy: "));
+    // An unsaved link passes.
+    assert_eq!(answer(&lib, &event(PRE_READ_UNSAVED), &c), None);
+    // PostToolUseFailure and a 404-looking PostToolUse get the fallback.
+    for fixture in [POST_FAILURE_READ, POST_READ_404] {
+        let out = answer(&lib, &event(fixture), &c).unwrap();
+        assert!(out["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .starts_with("Notchling keeps a local copy"));
+    }
+    // A publish is recorded and says nothing; a read that worked says nothing.
+    let publish = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
+    assert_eq!(answer(&lib, &publish, &c), None);
+    assert_eq!(answer(&lib, &event(POST_READ_OK), &c), None);
+    // Events that aren't the Artifact tool's are not ours, even with the same shape.
+    for other in [
+        json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}),
+        json!({"hook_event_name": "PermissionRequest", "tool_name": "Artifact"}),
+        json!({"hook_event_name": "PostToolUse", "tool_name": "Read", "tool_response": "404 not found"}),
+        json!({}),
+    ] {
+        assert_eq!(answer(&lib, &other, &c), None, "{other}");
+    }
+}
+
+#[test]
+fn only_a_post_tool_use_that_may_publish_needs_the_account() {
+    assert!(may_publish(&event(POST_PUBLISH)));
+    let mut explicit = event(POST_PUBLISH);
+    explicit["tool_input"]["action"] = json!("publish");
+    assert!(may_publish(&explicit));
+    assert!(!may_publish(&event(POST_READ_404)));
+    assert!(!may_publish(&event(POST_FAILURE_READ)));
+    assert!(!may_publish(&event(PRE_READ_SAVED)));
+    assert!(!may_publish(&json!({})));
+}
