@@ -54,7 +54,7 @@ pub fn icon_in(icon: Icon, points: f32, color: Color) -> Div {
 }
 
 /// How long a spinner takes to turn once (the macOS ring turns about once a second).
-const SPIN: Duration = Duration::from_secs(1);
+pub(super) const SPIN: Duration = Duration::from_secs(1);
 /// How often a spinner moves on: ten times a second (36 degrees a step), not once per display
 /// frame. GPUI draws
 /// every view above a spinner again for each of its frames, so a spinner asking for the display's
@@ -203,8 +203,16 @@ impl Element for Spin {
         let (size, color) = (self.size, self.color);
         // In a host drawn cached, a slot the host's layer paints (`spin_layer`), so the host
         // isn't drawn again for each frame of the spinner.
-        if let Some(slots) = super::spin_layer::slots_here(window, cx) {
-            let mut element = super::spin_layer::Slot { slots, size, color }.into_any_element();
+        let name = self.id.clone();
+        if let Some(slots) = super::spin_layer::slots_here(window, cx, &name) {
+            let key = super::spin_layer::key_of(id);
+            let mut element = super::spin_layer::Slot {
+                key,
+                slots,
+                size,
+                color,
+            }
+            .into_any_element();
             return (element.request_layout(window, cx), element);
         }
         let new = |cx: &mut App| cx.new(|_| Turning { size, color });

@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
@@ -23,11 +24,16 @@ use gpui::{
 
 use super::hsla;
 use super::icons::{next_spin_frame, spin_clock, turns_at};
+use super::spin_native::{mix_key, NativeSpin, SpinGate, SpinSink};
 use crate::{Color, Icon};
 
 /// Where one spinner is drawn: its box in the window, the clip it was laid out under, its ink.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpinSlot {
+    /// Names the spinner across frames (its element's path, mixed with its host's place), so a
+    /// native layer that only moved keeps turning. A spinner laid out twice in a frame leaves two
+    /// slots with one key: the later one is the one on screen.
+    pub key: u64,
     pub bounds: Bounds<Pixels>,
     pub mask: Bounds<Pixels>,
     pub color: Color,
@@ -43,6 +49,8 @@ impl SpinSlot {
 
 #[derive(Default)]
 struct Slots {
+    /// The spinners this host takes by element id; `None` takes all of them.
+    only: Option<&'static [&'static str]>,
     slots: Vec<SpinSlot>,
     /// The host's element was laid out this frame (`spin_host`); the layer takes it back.
     on_screen: bool,
@@ -53,6 +61,23 @@ struct Slots {
 pub struct SpinSlots(Rc<RefCell<Slots>>);
 
 impl SpinSlots {
+    /// A host that takes only the spinners named `names` (a window's root, whose other spinners
+    /// are short waits drawn as views of their own, or sit in sheets that draw over the layer).
+    pub fn only(names: &'static [&'static str]) -> SpinSlots {
+        SpinSlots(Rc::new(RefCell::new(Slots {
+            only: Some(names),
+            ..Slots::default()
+        })))
+    }
+
+    fn takes(&self, id: &ElementId) -> bool {
+        match (self.0.borrow().only, id) {
+            (None, _) => true,
+            (Some(names), ElementId::Name(name)) => names.contains(&name.as_ref()),
+            (Some(_), _) => false,
+        }
+    }
+
     /// The host is drawing again: its spinners are about to be laid out anew.
     pub fn clear(&self) {
         self.0.borrow_mut().slots.clear();
@@ -84,7 +109,9 @@ impl SpinSlots {
         }
     }
 
-    fn seen(&self) {
+    /// Says the host is on screen this frame, for a host that is a window's root view and has no
+    /// element to wrap in [`spin_host`].
+    pub fn seen(&self) {
         self.0.borrow_mut().on_screen = true;
     }
 }
@@ -109,14 +136,26 @@ pub fn drop_spinner_host(cx: &mut App, host: EntityId) {
     }
 }
 
-/// The slots of the view being laid out, if it is a host.
-pub(super) fn slots_here(window: &Window, cx: &App) -> Option<SpinSlots> {
+/// The slots of the view being laid out, if it is a host that takes the spinner `id`.
+pub(super) fn slots_here(window: &Window, cx: &App, id: &ElementId) -> Option<SpinSlots> {
     let hosts = cx.try_global::<Hosts>()?;
-    hosts.0.get(&window.current_view()).cloned()
+    hosts
+        .0
+        .get(&window.current_view())
+        .filter(|slots| slots.takes(id))
+        .cloned()
+}
+
+/// A stable number for a spinner's place in the tree.
+pub(super) fn key_of(id: Option<&GlobalElementId>) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// What a spinner in a host lays out: a box its size that notes where it ended up.
 pub(super) struct Slot {
+    pub key: u64,
     pub slots: SpinSlots,
     pub size: Pixels,
     pub color: Color,
@@ -165,6 +204,7 @@ impl Element for Slot {
         _: &mut App,
     ) {
         self.slots.push(SpinSlot {
+            key: self.key,
             bounds,
             mask: window.content_mask().bounds,
             color: self.color,
@@ -263,11 +303,26 @@ impl Element for Hosted {
 /// window's tree, so its frames draw it and its ancestors but none of the hosts.
 pub struct SpinLayer {
     hosts: Vec<SpinSlots>,
+    native: Option<Rc<NativeSpin>>,
 }
 
 impl SpinLayer {
     pub fn new(hosts: Vec<SpinSlots>) -> SpinLayer {
-        SpinLayer { hosts }
+        SpinLayer {
+            hosts,
+            native: None,
+        }
+    }
+
+    /// A layer whose slots the platform draws and turns (`sink`) while `allowed` is set: it
+    /// paints nothing and asks for no frame then, and hands the sink the slots each time the
+    /// window draws. While `allowed` is clear (something drawn over the window could cover a
+    /// spinner) it paints and turns them itself, as [`SpinLayer::new`] does.
+    pub fn native(hosts: Vec<SpinSlots>, sink: Rc<dyn SpinSink>, allowed: SpinGate) -> SpinLayer {
+        SpinLayer {
+            hosts,
+            native: Some(Rc::new(NativeSpin::new(sink, allowed))),
+        }
     }
 }
 
@@ -276,6 +331,7 @@ impl Render for SpinLayer {
         Painter {
             hosts: self.hosts.clone(),
             layer: cx.entity_id(),
+            native: self.native.clone(),
         }
     }
 }
@@ -283,6 +339,7 @@ impl Render for SpinLayer {
 struct Painter {
     hosts: Vec<SpinSlots>,
     layer: EntityId,
+    native: Option<Rc<NativeSpin>>,
 }
 
 impl IntoElement for Painter {
@@ -349,6 +406,24 @@ impl Element for Painter {
         window: &mut Window,
         cx: &mut App,
     ) {
+        if let Some(native) = &self.native {
+            if native.allowed() {
+                let slots: Vec<SpinSlot> = self
+                    .hosts
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(place, host)| {
+                        host.take_shown().into_iter().map(move |slot| SpinSlot {
+                            key: mix_key(place, slot.key),
+                            ..slot
+                        })
+                    })
+                    .collect();
+                native.sync(window, &slots);
+                return;
+            }
+            native.leave(window);
+        }
         let since = spin_clock();
         let turns = turns_at(since);
         let path = Icon::Spinner.svg().unwrap_or("icons/loader-circle.svg");
@@ -384,6 +459,7 @@ mod tests {
 
     fn slot(y: f32) -> SpinSlot {
         SpinSlot {
+            key: 1,
             bounds: Bounds::new(point(px(10.0), px(y)), size(px(12.0), px(12.0))),
             mask: Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(100.0))),
             color: crate::Ink::Working.color(crate::Appearance::Dark),

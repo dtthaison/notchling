@@ -15,6 +15,7 @@ mod resize;
 mod scrollbar;
 mod scrollbar_track;
 mod spin_layer;
+mod spin_native;
 mod text_editor;
 mod tool_images;
 mod widgets;
@@ -25,6 +26,9 @@ pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitP
 pub use resize::{resize_edges, TopBorder};
 pub use scrollbar::{scrollable, scrollable_list, PinScrollbars, Scrollable, ThumbAt, ThumbRecord};
 pub use spin_layer::{drop_spinner_host, host_spinners, spin_host, SpinLayer, SpinSlot, SpinSlots};
+pub use spin_native::{
+    diff as spin_diff, spin_period, spin_phase, Diff as SpinDiff, SpinGate, SpinSink,
+};
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{
