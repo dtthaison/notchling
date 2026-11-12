@@ -25,6 +25,7 @@ pub mod format;
 pub mod header;
 pub mod image_size;
 pub mod inspector;
+pub mod lane_limits;
 pub mod limit_ring;
 pub mod loader;
 pub mod markdown;

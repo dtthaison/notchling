@@ -1,6 +1,6 @@
 //! Claude Code behind Chat's parts: replies and Stop through the daemon's `session.reply` and
 //! `session.interrupt`, the pickers as `/model` and `/effort` replies, the account menu of lanes,
-//! and the main login's 5-hour and weekly limits.
+//! and the 5-hour and weekly limits of the account in use (the main login's, or its lane's).
 
 use gpui::Context;
 
@@ -9,6 +9,7 @@ use crate::accounts::model::CLAUDE_CODE;
 use crate::acting::Request;
 use crate::chat::claude_picker::Kind;
 use crate::chat::data::Session;
+use crate::chat::lane_limits;
 use crate::chat::limit_ring as rules;
 use crate::chat::pickers::{self, Menu, EFFORT};
 use crate::chat::terminal::{menu_route, MenuRoute};
@@ -124,12 +125,19 @@ impl ChatTool for Claude {
         view.toggle_account_menu(cx);
     }
 
-    /// The main login's windows; a session in a lane has none yet.
+    /// The main login's windows from the limit watcher; a session in a lane has the report of the
+    /// account its lane runs (`lane_limits`).
     fn limits(&self, view: &ChatView, session: &Session) -> Option<Shown> {
-        if session.agent.config_dir.is_some() {
-            return None;
-        }
         let s = view.accounts.snapshot();
+        if let Some(dir) = session.agent.config_dir.as_deref() {
+            let lane = lane_limits::limits_for(&s, dir)?;
+            return Some(Shown {
+                arc: rules::arc(&lane.limits),
+                limits: lane.limits,
+                plan: lane.plan,
+                provider: CLAUDE_CODE,
+            });
+        }
         let windows = &s
             .limits
             .providers
