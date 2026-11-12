@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, AnyView, Context, Div, Entity};
+use gpui::{div, prelude::*, px, AnyView, App, Context, Div, Entity};
 use notchling_engine::delegate::options::Tool as DelegateTool;
 use notchling_engine::delegate::second_opinion::{codex_options, Subject};
 use notchling_engine::tools::agy;
@@ -37,6 +37,11 @@ pub struct Sheet {
 
 impl ChatView {
     pub(super) fn acts(&self, cx: &mut Context<Self>) -> Acts {
+        self.acts_in(cx)
+    }
+
+    /// The same, from what an `App` reads (the conversation's input is made without a context).
+    pub(super) fn acts_in(&self, cx: &App) -> Acts {
         let actions = cx
             .try_global::<AppActions>()
             .map(|a| a.0.clone())

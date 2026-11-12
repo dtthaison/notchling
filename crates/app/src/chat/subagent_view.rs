@@ -71,6 +71,20 @@ pub fn links(subagents: &[Subagent]) -> Vec<(Option<String>, String)> {
         .collect()
 }
 
+/// The subagent an Agent call opens, from `links`.
+pub fn link_for_step<'a>(
+    links: &'a [(Option<String>, String)],
+    tool_use_id: &str,
+) -> Option<&'a str> {
+    if tool_use_id.is_empty() {
+        return None;
+    }
+    links
+        .iter()
+        .find(|(call, _)| call.as_deref() == Some(tool_use_id))
+        .map(|(_, id)| id.as_str())
+}
+
 /// What the slim header above a subagent's transcript says: its description, and the detail line
 /// its row in the panel shows ("Running · sonnet high · Explore").
 pub fn header_text(agent: &Subagent) -> (String, String) {
@@ -156,5 +170,13 @@ mod tests {
         let list = [agent("a", None), agent("b", None)];
         assert_eq!(find(&list, "b").map(|s| s.id.as_str()), Some("b"));
         assert!(find(&list, "z").is_none());
+    }
+
+    #[test]
+    fn an_agent_step_finds_its_subagent_in_the_links() {
+        let links = links(&[agent("a", Some("call-1")), agent("b", None)]);
+        assert_eq!(link_for_step(&links, "call-1"), Some("a"));
+        assert_eq!(link_for_step(&links, "call-2"), None);
+        assert_eq!(link_for_step(&links, ""), None);
     }
 }

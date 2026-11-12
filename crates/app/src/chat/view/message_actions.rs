@@ -17,8 +17,8 @@ use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{hsla, icon, icon_in, label, parts_on, KitPart};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::conversation_view::ConversationState;
-use super::{now_ms, ChatView};
+use super::conversation_view::{ConversationState, ConversationView};
+use super::now_ms;
 use crate::chat::message_meta::{self, Plan, Role};
 use crate::chat::rows::Row;
 use crate::mac::gate;
@@ -69,7 +69,7 @@ fn copy_button(
     text: &str,
     copied: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Stateful<Div> {
     let text = text.to_owned();
     let key = id.to_owned();
@@ -78,9 +78,7 @@ fn copy_button(
         cx.listener(move |this, _, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
             let at = now_ms();
-            this.parts
-                .conversation
-                .update(cx, |v, _| v.s.copied = Some((key.clone(), at)));
+            this.s.copied = Some((key.clone(), at));
             cx.notify();
         }),
     );
@@ -88,7 +86,7 @@ fn copy_button(
 }
 
 /// "4 minutes ago", its tooltip the full date and time.
-fn time_label(id: &str, at: f64, a: Appearance, cx: &Context<ChatView>) -> Stateful<Div> {
+fn time_label(id: &str, at: f64, a: Appearance, cx: &Context<ConversationView>) -> Stateful<Div> {
     let text = message_meta::relative_local(now_ms() as f64 / 1000.0, at);
     let tip = message_meta::full_local(at);
     let time = label(&text, TypeRole::Meta, Ink::TextFaint, a)
@@ -124,7 +122,7 @@ fn actions_row(
     group: SharedString,
     trailing: Option<Div>,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Div {
     let time = date.filter(|_| plan.time);
     let row = div()
@@ -167,7 +165,7 @@ pub fn with_actions(
     element: Div,
     trailing: Option<Div>,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> AnyElement {
     let (role, text, queued) = match row {
         Row::User { text, queued, .. } => (Role::User, text, *queued),
@@ -216,7 +214,7 @@ pub fn with_actions(
         .child(element)
         .child(row)
         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-            this.message_hover(&hover_id, *hovered, cx);
+            this.hover(&hover_id, *hovered, cx);
         }))
         .into_any_element()
 }
@@ -228,7 +226,7 @@ fn hover_only(
     item: Option<&ChatItem>,
     element: Div,
     trailing: Option<Div>,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> AnyElement {
     let Some(trailing) = trailing else {
         return element.into_any_element();

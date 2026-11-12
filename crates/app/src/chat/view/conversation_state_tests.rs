@@ -52,3 +52,65 @@ fn the_pill_shows_when_scrolled_up_and_not_while_loading() {
     assert!(!s.latest_preview);
     assert!(!s.latest_pill(false));
 }
+
+fn input() -> ConversationInput {
+    ConversationInput {
+        shown: Arc::default(),
+        subagent: None,
+        session: Some(SessionShown {
+            id: "s1".into(),
+            tool: Tool::Claude,
+            cwd: "/work".into(),
+            working: false,
+        }),
+        held_working: false,
+        outgoing: Vec::new(),
+        loading: false,
+        empty_note: None,
+        subagents: Vec::new(),
+        tasks_inset: false,
+        selected: Some("s1".into()),
+        chat: WeakEntity::new_invalid(),
+    }
+}
+
+#[test]
+fn the_input_is_equal_when_only_a_draft_or_a_menu_changed() {
+    // A draft, a menu, the chat handle: none is a field of the input, so two inputs made from
+    // chats that differ only there are equal, and only the chat handle may differ.
+    let a = input();
+    let mut b = input();
+    b.chat = WeakEntity::new_invalid();
+    assert!(a == b);
+    // The same conversation behind another Arc, read again from disk, is equal too.
+    let mut c = input();
+    c.shown = Arc::new(Conversation::default());
+    assert!(a == c);
+}
+
+#[test]
+fn a_new_conversation_arc_changes_the_input() {
+    let a = input();
+    let mut b = input();
+    let mut next = Conversation::default();
+    next.queued.push("one more".into());
+    b.shown = Arc::new(next);
+    assert!(a != b);
+}
+
+#[test]
+fn what_the_column_draws_from_the_session_changes_the_input() {
+    let a = input();
+    let mut working = input();
+    working.session.as_mut().unwrap().working = true;
+    assert!(a != working);
+    let mut loading = input();
+    loading.loading = true;
+    assert!(a != loading);
+    let mut other = input();
+    other.selected = Some("s2".into());
+    assert!(a != other);
+    let mut links = input();
+    links.subagents = vec![(Some("call".into()), "agent".into())];
+    assert!(a != links);
+}

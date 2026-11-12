@@ -191,6 +191,11 @@ impl ChatView {
         self.acts(cx).acting()
     }
 
+    /// [`Self::acting`] from an `App`, for what is drawn outside the chat's own context.
+    pub(super) fn acting_in(&self, cx: &App) -> Acting {
+        self.acts_in(cx).acting()
+    }
+
     /// The editor's text changed: it is the selected row's draft.
     fn draft_changed(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {

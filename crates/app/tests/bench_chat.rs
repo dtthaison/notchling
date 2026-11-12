@@ -313,3 +313,27 @@ fn bench_menu_draws_no_details() {
     let result = bench_for("menu", 3);
     assert_eq!(count(&result, "details"), 0, "{result}");
 }
+
+/// The account menu opening and closing changes nothing any part shows: no part is drawn, only the
+/// window's outer parts.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_menu_draws_no_part() {
+    let result = bench_for("menu", 3);
+    assert_eq!(count(&result, "conversation"), 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+    assert!(count(&result, "root") > 0, "{result}");
+}
+
+/// Typing still draws no part now that the conversation draws from its own input: the box and the
+/// slash menu are the window's.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_typing_still_draws_no_part() {
+    let result = bench_for("typing", 3);
+    assert_eq!(count(&result, "conversation"), 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+    assert!(count(&result, "root") > 0, "{result}");
+}

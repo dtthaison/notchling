@@ -1,26 +1,32 @@
 //! The conversation's column as a view of its own: its scroll, which groups and thoughts are open,
 //! the hovered message and Copy's check, the Markdown cache. It is drawn cached apart from the rest
-//! of the window (see `pane`), reads the chat only while it draws, and still draws whenever
-//! `ChatView` notifies (Task 4.4 makes it draw only when its input changed).
+//! of the window (see `pane`) from a [`ConversationInput`] (what the column shows, taken from the
+//! chat on each of its notifies) and its own state, and draws only when one of the two changed: a
+//! chat change nothing here shows (a draft, a menu) compares equal and draws nothing.
 //!
-//! The state lives here, not on `ChatView`, so a draw function gets it as an argument and never
-//! reads this entity from inside the chat (this view is being updated while it draws).
+//! What the draw reads is the input and the state, never `ChatView`: it acts on the session
+//! through a weak handle to it (`ConversationInput::chat`).
 
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, App, Context, Entity, IntoElement, ScrollHandle, Subscription, WeakEntity,
     Window,
 };
+use notchling_engine::transcript::model::Conversation;
 use notchling_kit::ui::{
     drop_spinner_host, host_spinners, scrollable, window_appearance, SpinSlots,
 };
 
 use super::pane::RENDERS;
 use super::{conversation, message_meta, now_ms, ChatView};
+use crate::acting::Acting;
+use crate::chat::data::Tool;
 use crate::chat::follow::{self, Scroll};
+use crate::chat::log::Change;
 use crate::chat::markdown_cache;
 
 /// What the conversation keeps between draws.
@@ -50,6 +56,9 @@ pub(super) struct ConversationState {
     pub follow_sent: bool,
     /// Scroll to the end once the picked session's conversation is in.
     pub scroll_to_end: bool,
+    /// Whether a second opinion in the selected session was running at the last tick, so the
+    /// tick that sees it end draws its card too.
+    pub opinions_running: bool,
 }
 
 impl ConversationState {
@@ -67,6 +76,7 @@ impl ConversationState {
             follow_sent: false,
             // The first conversation opens at its newest message, as a picked one does.
             scroll_to_end: true,
+            opinions_running: false,
         }
     }
 
@@ -139,11 +149,76 @@ impl ConversationState {
     }
 }
 
+/// The subagent shown in place of the session's conversation.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SubagentShown {
+    pub agent_id: String,
+    pub running: bool,
+    /// Its transcript has been read; until then the column says "Loading…".
+    pub loaded: bool,
+}
+
+/// The selected session, as far as the column draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SessionShown {
+    pub id: String,
+    pub tool: Tool,
+    pub cwd: String,
+    /// Its row says it is working.
+    pub working: bool,
+}
+
+/// Everything the column draws that isn't its own state, from the chat.
+#[derive(Clone)]
+pub(super) struct ConversationInput {
+    /// What the column shows: the open subagent's conversation or the session's.
+    pub shown: Arc<Conversation>,
+    pub subagent: Option<SubagentShown>,
+    pub session: Option<SessionShown>,
+    /// Another `agy` holds the Antigravity session's turn.
+    pub held_working: bool,
+    /// What was typed to the session and isn't in the transcript yet; none while a subagent shows.
+    pub outgoing: Vec<String>,
+    pub loading: bool,
+    /// What an empty column says.
+    pub empty_note: Option<&'static str>,
+    /// Which subagent each Agent call opens (`subagent_view::links`): all of the list the column
+    /// shows, so a running subagent's file growing draws nothing here.
+    pub subagents: Vec<(Option<String>, String)>,
+    /// The Tasks bar sits over the top, so the first row starts under it.
+    pub tasks_inset: bool,
+    /// The row id: the second opinions' key.
+    pub selected: Option<String>,
+    /// The chat, for what a click does to the session (not part of equality; the view fills it in).
+    pub chat: WeakEntity<ChatView>,
+}
+
+impl PartialEq for ConversationInput {
+    fn eq(&self, other: &Self) -> bool {
+        (Arc::ptr_eq(&self.shown, &other.shown) || *self.shown == *other.shown)
+            && self.subagent == other.subagent
+            && self.session == other.session
+            && self.held_working == other.held_working
+            && self.outgoing == other.outgoing
+            && self.loading == other.loading
+            && self.empty_note == other.empty_note
+            && self.subagents == other.subagents
+            && self.tasks_inset == other.tasks_inset
+            && self.selected == other.selected
+    }
+}
+
 pub struct ConversationView {
     chat: WeakEntity<ChatView>,
     pub(super) s: ConversationState,
+    /// The input drawn last; `None` asks for a fresh one at the next draw.
+    input: Option<ConversationInput>,
+    /// What the last load changed and the conversation it started from (Task 6.1 splices rows
+    /// from it).
+    #[allow(dead_code)]
+    change: Option<(Arc<Conversation>, Change)>,
     pub(super) spins: SpinSlots,
-    _changes: gpui::Subscription,
+    _changes: Subscription,
     _release: Subscription,
 }
 
@@ -155,9 +230,58 @@ impl ConversationView {
         ConversationView {
             chat: chat.downgrade(),
             s: ConversationState::new(),
+            input: None,
+            change: None,
             spins,
-            _changes: cx.observe(chat, |_, _, cx| cx.notify()),
+            _changes: cx.observe(chat, |this, chat, cx| {
+                let app: &App = cx;
+                let input = this.input_from(chat.read(app), app);
+                this.set_input(input, cx);
+            }),
             _release: cx.on_release(move |_, cx| drop_spinner_host(cx, id)),
+        }
+    }
+
+    /// The input from the chat now, with the handle this view acts through.
+    fn input_from(&self, chat: &ChatView, cx: &App) -> ConversationInput {
+        ConversationInput {
+            chat: self.chat.clone(),
+            ..chat.conversation_input(cx)
+        }
+    }
+
+    /// Takes the input and draws only if it differs from the one drawn.
+    fn set_input(&mut self, input: ConversationInput, cx: &mut Context<Self>) {
+        if self.input.as_ref() != Some(&input) {
+            self.input = Some(input);
+            cx.notify();
+        }
+    }
+
+    /// The change the last load found, for the rows to splice (Task 6.1).
+    pub(super) fn take_change(&mut self, change: Option<(Arc<Conversation>, Change)>) {
+        self.change = change;
+    }
+
+    /// Does something to the chat from a click in the column.
+    pub(super) fn act(
+        &self,
+        f: impl FnOnce(&mut ChatView, &mut Context<ChatView>),
+        cx: &mut Context<Self>,
+    ) {
+        self.chat.update(cx, f).ok();
+    }
+
+    /// Opens or folds `id`, and draws.
+    pub(super) fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.s.toggle(id);
+        cx.notify();
+    }
+
+    /// The pointer entered or left message `id`; draws when its times are stale.
+    pub(super) fn hover(&mut self, id: &str, hovered: bool, cx: &mut Context<Self>) {
+        if self.s.hover(id, hovered) {
+            cx.notify();
         }
     }
 }
@@ -167,24 +291,34 @@ impl Render for ConversationView {
         RENDERS.fetch_add(1, Ordering::Relaxed);
         self.spins.clear();
         let a = window_appearance(window);
-        let Some(chat) = self.chat.upgrade() else {
-            return div().into_any_element();
+        let input = match self.input.take() {
+            Some(input) => input,
+            None => {
+                let Some(chat) = self.chat.upgrade() else {
+                    return div().into_any_element();
+                };
+                let app: &App = cx;
+                self.input_from(chat.read(app), app)
+            }
         };
         // A hovered message's relative time is kept fresh from when it was last drawn.
         self.s.drawn_ms = now_ms();
         let s = &self.s;
-        chat.update(cx, |chat, ccx| {
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(scrollable(conversation::render(chat, s, a, ccx)).tracking(&s.scroll))
-                .into_any_element()
-        })
+        let element = div()
+            .size_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .child(scrollable(conversation::render(&input, s, a, cx)).tracking(&s.scroll))
+            .children(conversation::latest_pill(s, input.loading, a, cx))
+            .into_any_element();
+        self.input = Some(input);
+        element
     }
 }
 
-/// `ChatView`'s side: the conversation's state is read and written through its entity.
+/// `ChatView`'s side: the conversation's state is read and written through its entity, and its
+/// input is made here.
 impl ChatView {
     pub(super) fn conversation_state<R>(
         &self,
@@ -192,6 +326,72 @@ impl ChatView {
         f: impl FnOnce(&mut ConversationState) -> R,
     ) -> R {
         self.parts.conversation.update(cx, |v, _| f(&mut v.s))
+    }
+
+    /// Draws the conversation again whatever its input says (a clock, a Copy check).
+    pub(super) fn redraw_conversation(&self, cx: &mut Context<Self>) {
+        self.parts.conversation.update(cx, |_, cx| cx.notify());
+    }
+
+    /// Draws the conversation again if its input changed.
+    pub(super) fn refresh_conversation(&self, cx: &mut Context<Self>) {
+        let input = ConversationInput {
+            chat: cx.entity().downgrade(),
+            ..self.conversation_input(cx)
+        };
+        self.parts
+            .conversation
+            .update(cx, |v, pcx| v.set_input(input, pcx));
+    }
+
+    /// What the column draws from the chat now.
+    pub(super) fn conversation_input(&self, cx: &App) -> ConversationInput {
+        let session = self.selected_session();
+        let subagent = self.open_subagent.as_ref().map(|o| SubagentShown {
+            agent_id: o.agent.id.clone(),
+            running: o.agent.is_running(),
+            loaded: o.conversation.is_some(),
+        });
+        let shown = self
+            .open_subagent
+            .as_ref()
+            .and_then(|o| o.conversation.clone())
+            .unwrap_or_else(|| self.conversation.clone());
+        let outgoing = if self.open_subagent.is_some() {
+            Vec::new()
+        } else {
+            self.outgoing_texts()
+        };
+        let empty = shown.items.is_empty() && shown.queued.is_empty() && outgoing.is_empty();
+        let empty_note = empty.then(|| match session.map(|s| s.tool) {
+            // Loaded through the daemon, which holds the session open only while acting is on.
+            Some(Tool::Antigravity) if !self.tools.agy.as_ref().is_some_and(|c| c.open) => {
+                match self.acting_in(cx) {
+                    Acting::On => "Loading from Antigravity…",
+                    _ => "Antigravity sessions load through the daemon while acting is on.",
+                }
+            }
+            _ if self.open_subagent.is_some() => "No transcript yet for this subagent",
+            _ => "No transcript yet for this session",
+        });
+        ConversationInput {
+            shown,
+            subagent,
+            session: session.map(|s| SessionShown {
+                id: s.agent.id.clone(),
+                tool: s.tool,
+                cwd: s.agent.cwd.clone(),
+                working: s.agent.group == notchling_engine::sessions::agent::AgentGroup::Working,
+            }),
+            held_working: self.selected_held_working(),
+            outgoing,
+            loading: self.loading,
+            empty_note,
+            subagents: crate::chat::subagent_view::links(&self.subagents),
+            tasks_inset: super::tasks::shown(self),
+            selected: self.selected.clone(),
+            chat: WeakEntity::new_invalid(),
+        }
     }
 
     /// The Tasks bar is open.
@@ -206,28 +406,15 @@ impl ChatView {
                 .contains(super::tasks::OPEN_ID)
     }
 
-    /// Opens or folds `id`.
+    /// Opens or folds `id` (the Tasks bar's own key too, so the window's root draws as well).
     pub(super) fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
-        self.conversation_state(cx, |s| s.toggle(id));
+        self.parts.conversation.update(cx, |v, cx| v.toggle(id, cx));
         cx.notify();
-    }
-
-    /// The pointer entered or left message `id`; a redraw when its times are stale.
-    pub(super) fn message_hover(&mut self, id: &str, hovered: bool, cx: &mut Context<Self>) {
-        if self.conversation_state(cx, |s| s.hover(id, hovered)) {
-            cx.notify();
-        }
     }
 
     /// Before new content replaces the conversation (see `ConversationState::follow_content`).
     pub(super) fn follow_content(&mut self, session_changed: bool, cx: &mut Context<Self>) {
         self.conversation_state(cx, |s| s.follow_content(session_changed));
-    }
-
-    /// The "Latest" pill's click.
-    pub(super) fn jump_to_latest(&mut self, cx: &mut Context<Self>) {
-        self.conversation_state(cx, ConversationState::jump_to_latest);
-        cx.notify();
     }
 
     /// A message was sent: the next reload, and now, go to the end.

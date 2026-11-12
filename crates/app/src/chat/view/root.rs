@@ -17,7 +17,13 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
+        // The Tasks bar's room is the conversation's input, and this is where the bar's state is
+        // taken: a change in it is drawn in the same frame.
+        let inset = super::tasks::shown(self);
         self.sync_tasks(cx);
+        if super::tasks::shown(self) != inset {
+            self.refresh_conversation(cx);
+        }
         self.overlay_open = self.sheet.is_some()
             || self.account_menu
             || self.row_menu.is_some()
@@ -43,7 +49,6 @@ impl Render for ChatView {
             .child(self.parts.conversation(cx))
             // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
-            .children(conversation::latest_pill(self, a, cx))
             .part_at(
                 if in_subagent {
                     "Subagent View"

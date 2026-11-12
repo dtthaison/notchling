@@ -4,7 +4,7 @@
 //! engine's, shared app-wide (`AppOpinions`); a render and a fixture root have none, so the
 //! button is off.
 
-use gpui::{div, prelude::*, px, Context, Div, SharedString};
+use gpui::{div, prelude::*, px, App, Context, Div, SharedString, WeakEntity};
 use notchling_engine::delegate::second_opinion::{SecondOpinion, Status, Subject};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 use notchling_engine::transcript::model::{ChatItem, ItemKind, ToolKind};
@@ -14,6 +14,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::conversation_view::ConversationView;
 use super::ChatView;
 use crate::acting::Control;
 use crate::mac::gate;
@@ -26,7 +27,7 @@ pub const TIP: &str = "Second Opinion: ask Codex or Antigravity to review this";
 pub const NO_STORE: &str = "Second opinions need the app's own data folder, not a fixture";
 
 /// The store, when this app has one.
-pub fn store(cx: &Context<ChatView>) -> Option<SecondOpinionStore> {
+pub fn store(cx: &App) -> Option<SecondOpinionStore> {
     cx.try_global::<AppOpinions>().and_then(|o| o.0.clone())
 }
 
@@ -89,7 +90,8 @@ pub fn opinion_button(
     subject: Subject,
     of: usize,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    chat: &WeakEntity<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> impl IntoElement {
     let control = match store(cx) {
         Some(_) => Control {
@@ -102,6 +104,7 @@ pub fn opinion_button(
         },
     };
     let anchor = anchor.to_owned();
+    let chat = chat.clone();
     let title = button_label(&subject, of);
     let b = button(
         SharedString::from(format!("opinion-{anchor}")),
@@ -112,9 +115,13 @@ pub fn opinion_button(
     );
     gate::tip(b, control, a)
         .when(control.enabled, |b| {
-            b.on_click(cx.listener(move |this, _, _, cx| {
-                this.open_second_opinion(subject.clone(), &anchor, cx)
-            }))
+            b.on_click(move |_, _, cx| {
+                let (subject, anchor) = (subject.clone(), anchor.clone());
+                chat.update(cx, |this, cx| {
+                    this.open_second_opinion(subject, &anchor, cx)
+                })
+                .ok();
+            })
         })
         .part_at("Second Opinion Button", Corner::TopTrailing, a, cx)
 }
@@ -128,7 +135,7 @@ fn pick_line(run: &SecondOpinion) -> String {
 }
 
 /// One opinion's card.
-fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+fn card_for(run: &SecondOpinion, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
     let tool = tool_name(run.tool_value());
     let title = match run.status {
         Status::Running => format!("{tool} is reviewing {}", run.subject),
@@ -234,7 +241,7 @@ pub fn cards(
     session: &str,
     anchors: &[String],
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Option<Div> {
     let runs = store(cx)?.runs(session, anchors);
     if runs.is_empty() {
@@ -251,7 +258,7 @@ pub fn cards(
 }
 
 /// Whether an opinion in the selected session is still running (the view redraws for its clock).
-pub fn any_running(view: &ChatView, cx: &Context<ChatView>) -> bool {
+pub fn any_running(view: &ChatView, cx: &App) -> bool {
     let Some(session) = &view.selected else {
         return false;
     };

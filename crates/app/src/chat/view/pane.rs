@@ -257,6 +257,7 @@ impl ChatView {
     pub(super) fn redraw_all_but_conversation(&self, cx: &mut Context<ChatView>) {
         self.redraw_sidebar(cx);
         self.refresh_details(cx);
+        self.refresh_conversation(cx);
         self.redraw_chrome(cx);
     }
 }

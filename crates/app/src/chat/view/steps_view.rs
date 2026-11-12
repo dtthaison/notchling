@@ -12,8 +12,8 @@ use notchling_kit::ui::{button, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::conversation::chevron;
-use super::conversation_view::ConversationState;
-use super::{markdown, ChatView};
+use super::conversation_view::{ConversationInput, ConversationState, ConversationView};
+use super::markdown;
 use crate::chat::rows::ToolRow;
 use crate::chat::steps::{self, Detail};
 
@@ -76,7 +76,7 @@ fn diff_line(line: &DiffLine, a: Appearance) -> Div {
 }
 
 /// A file change (`DiffView`): the file and its folder, Show in Finder, then the lines.
-fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Div {
+fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) -> Div {
     let path = Path::new(&step.input);
     let name = path
         .file_name()
@@ -137,7 +137,7 @@ fn diff_view(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Div {
 }
 
 /// What opens under a step: its diff, or its command or input and its output.
-fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>) -> Option<Div> {
     let mut detail = div().pl(px(24.0)).flex().flex_col().gap(px(6.0));
     match steps::detail(step) {
         Detail::None => return None,
@@ -179,12 +179,12 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Opt
 
 /// One call (`ToolCallRow`): icon, title, diff counts, its state, a chevron when something opens.
 fn step_row(
-    view: &ChatView,
+    input: &ConversationInput,
     s: &ConversationState,
     step: &ToolRow,
     live: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Div {
     let has_detail = steps::detail(step) != Detail::None;
     let open = has_detail && s.is_open(&step.id);
@@ -197,9 +197,9 @@ fn step_row(
     let id = step.id.clone();
     // An Agent call whose subagent is listed opens that subagent's transcript.
     let subagent = (step.kind == ToolKind::Agent)
-        .then(|| crate::chat::subagent_view::for_step(&view.subagents, &step.id))
+        .then(|| crate::chat::subagent_view::link_for_step(&input.subagents, &step.id))
         .flatten()
-        .map(|agent| agent.id.clone());
+        .map(str::to_owned);
     let line = div()
         .id(SharedString::from(format!("step-{}", step.id)))
         .w_full()
@@ -237,7 +237,7 @@ fn step_row(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     // The row itself folds and opens on a click; this one is only Open.
                     cx.stop_propagation();
-                    this.open_subagent(&agent_id, cx);
+                    this.act(|chat, cx| chat.open_subagent(&agent_id, cx), cx);
                 }))
         }))
         .when(step.added + step.removed > 0, |d| {
@@ -275,7 +275,7 @@ fn step_chip(
     steps: &[ToolRow],
     open: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Stateful<Div> {
     let icons =
         div()
@@ -326,13 +326,13 @@ fn step_chip(
 
 /// A run of calls: the chip, and when open each call on its own line beside a hairline.
 pub(super) fn step_group(
-    view: &ChatView,
+    input: &ConversationInput,
     s: &ConversationState,
     id: &str,
     steps: &[ToolRow],
     live: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Div {
     let open = live || s.is_open(id);
     div()
@@ -354,7 +354,7 @@ pub(super) fn step_group(
                     .children(
                         steps
                             .iter()
-                            .map(|step| step_row(view, s, step, live, a, cx)),
+                            .map(|step| step_row(input, s, step, live, a, cx)),
                     ),
             )
         })
@@ -369,7 +369,7 @@ pub(super) fn thinking(
     title: &str,
     text: &str,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Div {
     let has_text = !text.is_empty();
     let open = has_text && s.is_open(id);

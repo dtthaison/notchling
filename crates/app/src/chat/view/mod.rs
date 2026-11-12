@@ -131,9 +131,6 @@ pub struct ChatView {
     new_drafts: Vec<Session>,
     selected: Option<String>,
     conversation: Arc<Conversation>,
-    /// What the last load changed in `conversation` and the conversation it started from; Task 4.4's
-    /// `ConversationView` reads it to splice rows.
-    pending_change: Option<(Arc<Conversation>, Change)>,
     subagents: Vec<Subagent>,
     /// The subagent shown read-only in place of the conversation (opened from the Details Panel or
     /// an Agent step). Kept here, not in the load, so it outlives every reload; cleared by Back,
@@ -412,7 +409,6 @@ impl ChatView {
             new_drafts: Vec::new(),
             selected: None,
             conversation: Arc::default(),
-            pending_change: None,
             subagents: Vec::new(),
             open_subagent: None,
             now_ms: 0,

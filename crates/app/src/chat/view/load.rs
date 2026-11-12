@@ -118,6 +118,11 @@ impl ChatView {
         // changed leaves this one as it was, and its long layout needn't be done again.
         let selected_before = self.selected_session().cloned();
         let mut conversation_changed = false;
+        // What changes the column's size or what it follows to the end, which a draw of it
+        // applies (a scroll to the end waits for one, and a question card shrinks its room): the
+        // conversation is drawn again for these even when its input is equal. The row's own
+        // fields changing (its age, its status) aren't among them.
+        let mut layout_changed = false;
         self.sessions = self.open_rows(all);
         conversation_changed |= self.selected_session() != selected_before.as_ref();
         if self.selected == asked {
@@ -151,6 +156,7 @@ impl ChatView {
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
             let session_changed = self.take_open_at_end(cx);
             conversation_changed |= self.selected != was || session_changed;
+            layout_changed |= self.selected != was || session_changed;
             if !agy {
                 let content_changed = match &loaded.change {
                     // The loader compared against the conversation on show: trust it.
@@ -164,20 +170,25 @@ impl ChatView {
                     }
                 };
                 conversation_changed |= self.loading || content_changed;
+                layout_changed |= self.loading || content_changed;
                 if conversation_changed {
                     self.follow_content(session_changed, cx);
                 }
                 self.conversation = loaded.conversation;
-                self.pending_change = loaded.change;
+                self.parts
+                    .conversation
+                    .update(cx, |v, _| v.take_change(loaded.change));
                 self.loading = false;
             } else if session_changed {
                 self.scroll_to_end_now(cx);
             }
             // The conversation shows which subagent an Agent step opens, not how it's doing.
             let links = crate::chat::subagent_view::links;
-            conversation_changed |= links(&self.subagents) != links(&loaded.subagents)
+            let others = links(&self.subagents) != links(&loaded.subagents)
                 || self.open_subagent.is_some()
                 || self.prompt.transcript != loaded.question;
+            conversation_changed |= others;
+            layout_changed |= others;
             self.subagents = loaded.subagents;
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply_shared(&self.subagents, loaded.subagent);
@@ -190,6 +201,9 @@ impl ChatView {
             self.start_load(cx);
         }
         self.sync_tools(cx);
+        if layout_changed {
+            self.redraw_conversation(cx);
+        }
         if conversation_changed {
             cx.notify();
         } else {
@@ -275,12 +289,16 @@ impl ChatView {
             copy_over || (s.hovered_message.is_some() && message_meta::stale(s.drawn_ms, now))
         });
         if redraw {
-            cx.notify();
+            self.redraw_conversation(cx);
         }
-        // A second opinion's card changes when its command ends, which nothing else signals.
+        // A second opinion's card changes when its command ends, which nothing else signals; the
+        // tick that sees it end draws it once more.
         shell_probe::tick(self, cx);
-        if opinions::any_running(self, cx) {
-            cx.notify();
+        let running = opinions::any_running(self, cx);
+        let was_running =
+            self.conversation_state(cx, |s| std::mem::replace(&mut s.opinions_running, running));
+        if running || was_running {
+            self.redraw_conversation(cx);
         }
         self.refresh_file(cx);
         if self.gate.due(now_ms()) {

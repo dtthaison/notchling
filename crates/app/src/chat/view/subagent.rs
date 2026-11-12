@@ -3,7 +3,6 @@
 //! Back button (Esc and ⌘[ do the same). There is no reply box under it.
 
 use gpui::{div, prelude::*, px, Context, Div};
-use notchling_engine::transcript::model::Conversation;
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
@@ -57,14 +56,6 @@ pub fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
 }
 
 impl ChatView {
-    /// What the conversation column draws: the open subagent's transcript, else the session's.
-    pub(super) fn shown_conversation(&self) -> &Conversation {
-        self.open_subagent
-            .as_ref()
-            .and_then(|o| o.conversation.as_ref())
-            .unwrap_or(&self.conversation)
-    }
-
     /// Shows a subagent of the selected session read-only in place of its conversation, read now.
     pub(super) fn open_subagent(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(agent) = crate::chat::subagent_view::find(&self.subagents, id) else {

@@ -6,10 +6,9 @@
 //! What is open is `ChatView::expanded`; the newest group of a working session is always open.
 
 use gpui::{
-    div, point, prelude::*, px, relative, AnyElement, BoxShadow, Context, Div, SharedString,
+    div, point, prelude::*, px, relative, AnyElement, App, BoxShadow, Context, Div, SharedString,
     Stateful,
 };
-use notchling_engine::sessions::agent::AgentGroup;
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI;
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
@@ -19,11 +18,10 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
-use super::conversation_view::ConversationState;
+use super::conversation_view::{ConversationInput, ConversationState, ConversationView};
 use super::steps_view::{hairline, step_group, thinking};
 use super::{markdown, message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
-use crate::chat::data::Tool;
 use crate::chat::rows::{rows, with_outgoing, Row};
 
 /// Rows sit this far apart (the Swift app's conversation stack).
@@ -113,8 +111,13 @@ pub(super) fn activity_row(
 /// The "↓ Latest" pill over the conversation's bottom right, while it is scrolled up (the Swift
 /// button: a secondary kit button with an arrow, 20 pt from the corner). It sits in the
 /// conversation, above the reply box. A click goes to the newest message and follows again.
-pub fn latest_pill(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
-    if !view.parts.conversation.read(cx).s.latest_pill(view.loading) {
+pub(super) fn latest_pill(
+    s: &ConversationState,
+    loading: bool,
+    a: Appearance,
+    cx: &mut Context<ConversationView>,
+) -> Option<Div> {
+    if !s.latest_pill(loading) {
         return None;
     }
     let content = div()
@@ -130,7 +133,10 @@ pub fn latest_pill(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -
             blur_radius: px(8.0),
             spread_radius: px(0.0),
         }])
-        .on_click(cx.listener(|this, _, _, cx| this.jump_to_latest(cx)));
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.s.jump_to_latest();
+            cx.notify();
+        }));
     Some(
         div()
             .absolute()
@@ -149,7 +155,7 @@ fn user_row(
     queued: bool,
     sending: bool,
     a: Appearance,
-    cx: &Context<ChatView>,
+    cx: &App,
 ) -> Div {
     // The Swift names: a sent message is "Your Message", one waiting for the turn "Queued Bubble".
     let name = match (queued, sending) {
@@ -243,13 +249,13 @@ fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoEle
 /// A row, drawn. `id` is the item's (the queued bubbles at the end have none), `live` whether this
 /// is the newest step group of a working session.
 fn row_element(
-    view: &ChatView,
+    input: &ConversationInput,
     s: &ConversationState,
     row: &Row,
     id: &str,
     live: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Div {
     match row {
         Row::User {
@@ -265,10 +271,7 @@ fn row_element(
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
         Row::Assistant { text } => {
-            let folder = view
-                .selected_session()
-                .map(|s| s.agent.cwd.as_str())
-                .unwrap_or("");
+            let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
             div().w_full().flex().items_start().child(
                 div()
                     .flex_1()
@@ -288,7 +291,7 @@ fn row_element(
             )
         }
         Row::Thinking { title, text } => thinking(s, id, title, text, a, cx),
-        Row::Tools(tools) => step_group(view, s, id, tools, live, a, cx),
+        Row::Tools(tools) => step_group(input, s, id, tools, live, a, cx),
         Row::TurnEnd { text } => div()
             .w_full()
             .py(px(2.0))
@@ -331,21 +334,21 @@ fn row_element(
 /// A row with its Second Opinion buttons and the cards of the opinions asked under it, when the
 /// item has something to review.
 fn row_with_opinions(
-    view: &ChatView,
+    input: &ConversationInput,
     s: &ConversationState,
     i: usize,
     row: &Row,
     live: bool,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> AnyElement {
     super::pane::ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let item = view.shown_conversation().items.get(i);
+    let item = input.shown.items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
-    let element = row_element(view, s, row, id, live, a, cx);
+    let element = row_element(input, s, row, id, live, a, cx);
     // A subagent's transcript is only read: no second opinions on it.
     let subjects = item
-        .filter(|_| view.open_subagent.is_none())
+        .filter(|_| input.subagent.is_none())
         .map(opinions::subjects)
         .unwrap_or_default();
     let anchors: Vec<String> = subjects.iter().map(|(anchor, _)| anchor.clone()).collect();
@@ -358,18 +361,16 @@ fn row_with_opinions(
             .flex_wrap()
             .justify_end()
             .gap(px(4.0))
-            .children(
-                subjects
-                    .into_iter()
-                    .map(|(anchor, subject)| opinions::opinion_button(&anchor, subject, of, a, cx)),
-            )
+            .children(subjects.into_iter().map(|(anchor, subject)| {
+                opinions::opinion_button(&anchor, subject, of, a, &input.chat, cx)
+            }))
     });
     // Your messages and Claude's replies get their row of actions beneath.
     let element = message_actions::with_actions(s, row, item, element, buttons, a, cx);
     if anchors.is_empty() {
         return element;
     }
-    let cards = view
+    let cards = input
         .selected
         .as_deref()
         .and_then(|session| opinions::cards(session, &anchors, a, cx));
@@ -382,20 +383,15 @@ fn row_with_opinions(
         .into_any_element()
 }
 
-pub fn render(
-    view: &ChatView,
+pub(super) fn render(
+    input: &ConversationInput,
     s: &ConversationState,
     a: Appearance,
-    cx: &mut Context<ChatView>,
+    cx: &mut Context<ConversationView>,
 ) -> Stateful<Div> {
-    let shown = view.shown_conversation();
+    let shown = &*input.shown;
     // What was typed to the session isn't waiting in a subagent's transcript.
-    let outgoing = if view.open_subagent.is_some() {
-        Vec::new()
-    } else {
-        view.outgoing_texts()
-    };
-    let rows = with_outgoing(rows(shown), &outgoing);
+    let rows = with_outgoing(rows(shown), &input.outgoing);
     let column = div()
         .id("conversation")
         .flex_1()
@@ -405,7 +401,7 @@ pub fn render(
         .px(px(SIDE_PADDING))
         .pb(px(COLUMN_PADDING_VERTICAL))
         // The Tasks bar sits over the top, so the first row starts under it.
-        .pt(px(if super::tasks::shown(view) {
+        .pt(px(if input.tasks_inset {
             super::tasks::INSET + COLUMN_PADDING_VERTICAL
         } else {
             COLUMN_PADDING_VERTICAL
@@ -415,16 +411,14 @@ pub fn render(
         .gap(px(ROW_GAP))
         // First, so each frame's texts are noted afresh before the rows place theirs.
         .child(super::select::listener());
-    if let Some(open) = &view.open_subagent {
-        if open.conversation.is_none() {
-            return column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a));
-        }
+    if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
+        return column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a));
     }
-    if view.loading {
+    if input.loading {
         // The picked session's conversation is on its way; the previous one's would mislead.
         return column;
     }
-    if view.selected_session().is_none() {
+    if input.session.is_none() {
         return column.child(
             div()
                 .flex_1()
@@ -438,34 +432,21 @@ pub fn render(
         );
     }
     if rows.is_empty() {
-        let note = match view.selected_session().map(|s| s.tool) {
-            // Loaded through the daemon, which holds the session open only while acting is on.
-            Some(Tool::Antigravity) if !view.tools.agy.as_ref().is_some_and(|c| c.open) => {
-                match view.acting(cx) {
-                    crate::acting::Acting::On => "Loading from Antigravity…",
-                    _ => "Antigravity sessions load through the daemon while acting is on.",
-                }
-            }
-            _ if view.open_subagent.is_some() => "No transcript yet for this subagent",
-            _ => "No transcript yet for this session",
-        };
+        let note = input
+            .empty_note
+            .unwrap_or("No transcript yet for this session");
         return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
     // The newest step group of a working session stays open with its running call spinning (the
     // Swift app's `liveTools`): the session works, and the last item is that group.
-    let working = match &view.open_subagent {
-        Some(open) => open.agent.is_running(),
-        None => {
-            view.selected_held_working()
-                || view
-                    .selected_session()
-                    .is_some_and(|s| s.agent.group == AgentGroup::Working)
-        }
+    let working = match &input.subagent {
+        Some(sub) => sub.running,
+        None => input.held_working || input.session.as_ref().is_some_and(|s| s.working),
     };
     let last_tools = crate::chat::activity::live_group(shown, working);
     column.children(
         rows.iter()
             .enumerate()
-            .map(|(i, row)| row_with_opinions(view, s, i, row, last_tools == Some(i), a, cx)),
+            .map(|(i, row)| row_with_opinions(input, s, i, row, last_tools == Some(i), a, cx)),
     )
 }

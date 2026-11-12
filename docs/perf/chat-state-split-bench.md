@@ -231,3 +231,39 @@ Against Phase 1 the counts are the same: Phase 3 moved work off the main thread 
 `Arc<Conversation>`, the loader diffs), which no count here shows. `parsed bytes` in `append` is
 about half of Phase 1's because the run now starts counting after the longer warm-up, while the test
 appends a line every 500 ms from `bench: ready`.
+
+## Phase 4 (Tasks 4.1 to 4.4)
+
+The Sidebar, the Details Panel and the conversation each draw from a model or input of what they
+show, and only when it changed (`chat/view/pane.rs`, `conversation_view.rs`). A release build, the
+screen locked, so every frame forced (`forced: true`), 10 s per mode, median of 3 runs. As in the
+locked-screen section above, `ms/frame` and `fps` are not comparable with the display-link rows;
+judge by the counts. Same machine as the baseline.
+
+| Task | Mode | ms/frame | fps | root | conversation | sidebar | details | rows | parsed bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 4.4 (Phase 4) | idle | 9.92 | 10.0 | 100 | 0 | 0 | 0 | 0 | 0 |
+| 4.4 (Phase 4) | append | 13.29 | 10.1 | 101 | 5 | 0 | 5 | 2500 | 5406 |
+| 4.4 (Phase 4) | scroll | 97.70 | 8.8 | 88 | 88 | 0 | 0 | 44000 | 0 |
+| 4.4 (Phase 4) | hover | 11.78 | 10.1 | 101 | 1 | 0 | 0 | 500 | 0 |
+| 4.4 (Phase 4) | select (see below) | 9.37 | 10.0 | 100 | 0 | 0 | 0 | 0 | 0 |
+| 4.4 (Phase 4) | typing | 8.69 | 17.9 | 181 | 1 | 0 | 0 | 500 | 0 |
+| 4.4 (Phase 4) | terminal | 8.36 | 31.7 | 317 | 0 | 0 | 0 | 0 | 0 |
+| 4.4 (Phase 4) | reload | 8.60 | 11.5 | 116 | 0 | 0 | 0 | 0 | 0 |
+| 4.4 (Phase 4) | menu | 9.11 | 14.0 | 141 | 0 | 0 | 0 | 0 | 0 |
+
+Before (Phase 3, same counts method): `reload` 0 / 20 / 20 (conversation / sidebar / details),
+`menu` 49 / 49 / 49, `append` 5 / 5 / 5. After: `reload` 0 / 0 / 0, `menu` 0 / 0 / 0,
+`append` 5 / 0 / 5 (the Sidebar's rows don't change when a session's text grows; the Details Panel
+shows counts from it).
+
+Per task, from the 3 s count tests (debug build): 4.1 `reload` Sidebar 6 to 0 and `menu` Sidebar
+15 to 0; 4.2 `reload` Details Panel 6 to 0 and `menu` Details Panel 15 to 0; 4.3 moves only; 4.4
+`menu` conversation draws to 0 (a run with the input check turned off gave 4 in 3.4 s of a debug
+build, which draws few frames).
+
+`select` shows 0 conversation draws here because the bench's mouse press does not reach the window
+while the screen is locked (true of the base build too), so its 58 draws of Phase 3 are not
+reproduced; rerun it on an unlocked Mac. `hover` and `typing` keep their one draw (the first
+hover; the box growing past a line). `scroll` is the conversation scrolling, which draws it by
+design.
