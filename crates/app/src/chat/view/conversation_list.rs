@@ -468,12 +468,17 @@ impl ConversationView {
         let a = window_appearance(window);
         let live = live_group_of(input) == Some(i);
         let element = render_row(input, &self.s, i, &row, live, a, cx);
-        div()
+        let mut item = div()
             .w_full()
             .px(px(SIDE_PADDING))
             .pt(px(ROW_GAP))
-            .child(element)
-            .into_any_element()
+            .child(element);
+        // The bench's trajectory recorder notes where each row painted (`scroll_probe`).
+        if super::scroll_probe::enabled() {
+            let key = super::row_select::key_of(&input.shown.items, i, &row);
+            item = item.relative().child(super::scroll_probe::row_canvas(key));
+        }
+        item.into_any_element()
     }
 
     /// The column: the list inside the kit's scroll bar.

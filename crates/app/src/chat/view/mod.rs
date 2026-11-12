@@ -30,6 +30,7 @@ mod root;
 mod row_blocks;
 mod row_menu;
 mod row_select;
+pub mod scroll_probe;
 mod select;
 mod sheets;
 mod shell_probe;
