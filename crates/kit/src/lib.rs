@@ -25,6 +25,7 @@ pub mod metric;
 pub mod motion;
 mod palette;
 pub mod part;
+pub mod render_map;
 pub mod resize;
 pub mod scrollbar;
 pub mod text_edit;
