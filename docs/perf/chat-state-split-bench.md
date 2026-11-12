@@ -352,3 +352,12 @@ The 3 s count tests (before the task they failed at 500 rows a draw, after they 
 `bench_hover_draws_only_rows_on_screen` 500 over 1 → 1 over 1, `bench_select_draws_only_rows_on_screen`
 9500 over 19 → 29 over 29, `bench_append_draws_only_rows_on_screen_and_follows` 1000 over 2 → 2
 over 2, `at_end` true.
+
+### Task 6.3: drag-select scrolls the list at its edges
+
+A behavior change, not a speed one: the `select` bench drags inside the column, so its numbers are
+the 6.1 numbers (the table above; a run after 6.3: 99 conversation draws, 99 rows, 3.2 ms a frame).
+The scroll itself is a 16 ms timer that moves the list by `autoscroll_speed` points through the
+scroll bar's offset (`set_offset_from_scrollbar`, `scroll_target`), not `ListState::scroll_by`:
+`scroll_by` from a list that follows its end first moves it a whole viewport's worth of
+unmeasured offset, while the bar's offset moves it from where it stands.

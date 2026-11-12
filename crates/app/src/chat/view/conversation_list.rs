@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{
     div, list, prelude::*, px, AnyElement, Context, ListOffset, ListSizingBehavior, ListState,
@@ -27,6 +28,7 @@ use notchling_kit::ui::{scrollable_list, window_appearance};
 
 use super::conversation::{live_group_of, render_row, COLUMN_PADDING_VERTICAL, ROW_GAP};
 use super::conversation_view::{ConversationInput, ConversationView};
+use super::row_select::autoscroll_speed;
 use crate::chat::follow::Scroll;
 use crate::chat::log::{Change, Splice};
 use crate::chat::rows::{row_of, Row};
@@ -144,6 +146,17 @@ pub(super) fn scroll_to_end(state: &ListState) {
         offset_in_item: px(0.0),
     });
 }
+
+/// Where the scroll bar's offset goes when the list moves `delta` points down (negative: up) from
+/// `offset` (the scroll bar's number, `-y` from the top; a list that follows its end reads past
+/// `max`), kept within `0..=max`. Going through the bar's offset, not `scroll_by`, moves a list
+/// that follows its end by a few points at once instead of after a viewport's worth.
+pub(super) fn scroll_target(offset: f32, max: f32, delta: f32) -> f32 {
+    (offset.min(max) + delta).clamp(0.0, max.max(0.0))
+}
+
+/// How often a drag at the edge scrolls.
+const DRAG_TICK: Duration = Duration::from_millis(16);
 
 enum Plan {
     /// Another session, or the first load: all new.
@@ -366,6 +379,62 @@ fn fits(splices: &[Splice], old: &Built, next: &Built) -> bool {
 }
 
 impl ConversationView {
+    /// The drag's speed now: how far to scroll each tick, 0 when not dragging or the pointer is
+    /// inside the column.
+    fn drag_speed(&self) -> f32 {
+        let frame = self.s.sel.borrow();
+        let (true, Some(pointer)) = (frame.selection.dragging, frame.pointer) else {
+            return 0.0;
+        };
+        let bounds = self.s.list.viewport_bounds();
+        autoscroll_speed(
+            f32::from(pointer.y),
+            f32::from(bounds.top()),
+            f32::from(bounds.bottom()),
+        )
+    }
+
+    /// A selection drag moved: while the pointer rests past the column's top or bottom, scrolls
+    /// the list on a 16 ms timer (one at a time) and keeps the focus at the row under the edge;
+    /// it stops on release or when the pointer comes back inside.
+    pub(super) fn drag_scroll(&mut self, cx: &mut Context<Self>) {
+        if self.s.sel.borrow().scrolling || self.drag_speed() == 0.0 {
+            return;
+        }
+        self.s.sel.borrow_mut().scrolling = true;
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(DRAG_TICK).await;
+            if !matches!(this.update(cx, |view, cx| view.drag_tick(cx)), Ok(true)) {
+                break;
+            }
+        })
+        .detach();
+    }
+
+    /// One tick of a drag scroll: whether the timer goes on.
+    fn drag_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let speed = self.drag_speed();
+        if speed == 0.0 {
+            self.s.sel.borrow_mut().scrolling = false;
+            return false;
+        }
+        let (offset, max) = (
+            -f32::from(self.s.list.scroll_px_offset_for_scrollbar().y),
+            f32::from(self.s.list.max_offset_for_scrollbar().height),
+        );
+        self.s.list.set_offset_from_scrollbar(gpui::point(
+            px(0.0),
+            px(-scroll_target(offset, max, speed)),
+        ));
+        // The rows drawn so far give the focus: the edge row, and the next draw's notes carry it on.
+        let mut frame = self.s.sel.borrow_mut();
+        if let Some(spot) = frame.pointer.and_then(|p| frame.spot_at(p)) {
+            frame.drag_to(spot);
+        }
+        drop(frame);
+        cx.notify();
+        true
+    }
     /// One item of the list: a spacer at each end, or the row between them.
     pub(super) fn render_item(
         &mut self,

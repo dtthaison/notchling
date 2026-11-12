@@ -373,3 +373,27 @@ fn copies_the_same_text_as_the_draw_order_selection_on_every_fixture() {
     assert!(blocks_seen > 100, "{blocks_seen} blocks");
     assert!(checked > 5000, "{checked} drags");
 }
+
+#[test]
+fn no_speed_inside() {
+    for y in [100.0, 150.0, 399.9, 400.0] {
+        assert_eq!(autoscroll_speed(y, 100.0, 400.0), 0.0, "{y}");
+    }
+}
+
+#[test]
+fn speed_grows_with_distance_and_is_capped() {
+    // A quarter of the distance past the edge, at least 2 and at most 40.
+    assert_eq!(autoscroll_speed(401.0, 100.0, 400.0), 2.0);
+    assert_eq!(autoscroll_speed(440.0, 100.0, 400.0), 10.0);
+    assert_eq!(autoscroll_speed(480.0, 100.0, 400.0), 20.0);
+    assert!(autoscroll_speed(480.0, 100.0, 400.0) > autoscroll_speed(440.0, 100.0, 400.0));
+    assert_eq!(autoscroll_speed(2000.0, 100.0, 400.0), 40.0);
+}
+
+#[test]
+fn above_scrolls_up() {
+    assert_eq!(autoscroll_speed(99.0, 100.0, 400.0), -2.0);
+    assert_eq!(autoscroll_speed(60.0, 100.0, 400.0), -10.0);
+    assert_eq!(autoscroll_speed(-5000.0, 100.0, 400.0), -40.0);
+}

@@ -289,3 +289,16 @@ fn a_reset_in_the_same_session_keeps_the_row_being_read() {
     // Row i3 is still list item 4.
     assert_eq!(top(&rows), (4, 9.0));
 }
+
+#[test]
+fn a_drag_scroll_moves_a_list_that_follows_its_end_at_once() {
+    // At the end the bar's offset reads a viewport past the last scroll position; a step up still
+    // moves from the last scroll position.
+    assert_eq!(scroll_target(900.0, 500.0, -10.0), 490.0);
+    assert_eq!(scroll_target(500.0, 500.0, -10.0), 490.0);
+    assert_eq!(scroll_target(200.0, 500.0, 40.0), 240.0);
+    // Never past either end.
+    assert_eq!(scroll_target(495.0, 500.0, 40.0), 500.0);
+    assert_eq!(scroll_target(5.0, 500.0, -40.0), 0.0);
+    assert_eq!(scroll_target(0.0, 0.0, 30.0), 0.0);
+}

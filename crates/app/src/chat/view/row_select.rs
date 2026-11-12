@@ -79,6 +79,11 @@ pub struct SelFrame {
     at: HashMap<(SharedString, u16), usize>,
     /// Row key → its place in the rows on show.
     pub rows: HashMap<SharedString, usize>,
+    /// Where the pointer was at the last drag move, for the scroll that goes on while it rests
+    /// past the column's edge.
+    pub pointer: Option<Point<Pixels>>,
+    /// A drag scroll's timer is running (only one at a time).
+    pub scrolling: bool,
 }
 
 /// The row's key: the item's id; a message at the tail, which has none, is `queued-<k>` (waiting
@@ -192,7 +197,7 @@ impl SelFrame {
 
     /// The text under `position`: the one it's over, else the next one below it (from its start),
     /// else the last one (to its end).
-    fn spot_at(&self, position: Point<Pixels>) -> Option<Spot> {
+    pub fn spot_at(&self, position: Point<Pixels>) -> Option<Spot> {
         for note in &self.notes {
             let bounds = note.layout.bounds();
             if position.y > bounds.bottom() {
@@ -292,6 +297,20 @@ impl SelFrame {
     }
 }
 
+/// How far a drag scrolls the conversation each tick (points; negative scrolls up) while the
+/// pointer is at `pointer_y` and the column spans `top` to `bottom`: nothing inside, and beyond an
+/// edge a quarter of how far past it the pointer is, between 2 and 40.
+pub fn autoscroll_speed(pointer_y: f32, top: f32, bottom: f32) -> f32 {
+    let past = if pointer_y < top {
+        pointer_y - top
+    } else if pointer_y > bottom {
+        pointer_y - bottom
+    } else {
+        return 0.0;
+    };
+    (past.abs() / 4.0).clamp(2.0, 40.0).copysign(past)
+}
+
 /// Goes first in the conversation's column: starts the draw's notes, and takes the pointer.
 pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl IntoElement {
     let begin = state.clone();
@@ -345,13 +364,19 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
                     frame.selection.dragging = false;
                     return;
                 }
-                let Some(spot) = frame.spot_at(event.position) else {
-                    return;
-                };
-                if frame.drag_to(spot) {
-                    drop(frame);
-                    drag_view.update(cx, |_, cx| cx.notify()).ok();
-                }
+                frame.pointer = Some(event.position);
+                let moved = frame
+                    .spot_at(event.position)
+                    .is_some_and(|spot| frame.drag_to(spot));
+                drop(frame);
+                drag_view
+                    .update(cx, |view, cx| {
+                        if moved {
+                            cx.notify();
+                        }
+                        view.drag_scroll(cx);
+                    })
+                    .ok();
             });
             window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
                 if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
