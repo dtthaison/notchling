@@ -307,3 +307,48 @@ One thing the probe taught: a list at its end counts as scrolled to the end of i
 scroll top is past the last scroll position by a viewport), so a `scroll_by` of less than a
 viewport from there leaves it following. Phase 6's code that scrolls the list by a step must start
 from `scroll_px_offset_for_scrollbar`/`logical_scroll_top`, not assume the end is a scroll position.
+
+## Phase 6 (Tasks 6.1 to 6.4)
+
+### Task 6.1: the conversation as a GPUI list
+
+The conversation's rows are a `list` (`chat/view/conversation_list.rs`): a draw builds the rows on
+screen plus any overdraw not measured yet, and a load splices the rows it changed. A release
+build over the generated 200-turn root, the screen locked, so every frame forced (`forced: true`),
+10 s per mode, on the same machine as the baseline. The "before" is one run of the commit before
+the task (`22b25b4`; the counts don't move between runs); the "after" is the median of 3 runs. Both
+sides are forced frames on the same Mac in the same state, so `ms/frame` and `fps` are
+comparable with each other here (not with the display-link rows above). `rows/draw` is `rows`
+divided by `conversation`.
+
+| Mode | ms/frame before → after | fps before → after | conversation draws | rows built | rows/draw | parsed bytes |
+| --- | --- | --- | --- | --- | --- | --- |
+| idle | 8.01 → 3.81 | 10.0 → 10.0 | 0 → 0 | 0 → 0 | - | 0 → 0 |
+| append | 11.95 → 3.93 | 10.1 → 10.3 | 5 → 5 | 2500 → 5 | 500 → 1 | 5406 → 5406 |
+| scroll | 93.06 → 5.24 | 9.1 → 46.3 | 92 → 463 | 46000 → 1569 | 500 → 3.4 | 0 → 0 |
+| hover | 9.54 → 4.20 | 10.1 → 10.1 | 1 → 1 | 500 → 1 | 500 → 1 | 0 → 0 |
+| select | 46.31 → 4.55 | 12.6 → 18.7 | 60 → 99 | 30000 → 99 | 500 → 1 | 0 → 0 |
+| typing | 7.89 → 3.43 | 18.0 → 17.5 | 1 → 1 | 500 → 1 | 500 → 1 | 0 → 0 |
+| terminal | 4.68 → 4.21 | 32.4 → 33.2 | 0 → 0 | 0 → 0 | - | 0 → 0 |
+| reload | 7.71 → 3.60 | 11.2 → 11.6 | 0 → 0 | 0 → 0 | - | 0 → 0 |
+| menu | 8.27 → 3.83 | 13.7 → 13.9 | 0 → 0 | 0 → 0 | - | 0 → 0 |
+
+`sidebar` and `details` draws are unchanged (0 everywhere but `append`'s 5 Details Panel draws, as in
+Phase 4). What the table says:
+
+- A conversation draw builds the rows on screen, not 500: 1 in `append`, `hover`, `select` and
+  `typing` (a message of this fixture is about 800 pt tall, so one or two fill the viewport), 3.4
+  in `scroll`, which also moves across rows the list hasn't measured yet.
+- `scroll` is the big one: a wheel event used to lay out all 500 rows (93 ms a frame, 9 fps); it
+  now takes 5 ms a frame and the window keeps up with the 60 a second the driver sends (46 fps).
+- `append` builds one row per draw (the appended one, spliced at the tail), the engine parses the
+  same 5.4 KB (only new bytes), and the conversation is still at its end afterwards (`at_end` in the
+  `bench-json:` line, new; `bench_append_draws_only_rows_on_screen_and_follows` asserts it).
+- `hover`'s and `typing`'s one conversation draw is the first hover and the box growing past a line,
+  as before.
+
+The 3 s count tests (before the task they failed at 500 rows a draw, after they pass):
+`bench_scroll_draws_only_rows_on_screen` 15500 rows over 31 draws → 489 over 144,
+`bench_hover_draws_only_rows_on_screen` 500 over 1 → 1 over 1, `bench_select_draws_only_rows_on_screen`
+9500 over 19 → 29 over 29, `bench_append_draws_only_rows_on_screen_and_follows` 1000 over 2 → 2
+over 2, `at_end` true.

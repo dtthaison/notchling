@@ -230,6 +230,11 @@ impl ChatView {
         self.redraw_chrome(cx);
     }
 
+    /// `--render`'s bench: whether the conversation is at its newest message.
+    pub fn bench_at_end(&self, cx: &App) -> bool {
+        self.parts.conversation.read(cx).s.at_bottom()
+    }
+
     /// Draws the Sidebar again if what it shows changed (and the window's outer parts do not
     /// follow): for a change only the Sidebar shows, or a load of other sessions' files.
     pub(super) fn redraw_sidebar(&self, cx: &mut Context<ChatView>) {

@@ -302,6 +302,13 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
     let frames = FRAMES.load(Ordering::Relaxed) - frames;
     let after = drawn();
     let forced = forcing.is_some();
+    // Whether the conversation is still at its newest message: one that follows must be.
+    let at_end = match &target.chat {
+        Some(chat) => cx
+            .update(|cx| chat.read(cx).bench_at_end(cx))
+            .unwrap_or(false),
+        None => false,
+    };
     if let Some(stop) = forcing {
         stop.set(true);
     }
@@ -327,6 +334,7 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         "rows": rows,
         "parsed_bytes": parsed,
         "forced": forced,
+        "at_end": at_end,
     });
     println!("bench-json: {json}");
 }

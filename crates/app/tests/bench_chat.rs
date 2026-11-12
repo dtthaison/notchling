@@ -349,3 +349,83 @@ fn bench_typing_still_draws_no_part() {
     assert_eq!(count(&result, "details"), 0, "{result}");
     assert!(count(&result, "root") > 0, "{result}");
 }
+
+/// Conversation rows built per conversation draw in a run (0 when it drew none).
+fn rows_per_draw(result: &Value) -> f64 {
+    count(result, "rows") as f64 / count(result, "conversation").max(1) as f64
+}
+
+/// The most rows a draw may build: the rows on screen with the list's overdraw (the viewport is
+/// about ten messages tall here), against the 500 a draw built before the list.
+const ON_SCREEN: f64 = 30.0;
+
+/// Scrolling draws the conversation on every frame and builds only the rows on screen.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_scroll_draws_only_rows_on_screen() {
+    let result = bench_for("scroll", 3);
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+}
+
+/// Hovering builds only the rows on screen when it draws the conversation at all.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_hover_draws_only_rows_on_screen() {
+    let result = bench_for("hover", 3);
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+}
+
+/// A selection drag builds only the rows on screen.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_select_draws_only_rows_on_screen() {
+    let result = bench_for("select", 3);
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+}
+
+/// Lines appended to the working session's transcript: each draw builds only the rows on screen,
+/// the engine parses only the new bytes (a re-read of the whole file would be many times what was
+/// appended), and the conversation, which was at its end, is still there.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_append_draws_only_rows_on_screen_and_follows() {
+    let root = TempRoot::new(TURNS);
+    let mut appended = 0usize;
+    let mut n = 0;
+    let result = run("idle", 4, &root, |root| {
+        n += 1;
+        let line = json!({
+            "type": "assistant",
+            "timestamp": iso8601(now_ms()),
+            "effort": "high",
+            "message": {
+                "id": format!("bench-append-{n}"),
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": format!("Appended line {n}: one more paragraph of the answer.")}],
+                "usage": {"input_tokens": 1500, "output_tokens": 30},
+            },
+        });
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(root.join(WORKING_TRANSCRIPT))
+            .expect("open the working transcript");
+        let text = format!("{line}\n");
+        file.write_all(text.as_bytes()).expect("append a line");
+        appended += text.len();
+    });
+    check("idle", &result);
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
+    let parsed = count(&result, "parsed_bytes") as f64;
+    assert!(parsed > 0.0, "{result}");
+    assert!(
+        parsed <= appended as f64 * 1.1,
+        "{parsed} parsed, {appended} appended: {result}"
+    );
+    assert_eq!(
+        result["at_end"], true,
+        "the conversation left its end: {result}"
+    );
+}

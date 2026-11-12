@@ -175,9 +175,10 @@ impl ChatView {
                     self.follow_content(session_changed, cx);
                 }
                 self.conversation = loaded.conversation;
+                let now = self.conversation.clone();
                 self.parts
                     .conversation
-                    .update(cx, |v, _| v.take_change(loaded.change));
+                    .update(cx, |v, _| v.take_change(loaded.change, &now));
                 self.loading = false;
             } else if session_changed {
                 self.scroll_to_end_now(cx);

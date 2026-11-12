@@ -68,13 +68,18 @@ pub(super) fn input_blocks(
 impl ChatView {
     /// The render check (`NOTCHLING_RENDER_CHECK_BLOCKS=1`): the texts the last draw made
     /// selectable, each with the row and block it noted itself as, against
-    /// `chat::blocks::plain_blocks` over the rows shown, from the model alone. The number of
-    /// texts, or what differs first.
+    /// `chat::blocks::plain_blocks` over the rows the draw built (the list builds only the rows on
+    /// screen, and a row's texts are noted whole), from the model alone. The number of texts, or
+    /// what differs first.
     pub fn check_blocks(&self, cx: &App) -> Result<usize, String> {
         let input = self.conversation_input(cx);
         let view = self.parts.conversation.read(cx);
+        let drawn = view.s.sel.borrow().noted();
+        let on_screen: std::collections::HashSet<&SharedString> =
+            drawn.iter().map(|(row, ..)| row).collect();
         let model: Vec<(SharedString, u16, String)> = input_blocks(&input, &view.s)
             .into_iter()
+            .filter(|(row, _)| on_screen.contains(row))
             .flat_map(|(row, blocks)| {
                 blocks
                     .into_iter()
@@ -82,7 +87,6 @@ impl ChatView {
                     .map(move |(b, text)| (row.clone(), b as u16, text))
             })
             .collect();
-        let drawn = view.s.sel.borrow().noted();
         for i in 0..drawn.len().max(model.len()) {
             match (drawn.get(i), model.get(i)) {
                 (Some(d), Some(m)) if d == m => {}

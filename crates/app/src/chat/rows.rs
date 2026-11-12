@@ -204,7 +204,8 @@ fn tool_row(call: &ToolCall) -> ToolRow {
     }
 }
 
-fn row(item: &ChatItem) -> Row {
+/// One item as the row it draws as.
+pub fn row_of(item: &ChatItem) -> Row {
     match &item.kind {
         ItemKind::User { text, images } => Row::User {
             text: text.clone(),
@@ -240,7 +241,7 @@ fn row(item: &ChatItem) -> Row {
 
 /// Every item as a row, then the queued messages as your bubbles marked queued.
 pub fn rows(conversation: &Conversation) -> Vec<Row> {
-    let mut out: Vec<Row> = conversation.items.iter().map(row).collect();
+    let mut out: Vec<Row> = conversation.items.iter().map(row_of).collect();
     out.extend(conversation.queued.iter().map(|text| Row::User {
         text: text.clone(),
         images: 0,

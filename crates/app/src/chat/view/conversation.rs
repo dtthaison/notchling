@@ -26,12 +26,12 @@ use super::row_select::{self, key_of};
 use super::steps_view::{hairline, step_group, thinking};
 use super::{message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
-use crate::chat::rows::{rows, with_outgoing, Row};
+use crate::chat::rows::Row;
 
 /// Rows sit this far apart (the Swift app's conversation stack).
-const ROW_GAP: f32 = 14.0;
+pub(super) const ROW_GAP: f32 = 14.0;
 /// Above the first row and below the last.
-const COLUMN_PADDING_VERTICAL: f32 = 20.0;
+pub(super) const COLUMN_PADDING_VERTICAL: f32 = 20.0;
 
 /// The chevron that opens and closes a row: right when folded, down when open. `points` is the
 /// Swift app's symbol size (9 on steps, 8 on a thought).
@@ -413,31 +413,45 @@ pub(super) fn live_group_of(input: &ConversationInput) -> Option<usize> {
     crate::chat::activity::live_group(&input.shown, working)
 }
 
-pub(super) fn render(
+/// A row of the list: row `i` of what `input` shows, with its Second Opinion buttons and cards.
+pub(super) fn render_row(
+    input: &ConversationInput,
+    s: &ConversationState,
+    i: usize,
+    row: &Row,
+    live: bool,
+    a: Appearance,
+    cx: &mut Context<ConversationView>,
+) -> AnyElement {
+    row_with_opinions(input, s, i, row, live, a, cx)
+}
+
+/// What the column shows in place of the rows, when there are none to show: a subagent still
+/// loading, a session on its way in, no session, no transcript. `None` when the rows are shown.
+pub(super) fn empty_column(
     input: &ConversationInput,
     s: &ConversationState,
     a: Appearance,
     cx: &mut Context<ConversationView>,
-) -> Stateful<Div> {
+) -> Option<Stateful<Div>> {
     let shown = &*input.shown;
-    // What was typed to the session isn't waiting in a subagent's transcript.
-    let rows = with_outgoing(rows(shown), &input.outgoing);
-    {
-        // Where each row is, for the selection's ends; one whose row went is dropped.
-        let mut frame = s.sel.borrow_mut();
-        frame.rows = rows
-            .iter()
-            .enumerate()
-            .map(|(i, row)| (key_of(&shown.items, i, row), i))
-            .collect();
-        frame.prune();
-    }
+    let empty = shown.items.is_empty() && shown.queued.is_empty() && input.outgoing.is_empty();
+    let state = if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
+        Empty::Loading
+    } else if input.loading {
+        // The picked session's conversation is on its way; the previous one's would mislead.
+        Empty::Blank
+    } else if input.session.is_none() {
+        Empty::NoSessions
+    } else if empty {
+        Empty::Note
+    } else {
+        return None;
+    };
     let column = div()
         .id("conversation")
         .flex_1()
         .min_h(px(0.0))
-        .overflow_y_scroll()
-        .track_scroll(&s.scroll)
         .px(px(SIDE_PADDING))
         .pb(px(COLUMN_PADDING_VERTICAL))
         // The Tasks bar sits over the top, so the first row starts under it.
@@ -449,17 +463,12 @@ pub(super) fn render(
         .flex()
         .flex_col()
         .gap(px(ROW_GAP))
-        // First, so each draw's texts are noted afresh before the rows place theirs.
+        // First, so each draw's texts are noted afresh.
         .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()));
-    if input.subagent.as_ref().is_some_and(|sub| !sub.loaded) {
-        return column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a));
-    }
-    if input.loading {
-        // The picked session's conversation is on its way; the previous one's would mislead.
-        return column;
-    }
-    if input.session.is_none() {
-        return column.child(
+    Some(match state {
+        Empty::Loading => column.child(label("Loading…", TypeRole::Meta, Ink::TextMuted, a)),
+        Empty::Blank => column,
+        Empty::NoSessions => column.child(
             div()
                 .flex_1()
                 .flex()
@@ -469,18 +478,21 @@ pub(super) fn render(
                 .gap(px(8.0))
                 .child(claude_mark(40.0, a))
                 .child(label("No sessions yet", TypeRole::Heading, Ink::Text, a)),
-        );
-    }
-    if rows.is_empty() {
-        let note = input
-            .empty_note
-            .unwrap_or("No transcript yet for this session");
-        return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
-    }
-    let last_tools = live_group_of(input);
-    column.children(
-        rows.iter()
-            .enumerate()
-            .map(|(i, row)| row_with_opinions(input, s, i, row, last_tools == Some(i), a, cx)),
-    )
+        ),
+        Empty::Note => column.child(label(
+            input
+                .empty_note
+                .unwrap_or("No transcript yet for this session"),
+            TypeRole::Meta,
+            Ink::TextMuted,
+            a,
+        )),
+    })
+}
+
+enum Empty {
+    Loading,
+    Blank,
+    NoSessions,
+    Note,
 }

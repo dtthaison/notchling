@@ -10,6 +10,7 @@
 mod accounts;
 mod composer;
 mod conversation;
+mod conversation_list;
 mod conversation_view;
 mod drop;
 mod header;

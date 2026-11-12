@@ -2,7 +2,8 @@
 //! the hovered message and Copy's check, the Markdown cache. It is drawn cached apart from the rest
 //! of the window (see `pane`) from a [`ConversationInput`] (what the column shows, taken from the
 //! chat on each of its notifies) and its own state, and draws only when one of the two changed: a
-//! chat change nothing here shows (a draft, a menu) compares equal and draws nothing.
+//! chat change nothing here shows (a draft, a menu) compares equal and draws nothing. The rows are
+//! a GPUI list (`conversation_list`): a draw builds only the rows on screen.
 //!
 //! What the draw reads is the input and the state, never `ChatView`: it acts on the session
 //! through a weak handle to it (`ConversationInput::chat`).
@@ -14,26 +15,25 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, App, Context, Entity, IntoElement, ScrollHandle, Subscription, WeakEntity,
-    Window,
+    div, prelude::*, App, Context, Entity, IntoElement, ListAlignment, ListState, Subscription,
+    WeakEntity, Window,
 };
 use notchling_engine::transcript::model::Conversation;
-use notchling_kit::ui::{
-    drop_spinner_host, host_spinners, scrollable, window_appearance, SpinSlots,
-};
+use notchling_kit::ui::{drop_spinner_host, host_spinners, window_appearance, SpinSlots};
 
+use super::conversation_list::{at_bottom, scroll_to_end, ListRows, Pending, OVERDRAW};
 use super::pane::RENDERS;
-use super::row_select::SelState;
+use super::row_select::{self, SelState};
 use super::{conversation, message_meta, now_ms, ChatView};
 use crate::acting::Acting;
 use crate::chat::data::Tool;
-use crate::chat::follow::{self, Scroll};
 use crate::chat::log::Change;
 use crate::chat::markdown_cache;
 
 /// What the conversation keeps between draws.
 pub(super) struct ConversationState {
-    pub scroll: ScrollHandle,
+    /// The rows' list: its scroll position is the column's.
+    pub list: ListState,
     /// Each drawn message's Markdown, parsed once and its paths looked up once per load.
     pub markdown: RefCell<markdown_cache::Cache>,
     /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
@@ -58,6 +58,9 @@ pub(super) struct ConversationState {
     pub follow_sent: bool,
     /// Scroll to the end once the picked session's conversation is in.
     pub scroll_to_end: bool,
+    /// The next conversation that comes in goes to the end whatever was being read: a message
+    /// was sent, or another session picked (`follow_content` sets it, the list takes it).
+    pub follow_next: bool,
     /// Whether a second opinion in the selected session was running at the last tick, so the
     /// tick that sees it end draws its card too.
     pub opinions_running: bool,
@@ -68,7 +71,7 @@ pub(super) struct ConversationState {
 impl ConversationState {
     pub fn new() -> ConversationState {
         ConversationState {
-            scroll: ScrollHandle::new(),
+            list: ListState::new(0, ListAlignment::Bottom, gpui::px(OVERDRAW)),
             markdown: RefCell::default(),
             expanded: HashSet::new(),
             expand_all: false,
@@ -80,6 +83,7 @@ impl ConversationState {
             follow_sent: false,
             // The first conversation opens at its newest message, as a picked one does.
             scroll_to_end: true,
+            follow_next: false,
             opinions_running: false,
             sel: Rc::default(),
         }
@@ -114,18 +118,19 @@ impl ConversationState {
 
     /// Before new content replaces the conversation: stay on the newest message when the view is
     /// at the bottom (or a message was just sent, or another session was picked), else leave it
-    /// where it is (`chat::follow`). The numbers are those of the last frame, so a reply that
-    /// grew since is measured by the next one, which the scroll handle then pins to the end.
+    /// where it is (`chat::follow`). Whether the view is at the bottom is read when the list takes
+    /// the content (`ListRows::sync`), before it changes anything; this says whether to go to the
+    /// end whatever the view was at.
     pub fn follow_content(&mut self, session_changed: bool) {
-        let handle = &self.scroll;
-        let prev = Scroll {
-            offset_y: f32::from(handle.offset().y),
-            max_y: f32::from(handle.max_offset().height),
-        };
         let sent = std::mem::take(&mut self.follow_sent);
-        if follow::decide(prev, prev.max_y, sent, session_changed).scroll {
-            handle.scroll_to_bottom();
+        if sent || session_changed {
+            self.follow_next = true;
         }
+    }
+
+    /// Whether the conversation is at its newest message (or has nothing below it).
+    pub fn at_bottom(&self) -> bool {
+        at_bottom(&self.list)
     }
 
     /// Whether the "Latest" pill shows: the conversation is scrolled up from its newest message.
@@ -133,24 +138,18 @@ impl ConversationState {
         if loading {
             return false;
         }
-        let handle = &self.scroll;
-        self.latest_preview
-            || !Scroll {
-                offset_y: f32::from(handle.offset().y),
-                max_y: f32::from(handle.max_offset().height),
-            }
-            .at_bottom()
+        self.latest_preview || !self.at_bottom()
     }
 
     /// The pill's click: to the newest message, and following again.
     pub fn jump_to_latest(&mut self) {
         self.latest_preview = false;
-        self.scroll.scroll_to_bottom();
+        self.scroll_to_end_now();
     }
 
     /// To the newest message now.
     pub fn scroll_to_end_now(&mut self) {
-        self.scroll.scroll_to_bottom();
+        scroll_to_end(&self.list);
     }
 }
 
@@ -217,11 +216,12 @@ pub struct ConversationView {
     chat: WeakEntity<ChatView>,
     pub(super) s: ConversationState,
     /// The input drawn last; `None` asks for a fresh one at the next draw.
-    input: Option<ConversationInput>,
-    /// What the last load changed and the conversation it started from (Task 6.1 splices rows
-    /// from it).
-    #[allow(dead_code)]
-    change: Option<(Arc<Conversation>, Change)>,
+    pub(super) input: Option<ConversationInput>,
+    /// The list's items, kept in step with the conversation on show.
+    pub(super) rows: ListRows,
+    /// What the last load changed: the conversation it started from, the one it made, and the
+    /// difference. The list splices from it when it is the step from what the list holds.
+    change: Option<Pending>,
     pub(super) spins: SpinSlots,
     _changes: Subscription,
     _release: Subscription,
@@ -232,9 +232,11 @@ impl ConversationView {
         let spins = SpinSlots::default();
         let id = cx.entity_id();
         host_spinners(cx, id, &spins);
+        let s = ConversationState::new();
         ConversationView {
             chat: chat.downgrade(),
-            s: ConversationState::new(),
+            rows: ListRows::new(s.list.clone()),
+            s,
             input: None,
             change: None,
             spins,
@@ -263,9 +265,14 @@ impl ConversationView {
         }
     }
 
-    /// The change the last load found, for the rows to splice (Task 6.1).
-    pub(super) fn take_change(&mut self, change: Option<(Arc<Conversation>, Change)>) {
-        self.change = change;
+    /// The change the last load found, from the conversation it started from to `to`, for the
+    /// list to splice.
+    pub(super) fn take_change(
+        &mut self,
+        change: Option<(Arc<Conversation>, Change)>,
+        to: &Arc<Conversation>,
+    ) {
+        self.change = change.map(|(from, change)| (from, to.clone(), change));
     }
 
     /// Does something to the chat from a click in the column.
@@ -325,17 +332,46 @@ impl Render for ConversationView {
         };
         // A hovered message's relative time is kept fresh from when it was last drawn.
         self.s.drawn_ms = now_ms();
+        // The list takes what the loads changed before it lays out: only the rows they touched
+        // are built again.
+        let change = self.change.take();
+        let synced = self.rows.sync(&input, change.as_ref(), self.s.follow_next);
+        if synced.replaced {
+            self.s.follow_next = false;
+        }
+        if synced.keys {
+            // Where each row is, for the selection's ends; one whose row went is dropped.
+            let mut frame = self.s.sel.borrow_mut();
+            frame.rows = self.rows.places();
+            frame.prune();
+        }
+        self.input = Some(input);
+        let Some(input) = self.input.as_ref() else {
+            return div().into_any_element();
+        };
         let s = &self.s;
-        let element = div()
+        let body = conversation::empty_column(input, s, a, cx);
+        let pill = conversation::latest_pill(s, input.loading, a, cx);
+        let column = match body {
+            Some(column) => column.into_any_element(),
+            None => div()
+                .size_full()
+                .relative()
+                .flex()
+                .flex_col()
+                // First, so each draw's texts are noted afresh before the rows place theirs.
+                .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()))
+                .child(self.list_column(cx))
+                .into_any_element(),
+        };
+        div()
             .size_full()
             .relative()
             .flex()
             .flex_col()
-            .child(scrollable(conversation::render(&input, s, a, cx)).tracking(&s.scroll))
-            .children(conversation::latest_pill(s, input.loading, a, cx))
-            .into_any_element();
-        self.input = Some(input);
-        element
+            .child(column)
+            .children(pill)
+            .into_any_element()
     }
 }
 
