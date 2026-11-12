@@ -235,6 +235,31 @@ fn count(result: &Value, key: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {key}: {result}"))
 }
 
+/// A session that works costs the window no frame of its own: its spinner is Core Animation's
+/// (the app draws nothing to turn it), and the Activity Line's clock is drawn once a second. Before,
+/// the spinner drew the window ten times a second (100 in 10 s). `root` counts the window's draws,
+/// which are the frames the app asks for, so this holds on a locked screen too, where the bench
+/// draws frames by hand but only a window that was made dirty draws anything.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_idle_working_requests_few_frames() {
+    let result = bench_for("idle", 10);
+    let rings = count(&result, "native_rings");
+    assert!(
+        rings >= 1,
+        "the working session's spinner isn't native: {result}"
+    );
+    let roots = count(&result, "root");
+    assert!(
+        (8..=16).contains(&roots),
+        "the clock's once-a-second redraws, not a spinner's ten: {result}"
+    );
+    // A busy Mac adds a stray draw of every part now and then (see the bench doc).
+    for part in ["conversation", "sidebar", "details"] {
+        assert!(count(&result, part) <= 1, "{part}: {result}");
+    }
+}
+
 /// A terminal's output redraws the window's outer parts, not the conversation, the Sidebar or the
 /// Details Panel.
 #[test]
