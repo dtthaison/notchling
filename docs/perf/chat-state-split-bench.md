@@ -78,3 +78,35 @@ What the baseline says:
   Details Panel again (5 draws for the 20 lines appended in 10 s; reads are spaced by the reload gate) and parses
   only the appended bytes (10 KB for the 20 lines).
 - `parsed bytes` is 0 outside `append`: the engine reads an unchanged transcript for nothing.
+
+## Phase 1 (Tasks 1.1 to 1.5)
+
+Commit `1ce01aa`, a release build, one 10 s run per mode on 2026-11-12 (not the median of three: the
+counts don't move between runs, and the Mac was busy, load average 73, so ms/frame is only a hint).
+Same machine as the baseline.
+
+| Task | Mode | ms/frame | fps | root | conversation | sidebar | details | rows | parsed bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1.5 (Phase 1) | idle | 9.64 | 10 | 100 | 0 | 0 | 0 | 0 | 0 |
+| 1.5 (Phase 1) | append | 11.15 | 10.1 | 102 | 5 | 5 | 5 | 2500 | 9720 |
+| 1.5 (Phase 1) | scroll | 81.95 | 12.3 | 123 | 123 | 0 | 0 | 61500 | 0 |
+| 1.5 (Phase 1) | hover | 17.3 | 10.1 | 101 | 1 | 0 | 0 | 500 | 0 |
+| 1.5 (Phase 1) | select | 38.57 | 14.6 | 146 | 63 | 0 | 0 | 31500 | 0 |
+| 1.5 (Phase 1) | typing | 8.44 | 18 | 182 | 1 | 0 | 0 | 500 | 0 |
+| 1.5 (Phase 1) | terminal | 7.5 | 35 | 350 | 0 | 0 | 0 | 0 | 0 |
+| 1.5 (Phase 1) | reload | 9.17 | 11.2 | 115 | 0 | 20 | 20 | 0 | 0 |
+| 1.5 (Phase 1) | menu | 30.57 | 14.3 | 144 | 49 | 49 | 49 | 24500 | 0 |
+
+Each task's own 3 s count test, before and after (conversation / sidebar / details draws):
+
+| Task | Test (mode, 3 s) | Before | After |
+| --- | --- | --- | --- |
+| 1.1 | `bench_terminal_draws_no_part` (terminal) | 32 / 32 / 0, 33 frames, 91 ms/frame | 0 / 0 / 0, 110 frames, 7.0 ms/frame |
+| 1.3 | `bench_typing_draws_no_part` (typing) | 29 / 29 / 29, 52 frames, 49 ms/frame | 0 / 0 / 0, 57 frames, 7.9 ms/frame |
+| 1.5 | `bench_select_draws_no_sidebar_or_details` (select) | 19 / 19 / 19, 43 frames, 41 ms/frame | 19 / 0 / 0, 43-45 frames, 39-42 ms/frame |
+
+What Phase 1 did: `terminal` and `typing` draw no cached part (the 10 s `typing` run's one
+conversation draw is the box growing past a line, which resizes the column), `select` draws no
+Sidebar or Details Panel. `scroll`, `hover`, `reload` and `menu` are unchanged, as expected: they
+are Phases 3 to 6. Tasks 1.2 (simulator) and 1.4 (notch) have no bench mode; 1.4 is held by the
+`notch::drawn::tests`.
