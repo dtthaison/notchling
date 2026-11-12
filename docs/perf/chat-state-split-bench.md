@@ -408,3 +408,11 @@ speed (this environment takes no screenshots; the probe below reads the layers' 
 pixels), and the ring under every overlay. `NOTCHLING_RENDER_NATIVE_PROBE=1` on `--render chat`
 prints `native-spin:` with each ring's place and its presentation layer's rotation at three times
 150 ms apart; the rotation moves between samples when Core Animation is turning it.
+
+A re-run after merging agent-run-oss, on a Mac shared with other builds and a running VM (the load
+the bench doc warns about), was too noisy to repeat the table: the same `idle` test gave 2, 10, 11
+and 6 root draws with the native spinner, and with `NOTCHLING_NATIVE_SPINNER=0` 3 and 60 (a window
+that gets no display-link frames draws almost nothing, with either spinner). Under that load the
+test's lower bound was 8 and failed once at 6, so it is 5 to 16, and each part may draw twice. Every
+bench test that failed in the full run passed alone. The count test is the evidence that matters:
+the GPUI spinner asks for about 100 draws in 10 s, the native one at most the clock's 10 or 11.
