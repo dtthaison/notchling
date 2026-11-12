@@ -136,6 +136,74 @@ pub fn successor(path: &str, name: &str) -> Option<String> {
     result
 }
 
+/// The transcript a `/clear` left: the file of the same job (its name near the top) that was
+/// created last before `path`, when `path` itself was started by a clear. `None` for a transcript
+/// no clear started. The new file names nothing of the old one, so the folder is searched; cached
+/// like [`successor`] until the folder's modification date changes.
+pub fn predecessor(path: &str, name: &str) -> Option<String> {
+    let dir = Path::new(path).parent()?.to_string_lossy().into_owned();
+    let Some(dir_modified) = std::fs::metadata(&dir).ok().and_then(|m| m.modified().ok()) else {
+        return search_predecessor(path, name);
+    };
+    let key = format!("before\n{path}\n{name}");
+    if let Some((stamp, result)) = successor_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
+        if *stamp == dir_modified {
+            return result.clone();
+        }
+    }
+    let result = search_predecessor(path, name);
+    let mut cache = successor_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() > 500 {
+        cache.clear();
+    }
+    cache.insert(key, (dir_modified, result.clone()));
+    result
+}
+
+fn search_predecessor(path: &str, name: &str) -> Option<String> {
+    if name.is_empty() {
+        return None;
+    }
+    let quoted = serde_json::to_string(name).ok()?;
+    let marker = format!("\"agentName\":{quoted}");
+    if !head_contains_clear(Path::new(path), &marker) {
+        return None;
+    }
+    let (_, created) = file_times(path)?;
+    let dir = Path::new(path).parent()?;
+    let mut candidates: Vec<(Timestamp, String)> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|p| p != path)
+        .filter_map(|p| file_times(&p).map(|(_, c)| (c, p)))
+        .filter(|(c, _)| *c < created)
+        .collect();
+    // Newest first: the file the clear ended is the last one started before it.
+    candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    candidates
+        .into_iter()
+        .map(|c| c.1)
+        .find(|p| head_contains(Path::new(p), &marker))
+}
+
+fn head_contains(path: &Path, marker: &str) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut head = Vec::new();
+    if file.take(16_384).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    String::from_utf8_lossy(&head).contains(marker)
+}
+
 fn head_contains_clear(path: &Path, marker: &str) -> bool {
     let Ok(file) = File::open(path) else {
         return false;

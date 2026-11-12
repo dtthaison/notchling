@@ -108,6 +108,10 @@ pub mod timing {
     /// After a permission's digit, its dialog should close within this long (no Swift twin: the
     /// Swift app never typed into a permission dialog).
     pub const PERMISSION_WAIT_MS: u64 = 4_000;
+    /// Before a permission's digit: the dialog may not be on the screen yet (the session repaints
+    /// for the attach's size after the quiet that let typing start), so it is looked for again,
+    /// at most this long, before the answer is refused as "not showing". Nothing is typed meanwhile.
+    pub const PERMISSION_DRAW_WAIT_MS: u64 = 3_000;
     /// Each Left of the walk back to the first question waits for quiet this long, or this long.
     pub const WALK_BACK_QUIET_MS: u64 = 400;
     pub const WALK_BACK_TIMEOUT_MS: u64 = 1_500;

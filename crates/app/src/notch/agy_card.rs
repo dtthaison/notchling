@@ -11,6 +11,7 @@ use super::answering::{status_height, GAP, HEADER};
 use super::cards::{line, A};
 use super::requests::HookRequest;
 use super::view::NotchView;
+use crate::chat::prompt_flow::Sending;
 use crate::tools::agy_permission::{AgyPermission, PREVIEW_LINES};
 use crate::tools::requests::agy_permission;
 use crate::tools::view::agy_card;
@@ -49,7 +50,7 @@ impl NotchView {
         let prompt = request.id.clone();
         let card = agy_card(agy, agent, gate, A, cx, move |this, option, cx| {
             let request = agy_permission(&session, &rpc, Some(option));
-            this.send_for(Some(prompt.clone()), request, cx);
+            this.send_for(Some(prompt.clone()), request, Sending::Answer, cx);
         });
         div()
             .flex()

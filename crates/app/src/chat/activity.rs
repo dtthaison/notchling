@@ -78,8 +78,9 @@ fn present(call: &ToolCall) -> String {
     title.to_owned()
 }
 
-/// What the newest item says is going on, as a verb with its object.
-fn doing(conversation: &Conversation) -> String {
+/// What the newest item says is going on, as a verb with its object (also a running subagent's
+/// line in the Details Panel).
+pub fn doing(conversation: &Conversation) -> String {
     match newest_step(conversation).map(|(_, kind)| kind) {
         Some(ItemKind::Tools(calls)) => match calls.iter().rev().find(|call| !call.finished) {
             Some(call) => format!("{}…", present(call).trim_end_matches('…')),

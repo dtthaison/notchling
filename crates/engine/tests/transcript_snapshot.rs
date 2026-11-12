@@ -5,7 +5,9 @@ mod common;
 
 use common::*;
 use notchling_engine::transcript::errors::limit_hit_in_file;
-use notchling_engine::transcript::locate::{job_transcript, project_folder, successor};
+use notchling_engine::transcript::locate::{
+    job_transcript, predecessor, project_folder, successor,
+};
 use notchling_engine::transcript::snapshot::{self, LineKind};
 use notchling_engine::transcript::tail::{Cursors, LineParser};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -374,4 +376,26 @@ fn a_half_written_line_waits_for_its_newline() {
 fn unreadable_file_is_none() {
     let (cursors, _) = counting(2);
     assert_eq!(cursors.read("/nonexistent/x.jsonl"), None);
+}
+
+// MARK: predecessor
+
+fn named(agent: &str) -> String {
+    format!(r#"{{"type":"agent-name","agentName":"{agent}"}}"#) + "\n"
+}
+
+#[test]
+fn a_cleared_transcript_finds_the_one_the_clear_ended() {
+    let scratch = Scratch::new("pred");
+    scratch.write("older.jsonl", &named("worker"));
+    tick();
+    let old = s(&scratch.write("old.jsonl", &named("worker")));
+    tick();
+    scratch.write("other.jsonl", &named("someone-else"));
+    tick();
+    let new = s(&scratch.write("new.jsonl", &cleared("worker")));
+    assert_eq!(predecessor(&new, "worker"), Some(old.clone()));
+    // A transcript no clear started has none, and neither has an unknown name.
+    assert_eq!(predecessor(&old, "worker"), None);
+    assert_eq!(predecessor(&new, "nobody"), None);
 }

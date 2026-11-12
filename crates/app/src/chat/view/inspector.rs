@@ -420,7 +420,14 @@ fn subagent_row(
                 )
                 .child(
                     label(&s.detail, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
-                ),
+                )
+                // What a running one does now, one line, cut with an ellipsis.
+                .children(s.doing.as_ref().map(|doing| {
+                    label(doing, TypeRole::Meta, Ink::TextMuted, a)
+                        .line_height(px(ROW_LINE))
+                        .w_full()
+                        .elide()
+                })),
         )
 }
 
