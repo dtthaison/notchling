@@ -47,6 +47,7 @@ jobs:
         run: |
           python3 -m guard rules
           python3 -m guard claudemd
+          python3 -m guard featuremap
       - name: Protocol types
         run: |
           python3 tools/protocol/gen.py --check

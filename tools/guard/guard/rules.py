@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
-from guard import capability, claudemd, gate, lint, pins, rulesets, weakening
+from guard import capability, claudemd, featuremap, gate, lint, pins, rulesets, weakening
 from guard.changes import Change, diff
 from guard.zones import Zones
 
@@ -180,6 +180,16 @@ def _guard_claude_md() -> bool:
     return any(p.startswith("GUARD-CLAUDE-MD") for p in problems)
 
 
+def _guard_feature_map() -> bool:
+    """A crate folder the map names passes; one it doesn't is reported by path."""
+    with _tmp() as root:
+        _repo(root, {"docs/feature-map.md": "| Notch | `crates/app/src/notch/` | t | auto | U2 |\n",
+                     "crates/app/src/notch/mod.rs": "", "crates/app/src/phone/mod.rs": ""})
+        problems = featuremap.check(root)
+    return (len(problems) == 1 and problems[0].startswith("GUARD-FEATURE-MAP")
+            and "crates/app/src/phone/" in problems[0])
+
+
 def _guard_rules() -> bool:
     """A docs file listing an id nothing checks. (Probes aren't run, or this would call itself.)"""
     with _tmp() as root:
@@ -231,6 +241,7 @@ REGISTRY.update({
     "GUARD-RULESETS": _guard_rulesets,
     "GUARD-BASELINE": _guard_baseline,
     "GUARD-CLAUDE-MD": _guard_claude_md,
+    "GUARD-FEATURE-MAP": _guard_feature_map,
     "GUARD-RULES": _guard_rules,
     "GUARD-PROTOCOL-GEN": _guard_protocol_gen,
 })

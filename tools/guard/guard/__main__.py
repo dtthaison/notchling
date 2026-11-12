@@ -76,6 +76,12 @@ def cmd_claudemd(args: argparse.Namespace) -> int:
     return claudemd.main(Path(args.repo))
 
 
+def cmd_featuremap(args: argparse.Namespace) -> int:
+    from guard import featuremap
+
+    return featuremap.main(Path(args.repo))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,6 +115,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("claudemd", help="CLAUDE.md is exactly @AGENTS.md and no other CLAUDE*.md is tracked")
     p.add_argument("--repo", default=".")
     p.set_defaults(func=cmd_claudemd)
+    p = sub.add_parser("featuremap", help="every crates/*/src/ folder is named in docs/feature-map.md")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_featuremap)
     args = parser.parse_args(argv)
     return args.func(args)
 
