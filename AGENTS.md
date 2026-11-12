@@ -1,6 +1,6 @@
 # Notchling: instructions for agents
 
-Notchling is a macOS menu bar app (Swift, AppKit + SwiftUI) that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Its Chat window is the full-size view of a session; a phone app (Flutter, `apps/flutter/`) follows and answers sessions over the Mac's bridge. [README.md](README.md) says what it does for the people who use it.
+Notchling is a macOS menu bar app that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Its Chat window is the full-size view of a session; a phone app (Flutter, `apps/flutter/`) follows and answers sessions over the Mac's bridge. The app is Rust now (`crates/`: a GPUI app over the `notchling` daemon); the Swift app it replaced is in `legacy/macos/`. [README.md](README.md) says what it does for the people who use it.
 
 This file is the start. Codex and Antigravity read AGENTS.md files themselves; Claude Code reads them through `CLAUDE.md`, which holds only `@AGENTS.md`. Don't add another `CLAUDE*.md` anywhere: CI fails on it (`GUARD-CLAUDE-MD`).
 
@@ -16,7 +16,8 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 | Feature map | [docs/feature-map.md](docs/feature-map.md) | Each feature's folders, tests and zone |
 | Skills | [.claude/skills/](.claude/skills/) | Steps for repeated work; one marked `Tried: not yet` is untested, so check its steps |
 | Dev profile | [docs/dev-profile.md](docs/dev-profile.md) | Running the app and hooks without touching your real `~/.claude/` |
-| Swift app | [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) | The working notes: architecture in one pass, things that bit before |
+| Rust app | [crates/AGENTS.md](crates/AGENTS.md) | The working notes: the crates, the daemon, architecture in one pass, things that bit before |
+| Swift app | [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) | The retired app's notes, still the reference for behavior a port matches |
 | Phone app | [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) | The phone's rules and checks |
 
 ## Build, test, check
@@ -27,22 +28,19 @@ This file is the start. Codex and Antigravity read AGENTS.md files themselves; C
 tools/bundle-next.sh      # build/next/Notchling.app: the Rust app, its daemon and terminal host (--install replaces /Applications/Notchling.app, never the Swift app: the maintainer only)
 swift test                # legacy/macos/Tests/NotchlingTests and legacy/macos/Tests/ConsoleCoreTests
 export PYTHONPATH=tools/guard
-python3 -m unittest discover -s tools/guard/tests -t tools/guard   # the guard's own tests
+tools/test-python.sh      # every Python suite (guard, agents, release, protocol) as CI runs them
 python3 -m guard lint                 # architecture lint; fails only on new or changed lines
 python3 -m guard rules                # every rule in docs/rules.md has a check that fires
 python3 -m guard pins                 # workflow actions pinned and allowlisted
 python3 -m guard codeowners --check   # CODEOWNERS matches tools/guard/zones.json
 python3 -m guard rulesets             # the rulesets require checks the workflows run
-python3 -m guard claudemd             # CLAUDE.md is only @AGENTS.md, and there is no other
+python3 -m guard claudemd             # CLAUDE.md is only @AGENTS.md, and there is no other (featuremap: every crate folder is mapped)
 cargo test --workspace --locked       # the Rust crates (also: cargo clippy --workspace --all-targets -- -D warnings, cargo fmt --check, cargo deny check)
-cargo run -p notchling-notchlingd --bin notchling -- daemon   # the `notchling` binary; set NOTCHLING_DATA_ROOT first (below)
 ```
 
-The `notchling` binary (`crates/notchlingd`) is the daemon (`notchling daemon`), its clients (`notchling status`, `notchling sessions [--json]`) and `notchling service install|uninstall|print [--dir <folder>]`. In dev, run the daemon over a copy of a fixture, never over your real folders: `cp -R crates/app/fixtures/notch /tmp/nl-root`, then `NOTCHLING_DATA_ROOT=/tmp/nl-root` for the daemon and the clients alike (socket, lock and `audit.jsonl` land in `/tmp/nl-root/notchling`). `--socket <path>` moves the socket and puts its lock and the audit log beside it; over the real folders the daemon still locks `notchlingd.lock` in the data folder, one daemon per data folder. `NOTCHLING_APP_TIER_PATHS` (read once at daemon start, and only by a daemon run from a cargo target folder) lists executables that get the app tier; `ensure_daemon` never passes it on. `service install` only writes the file and prints the `launchctl`/`systemctl`/`schtasks` command; don't run that command, and in tests always pass `--dir`.
+The `notchling` binary (the daemon, its clients with `--json`, `hook`, `service`), running it over fixtures with `NOTCHLING_DATA_ROOT`, and the switches that are off at every start are in [crates/AGENTS.md](crates/AGENTS.md).
 
-`notchling hook [--socket <path>]` is Claude Code's hook under the daemon: it reads the hook JSON on stdin, asks the daemon (`hook.request`) and prints what the Swift `--hook` prints, or nothing (a pass, exit 0) when there's no daemon, no app attached, a socket error, a `claude -p` session, its 290 s deadline, an event over the local API's 1 MiB line (a Write of a big file: Claude Code then asks in its own terminal; the cap stays 1 MiB for every op, `hook.request` included), the daemon refusing it (its process must descend from the Claude Code process whose `sessions/<pid>.json` holds the event's session, read from the socket's peer, never from arguments), or the daemon's `acting` switch off. Acting is off at every daemon start, whatever any file says, until the app sends `settings.set_acting` (decision 0007's note of 2026-11-08), and stays off until the maintainer hands sessions over (decision 0011). It isn't installed anywhere yet (E13, M6): never add it to `~/.claude/settings.json`. The code that can (`notchling_engine::install`, behind the daemon's `install` switch, which is off at every start: `install.plan` reads only, `install.apply` and `install.remove` answer the dry run) is tested against temp copies only; its roots are parameters, so a test never reaches the real `~/.claude`, `~/.codex` or `~/.gemini`. Try it with a fixture event: `NOTCHLING_DATA_ROOT=/tmp/nl-root target/debug/notchling hook < crates/notchlingd/tests/fixtures/hook/permission-request.json`.
-
-The phone app's checks are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) (`flutter analyze`, `flutter test`). Run `swift test` after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test`, `rust-test`, `rust-clippy`, `rust-deny` and `maintainer-gate`.
+The phone app's checks are in [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) (`flutter analyze`, `flutter test`). Run `cargo test` (or `swift test` in `legacy/macos/`) after a change to logic, and add a test with any new pure logic or parser. Guard code is Python 3.9+ standard library only. Never run `./build.sh --install`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs. The checks `main` will require once the rulesets are applied (they aren't yet; see GOVERNANCE.md): `build`, `app-build`, `guard`, `phone-analyze`, `phone-test`, `rust-test`, `rust-clippy`, `rust-deny` and `maintainer-gate`.
 
 ## The line
 
@@ -75,7 +73,8 @@ Details and the PR checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Folder notes
 
-- [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md): the Swift app. Read it before changing `legacy/macos/` (`Sources/`, `Tests/`, `Fixtures/`, `Demo/`, `build.sh`). Claude Code loads it through the line below. It is longer than some tools load on their own (Codex cuts project docs at its `project_doc_max_bytes`), so read the whole file with a file read before working there.
+- [crates/AGENTS.md](crates/AGENTS.md): the Rust app. Read it before changing `crates/`. Claude Code loads it through the line below.
+- [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md): the Swift app. Read it before changing `legacy/macos/` (`Sources/`, `Tests/`, `Fixtures/`, `Demo/`, `build.sh`) or porting a part. Nothing loads it on its own any more, and it is longer than some tools load (Codex cuts project docs at its `project_doc_max_bytes`), so read the whole file with a file read before working there.
 - [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md): the phone app. Read it before changing `apps/flutter/`.
 
-@legacy/macos/Sources/AGENTS.md
+@crates/AGENTS.md

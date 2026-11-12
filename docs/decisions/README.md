@@ -10,7 +10,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | --- | --- | --- |
 | [0001](0001-gpui-spike.md) | GPUI spike: the rebuild goes ahead | Accepted |
 | [0002](0002-the-line.md) | The line: agents merge only in named safe areas; everything else waits for `maintainer-gate` | Accepted |
-| [0003](0003-agent-instructions-in-agents-md.md) | Agent instructions live in `AGENTS.md`; `CLAUDE.md` is one line, `@AGENTS.md` | Accepted |
+| [0003](0003-agent-instructions-in-agents-md.md) | Agent instructions live in `AGENTS.md`; `CLAUDE.md` is one line, `@AGENTS.md` | Accepted, amended by 0017 |
 | [0004](0004-notchlingd-engine-service.md) | The Rust engine runs as the always-on `notchlingd` service | Accepted |
 | [0005](0005-gpui-desktop-app.md) | GPUI for every desktop app, web content in `wry` windows | Accepted |
 | [0006](0006-flutter-phone-generated-types.md) | Flutter phone with generated protocol types and no Rust | Proposed |
@@ -24,6 +24,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0014](0014-app-data-in-sqlite.md) | The app's own data in SQLite, and search by bm25 | Accepted |
 | [0015](0015-one-chat-interface-per-tool.md) | Chat's parts are shared; each tool is one adapter behind one interface | Proposed, amended by 0016 |
 | [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
+| [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed |
 
 0001 was written before records had a Status section. Its status is Accepted.
 

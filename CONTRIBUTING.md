@@ -6,7 +6,7 @@ The rest of the manual, in layers:
 
 | What | Where |
 | --- | --- |
-| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md), [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) |
+| Instructions for agents (and a quick start for people) | [AGENTS.md](AGENTS.md), [crates/AGENTS.md](crates/AGENTS.md), [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md), [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md) |
 | What Notchling is and won't be | [docs/goals.md](docs/goals.md) |
 | How the parts fit, and why | [ARCHITECTURE.md](ARCHITECTURE.md), [docs/decisions/](docs/decisions/) |
 | Rules, each with its check | [docs/rules.md](docs/rules.md) |
@@ -137,7 +137,7 @@ Notchling works on your actual Claude Code, Claude Desktop, Codex and Antigravit
 - Never paste real tokens, cookies or `~/.claude.json` contents into issues or pull requests.
 - Use the [dev profile](docs/dev-profile.md) so a dev build doesn't write hooks and skills into your real `~/.claude`. It can't isolate Keychain.
 
-[legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) has the architecture in one pass and a list of things that bit before. It's written for agents but reads fine for people too.
+[crates/AGENTS.md](crates/AGENTS.md) (the Rust app) and [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md) (the Swift app it replaced) have the architecture in one pass and a list of things that bit before. They are written for agents but read fine for people too.
 
 ## Code style
 

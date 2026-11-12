@@ -1,5 +1,6 @@
 """Phase 3 moved the notes in CLAUDE.md into AGENTS.md files. Claude Code still loads them through
-`@` imports (CLAUDE.md is `@AGENTS.md`, which ends with `@legacy/macos/Sources/AGENTS.md`); Codex and Antigravity
+`@` imports (CLAUDE.md is `@AGENTS.md`, which ends with `@crates/AGENTS.md`, the Rust notes; the Swift notes are
+read on demand); Codex and Antigravity
 read AGENTS.md themselves. These tests prove the move lost nothing an agent relies on and that the
 import chain holds.
 
@@ -19,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # The old CLAUDE.md, byte for byte. Not named *.md: GUARD-CLAUDE-MD rejects any tracked `claude*.md`,
 # and nothing should mistake it for live instructions.
 OLD = Path(__file__).resolve().parent / "fixtures" / "notes-before-phase3.txt"
-DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md"]
+DOCS = ["AGENTS.md", "legacy/macos/Sources/AGENTS.md", "crates/AGENTS.md"]
 LATER_DOCS = ["ARCHITECTURE.md"]  # written by another task; counted once it exists
 # A fact the docs drop on purpose goes here, with the reason. Editing this file needs the maintainer.
 RETIRED: Dict[str, str] = {}
@@ -113,10 +114,13 @@ class ManualMoveTests(unittest.TestCase):
     def test_claude_md_is_one_import(self):
         self.assertEqual((ROOT / "CLAUDE.md").read_bytes(), ROOT_CLAUDE_MD)
 
-    def test_root_ends_by_importing_the_swift_notes(self):
+    def test_root_ends_by_importing_the_rust_notes(self):
+        """The Rust app is the one that runs, so its notes load in every session; the Swift and phone
+        notes are linked, for a file read before working in their folders."""
         text = self.read("AGENTS.md")
         lines = [line for line in text.splitlines() if line.strip()]
-        self.assertEqual(lines[-1], "@legacy/macos/Sources/AGENTS.md")
+        self.assertEqual(lines[-1], "@crates/AGENTS.md")
+        self.assertIn("(legacy/macos/Sources/AGENTS.md)", text)  # a link to the Swift notes
         self.assertIn("(apps/flutter/AGENTS.md)", text)  # a link to the phone notes
 
     def test_root_is_short(self):
