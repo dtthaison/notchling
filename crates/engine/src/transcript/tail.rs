@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
@@ -12,6 +13,10 @@ pub const TAIL_BYTES: u64 = 2_000_000;
 pub const CHAT_TAIL_BYTES: u64 = 4_000_000;
 /// A line this long is a screenshot or huge tool output: slow to decode and nothing the chat shows.
 pub const MAX_LINE_BYTES: usize = 100_000;
+
+/// Bytes every [`Cursors`] in this process has parsed, for `--render`'s bench: an unchanged file
+/// adds nothing, an append adds only what was appended.
+pub static PARSED_BYTES: AtomicU64 = AtomicU64::new(0);
 
 /// The complete lines in `start..end` and how many bytes they span. `skip_first_line`: `start` may be
 /// mid-line, so everything up to the first newline is dropped. A last line with no newline yet is not
@@ -149,6 +154,8 @@ pub struct Cursors<P: LineParser, O: Clone> {
     long_line_scan: u64,
     render: Box<dyn Fn(&P) -> O + Send + Sync>,
     state: Mutex<State<P, O>>,
+    /// Bytes this set of cursors has parsed (the same count as [`PARSED_BYTES`], for one set).
+    parsed: AtomicU64,
 }
 
 #[cfg(unix)]
@@ -177,7 +184,18 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 cursors: HashMap::new(),
                 clock: 0,
             }),
+            parsed: AtomicU64::new(0),
         }
+    }
+
+    /// Bytes parsed by this set of cursors so far.
+    pub fn parsed_bytes(&self) -> u64 {
+        self.parsed.load(Ordering::Relaxed)
+    }
+
+    fn count_parsed(&self, bytes: u64) {
+        self.parsed.fetch_add(bytes, Ordering::Relaxed);
+        PARSED_BYTES.fetch_add(bytes, Ordering::Relaxed);
     }
 
     /// Lines over [`MAX_LINE_BYTES`] are read but don't use the tail budget, looking back at most
@@ -221,6 +239,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 if size > cursor.offset {
                     if let Ok((lines, consumed)) = read_chunk(path, cursor.offset, size, false) {
                         cursor.offset += consumed;
+                        self.count_parsed(consumed);
                         for line in &lines {
                             cursor.parser.consume(line);
                         }
@@ -247,6 +266,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
             }
         };
         let (lines, consumed) = read_chunk(path, start, size, cut).ok()?;
+        self.count_parsed(consumed);
         let mut parser = P::default();
         for line in &lines {
             parser.consume(line);

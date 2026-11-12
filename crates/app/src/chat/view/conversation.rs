@@ -337,6 +337,7 @@ fn row_with_opinions(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> AnyElement {
+    super::pane::ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let item = view.shown_conversation().items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
     let element = row_element(view, row, id, live, a, cx);

@@ -33,6 +33,8 @@ pub mod markdown_cache;
 pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;
+#[cfg(test)]
+mod parse_cost_tests;
 pub mod paths;
 pub mod pickers;
 pub mod prompts;

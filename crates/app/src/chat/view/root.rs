@@ -5,6 +5,7 @@ use super::*;
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        super::pane::ROOT_RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let a = window_appearance(window);
         self.take_terminal_focus(window);
         if let Some(text) = self.slash_preview.clone() {

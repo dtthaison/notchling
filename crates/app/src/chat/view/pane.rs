@@ -30,6 +30,9 @@ use crate::chat::follow::{self, Scroll};
 pub static RENDERS: AtomicU64 = AtomicU64::new(0);
 pub static SIDEBAR_RENDERS: AtomicU64 = AtomicU64::new(0);
 pub static DETAILS_RENDERS: AtomicU64 = AtomicU64::new(0);
+/// Conversation rows built, and times the window's root view (`ChatView`) was drawn.
+pub static ROWS: AtomicU64 = AtomicU64::new(0);
+pub static ROOT_RENDERS: AtomicU64 = AtomicU64::new(0);
 
 /// What a part draws, from the chat's state.
 type Draw = fn(&mut ChatView, Appearance, &mut Context<ChatView>) -> AnyElement;

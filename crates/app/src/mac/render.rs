@@ -71,11 +71,22 @@ fn cpu_ms() -> f64 {
     ms(&usage.user) + ms(&usage.system)
 }
 
-/// Keeps the window up for `seconds` and prints what it drew and spent meanwhile.
+/// Keeps the window up for `seconds` and prints what it drew and spent meanwhile: the `bench:`
+/// line for a person, then `bench-json:` with the same numbers and the counters for a test.
 async fn bench(seconds: f64, cx: &gpui::AsyncApp) {
-    use crate::chat::view::pane::{DETAILS_RENDERS, RENDERS, SIDEBAR_RENDERS};
-    let drawn =
-        || [&RENDERS, &SIDEBAR_RENDERS, &DETAILS_RENDERS].map(|n| n.load(Ordering::Relaxed));
+    use crate::chat::view::pane::{DETAILS_RENDERS, RENDERS, ROOT_RENDERS, ROWS, SIDEBAR_RENDERS};
+    use notchling_engine::transcript::tail::PARSED_BYTES;
+    let drawn = || {
+        [
+            &RENDERS,
+            &SIDEBAR_RENDERS,
+            &DETAILS_RENDERS,
+            &ROOT_RENDERS,
+            &ROWS,
+            &PARSED_BYTES,
+        ]
+        .map(|n| n.load(Ordering::Relaxed))
+    };
     let (frames, before) = (FRAMES.load(Ordering::Relaxed), drawn());
     let (cpu, at) = (cpu_ms(), Instant::now());
     cx.background_executor()
@@ -83,7 +94,8 @@ async fn bench(seconds: f64, cx: &gpui::AsyncApp) {
         .await;
     let frames = FRAMES.load(Ordering::Relaxed) - frames;
     let after = drawn();
-    let [conversations, sidebars, details] = [0, 1, 2].map(|i| after[i] - before[i]);
+    let [conversations, sidebars, details, roots, rows, parsed] =
+        [0, 1, 2, 3, 4, 5].map(|i| after[i] - before[i]);
     let (cpu, wall) = (cpu_ms() - cpu, at.elapsed().as_secs_f64());
     println!(
         "bench: {frames} frames in {wall:.1} s ({conversations} drew the conversation, {sidebars} the sidebar, {details} the details), {cpu:.0} ms CPU ({:.2} ms/frame, {:.1} fps, {:.1}% of a core)",
@@ -91,6 +103,20 @@ async fn bench(seconds: f64, cx: &gpui::AsyncApp) {
         frames as f64 / wall,
         cpu / wall / 10.0
     );
+    let json = serde_json::json!({
+        "mode": "idle",
+        "seconds": (wall * 10.0).round() / 10.0,
+        "frames": frames,
+        "cpu_ms": cpu.round(),
+        "ms_per_frame": (cpu / frames.max(1) as f64 * 100.0).round() / 100.0,
+        "root": roots,
+        "conversation": conversations,
+        "sidebar": sidebars,
+        "details": details,
+        "rows": rows,
+        "parsed_bytes": parsed,
+    });
+    println!("bench-json: {json}");
 }
 
 /// Forces the app's appearance, so every window (and `window_appearance`) follows it.
