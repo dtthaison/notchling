@@ -33,6 +33,7 @@ use super::prefs::NotchPrefs;
 use super::source::Source;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
+use crate::chat::prompt_flow::Sending;
 use crate::session_source::{Link, SessionSource};
 
 /// The notch's root view: a transparent canvas with the shape at its top centre.
@@ -53,7 +54,8 @@ pub struct NotchView {
     pub(super) actions: Arc<Actions>,
     /// The answers being put together for the question on show.
     pub(super) draft: QuestionDraft,
-    pub(super) sending: bool,
+    /// What is going out now: the card's controls are off meanwhile and say so.
+    pub(super) sending: Option<Sending>,
     pub(super) send_error: Option<String>,
     /// The answer box's focus, and whether it had it at the last draw.
     pub(super) focus: FocusHandle,
@@ -86,7 +88,7 @@ impl NotchView {
             scrolled_for: None,
             actions,
             draft: QuestionDraft::default(),
-            sending: false,
+            sending: None,
             send_error: None,
             focus: cx.focus_handle(),
             focused: false,

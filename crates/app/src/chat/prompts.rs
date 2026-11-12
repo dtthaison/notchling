@@ -103,19 +103,38 @@ pub fn question_key(q: &PendingQuestion) -> String {
         .to_owned()
 }
 
+/// The path a file preview asks about, and the one allowed just before it.
+pub const PREVIEW_PATH: &str =
+    "/Users/me/work/notchling/.claude/projects/-Users-me-work-notchling/memory/glass-kit-feature-state.md";
+pub const PREVIEW_BEFORE: &str =
+    "/Users/me/work/notchling/.claude/projects/-Users-me-work-notchling/memory/autopilot-needs-claude-on-path.md";
+
 /// What a render forces (`NOTCHLING_RENDER_PROMPT`), since no hook holds a prompt in a picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preview {
     Question,
     Permission,
+    /// A Write of a file with a long path, read from a job's state like a real one.
+    PermissionFile,
+    /// The same, its Allow on its way.
+    PermissionSending,
+    /// The same, its last answer refused.
+    PermissionFailed,
+    /// The same, right after the one before it was allowed.
+    PermissionNext,
 }
 
 impl Preview {
-    /// `question` or `permission`; anything else shows nothing.
+    /// `question`, `permission`, `permission-file`, `permission-sending`, `permission-failed` or
+    /// `permission-next`; anything else shows nothing.
     pub fn parse(value: &str) -> Option<Preview> {
         match value {
             "question" => Some(Preview::Question),
             "permission" => Some(Preview::Permission),
+            "permission-file" => Some(Preview::PermissionFile),
+            "permission-sending" => Some(Preview::PermissionSending),
+            "permission-failed" => Some(Preview::PermissionFailed),
+            "permission-next" => Some(Preview::PermissionNext),
             _ => None,
         }
     }
@@ -239,6 +258,19 @@ pub fn preview_prompt(preview: Preview) -> Prompt {
                 },
             ],
         }),
+        Preview::PermissionFile
+        | Preview::PermissionSending
+        | Preview::PermissionFailed
+        | Preview::PermissionNext => Prompt::Permission(Box::new(HookRequest {
+            id: format!("{NEEDS_PREFIX}preview:approve Write {PREVIEW_PATH}"),
+            session_id: "preview".into(),
+            created: 0.0,
+            kind: RequestKind::Permission,
+            tool_name: "Write".into(),
+            summary: PREVIEW_PATH.into(),
+            can_always_allow: true,
+            agy: None,
+        })),
         Preview::Permission => Prompt::Permission(Box::new(HookRequest {
             id: "preview".into(),
             session_id: "preview".into(),

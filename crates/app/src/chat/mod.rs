@@ -35,6 +35,7 @@ pub mod outgoing;
 pub mod page_panel;
 pub mod paths;
 pub mod pickers;
+pub mod prompt_flow;
 pub mod prompts;
 pub mod reload;
 pub mod rows;
