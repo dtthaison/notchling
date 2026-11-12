@@ -380,6 +380,9 @@ impl Parser {
                     if let Some(v) = total.get("output_tokens") {
                         self.facts.output_tokens = count_of(v);
                     }
+                    if let Some(v) = total.get("cached_input_tokens") {
+                        self.facts.cached_tokens = count_of(v);
+                    }
                 }
                 if let Some(last) = info.get("last_token_usage").filter(|t| t.is_object()) {
                     let n = |k: &str| last.get(k).map_or(0, count_of);

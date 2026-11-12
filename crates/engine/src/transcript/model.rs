@@ -159,6 +159,9 @@ pub struct SessionFacts {
     pub effort: Option<String>,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// The part of `input_tokens` read from the prompt cache (Claude's `cache_read_input_tokens`,
+    /// Codex's `cached_input_tokens`).
+    pub cached_tokens: u64,
     /// What the model holds after the latest reply: its last request's input and output.
     pub context_tokens: u64,
     pub turns: u64,

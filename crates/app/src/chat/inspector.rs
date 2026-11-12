@@ -7,6 +7,7 @@ use notchling_engine::transcript::shells::{self, ShellState};
 use notchling_engine::transcript::subagents::{
     Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
 };
+use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
 use super::format::{model_name, tokens};
@@ -34,6 +35,8 @@ pub struct SubagentRow {
     pub status_word: String,
     pub running: bool,
     pub mark: Mark,
+    /// The tool that runs it, whose logo leads the row (the status is in `detail`).
+    pub tool: ToolMark,
     /// What a running subagent is doing now, from its own transcript ("Running cargo test…").
     pub doing: Option<String>,
 }
@@ -164,7 +167,27 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
             kind,
         ]
     };
-    let detail = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    // Its own transcript, read incrementally and cached: what it does now and how much context
+    // it holds. Antigravity's log is read whole when opened; too much for every redraw.
+    let read = (!agent.path.is_empty())
+        .then(|| match agent.origin {
+            SubagentOrigin::Claude => Some(conversation::read_subagent_shared(&agent.path)),
+            SubagentOrigin::Codex => Some(codex::read_shared(&agent.path)),
+            SubagentOrigin::Antigravity => None,
+        })
+        .flatten();
+    // Context as a bare number ("232.3k").
+    let context = read
+        .as_ref()
+        .map(|c| c.facts.context_tokens)
+        .filter(|n| *n > 0)
+        .map(tokens);
+    let detail = parts
+        .into_iter()
+        .flatten()
+        .chain(context.as_deref())
+        .collect::<Vec<_>>()
+        .join(" · ");
     SubagentRow {
         description: agent.description.clone(),
         detail,
@@ -172,19 +195,26 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
         status_word: word.to_owned(),
         running: agent.is_running(),
         mark,
-        doing: (agent.is_running() && !agent.path.is_empty())
-            .then(|| match agent.origin {
-                SubagentOrigin::Claude => Some(super::activity::doing(
-                    &conversation::read_subagent_shared(&agent.path),
-                )),
-                SubagentOrigin::Codex => {
-                    Some(super::activity::doing(&codex::read_shared(&agent.path)))
-                }
-                // Antigravity's log is read whole when opened; too much for every redraw.
-                SubagentOrigin::Antigravity => None,
-            })
-            .flatten(),
+        tool: match agent.origin {
+            SubagentOrigin::Claude => ToolMark::Claude,
+            SubagentOrigin::Codex => ToolMark::Codex,
+            SubagentOrigin::Antigravity => ToolMark::Antigravity,
+        },
+        doing: read
+            .filter(|_| agent.is_running())
+            .map(|c| super::activity::doing(&c)),
     }
+}
+
+/// "71.1k in · 650 out · 68.2k cached (96%)": the cache share is of the input; left out with no
+/// cache reads.
+pub fn token_line(input: u64, output: u64, cached: u64) -> String {
+    let mut line = format!("{} in · {} out", tokens(input), tokens(output));
+    if cached > 0 && input > 0 {
+        let share = (cached as f64 / input as f64 * 100.0).round().min(100.0);
+        line.push_str(&format!(" · {} cached ({share}%)", tokens(cached)));
+    }
+    line
 }
 
 /// How many subagents show while the list is folded to the latest finished ones.
@@ -327,11 +357,7 @@ pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
     if f.input_tokens + f.output_tokens > 0 {
         out.push((
             "Tokens",
-            format!(
-                "{} in · {} out",
-                tokens(f.input_tokens),
-                tokens(f.output_tokens)
-            ),
+            token_line(f.input_tokens, f.output_tokens, f.cached_tokens),
         ));
     }
     if f.commands > 0 {
@@ -536,6 +562,7 @@ mod tests {
                 status_word: "Done".into(),
                 running: false,
                 mark: Mark::Icon(Icon::Done, Ink::Done),
+                tool: ToolMark::Claude,
                 doing: None,
             }
         );
@@ -588,6 +615,8 @@ mod tests {
         assert_eq!(i.subagents[0].detail, "Running · Codex · gpt-5.5 high");
         assert_eq!(i.subagents[0].doing, None, "no rollout yet, nothing to say");
         assert_eq!(i.subagents[1].detail, "Stopped · Antigravity CLI");
+        assert_eq!(i.subagents[0].tool, ToolMark::Codex);
+        assert_eq!(i.subagents[1].tool, ToolMark::Antigravity);
         assert_eq!(i.subagents_title(), "Subagents · 1 running");
     }
 
@@ -620,7 +649,7 @@ mod tests {
             concat!(
                 r#"{"isSidechain":true,"type":"user","message":{"role":"user","content":"Fix it"},"uuid":"u1","timestamp":"2026-11-08T08:00:00.000Z"}"#,
                 "\n",
-                r#"{"isSidechain":true,"type":"assistant","message":{"id":"a1","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}]},"uuid":"u2","timestamp":"2026-11-08T08:00:05.000Z"}"#,
+                r#"{"isSidechain":true,"type":"assistant","message":{"id":"a1","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}],"usage":{"input_tokens":1000,"cache_read_input_tokens":231000,"output_tokens":300}},"uuid":"u2","timestamp":"2026-11-08T08:00:05.000Z"}"#,
                 "\n"
             ),
         );
@@ -632,6 +661,20 @@ mod tests {
         let doing = i.subagents[0].doing.as_deref().expect("a running one says");
         assert!(doing.contains("Run the tests"), "{doing}");
         assert_eq!(i.subagents[1].doing, None, "a finished one doesn't");
+        // Both end with the context they hold, as a bare number, and lead with Claude's logo.
+        assert_eq!(i.subagents[0].detail, "Running · 232.3k");
+        assert_eq!(i.subagents[1].detail, "Done · 232.3k");
+        assert_eq!(i.subagents[0].tool, ToolMark::Claude);
+    }
+
+    #[test]
+    fn the_token_line_says_the_cached_part_and_its_share() {
+        assert_eq!(token_line(71_100, 650, 0), "71.1k in · 650 out");
+        assert_eq!(
+            token_line(71_100, 650, 68_200),
+            "71.1k in · 650 out · 68.2k cached (96%)"
+        );
+        assert_eq!(token_line(0, 10, 5), "0 in · 10 out");
     }
 
     #[test]

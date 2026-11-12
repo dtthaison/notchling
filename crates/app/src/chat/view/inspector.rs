@@ -12,9 +12,9 @@ use gpui::{
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
-use notchling_kit::metric::{METER_BAR, RADIUS_SM, SIDE_PADDING};
+use notchling_kit::metric::{METER_BAR, RADIUS_SM, SIDE_PADDING, TOOL_ICON};
 use notchling_kit::ui::{
-    hsla, icon, label, scrollable, spinner as kit_spinner, KitPart, KitStyled,
+    hsla, icon, label, scrollable, spinner as kit_spinner, tool_icon, KitPart, KitStyled,
 };
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
@@ -407,7 +407,17 @@ fn subagent_row(
         .flex()
         .items_start()
         .gap(px(7.0))
-        .child(mark_box(s.mark, &format!("agent-{index}"), a))
+        // The tool's logo, not a status mark: the detail line says Running, Done or Failed.
+        .child(
+            div()
+                .w(px(MARK_BOX))
+                .h(px(ROW_LINE))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(tool_icon(s.tool, TOOL_ICON, a)),
+        )
         .child(
             div()
                 .flex_1()

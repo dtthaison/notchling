@@ -201,6 +201,11 @@ impl Parser {
                     .saturating_add(n(usage, "cache_creation_input_tokens"))
                     .saturating_add(n(usage, "cache_read_input_tokens"));
                 self.c.facts.input_tokens = self.c.facts.input_tokens.saturating_add(input);
+                self.c.facts.cached_tokens = self
+                    .c
+                    .facts
+                    .cached_tokens
+                    .saturating_add(n(usage, "cache_read_input_tokens"));
                 self.c.facts.output_tokens = self
                     .c
                     .facts
