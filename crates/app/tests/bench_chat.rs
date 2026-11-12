@@ -71,7 +71,18 @@ fn seconds() -> u64 {
 
 /// Runs the render in `mode` over `root`. `during` is called every 500 ms from `bench: ready`
 /// until the render ends. Returns the `bench-json:` object.
-fn run(mode: &str, seconds: u64, root: &TempRoot, mut during: impl FnMut(&Path)) -> Value {
+fn run(mode: &str, seconds: u64, root: &TempRoot, during: impl FnMut(&Path)) -> Value {
+    run_with(mode, seconds, root, &[], during)
+}
+
+/// `run` with more environment variables for the render.
+fn run_with(
+    mode: &str,
+    seconds: u64,
+    root: &TempRoot,
+    envs: &[(&str, &str)],
+    mut during: impl FnMut(&Path),
+) -> Value {
     let out = root.path().join("bench.png");
     let child = Command::new(env!("CARGO_BIN_EXE_notchling-app"))
         .args(["--render", "chat", "--out"])
@@ -80,6 +91,7 @@ fn run(mode: &str, seconds: u64, root: &TempRoot, mut during: impl FnMut(&Path))
         .env("NOTCHLING_DATA_ROOT", root.path())
         .env("NOTCHLING_RENDER_BENCH", seconds.to_string())
         .env("NOTCHLING_RENDER_BENCH_MODE", mode)
+        .envs(envs.iter().copied())
         .stdout(Stdio::piped())
         .spawn()
         .expect("run notchling-app");
@@ -141,6 +153,15 @@ fn bench(mode: &str) -> Value {
 fn bench_for(mode: &str, seconds: u64) -> Value {
     let root = TempRoot::new(TURNS);
     let result = run(mode, seconds, &root, |_| {});
+    check(mode, &result);
+    result
+}
+
+/// A bench with more environment variables: `NOTCHLING_RENDER_PARTS=1` shows the part names and the
+/// render map.
+fn bench_with(mode: &str, seconds: u64, envs: &[(&str, &str)]) -> Value {
+    let root = TempRoot::new(TURNS);
+    let result = run_with(mode, seconds, &root, envs, |_| {});
     check(mode, &result);
     result
 }
@@ -442,4 +463,37 @@ fn bench_append_draws_only_rows_on_screen_and_follows() {
         result["at_end"], true,
         "the conversation left its end: {result}"
     );
+}
+
+/// The render map (? on) is drawn by the window itself: with it on, typing and the account menu
+/// still draw no Sidebar, no Details Panel and no conversation, and the conversation's count is
+/// what it is with the part names off, so the badges' own counts are true.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_render_map_draws_no_part_and_changes_no_count() {
+    for mode in ["typing", "menu"] {
+        let off = bench_with(mode, 3, &[]);
+        let on = bench_with(mode, 3, &[("NOTCHLING_RENDER_PARTS", "1")]);
+        for key in ["sidebar", "details", "conversation"] {
+            assert_eq!(count(&on, key), 0, "{mode} {key} with the map on: {on}");
+        }
+        assert_eq!(
+            count(&on, "conversation"),
+            count(&off, "conversation"),
+            "{mode}: {on} against {off}"
+        );
+        assert!(count(&on, "root") > 0, "{mode}: {on}");
+    }
+}
+
+/// Scrolling with the map on builds only the rows on screen and draws no Sidebar or Details Panel,
+/// as with it off.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_render_map_scroll_draws_only_the_conversation() {
+    let result = bench_with("scroll", 3, &[("NOTCHLING_RENDER_PARTS", "1")]);
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+    assert!(rows_per_draw(&result) <= ON_SCREEN, "{result}");
 }
