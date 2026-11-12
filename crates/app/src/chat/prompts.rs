@@ -66,20 +66,27 @@ pub fn permission_request(r: &HookRequest, decision: Decision) -> Request {
     }
 }
 
+/// The tools whose terminal dialog has no "don't ask again": a file edit offers "Yes, allow all
+/// edits during this session" instead, which is no answer to "Always allow this" (a wider one), so
+/// the card doesn't offer that button for them.
+const NO_ALWAYS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
+
 /// A background job waiting on a permission has no prompt in the daemon, only a summary in its
-/// state: "approve Bash: ls -la". The tool and what it would run, as a card shows them. Always
-/// allow is offered: the daemon refuses it, with nothing typed, when the dialog has no "don't ask
-/// again" option.
+/// state: "approve Bash: ls -la". The tool and what it would run, as a card shows them. The tool
+/// is the first word, with or without the colon after it. Always allow is offered unless the
+/// tool's dialog has no such option ([`NO_ALWAYS`]); for any other the daemon still refuses it,
+/// with nothing typed, when the dialog has none.
 pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
     if agent.group != AgentGroup::NeedsInput || !matches!(agent.target, AgentTarget::Job(_)) {
         return None;
     }
     let needs = agent.detail.as_deref()?;
-    let body = needs.strip_prefix("approve ")?;
-    let (tool, summary) = match body.split_once(": ") {
-        Some((tool, summary)) => (tool.trim(), summary.trim()),
-        None => (body.trim(), ""),
-    };
+    let body = needs.strip_prefix("approve ")?.trim();
+    // A tool's name is one word: "Write /a/b.md" and "Write: /a/b.md" both name the tool Write.
+    let end = body
+        .find(|c: char| c.is_whitespace() || c == ':')
+        .unwrap_or(body.len());
+    let (tool, summary) = (&body[..end], body[end..].trim_start_matches(':').trim());
     if tool.is_empty() {
         return None;
     }
@@ -90,7 +97,7 @@ pub fn permission_from_needs(agent: &Agent) -> Option<HookRequest> {
         kind: RequestKind::Permission,
         tool_name: tool.to_owned(),
         summary: summary.to_owned(),
-        can_always_allow: true,
+        can_always_allow: !NO_ALWAYS.contains(&tool),
         agy: None,
     })
 }

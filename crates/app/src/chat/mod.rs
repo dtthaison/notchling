@@ -37,6 +37,8 @@ pub mod paths;
 pub mod pickers;
 pub mod prompt_flow;
 pub mod prompts;
+#[cfg(test)]
+mod prompts_permission_tests;
 pub mod reload;
 pub mod rows;
 pub mod selection;

@@ -297,7 +297,14 @@ impl Run<'_> {
                 }
             }
             Step::PressPermission { decision, expect } => {
-                let lines = self.pty.screen();
+                let mut lines = self.pty.screen();
+                if permission_dialog::read(&lines).is_none() {
+                    // Not drawn yet, or not there: look again for a moment before refusing.
+                    self.wait_until(PERMISSION_DRAW_WAIT_MS, |_, lines| {
+                        permission_dialog::read(lines).is_some()
+                    });
+                    lines = self.pty.screen();
+                }
                 let dialog = permission_dialog::read(&lines).ok_or(Failure::NotPermission)?;
                 if !dialog.asks(expect) {
                     return Err(Failure::PermissionMismatch);

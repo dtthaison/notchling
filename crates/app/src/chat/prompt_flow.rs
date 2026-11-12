@@ -45,6 +45,9 @@ pub fn sending_text(sending: Sending) -> &'static str {
 /// The tools whose summary is the path of the file they work on.
 const FILE_TOOLS: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Read"];
 
+/// The marker of the daemon's "not on screen any more" refusal (`Failure::NotPermission`).
+const GONE: &str = "isn't showing that permission";
+
 /// How much of a command a confirmation names.
 const SUBJECT_CHARS: usize = 48;
 
@@ -91,6 +94,24 @@ pub fn confirmation(tool: &str, summary: &str, decision: Decision) -> String {
     }
 }
 
+/// What a permission card leaves behind, by how its answer ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Told {
+    /// The answer went through: "Allowed: Write notes.md".
+    pub went_through: String,
+    /// The terminal showed no such permission any more: "Already answered in the terminal: …".
+    pub already_answered: String,
+}
+
+impl Told {
+    pub fn new(tool: &str, summary: &str, decision: Decision) -> Told {
+        Told {
+            went_through: confirmation(tool, summary, decision),
+            already_answered: already_answered(tool, summary),
+        }
+    }
+}
+
 /// A decision that went through, shown for a moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirmed {
@@ -108,6 +129,26 @@ impl Confirmed {
 
     pub fn visible(&self, now_ms: i64) -> bool {
         now_ms < self.until_ms
+    }
+}
+
+/// Whether the daemon refused because the terminal shows no such permission any more
+/// (`Failure::NotPermission`, pinned by a test against the engine's words): it was answered
+/// there, or by an earlier click whose state hasn't caught up.
+pub fn is_gone(message: &str) -> bool {
+    message.contains(GONE)
+}
+
+/// What the card leaves behind when its permission turns out to be answered already.
+pub fn already_answered(tool: &str, summary: &str) -> String {
+    let subject = subject(tool, summary);
+    if subject.is_empty() {
+        format!("Already answered in the terminal: {}", tool.trim())
+    } else {
+        format!(
+            "Already answered in the terminal: {} {subject}",
+            tool.trim()
+        )
     }
 }
 

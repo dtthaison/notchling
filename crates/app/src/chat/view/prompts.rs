@@ -26,7 +26,8 @@ use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
 use crate::chat::prompt_flow::{
-    confirmation, failure_text, file_name, sending_text, Confirmed, Sending, CONFIRM_MS,
+    confirmation, failure_text, file_name, is_gone, sending_text, Confirmed, Sending, Told,
+    CONFIRM_MS,
 };
 use crate::chat::prompts::{
     is_dialog, permission_request, preview_prompt, prompt_for, question_key, screen_question,
@@ -227,14 +228,16 @@ impl ChatView {
     /// Sends an answer or a decision; on success the prompt it answered (`key`, taken when the
     /// button was pressed) is hidden everywhere, and no other: the session may have a newer one
     /// by the time the reply comes back.
-    /// `sending` is what the card says meanwhile; `confirm` is what it says once it went through
-    /// (a permission's decision, named so the next card isn't taken for the same one).
+    /// `sending` is what the card says meanwhile; `told` is what it leaves behind (a permission's
+    /// decision, named so the next card isn't taken for the same one). A refusal that the
+    /// terminal shows no such permission any more means it was answered there: the card goes, as
+    /// after an answer, with a note saying so, instead of an error nothing can be done about.
     fn answer_prompt(
         &mut self,
         key: String,
         request: Request,
         sending: Sending,
-        confirm: Option<String>,
+        told: Option<Told>,
         cx: &mut Context<Self>,
     ) {
         if self.prompt.sending.is_some() || !self.prompt_gate(cx).enabled {
@@ -257,9 +260,8 @@ impl ChatView {
                 match result {
                     Ok(_) => {
                         view.source.mark_answered(&key);
-                        if let (Some(text), Some(row)) = (confirm, row) {
-                            view.prompt.confirmed = Some((row, Confirmed::new(text, now_ms())));
-                            view.draw_when_confirmation_ends(cx);
+                        if let (Some(told), Some(row)) = (&told, &row) {
+                            view.keep_note(row, told.went_through.clone(), cx);
                         }
                         // "Answer it above" is answered.
                         if view.tools.error.as_deref().is_some_and(is_dialog) {
@@ -267,7 +269,14 @@ impl ChatView {
                         }
                         view.reload_now(cx);
                     }
-                    Err(message) => view.prompt.error = Some(failure_text(&message)),
+                    Err(message) => match (&told, &row) {
+                        (Some(told), Some(row)) if is_gone(&message) => {
+                            view.source.mark_answered(&key);
+                            view.keep_note(row, told.already_answered.clone(), cx);
+                            view.reload_now(cx);
+                        }
+                        _ => view.prompt.error = Some(failure_text(&message)),
+                    },
                 }
                 cx.notify();
             })
@@ -275,6 +284,12 @@ impl ChatView {
         })
         .detach();
         cx.notify();
+    }
+
+    /// Shows `text` over what follows for a moment ([`confirmed`]).
+    fn keep_note(&mut self, row: &str, text: String, cx: &mut Context<Self>) {
+        self.prompt.confirmed = Some((row.to_owned(), Confirmed::new(text, now_ms())));
+        self.draw_when_confirmation_ends(cx);
     }
 
     /// The confirmation goes by itself: one more draw when its moment is over.
@@ -676,7 +691,7 @@ fn permission(
                     decision,
                     on_screen,
                 },
-                confirmation(&r.tool_name, &r.summary, decision),
+                Told::new(&r.tool_name, &r.summary, decision),
             );
             // `w_auto`: the kit's row is `w_full`, which a card with wrapped text above it (a long
             // path) doesn't resolve, and the rows shrank to their text; stretch gives the width.
