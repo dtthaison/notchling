@@ -12,9 +12,11 @@ use gpui::{point, px, AsyncApp, Entity, Size};
 use notchling_engine::transcript::tail::PARSED_BYTES;
 
 use super::bench_events::Injector;
+use super::bench_scroll::Scenario;
 use super::render::{cpu_ms, FRAMES};
+use crate::chat::scroll_trace;
 use crate::chat::view::pane::{DETAILS_RENDERS, RENDERS, ROOT_RENDERS, ROWS, SIDEBAR_RENDERS};
-use crate::chat::view::{bench_point, ChatView};
+use crate::chat::view::{bench_point, scroll_probe, ChatView};
 
 /// The environment's name for what the driver does each step.
 pub const MODE_ENV: &str = "NOTCHLING_RENDER_BENCH_MODE";
@@ -28,6 +30,9 @@ const WARM_UP: Duration = Duration::from_millis(1500);
 
 /// How often a forced frame is tried.
 const FORCED_EVERY: Duration = Duration::from_millis(16);
+
+/// How long a scroll script waits after its last step for that step to be drawn.
+const SETTLE: Duration = Duration::from_millis(150);
 
 /// What the driver does while the bench runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +57,9 @@ pub enum Mode {
     Reload,
     /// The account menu opened or closed.
     Menu,
+    /// A script of trackpad steps with the trajectory recorder on (`bench_scroll`): the report
+    /// goes in the json as `scroll`.
+    Trace(Scenario),
 }
 
 impl Mode {
@@ -67,7 +75,7 @@ impl Mode {
             "terminal" => Mode::Terminal,
             "reload" => Mode::Reload,
             "menu" => Mode::Menu,
-            _ => return None,
+            _ => return Scenario::parse(name).map(Mode::Trace),
         })
     }
 
@@ -82,6 +90,7 @@ impl Mode {
             Mode::Terminal => "terminal",
             Mode::Reload => "reload",
             Mode::Menu => "menu",
+            Mode::Trace(scenario) => scenario.name(),
         }
     }
 
@@ -89,7 +98,7 @@ impl Mode {
     fn rate(self) -> Option<u32> {
         match self {
             Mode::Idle | Mode::ScrollFade => None,
-            Mode::Scroll => Some(60),
+            Mode::Scroll | Mode::Trace(_) => Some(60),
             Mode::Hover | Mode::Select | Mode::Terminal => Some(30),
             Mode::Typing => Some(10),
             Mode::Reload => Some(2),
@@ -166,6 +175,13 @@ fn step(mode: Mode, n: u64, target: &mut Target, cx: &mut AsyncApp) {
                 injector.scroll(middle.x, middle.y, dy);
             }
         }
+        Mode::Trace(scenario) => {
+            let dy = scenario.delta(n);
+            if let (true, Some(injector)) = (dy != 0.0, target.injector.as_mut()) {
+                injector.scroll(middle.x, middle.y, dy);
+                scroll_probe::injected(dy);
+            }
+        }
         Mode::Hover => {
             if let Some(injector) = &target.injector {
                 injector.moved(top.x, top.y + px(wave(n, true, span)));
@@ -190,6 +206,12 @@ async fn prepare(mode: Mode, target: &mut Target, cx: &mut AsyncApp) {
         Mode::Scroll => {
             if let Some(injector) = target.injector.as_mut() {
                 injector.scroll(middle.x, middle.y, WHEEL_START);
+            }
+        }
+        Mode::Trace(scenario) => {
+            let prime = scenario.prime();
+            if let (true, Some(injector)) = (prime != 0.0, target.injector.as_mut()) {
+                injector.scroll(middle.x, middle.y, prime);
             }
         }
         Mode::ScrollFade => {
@@ -298,6 +320,9 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         ]
         .map(|n| n.load(Ordering::Relaxed))
     };
+    if matches!(mode, Mode::Trace(_)) {
+        scroll_probe::enable(|| FRAMES.load(Ordering::Relaxed));
+    }
     let (frames, before) = (FRAMES.load(Ordering::Relaxed), drawn());
     let (cpu, at) = (cpu_ms(), Instant::now());
     let until = at + Duration::from_secs_f64(seconds);
@@ -309,11 +334,31 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         }
         Some(rate) => {
             let every = Duration::from_secs_f64(1.0 / f64::from(rate));
+            // A scroll script runs every one of its steps, however late the main thread gets to
+            // them (a busy Mac), up to four times the time asked for.
+            let script = match mode {
+                Mode::Trace(scenario) => Some((
+                    scenario.steps(),
+                    until + Duration::from_secs_f64(seconds * 3.0),
+                )),
+                _ => None,
+            };
             let mut n = 0;
-            while Instant::now() < until {
+            loop {
+                let more = match script {
+                    Some((steps, cap)) => n < steps && Instant::now() < cap,
+                    None => Instant::now() < until,
+                };
+                if !more {
+                    break;
+                }
                 step(mode, n, &mut target, cx);
                 n += 1;
                 cx.background_executor().timer(every).await;
+            }
+            if script.is_some() {
+                // The last step's draw.
+                cx.background_executor().timer(SETTLE).await;
             }
             finish(mode, &target);
         }
@@ -340,7 +385,15 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         frames as f64 / wall,
         cpu / wall / 10.0
     );
-    let json = serde_json::json!({
+    let scroll = matches!(mode, Mode::Trace(_)).then(|| {
+        let recording = scroll_probe::finish();
+        super::bench_scroll::dump(&recording);
+        let mut report =
+            scroll_trace::report(&recording.frames, &recording.steps, recording.viewport).json();
+        report["draws"] = scroll_trace::draw_report(&recording.draws).json();
+        report
+    });
+    let mut json = serde_json::json!({
         "mode": mode.name(),
         "seconds": (wall * 10.0).round() / 10.0,
         "frames": frames,
@@ -357,6 +410,9 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         // Spinner rings Core Animation turns for the window: the working session's Activity Line.
         "native_rings": super::native_spin::probe().len(),
     });
+    if let Some(scroll) = scroll {
+        json["scroll"] = scroll;
+    }
     println!("bench-json: {json}");
 }
 
@@ -378,7 +434,9 @@ mod tests {
             Mode::Terminal,
             Mode::Reload,
             Mode::Menu,
-        ];
+        ]
+        .into_iter()
+        .chain(Scenario::ALL.map(Mode::Trace));
         for mode in modes {
             assert_eq!(Mode::parse(mode.name()), Some(mode));
         }

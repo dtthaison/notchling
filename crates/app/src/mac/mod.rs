@@ -4,6 +4,7 @@
 pub mod app_icons;
 pub mod bench;
 pub mod bench_events;
+pub mod bench_scroll;
 pub mod capture;
 pub mod dock;
 pub mod gate;

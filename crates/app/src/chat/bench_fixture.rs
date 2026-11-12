@@ -17,15 +17,33 @@ pub const WORKING_TRANSCRIPT: &str = "claude/projects/-Users-me-work-bench/bench
 /// Milliseconds between two lines of a transcript: whole seconds, which is all `iso8601` writes.
 const LINE_GAP_MS: i64 = 1000;
 
+/// How tall a turn's rows are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// Every turn the same: an 800 pt reply and a 20-line tool output.
+    Plain,
+    /// Some turns have rows much taller than a window: a 3,000-line tool output, and a long
+    /// reply of many sections with tables and code, as a real session's long answers are.
+    Tall,
+    /// Some turns run sixty tool calls in a row: one step group a few thousand points tall once
+    /// it is open, as a long working turn's is.
+    Busy,
+}
+
 /// The files of a data root, as relative paths and texts: the working job first, then three done
 /// ones. `now_ms` is the time the newest working line carries, so the sessions are recent when
 /// the bench passes the current time.
 pub fn files(turns: usize, now_ms: i64) -> Vec<(String, String)> {
+    files_shaped(turns, now_ms, Shape::Plain)
+}
+
+/// [`files`] with the working transcript's turns shaped as `shape` says.
+pub fn files_shaped(turns: usize, now_ms: i64, shape: Shape) -> Vec<(String, String)> {
     let mut out = Vec::new();
     out.push(job(WORKING_JOB, "bench-working", "working", now_ms));
     out.push((
         WORKING_TRANSCRIPT.to_owned(),
-        transcript("bench-working", turns, now_ms),
+        transcript("bench-working", turns, now_ms, shape),
     ));
     for n in 1..=3 {
         let (id, session) = (format!("bd00000{n}"), format!("bench-done-{n}"));
@@ -34,7 +52,7 @@ pub fn files(turns: usize, now_ms: i64) -> Vec<(String, String)> {
         out.push(job(&id, &session, "done", at));
         out.push((
             format!("claude/projects/{PROJECT}/{session}.jsonl"),
-            transcript(&session, 2, at),
+            transcript(&session, 2, at, Shape::Plain),
         ));
     }
     out
@@ -55,13 +73,13 @@ fn job(id: &str, session: &str, state: &str, at_ms: i64) -> (String, String) {
 
 /// `turns` turns ending at `end_ms`, one JSON line each and a newline after every one: a user
 /// line, an assistant line with a Bash call, its result and a Markdown reply.
-fn transcript(session: &str, turns: usize, end_ms: i64) -> String {
+fn transcript(session: &str, turns: usize, end_ms: i64, shape: Shape) -> String {
     let lines = turns as i64 * 4;
     let start = end_ms - lines * LINE_GAP_MS;
     let mut out = String::new();
     for turn in 0..turns {
         let at = |k: i64| iso8601(start + (turn as i64 * 4 + k) * LINE_GAP_MS);
-        for line in turn_lines(session, turn, &at) {
+        for line in turn_lines(session, turn, shape, &at) {
             out.push_str(&line.to_string());
             out.push('\n');
         }
@@ -70,9 +88,15 @@ fn transcript(session: &str, turns: usize, end_ms: i64) -> String {
 }
 
 /// One turn's four lines. `at(k)` is the time of its `k`-th line.
-fn turn_lines(session: &str, turn: usize, at: &dyn Fn(i64) -> String) -> [Value; 4] {
+fn turn_lines(session: &str, turn: usize, shape: Shape, at: &dyn Fn(i64) -> String) -> Vec<Value> {
     let tool = format!("{session}-t{turn}");
-    let output = (1..=20)
+    // A tall turn's output is 3,000 lines (every seventh turn); the others' are 20.
+    let lines = if shape == Shape::Tall && turn % 7 == 3 {
+        3000
+    } else {
+        20
+    };
+    let output = (1..=lines)
         .map(|i| {
             format!(
                 "   Compiling bench-crate-{turn}-{i} v0.{i}.0 (/Users/me/work/bench/crates/c{i})"
@@ -80,7 +104,7 @@ fn turn_lines(session: &str, turn: usize, at: &dyn Fn(i64) -> String) -> [Value;
         })
         .collect::<Vec<_>>()
         .join("\n");
-    [
+    let mut lines = vec![
         json!({
             "type": "user",
             "timestamp": at(0),
@@ -121,9 +145,50 @@ fn turn_lines(session: &str, turn: usize, at: &dyn Fn(i64) -> String) -> [Value;
             "message": {
                 "id": format!("{session}-b{turn}"),
                 "model": "claude-opus-5-5",
-                "content": [{"type": "text", "text": reply(turn)}],
+                "content": [{"type": "text", "text": if shape == Shape::Tall && turn % 4 == 1 { long_reply(turn) } else { reply(turn) }}],
                 "usage": {"input_tokens": 1400, "output_tokens": 180},
             },
+        }),
+    ];
+    if shape == Shape::Busy && turn % 6 == 2 {
+        // Sixty more calls between the first result and the reply: they join the first one's
+        // group (no text between them), the way a long working turn's do.
+        let extra: Vec<Value> = (0..60)
+            .flat_map(|k| busy_call(session, turn, k, at(2)))
+            .collect();
+        lines.splice(3..3, extra);
+    }
+    lines
+}
+
+/// Call `k` of a busy turn: a Read of one file and its result.
+fn busy_call(session: &str, turn: usize, k: usize, when: String) -> [Value; 2] {
+    let tool = format!("{session}-x{turn}-{k}");
+    [
+        json!({
+            "type": "assistant",
+            "timestamp": when,
+            "effort": "high",
+            "message": {
+                "id": format!("{tool}-m"),
+                "model": "claude-opus-5-5",
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool,
+                    "name": "Read",
+                    "input": {"file_path": format!("/Users/me/work/bench/crates/parser/src/part{k}.rs")},
+                }],
+                "usage": {"input_tokens": 1300, "output_tokens": 30},
+            },
+        }),
+        json!({
+            "type": "user",
+            "timestamp": when,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool,
+                "content": format!("     1\tpub fn part{k}() {{}}\n     2\t// turn {turn}"),
+            }]},
         }),
     ]
 }
@@ -156,9 +221,19 @@ fn reply(turn: usize) -> String {
     )
 }
 
+/// A long answer: forty sections like [`reply`], a few thousand points tall.
+fn long_reply(turn: usize) -> String {
+    (0..40)
+        .map(|section| reply(turn * 100 + section))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use notchling_engine::transcript::conversation::Parser;
+
+    use notchling_engine::transcript::model::ItemKind;
 
     use super::*;
     use crate::chat::data::DataRoot;
@@ -198,6 +273,60 @@ mod tests {
         }
         let items = parser.conversation().items.len();
         assert!((400..=500).contains(&items), "{items} items");
+    }
+
+    #[test]
+    fn a_tall_fixture_has_rows_far_taller_than_a_window() {
+        let (_, text) = files_shaped(40, T, Shape::Tall)
+            .into_iter()
+            .find(|(path, _)| path == WORKING_TRANSCRIPT)
+            .expect("the working transcript");
+        let plain = files(40, T)
+            .into_iter()
+            .find(|(path, _)| path == WORKING_TRANSCRIPT)
+            .expect("the working transcript")
+            .1;
+        assert!(
+            text.len() > plain.len() * 5,
+            "{} vs {}",
+            text.len(),
+            plain.len()
+        );
+        let mut parser = Parser::default();
+        for line in text.lines() {
+            parser.consume(line.as_bytes());
+        }
+        let longest = parser
+            .conversation()
+            .items
+            .iter()
+            .map(|item| format!("{:?}", item.kind).len())
+            .max()
+            .unwrap_or(0);
+        assert!(longest > 20_000, "{longest}");
+    }
+
+    #[test]
+    fn a_busy_fixture_has_a_group_of_sixty_calls() {
+        let (_, text) = files_shaped(40, T, Shape::Busy)
+            .into_iter()
+            .find(|(path, _)| path == WORKING_TRANSCRIPT)
+            .expect("the working transcript");
+        let mut parser = Parser::default();
+        for line in text.lines() {
+            parser.consume(line.as_bytes());
+        }
+        let largest = parser
+            .conversation()
+            .items
+            .iter()
+            .map(|item| match &item.kind {
+                ItemKind::Tools(calls) => calls.len(),
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(largest >= 60, "{largest}");
     }
 
     #[test]

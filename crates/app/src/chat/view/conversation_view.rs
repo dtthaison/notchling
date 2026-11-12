@@ -370,6 +370,7 @@ impl Render for ConversationView {
         let s = &self.s;
         let body = conversation::empty_column(input, s, a, cx);
         let pill = conversation::latest_pill(s, input.loading, a, cx);
+        let list = s.list.clone();
         let column = match body {
             Some(column) => column.into_any_element(),
             None => div()
@@ -380,6 +381,14 @@ impl Render for ConversationView {
                 // First, so each draw's texts are noted afresh before the rows place theirs.
                 .child(row_select::listener(s.sel.clone(), cx.entity().downgrade()))
                 .child(self.list_column(cx))
+                .when(super::scroll_probe::enabled(), |d| {
+                    d.child(super::scroll_probe::frame_canvas(list, || {
+                        (
+                            super::pane::ROWS.load(Ordering::Relaxed),
+                            super::pane::LIST_CHANGES.load(Ordering::Relaxed),
+                        )
+                    }))
+                })
                 .into_any_element(),
         };
         div()

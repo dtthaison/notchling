@@ -114,6 +114,8 @@ struct Root {
 impl Render for Root {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
         FRAMES.fetch_add(1, Ordering::Relaxed);
+        // The bench's recorder times the draw from here (a no-op when it is off).
+        crate::chat::view::scroll_probe::draw_started();
         self.view.clone()
     }
 }

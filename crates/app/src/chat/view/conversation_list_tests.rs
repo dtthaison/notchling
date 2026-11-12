@@ -302,3 +302,15 @@ fn a_drag_scroll_moves_a_list_that_follows_its_end_at_once() {
     assert_eq!(scroll_target(5.0, 500.0, -40.0), 0.0);
     assert_eq!(scroll_target(0.0, 0.0, 30.0), 0.0);
 }
+
+#[test]
+fn a_draw_with_nothing_new_leaves_a_reader_near_the_end_where_they_are() {
+    // At the bottom and something changed: follow. Within the tolerance but nothing changed: the
+    // reader took a small step up, which the next draw must not undo.
+    assert!(goes_to_end(true, false, true));
+    assert!(!goes_to_end(true, false, false));
+    // Scrolled up: an append doesn't move them, a send or a pick does.
+    assert!(!goes_to_end(false, false, true));
+    assert!(goes_to_end(false, true, false));
+    assert!(goes_to_end(true, true, true));
+}

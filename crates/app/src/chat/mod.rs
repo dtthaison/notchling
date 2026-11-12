@@ -57,6 +57,7 @@ mod question_parity_tests;
 pub mod reload;
 pub mod renders;
 pub mod rows;
+pub mod scroll_trace;
 pub mod selection;
 pub mod sidebar;
 pub mod simulator;
