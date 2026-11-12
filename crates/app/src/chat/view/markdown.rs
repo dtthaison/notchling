@@ -2,6 +2,9 @@
 //! blocks, each paragraph's spans as one styled text, links clickable (`page_panel::follow_link`:
 //! an Artifact opens beside the chat, anything else in the browser).
 
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
 use gpui::{
     div, font, img, prelude::*, px, AnyElement, ClipboardItem, Div, FontStyle, FontWeight,
     InteractiveText, MouseButton, ObjectFit, SharedString, StrikethroughStyle, StyledText, TextRun,
@@ -13,6 +16,7 @@ use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SY
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use crate::chat::markdown::{blocks, image_links, spans, Block, LinkPress, ListItem, Span};
+use crate::chat::paths::{self, Probe};
 
 /// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
@@ -22,8 +26,15 @@ const IMAGE_WIDTH: f32 = 360.0;
 /// The spans of `text` as one text element: bold, italics, code (the mono face on a raised wash),
 /// strikethrough, links (accent, underlined, clickable). `weight` is the text's own weight (a
 /// heading's), `ink` its color. `key` makes the element's id unique in the window.
-fn inline(key: &str, text: &str, weight: FontWeight, ink: Ink, a: Appearance) -> AnyElement {
-    let spans = spans(text);
+fn inline(
+    key: &str,
+    text: &str,
+    weight: FontWeight,
+    ink: Ink,
+    bases: &[PathBuf],
+    a: Appearance,
+) -> AnyElement {
+    let spans = link_paths(spans(text), bases);
     let mut full = String::new();
     let mut runs: Vec<TextRun> = Vec::with_capacity(spans.len());
     let mut links: Vec<(std::ops::Range<usize>, String)> = Vec::new();
@@ -103,7 +114,74 @@ pub(super) fn image_shape(path: &str) -> Option<(u32, u32)> {
     shape
 }
 
+/// How long what the disk said about a path is kept: a message is drawn every frame, and a path
+/// in it is looked up each time.
+const DISK_TTL: Duration = Duration::from_secs(3);
+
+/// What the disk has, remembered for [`DISK_TTL`].
+struct CachedDisk {
+    home: Option<PathBuf>,
+}
+
+type Seen = std::collections::HashMap<PathBuf, (Instant, bool, bool)>;
+
+impl CachedDisk {
+    fn look(&self, path: &Path) -> (bool, bool) {
+        SEEN.with(|seen| {
+            let mut seen = seen.borrow_mut();
+            if let Some((at, exists, dir)) = seen.get(path) {
+                if at.elapsed() < DISK_TTL {
+                    return (*exists, *dir);
+                }
+            }
+            if seen.len() > 4096 {
+                seen.clear();
+            }
+            let found = (path.exists(), path.is_dir());
+            seen.insert(path.to_path_buf(), (Instant::now(), found.0, found.1));
+            found
+        })
+    }
+}
+
+impl Probe for CachedDisk {
+    fn exists(&self, path: &Path) -> bool {
+        self.look(path).0
+    }
+    fn is_dir(&self, path: &Path) -> bool {
+        self.look(path).1
+    }
+    fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
+    }
+}
+
+fn disk() -> CachedDisk {
+    CachedDisk {
+        home: std::env::var_os("HOME").map(PathBuf::from),
+    }
+}
+
+/// The folders a message's relative paths are read against.
+fn path_bases(text: &str, folder: &str) -> Vec<PathBuf> {
+    paths::bases(text, folder, &disk())
+}
+
+/// The spans with the paths that exist made links (`chat::paths`).
+fn link_paths(spans: Vec<Span>, bases: &[PathBuf]) -> Vec<Span> {
+    if bases.is_empty()
+        && !spans
+            .iter()
+            .any(|s| s.text.contains('/') || s.link.is_some())
+    {
+        return spans;
+    }
+    paths::link_spans(spans, bases, &disk())
+}
+
 thread_local! {
+    /// What the disk said about each path lately.
+    static SEEN: std::cell::RefCell<Seen> = Default::default();
     /// Image shapes read so far, by path.
     static SHAPES: std::cell::RefCell<std::collections::HashMap<String, Option<(u32, u32)>>> =
         Default::default();
@@ -210,7 +288,14 @@ pub fn plain(key: &str, text: &str, a: Appearance) -> AnyElement {
     super::select::selectable(key, text, layout, styled.into_any_element(), a).into_any_element()
 }
 
-fn heading(key: &str, level: usize, text: &str, first: bool, a: Appearance) -> Div {
+fn heading(
+    key: &str,
+    level: usize,
+    text: &str,
+    first: bool,
+    bases: &[PathBuf],
+    a: Appearance,
+) -> Div {
     let size = match level {
         1 => 18.0,
         2 => 16.0,
@@ -235,10 +320,10 @@ fn heading(key: &str, level: usize, text: &str, first: bool, a: Appearance) -> D
         .text_size(px(size))
         .font_weight(weight)
         .ink(Ink::Text, a)
-        .child(inline(key, text, weight, Ink::Text, a))
+        .child(inline(key, text, weight, Ink::Text, bases, a))
 }
 
-fn paragraph(key: &str, text: &str, ink: Ink, a: Appearance) -> Div {
+fn paragraph(key: &str, text: &str, ink: Ink, bases: &[PathBuf], a: Appearance) -> Div {
     let images = image_links(text)
         .into_iter()
         .filter(|path| std::path::Path::new(path).is_file());
@@ -246,7 +331,7 @@ fn paragraph(key: &str, text: &str, ink: Ink, a: Appearance) -> Div {
         .kit_type(TypeRole::Body)
         .line_height(px(BODY_LINE))
         .ink(ink, a)
-        .child(inline(key, text, FontWeight::NORMAL, ink, a))
+        .child(inline(key, text, FontWeight::NORMAL, ink, bases, a))
         .children(images.map(|path| image(key, &path, a)))
 }
 
@@ -275,7 +360,7 @@ fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
         )
 }
 
-fn list(key: &str, items: &[ListItem], a: Appearance) -> Div {
+fn list(key: &str, items: &[ListItem], bases: &[PathBuf], a: Appearance) -> Div {
     div()
         .flex()
         .flex_col()
@@ -304,14 +389,14 @@ fn list(key: &str, items: &[ListItem], a: Appearance) -> Div {
                 .gap(px(8.0))
                 .child(marker)
                 .child(
-                    paragraph(&format!("{key}-{i}"), &item.text, Ink::Text, a)
+                    paragraph(&format!("{key}-{i}"), &item.text, Ink::Text, bases, a)
                         .flex_1()
                         .min_w(px(0.0)),
                 )
         }))
 }
 
-fn quote(key: &str, text: &str, a: Appearance) -> Div {
+fn quote(key: &str, text: &str, bases: &[PathBuf], a: Appearance) -> Div {
     div()
         .flex()
         .items_start()
@@ -324,7 +409,7 @@ fn quote(key: &str, text: &str, a: Appearance) -> Div {
                 .bg(hsla(Ink::Accent.color(a).with_alpha(0.6))),
         )
         .child(
-            paragraph(key, text, Ink::TextMuted, a)
+            paragraph(key, text, Ink::TextMuted, bases, a)
                 .flex_1()
                 .min_w(px(0.0)),
         )
@@ -367,7 +452,13 @@ fn code(key: &str, language: &str, text: &str, a: Appearance) -> Div {
         )
 }
 
-fn table(key: &str, header: &[String], rows: &[Vec<String>], a: Appearance) -> Div {
+fn table(
+    key: &str,
+    header: &[String],
+    rows: &[Vec<String>],
+    bases: &[PathBuf],
+    a: Appearance,
+) -> Div {
     let cell = |key: String, text: &str, head: bool| {
         div()
             .flex_1()
@@ -392,6 +483,7 @@ fn table(key: &str, header: &[String], rows: &[Vec<String>], a: Appearance) -> D
                     FontWeight::NORMAL
                 },
                 Ink::Text,
+                bases,
                 a,
             ))
     };
@@ -430,19 +522,23 @@ fn table(key: &str, header: &[String], rows: &[Vec<String>], a: Appearance) -> D
     table
 }
 
-/// The message as blocks, 10 pt apart. `key` makes the ids unique (the item's id).
-pub fn render(key: &str, text: &str, a: Appearance) -> Div {
+/// The message as blocks, 10 pt apart. `key` makes the ids unique (the item's id); `folder` is
+/// the session's (or the file's own), which a path in the text is read against after the folders
+/// the text names (`chat::paths`).
+pub fn render(key: &str, text: &str, folder: &str, a: Appearance) -> Div {
     let blocks = blocks(text);
+    let bases = path_bases(text, folder);
+    let bases = bases.as_slice();
     let mut column = div().w_full().flex().flex_col().gap(px(10.0));
     for (i, block) in blocks.iter().enumerate() {
         let k = format!("{key}-{i}");
         column = column.child(match block {
-            Block::Heading { level, text } => heading(&k, *level, text, i == 0, a),
-            Block::Paragraph(text) => paragraph(&k, text, Ink::Text, a),
-            Block::List(items) => list(&k, items, a),
-            Block::Quote(text) => quote(&k, text, a),
+            Block::Heading { level, text } => heading(&k, *level, text, i == 0, bases, a),
+            Block::Paragraph(text) => paragraph(&k, text, Ink::Text, bases, a),
+            Block::List(items) => list(&k, items, bases, a),
+            Block::Quote(text) => quote(&k, text, bases, a),
             Block::Code { language, text } => code(&k, language, text, a),
-            Block::Table { header, rows } => table(&k, header, rows, a),
+            Block::Table { header, rows } => table(&k, header, rows, bases, a),
             Block::Rule => div().h(px(1.0)).my(px(4.0)).fill(Ink::Hairline, a),
         });
     }

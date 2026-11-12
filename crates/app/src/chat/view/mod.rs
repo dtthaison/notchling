@@ -294,6 +294,9 @@ impl ChatView {
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
         }
+        if let Ok(path) = std::env::var(page_panel::FILE_ENV) {
+            view.page.preview_file(&path);
+        }
         view.page.render_only = true;
         if switch(PARTS_ENV) {
             set_parts(cx, true);
@@ -819,6 +822,7 @@ impl ChatView {
         if opinions::any_running(self, cx) {
             cx.notify();
         }
+        self.refresh_file(cx);
         if self.gate.due(now_ms()) {
             self.start_load(cx);
         }

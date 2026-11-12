@@ -649,19 +649,25 @@ fn row_element(
         } => user_row(id, text, *images, *queued, *sending, a, cx),
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
         // left edge, which the thoughts, the steps and the reply box share.
-        Row::Assistant { text } => div().w_full().flex().items_start().child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .px(px(14.0))
-                .py(px(12.0))
-                .rounded(px(RADIUS_CARD))
-                .fill(Ink::Card, a)
-                .border(px(1.0))
-                .border_color(hsla(Ink::Hairline.color(a)))
-                .child(markdown::render(id, text, a))
-                .part("Claude's Reply", a, cx),
-        ),
+        Row::Assistant { text } => {
+            let folder = view
+                .selected_session()
+                .map(|s| s.agent.cwd.as_str())
+                .unwrap_or("");
+            div().w_full().flex().items_start().child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .px(px(14.0))
+                    .py(px(12.0))
+                    .rounded(px(RADIUS_CARD))
+                    .fill(Ink::Card, a)
+                    .border(px(1.0))
+                    .border_color(hsla(Ink::Hairline.color(a)))
+                    .child(markdown::render(id, text, folder, a))
+                    .part("Claude's Reply", a, cx),
+            )
+        }
         Row::Thinking { title, text } => thinking(view, id, title, text, a, cx),
         Row::Tools(tools) => step_group(view, id, tools, live, a, cx),
         Row::TurnEnd { text } => div()

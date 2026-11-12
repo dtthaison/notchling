@@ -4,6 +4,8 @@
 //! the library has one, else the live claude.ai page. Any other link goes to the browser, as before.
 //! The GPUI panel (`view::page_panel`) and the web view (`pages::web`) only do what this decides.
 
+use std::path::PathBuf;
+
 use crate::pages::dates;
 use crate::search::wire::Page;
 
@@ -36,6 +38,12 @@ pub enum Opens {
     Saved(Box<Page>),
     /// An Artifact the library doesn't have: the live page in the panel.
     Live(ArtifactLink),
+    /// A file on this Mac the panel shows (`chat::file_panel`): Markdown, text, code, a picture.
+    File(PathBuf),
+    /// A folder on this Mac: Finder.
+    Folder(PathBuf),
+    /// A file the panel can't show (a PDF, a video, a binary): its own app.
+    System(PathBuf),
     /// Anything else: the browser, as every link did before.
     Browser,
 }
@@ -143,7 +151,7 @@ pub fn subtitle(opens: &Opens) -> String {
         }
         Opens::Saved(_) => "Saved copy".to_owned(),
         Opens::Live(_) => "Live on claude.ai".to_owned(),
-        Opens::Browser => String::new(),
+        Opens::File(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => String::new(),
     }
 }
 
