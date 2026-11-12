@@ -206,13 +206,13 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
     }
 }
 
-/// "71.1k in · 650 out · 68.2k cached (96%)": the cache share is of the input; left out with no
-/// cache reads.
+/// "71.1k in · 650 out", then on its own line "68.2k cached (96%)": the cache share is of the
+/// input; left out with no cache reads.
 pub fn token_line(input: u64, output: u64, cached: u64) -> String {
     let mut line = format!("{} in · {} out", tokens(input), tokens(output));
     if cached > 0 && input > 0 {
         let share = (cached as f64 / input as f64 * 100.0).round().min(100.0);
-        line.push_str(&format!(" · {} cached ({share}%)", tokens(cached)));
+        line.push_str(&format!("\n{} cached ({share}%)", tokens(cached)));
     }
     line
 }
@@ -672,7 +672,7 @@ mod tests {
         assert_eq!(token_line(71_100, 650, 0), "71.1k in · 650 out");
         assert_eq!(
             token_line(71_100, 650, 68_200),
-            "71.1k in · 650 out · 68.2k cached (96%)"
+            "71.1k in · 650 out\n68.2k cached (96%)"
         );
         assert_eq!(token_line(0, 10, 5), "0 in · 10 out");
     }
