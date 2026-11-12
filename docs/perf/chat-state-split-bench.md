@@ -292,3 +292,18 @@ reaches the window's view fine when the screen is locked (AppKit events handed t
 view, as for `scroll`); `prepare` now waits until a row has been built (up to 5 s) and 300 ms more
 before pressing. The new test `bench_select_draws_the_conversation_only` asserts the conversation
 drew (so a press that missed can't pass), the Sidebar and the Details Panel didn't.
+
+## Task 6.2 (the kit's scroll bar over a list)
+
+The list probe now draws its list through `scrollable_list` and gate G7 reads where the bar put its
+thumb (`Scrollable::record_thumb`). A release build, the screen locked (frames forced), 2026-11-12:
+G1 to G5 pass as before (G6 still fails alone, as in the spike), and
+
+| Gate | What it checks | Result |
+| --- | --- | --- |
+| G7 bar | the thumb's bottom against the track's bottom: while following, while the last row grows, scrolled up 1500 pt, and back at the end | 0.0 px following, 0.0 px while growing, 45.7 px scrolled up (thumb 541 to 571 of a track ending at 617), 0.0 px back at the end: pass |
+
+One thing the probe taught: a list at its end counts as scrolled to the end of its content (the
+scroll top is past the last scroll position by a viewport), so a `scroll_by` of less than a
+viewport from there leaves it following. Phase 6's code that scrolls the list by a step must start
+from `scroll_px_offset_for_scrollbar`/`logical_scroll_top`, not assume the end is a scroll position.

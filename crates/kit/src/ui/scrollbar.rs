@@ -19,20 +19,23 @@
 //!
 //! The scroll position is the container's [`ScrollHandle`]: pass the view's own with
 //! [`Scrollable::tracking`] (which also does `track_scroll`), or leave it out and the bar keeps one in
-//! element state under the div's id. The numbers are in [`crate::scrollbar`].
+//! element state under the div's id. Over a GPUI list, [`scrollable_list`] follows its
+//! [`ListState`] instead: the list scrolls itself, the bar reads where it is and moves it. The
+//! numbers are in [`crate::scrollbar`].
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
     fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div, Element,
     ElementId, Global, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent, Stateful, StatefulInteractiveElement,
-    Window,
+    InteractiveElement, IntoElement, LayoutId, List, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent, Stateful,
+    StatefulInteractiveElement, Window,
 };
 
+use super::scrollbar_track::{scroll_to, Geometry, Track};
 use super::{hsla, window_appearance};
 use crate::scrollbar::{self as math, EDGE_INSET, THUMB_WIDTH, THUMB_WIDTH_HOVER, ZONE_WIDTH};
 use crate::Ink;
@@ -57,15 +60,50 @@ pub fn scrollable(mut inner: Stateful<Div>) -> Scrollable {
         .unwrap_or_else(|| ElementId::Name("scrollable".into()));
     Scrollable {
         id,
-        inner: Some(inner),
+        inner: Some(Inner::Div(Box::new(inner))),
         handle: None,
+        list: None,
+        thumb: None,
     }
 }
 
+/// The bar over a GPUI list. `list` must fill the box the bar sits in (give it `size_full()` or
+/// `flex_1()`), and `state` is the list's own `ListState`.
+pub fn scrollable_list(id: impl Into<ElementId>, list: List, state: &ListState) -> Scrollable {
+    Scrollable {
+        id: id.into(),
+        inner: Some(Inner::Any(list.into_any_element())),
+        handle: None,
+        list: Some(state.clone()),
+        thumb: None,
+    }
+}
+
+enum Inner {
+    // Boxed: a styled div is far larger than the list's one element.
+    Div(Box<Stateful<Div>>),
+    Any(AnyElement),
+}
+
+/// Where the thumb sat in the last frame (window coordinates), for a render that checks it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThumbAt {
+    pub top: f32,
+    pub bottom: f32,
+    /// The track the thumb travels in.
+    pub track_top: f32,
+    pub track_bottom: f32,
+}
+
+/// Where [`Scrollable::record_thumb`] writes.
+pub type ThumbRecord = Rc<Cell<Option<ThumbAt>>>;
+
 pub struct Scrollable {
     id: ElementId,
-    inner: Option<Stateful<Div>>,
+    inner: Option<Inner>,
     handle: Option<ScrollHandle>,
+    list: Option<ListState>,
+    thumb: Option<ThumbRecord>,
 }
 
 impl Scrollable {
@@ -73,6 +111,13 @@ impl Scrollable {
     /// reads its offset. Replaces the div's own `track_scroll`.
     pub fn tracking(mut self, handle: &ScrollHandle) -> Self {
         self.handle = Some(handle.clone());
+        self
+    }
+
+    /// Writes the thumb's place each frame to `record` (`None` when the content fits): for a
+    /// render that checks the bar, never for the app.
+    pub fn record_thumb(mut self, record: &ThumbRecord) -> Self {
+        self.thumb = Some(record.clone());
         self
     }
 }
@@ -102,7 +147,7 @@ type Shared = Rc<RefCell<Bar>>;
 pub struct Layout {
     inner: AnyElement,
     bar: Shared,
-    handle: ScrollHandle,
+    track: Track,
 }
 
 pub struct Prepainted {
@@ -159,17 +204,25 @@ impl Element for Scrollable {
                 shown: false,
             })),
         };
-        let handle = self
-            .handle
-            .clone()
-            .unwrap_or_else(|| bar.borrow().own.clone());
-        let mut inner = self
-            .inner
-            .take()
-            .map(|inner| inner.track_scroll(&handle).into_any_element())
-            .unwrap_or_else(|| gpui::div().into_any_element());
+        let (mut inner, track) = match (self.inner.take(), &self.list) {
+            (Some(Inner::Any(list)), Some(state)) => (list, Track::List(state.clone())),
+            (Some(Inner::Div(div)), _) => {
+                let handle = self
+                    .handle
+                    .clone()
+                    .unwrap_or_else(|| bar.borrow().own.clone());
+                (
+                    (*div).track_scroll(&handle).into_any_element(),
+                    Track::Div(handle),
+                )
+            }
+            (_, _) => (
+                gpui::div().into_any_element(),
+                Track::Div(bar.borrow().own.clone()),
+            ),
+        };
         let layout = inner.request_layout(window, cx);
-        (layout, Layout { inner, bar, handle })
+        (layout, Layout { inner, bar, track })
     }
 
     fn prepaint(
@@ -183,7 +236,7 @@ impl Element for Scrollable {
     ) -> Prepainted {
         layout.inner.prepaint(window, cx);
         // The div has measured its content by now.
-        let scrolls = f32::from(layout.handle.max_offset().height) > 0.5;
+        let scrolls = layout.track.max_offset() > 0.5;
         let zone = scrolls.then(|| {
             // The strip passes presses and the pointer through while the bar is hidden.
             let behavior = if layout.bar.borrow().shown {
@@ -211,11 +264,20 @@ impl Element for Scrollable {
             layout.bar.borrow_mut().shown = false;
             return;
         };
-        let handle = layout.handle.clone();
+        let track = layout.track.clone();
         let bar = layout.bar.clone();
         // The view the bar is in: its changes draw that view, not the whole window.
         let view = window.current_view();
-        let geometry = Geometry::of(bounds, &handle);
+        let geometry = Geometry::of(bounds, &track);
+        if let Some(record) = &self.thumb {
+            let track_top = f32::from(bounds.top()) + EDGE_INSET;
+            record.set(geometry.thumb().map(|t| ThumbAt {
+                top: track_top + t.start,
+                bottom: track_top + t.end(),
+                track_top,
+                track_bottom: track_top + geometry.track,
+            }));
+        }
         let now = Instant::now();
         let appearance = window_appearance(window);
         let pinned = cx.has_global::<PinScrollbars>();
@@ -294,7 +356,7 @@ impl Element for Scrollable {
 
         // The pointer moving: hover, and the thumb following a drag.
         {
-            let (bar, handle, zone) = (bar.clone(), handle.clone(), zone.clone());
+            let (bar, track, zone) = (bar.clone(), track.clone(), zone.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble {
                     return;
@@ -302,7 +364,7 @@ impl Element for Scrollable {
                 let mut state = bar.borrow_mut();
                 if let Some(drag) = state.drag {
                     if event.pressed_button == Some(MouseButton::Left) {
-                        let geometry = Geometry::of(bounds, &handle);
+                        let geometry = Geometry::of(bounds, &track);
                         let moved = f32::from(event.position.y) - drag.pointer;
                         let to = math::scrolled_for_drag(
                             geometry.track,
@@ -311,9 +373,10 @@ impl Element for Scrollable {
                             drag.scrolled,
                             moved,
                         );
-                        scroll_to(&handle, to);
+                        scroll_to(&track, to);
                     } else {
                         state.drag = None;
+                        track.drag_ended();
                     }
                     cx.notify(view);
                     cx.stop_propagation();
@@ -332,7 +395,7 @@ impl Element for Scrollable {
         }
         // A press: on the thumb it grabs it, in the track it pages. The content never sees it.
         {
-            let (bar, handle, zone) = (bar.clone(), handle.clone(), zone.clone());
+            let (bar, track, zone) = (bar.clone(), track.clone(), zone.clone());
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble
                     || event.button != MouseButton::Left
@@ -344,7 +407,7 @@ impl Element for Scrollable {
                 if !state.shown && !state.hovered {
                     return;
                 }
-                let geometry = Geometry::of(bounds, &handle);
+                let geometry = Geometry::of(bounds, &track);
                 let y = f32::from(event.position.y) - f32::from(bounds.top()) - EDGE_INSET;
                 match math::scrolled_for_page(
                     geometry.track,
@@ -353,8 +416,9 @@ impl Element for Scrollable {
                     geometry.scrolled,
                     y,
                 ) {
-                    Some(to) => scroll_to(&handle, to),
+                    Some(to) => scroll_to(&track, to),
                     None => {
+                        track.drag_started();
                         state.drag = Some(Drag {
                             pointer: f32::from(event.position.y),
                             scrolled: geometry.scrolled,
@@ -367,13 +431,14 @@ impl Element for Scrollable {
             });
         }
         {
-            let (bar, zone) = (bar.clone(), zone.clone());
+            let (bar, track, zone) = (bar.clone(), track.clone(), zone.clone());
             window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
                     return;
                 }
                 let mut state = bar.borrow_mut();
                 if state.drag.take().is_some() {
+                    track.drag_ended();
                     state.hovered = zone.is_hovered(window);
                     state.active = Some(Instant::now());
                     cx.notify(view);
@@ -398,36 +463,4 @@ fn strip(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
         origin: point(bounds.right() - px(ZONE_WIDTH), bounds.top()),
         size: size(px(ZONE_WIDTH), bounds.size.height),
     }
-}
-
-/// The scroll container's numbers this frame, in the kit's terms (points scrolled down, not
-/// GPUI's negative offset).
-#[derive(Clone, Copy)]
-struct Geometry {
-    track: f32,
-    viewport: f32,
-    content: f32,
-    scrolled: f32,
-}
-
-impl Geometry {
-    fn of(bounds: Bounds<Pixels>, handle: &ScrollHandle) -> Self {
-        let viewport = f32::from(bounds.size.height);
-        Geometry {
-            track: (viewport - 2.0 * EDGE_INSET).max(0.0),
-            viewport,
-            content: viewport + f32::from(handle.max_offset().height),
-            scrolled: -f32::from(handle.offset().y),
-        }
-    }
-
-    fn thumb(self) -> Option<math::Thumb> {
-        math::thumb(self.track, self.viewport, self.content, self.scrolled)
-    }
-}
-
-/// Scrolls the container to `scrolled` points down, keeping its horizontal offset.
-fn scroll_to(handle: &ScrollHandle, scrolled: f32) {
-    let offset = handle.offset();
-    handle.set_offset(point(offset.x, px(-scrolled)));
 }

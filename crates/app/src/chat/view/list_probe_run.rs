@@ -2,13 +2,15 @@
 //! the list, notify, wait for the child view to paint, read what the rows recorded. Prints
 //! `list-probe: {"g1": …, …}` and exits 0 (a check that can't draw exits 1).
 //!
-//! G1 follow, G2 anchor, G3 cost, G4 resize, G5 at the bottom, G6 spinners; each is an object with
+//! G1 follow, G2 anchor, G3 cost, G4 resize, G5 at the bottom, G6 spinners, G7 the kit's bar
+//! (Task 6.2); each is an object with
 //! `pass` and the numbers behind it.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::{point, px, AsyncApp, Bounds, Context, Entity, ListOffset, Pixels};
+use notchling_kit::ui::ThumbAt;
 use serde_json::{json, Value};
 
 use super::list_probe::{ListProbe, ProbeList, LAST, NARROW, ROWS, WORDS_PER_LINE};
@@ -148,8 +150,11 @@ impl Script {
         let g5 = self.g5().await?;
         let g4 = self.g4(height_before).await?;
         let g6 = self.g6().await?;
+        let g7 = self.g7().await?;
         let frames = self.with(|p, _| p.frame.paints.get())?;
-        Ok(json!({"g1": g1, "g2": g2, "g3": g3, "g4": g4, "g5": g5, "g6": g6, "frames": frames}))
+        Ok(
+            json!({"g1": g1, "g2": g2, "g3": g3, "g4": g4, "g5": g5, "g6": g6, "g7": g7, "frames": frames}),
+        )
     }
 
     /// G1: while following, the last row grows ten times; its bottom stays on the viewport's.
@@ -347,6 +352,42 @@ impl Script {
             "slots_in_a_plain_frame": control,
             "slots_after_an_autoscroll_retry": retried,
             "slots_a_plain_frame_later": after,
+        }))
+    }
+}
+
+impl Script {
+    /// G7: the kit's bar over the list: while the list follows its end, the thumb's bottom is at
+    /// the track's bottom; scrolled up it is not, and it is back at the bottom after the way down.
+    async fn g7(&self) -> Step<Value> {
+        self.to_end().await?;
+        self.tick(2).await?;
+        let following = self.with(|p, _| p.thumb.get())?;
+        let gap =
+            |t: Option<ThumbAt>| t.map_or(f32::INFINITY, |t| (t.track_bottom - t.bottom).abs());
+        let end_gap = gap(following);
+        // Grow the last row while following: the thumb stays at the end.
+        self.grow(LAST, 1)?;
+        self.tick(2).await?;
+        let grown_gap = gap(self.with(|p, _| p.thumb.get())?);
+        // Up from the end. A list at its end counts as scrolled to the end of its content, a
+        // viewport past the last scroll position, so the first step has to be longer than that.
+        self.with(|p, _| p.state.scroll_by(px(-1500.0)))?;
+        self.tick(3).await?;
+        let up = self.with(|p, _| p.thumb.get())?;
+        let up_gap = gap(up);
+        self.to_end().await?;
+        self.tick(2).await?;
+        let back_gap = gap(self.with(|p, _| p.thumb.get())?);
+        Ok(json!({
+            "pass": end_gap <= TOLERANCE && grown_gap <= TOLERANCE && back_gap <= TOLERANCE
+                && up_gap > TOLERANCE,
+            "following_gap_px": end_gap,
+            "following_while_growing_gap_px": grown_gap,
+            "scrolled_up_gap_px": up_gap,
+            "back_at_the_end_gap_px": back_gap,
+            "thumb_scrolled_up": up.map(|t| json!([t.top, t.bottom, t.track_bottom])),
+            "thumb_when_following": following.map(|t| json!([t.top, t.bottom, t.track_bottom])),
         }))
     }
 }

@@ -7,7 +7,8 @@
 //! exits; without it, it only shows the list.
 //!
 //! What the rows record while they paint is the truth the checks read: each row's painted bounds
-//! and the viewport's, so a check never trusts the list's own bookkeeping alone.
+//! and the viewport's, so a check never trusts the list's own bookkeeping alone. The list is drawn
+//! through the kit's scroll bar (`scrollable_list`), whose thumb gate G7 reads.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,8 +19,8 @@ use gpui::{
     ListAlignment, ListSizingBehavior, ListState, Pixels, StyleRefinement, Window,
 };
 use notchling_kit::ui::{
-    drop_spinner_host, host_spinners, spin_host, spinner, window_appearance, KitStyled, SpinLayer,
-    SpinSlots,
+    drop_spinner_host, host_spinners, scrollable_list, spin_host, spinner, window_appearance,
+    KitStyled, SpinLayer, SpinSlots, ThumbRecord,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -82,6 +83,8 @@ pub struct ProbeList {
     pub infer: bool,
     /// The last row asks to be scrolled into view, with room below it, while it paints.
     pub autoscroll: Rc<Cell<bool>>,
+    /// Where the kit's scroll bar put its thumb in the latest frame (gate G7).
+    pub thumb: ThumbRecord,
     _release: gpui::Subscription,
 }
 
@@ -97,6 +100,7 @@ impl ProbeList {
             spins,
             infer: false,
             autoscroll: Rc::new(Cell::new(false)),
+            thumb: Rc::default(),
             _release: cx.on_release(move |_, cx| drop_spinner_host(cx, id)),
         }
     }
@@ -173,7 +177,9 @@ impl Render for ProbeList {
             ListSizingBehavior::Auto
         });
         let frame = self.frame.clone();
-        div().size_full().relative().child(rows).child(
+        // Through the kit's bar, as the conversation draws its list (Task 6.2).
+        let bar = scrollable_list("probe-list", rows, &self.state).record_thumb(&self.thumb);
+        div().size_full().relative().child(bar).child(
             canvas(
                 |bounds, _, _| bounds,
                 move |bounds, _, _, _| {

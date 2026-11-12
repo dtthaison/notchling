@@ -145,6 +145,23 @@ pub fn holds(over: bool, shown: bool, hovered: bool) -> bool {
     over && (shown || hovered)
 }
 
+/// How far a GPUI list is scrolled down, in the kit's terms. A list that follows its end (a
+/// bottom-aligned one at the bottom) has no offset of its own to read: it is at `max`. Otherwise
+/// the offset it reports, kept inside `0..=max`: that range comes from the rows measured so far,
+/// and a row measured since can leave the offset past it.
+pub(crate) fn list_scrolled(following: bool, offset: f32, max: f32) -> f32 {
+    let max = max.max(0.0);
+    if following {
+        max
+    } else {
+        offset.clamp(0.0, max)
+    }
+}
+
+#[cfg(test)]
+#[path = "scrollbar_list_tests.rs"]
+mod list_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
