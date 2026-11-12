@@ -379,42 +379,54 @@ pub fn inspector(
         tasks: task_rows(conversation),
         facts: facts(conversation),
         subagents: subagents.iter().map(subagent_row).collect(),
-        shells: conversation
-            .shells
-            .iter()
-            .map(|shell| {
-                let state = shells::state(shell, &conversation.finished_agents, writers);
-                let (status, word, mark) = match state {
-                    ShellState::Running => (Status::Working, "Running".to_owned(), Mark::Spinner),
-                    ShellState::Ended(how) => {
-                        let ok = how == "completed";
-                        (
-                            if ok { Status::Done } else { Status::Needs },
-                            capitalized(&how),
-                            if ok {
-                                Mark::Icon(Icon::Done, Ink::Done)
-                            } else {
-                                Mark::Icon(Icon::Failed, Ink::Expired)
-                            },
-                        )
+        shells: running_first(
+            conversation
+                .shells
+                .iter()
+                .map(|shell| {
+                    let state = shells::state(shell, &conversation.finished_agents, writers);
+                    let (status, word, mark) = match state {
+                        ShellState::Running => {
+                            (Status::Working, "Running".to_owned(), Mark::Spinner)
+                        }
+                        ShellState::Ended(how) => {
+                            let ok = how == "completed";
+                            (
+                                if ok { Status::Done } else { Status::Needs },
+                                capitalized(&how),
+                                if ok {
+                                    Mark::Icon(Icon::Done, Ink::Done)
+                                } else {
+                                    Mark::Icon(Icon::Failed, Ink::Expired)
+                                },
+                            )
+                        }
+                    };
+                    ShellRow {
+                        title: if shell.title.is_empty() {
+                            shell.command.clone()
+                        } else {
+                            shell.title.clone()
+                        },
+                        command: shell.command.clone(),
+                        status,
+                        status_word: word,
+                        running: status == Status::Working,
+                        mark,
+                        output_path: shell.output_path.clone(),
                     }
-                };
-                ShellRow {
-                    title: if shell.title.is_empty() {
-                        shell.command.clone()
-                    } else {
-                        shell.title.clone()
-                    },
-                    command: shell.command.clone(),
-                    status,
-                    status_word: word,
-                    running: status == Status::Working,
-                    mark,
-                    output_path: shell.output_path.clone(),
-                }
-            })
-            .collect(),
+                })
+                .collect(),
+        ),
     }
+}
+
+/// Shells newest first, the running ones on top.
+fn running_first(mut rows: Vec<ShellRow>) -> Vec<ShellRow> {
+    rows.reverse();
+    // Stable: each group keeps newest first.
+    rows.sort_by_key(|row| !row.running);
+    rows
 }
 
 fn capitalized(word: &str) -> String {
@@ -527,13 +539,14 @@ mod tests {
                 ("Commands", "3".to_owned()),
             ]
         );
-        assert_eq!(i.shells[0].title, "Run tests");
+        // Newest first.
+        assert_eq!(i.shells[1].title, "Run tests");
         assert_eq!(
-            (i.shells[0].status, i.shells[0].status_word.as_str()),
+            (i.shells[1].status, i.shells[1].status_word.as_str()),
             (Status::Done, "Completed")
         );
-        assert_eq!(i.shells[1].title, "sleep 9", "no description: the command");
-        assert_eq!(i.shells[1].status_word, "Ended");
+        assert_eq!(i.shells[0].title, "sleep 9", "no description: the command");
+        assert_eq!(i.shells[0].status_word, "Ended");
     }
 
     #[test]
@@ -726,10 +739,14 @@ mod tests {
     #[test]
     fn shell_rows_know_if_they_run() {
         let mut c = Conversation::default();
-        for (id, ended, path) in [("b1", true, "/done"), ("b2", false, "/live")] {
+        for (id, ended, path) in [
+            ("b0", true, "/old"),
+            ("b1", false, "/live"),
+            ("b2", true, "/done"),
+        ] {
             c.shells.push(BackgroundShell {
                 id: id.into(),
-                command: "x".into(),
+                command: id.into(),
                 title: String::new(),
                 output_path: path.into(),
                 started: None,
@@ -740,8 +757,11 @@ mod tests {
         }
         let writers = |path: &str| if path == "/live" { vec![1] } else { Vec::new() };
         let i = inspector(&c, &[], &writers);
-        assert_eq!(i.shells[0].mark, Mark::Icon(Icon::Done, Ink::Done));
-        assert!(i.shells[1].running && i.shells[1].mark == Mark::Spinner);
+        // The running one on top, then the rest newest first.
+        assert!(i.shells[0].running && i.shells[0].mark == Mark::Spinner);
+        assert_eq!(i.shells[1].mark, Mark::Icon(Icon::Done, Ink::Done));
+        let order: Vec<&str> = i.shells.iter().map(|s| s.command.as_str()).collect();
+        assert_eq!(order, ["b1", "b2", "b0"]);
         assert_eq!(i.shells_title(), "Shells · 1 running");
     }
 
