@@ -21,7 +21,8 @@
 //! # Bounds
 //!
 //! A file over [`WHOLE_FILE_BYTES`] is read as its first [`HEAD_BYTES`] and last [`TAIL_BYTES`]
-//! (cut at line boundaries); a line over [`crate::search::MAX_LINE_BYTES`] is skipped; a file that
+//! (cut at line boundaries); a line over [`crate::search::MAX_LINE_BYTES`] is skipped and takes no room
+//! in the tail, so pictures between the text don't push it out; a file that
 //! cannot be opened (deleted mid-scan) is left out and tried again next time. Memory per file is
 //! at most about 4 MB whatever its size, and an entry holds at most
 //! [`crate::search::MAX_CHARS`] characters.
