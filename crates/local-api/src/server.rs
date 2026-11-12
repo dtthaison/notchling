@@ -187,9 +187,22 @@ impl Drop for Slot {
 
 impl Shared {
     pub(crate) fn audit(&self, op: &str, tier: Option<Tier>, peer: Option<&Path>, result: &str) {
+        self.audit_with(op, tier, peer, result, None);
+    }
+
+    /// [`Shared::audit`] with why the call failed (`audit::audit_reason` decides what is kept).
+    pub(crate) fn audit_with(
+        &self,
+        op: &str,
+        tier: Option<Tier>,
+        peer: Option<&Path>,
+        result: &str,
+        reason: Option<String>,
+    ) {
         if let Some(log) = &self.audit {
             // The log is best effort: a full disk must not stop the refusal itself.
-            let _ = log.append(&AuditEntry::now(op, tier, peer, result));
+            let entry = AuditEntry::now(op, tier, peer, result).with_reason(reason);
+            let _ = log.append(&entry);
         }
     }
 
