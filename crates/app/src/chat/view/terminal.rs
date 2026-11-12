@@ -476,7 +476,6 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
         .cursor_pointer()
         .h(px(20.0))
         .w(px(20.0))
-        .hover(move |s| s.bg(hsla(Ink::Text.color(a).with_alpha(0.14))))
         .on_click(cx.listener(move |this, _, window, cx| {
             cx.stop_propagation();
             this.close_terminal(i, window, cx);
