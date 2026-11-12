@@ -13,7 +13,7 @@
 //! with mode 0600. `ended` and `outcome` are set when the command exits. A record with no `ended`
 //! whose process is gone (killed, a closed laptop) counts as ended and stopped.
 
-use super::options::{Options, Tool};
+use super::options::Options;
 use super::outcome::Outcome;
 use notchling_platform::files;
 use serde::{Deserialize, Serialize};
@@ -298,11 +298,6 @@ pub fn end_of(outcome: &Outcome, stopped: bool) -> End {
     } else {
         End::Ok
     }
-}
-
-/// The tool a record names, if it is one of ours.
-pub fn tool_of(record: &Delegation) -> Option<Tool> {
-    Tool::from_name(&record.tool)
 }
 
 #[cfg(test)]

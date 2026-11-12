@@ -74,7 +74,7 @@ pub fn subagents(
 ) -> Vec<Subagent> {
     records
         .iter()
-        .filter(|r| parents.iter().any(|p| *p == r.parent_session))
+        .filter(|r| parents.contains(&r.parent_session))
         .map(|r| subagent(r, places, now, alive))
         .collect()
 }

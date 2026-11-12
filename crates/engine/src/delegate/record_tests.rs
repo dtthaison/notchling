@@ -1,4 +1,5 @@
 use super::*;
+use crate::delegate::options::Tool;
 use crate::delegate::test_support::scratch;
 use std::time::Duration;
 
