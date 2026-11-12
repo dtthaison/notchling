@@ -42,6 +42,22 @@ pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
             }
         }
         view.draft.select_tab(scene.tab);
+        // A bench (`NOTCHLING_RENDER_BENCH`) moves the pet as the live panel's tick does, so what
+        // the notch costs while it walks is measured.
+        if std::env::var_os(crate::mac::render::BENCH_ENV).is_some() {
+            cx.spawn(async move |this, cx| loop {
+                let stepped = this.update(cx, |view, cx| {
+                    if view.step_pet(super::source::now_ms() as f64 / 1000.0) {
+                        cx.notify();
+                    }
+                });
+                if stepped.is_err() {
+                    break;
+                }
+                cx.background_executor().timer(super::panel::TICK).await;
+            })
+            .detach();
+        }
         view
     })
     .into()

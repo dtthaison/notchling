@@ -13,6 +13,7 @@ mod icons;
 mod parts;
 mod resize;
 mod scrollbar;
+mod spin_layer;
 mod text_editor;
 mod tool_images;
 mod widgets;
@@ -22,6 +23,7 @@ pub use icons::{icon, icon_in, spinner, KitAssets};
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart};
 pub use resize::{resize_edges, TopBorder};
 pub use scrollbar::{scrollable, PinScrollbars, Scrollable};
+pub use spin_layer::{drop_spinner_host, host_spinners, spin_host, SpinLayer, SpinSlot, SpinSlots};
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{

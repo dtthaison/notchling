@@ -15,7 +15,8 @@ use gpui::{
 };
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
-    NSEvent, NSScreen, NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSEvent, NSScreen, NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior,
+    NSWindowOcclusionState, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
@@ -32,7 +33,7 @@ use crate::session_source::{Link, SessionSource};
 use crate::tools::live::ToolLive;
 use crate::tools::requests::{agy_conversation, parse_conversation};
 
-const TICK: Duration = Duration::from_millis(50);
+pub(super) const TICK: Duration = Duration::from_millis(50);
 const POLL: Duration = Duration::from_secs(2);
 /// How many polls between asking the daemon whether acting is on.
 const ACTING_EVERY: u32 = 5;
@@ -159,14 +160,19 @@ fn tick(view: &mut NotchView, cx: &mut gpui::Context<NotchView>) {
     let state = view.model.state.clone();
     let shape = shape_rect(&g, view.model.size(&state), state == NotchState::Collapsed);
     let mouse = NSEvent::mouseLocation();
-    let inside = w.isVisible() && hit_test(shape, (mouse.x, mouse.y));
+    // On screen: shown (the notch can be turned off) and not covered (the display asleep or
+    // locked). Off screen the pet stays put and draws nothing: twenty frames a second of a window
+    // nobody sees.
+    let shown = w.isVisible();
+    let on_screen = shown && w.occlusionState().contains(NSWindowOcclusionState::Visible);
+    let inside = shown && hit_test(shape, (mouse.x, mouse.y));
     if w.ignoresMouseEvents() == inside {
         w.setIgnoresMouseEvents(!inside);
     }
     let was = view.model.hovering();
     view.model.hover(inside, now);
     let moved = view.model.tick(now);
-    let pet = view.step_pet(now as f64 / 1000.0);
+    let pet = on_screen && view.step_pet(now as f64 / 1000.0);
     if moved || pet || was != inside {
         cx.notify();
     }
