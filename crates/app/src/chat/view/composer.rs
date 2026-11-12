@@ -891,6 +891,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .children(permission(view, a, cx))
         // What the session is doing, right over the box rather than at the end of the messages.
         .children(view.activity_line().map(|activity| {
+            view.activity_drawn.set(Some(super::now_ms()));
             let stalled = view.stalled_prompt().is_some();
             let shell = crate::chat::activity::newest_unfinished_shell(&view.conversation);
             div()

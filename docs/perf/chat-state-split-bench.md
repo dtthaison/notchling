@@ -378,3 +378,41 @@ The fade draws the conversation 9 or 10 times (the hold's wake-up and the fade's
 second), one row each, and `ms_per_frame` stays under 4 ms in every run, so the fade rate is left
 as it is: `FADE_STEP_SECONDS` stays 1/30 and `the_fade_steps_at_fifteen_frames_a_second` was not
 added. (Before the list a fade step drew all 500 rows; the plan's 4 ms line is for the list.)
+
+## Native spinner spike
+
+After the split, a session that works still cost the window about 100 frames in 10 s: the
+Activity Line's spinner (`SpinLayer`, ten steps a second) asked GPUI to draw the root and present
+the window for each step, about 3.8 ms each, to turn a 12 pt ring. The spike draws that ring as a
+Core Animation layer instead: a `CAShapeLayer` (Lucide's `loader-circle` arc, same size, stroke and
+ink) under a repeating rotation the render server turns by itself, so the app asks for no frame to
+turn it. Verdict: GO.
+
+`bench_idle_working_requests_few_frames` (mode `idle`, a working session on the generated 200-turn
+conversation, 10 s, release, the window's own frames):
+
+| | root draws (frames asked for) | cpu ms over the run |
+| --- | --- | --- |
+| GPUI spinner (`NOTCHLING_NATIVE_SPINNER=0`) | about 100 | 164 to 286 |
+| Core Animation spinner | 10 to 11 | 67 to 82 |
+
+The ten or eleven draws left are the Activity Line's clock ("Writing... (26s)"), redrawn once a
+second by the tick (`activity::clock_due`) through `redraw_chrome`, which draws no part. The
+conversation, the Sidebar and the Details Panel draw 0 or 1 times in the run. The test counts
+`root` (the draws the app asked for), not a rate, so it holds on a locked screen, where the bench
+draws frames by hand but only a window made dirty draws anything. `native_rings` in the
+`bench-json:` line is the number of Core Animation rings the window holds; the test requires one.
+
+Not verified by a machine: that the ring looks identical to the GPUI one and turns at the same
+speed (this environment takes no screenshots; the probe below reads the layers' rotation, not
+pixels), and the ring under every overlay. `NOTCHLING_RENDER_NATIVE_PROBE=1` on `--render chat`
+prints `native-spin:` with each ring's place and its presentation layer's rotation at three times
+150 ms apart; the rotation moves between samples when Core Animation is turning it.
+
+A re-run after merging agent-run-oss, on a Mac shared with other builds and a running VM (the load
+the bench doc warns about), was too noisy to repeat the table: the same `idle` test gave 2, 10, 11
+and 6 root draws with the native spinner, and with `NOTCHLING_NATIVE_SPINNER=0` 3 and 60 (a window
+that gets no display-link frames draws almost nothing, with either spinner). Under that load the
+test's lower bound was 8 and failed once at 6, so it is 5 to 16, and each part may draw twice. Every
+bench test that failed in the full run passed alone. The count test is the evidence that matters:
+the GPUI spinner asks for about 100 draws in 10 s, the native one at most the clock's 10 or 11.

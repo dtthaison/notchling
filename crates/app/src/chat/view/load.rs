@@ -269,8 +269,11 @@ impl ChatView {
             );
             cx.notify();
         }
-        // The live line's clock needs no redraw of its own: its spinner draws the window's outer
-        // parts ten times a second while it shows, which reads the clock again.
+        // The live line's clock: its spinner is Core Animation's and draws no frames, so the
+        // window's outer parts are drawn once a second while it shows, which reads the clock again.
+        if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms()) {
+            self.redraw_chrome(cx);
+        }
         let dot = self.bridge_on();
         if dot != self.phone_dot {
             self.phone_dot = dot;

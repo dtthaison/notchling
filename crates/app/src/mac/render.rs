@@ -49,6 +49,11 @@ pub const CHECK_BLOCKS_ENV: &str = "NOTCHLING_RENDER_CHECK_BLOCKS";
 /// (locked), so a render sees what loads after the first frame.
 pub const FORCE_FRAMES_ENV: &str = "NOTCHLING_RENDER_FORCE_FRAMES";
 
+/// The environment's name for the switch that reads Core Animation's spinner layers (where each
+/// ring is and how far its presentation layer has turned, three times 150 ms apart) before the
+/// capture and prints `native-spin: {...}`.
+pub const NATIVE_PROBE_ENV: &str = "NOTCHLING_RENDER_NATIVE_PROBE";
+
 /// Frames the window has drawn: the root view renders once per frame, whatever made it.
 pub(super) static FRAMES: AtomicU64 = AtomicU64::new(0);
 
@@ -203,6 +208,9 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
                     if std::env::var_os(CHECK_BLOCKS_ENV).is_some_and(|v| v == "1") {
                         check_blocks(&target, cx).await;
                     }
+                    if std::env::var_os(NATIVE_PROBE_ENV).is_some_and(|v| v == "1") {
+                        native_probe(cx).await;
+                    }
                     if let Some(seconds) = bench_seconds {
                         bench::bench(seconds, mode, target, cx).await;
                     }
@@ -242,6 +250,35 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
         }
     });
     0
+}
+
+/// Prints where the native spinner rings are and their rotation, three samples 150 ms apart.
+async fn native_probe(cx: &mut gpui::AsyncApp) {
+    let mut samples = Vec::new();
+    for n in 0..3 {
+        if n > 0 {
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
+        }
+        samples.push(super::native_spin::probe());
+    }
+    let rings: Vec<serde_json::Value> = samples[0]
+        .iter()
+        .map(|first| {
+            let rotation = |i: usize| {
+                samples[i]
+                    .iter()
+                    .find(|p| p.key == first.key)
+                    .and_then(|p| p.rotation)
+            };
+            serde_json::json!({
+                "x": first.x, "y": first.y,
+                "rotation": [rotation(0), rotation(1), rotation(2)],
+            })
+        })
+        .collect();
+    println!("native-spin: {}", serde_json::json!({ "rings": rings }));
 }
 
 /// Runs the blocks check once the conversation has drawn (it is loaded in the background, so an
