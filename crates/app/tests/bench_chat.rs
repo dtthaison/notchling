@@ -246,3 +246,14 @@ fn bench_terminal_draws_no_part() {
     assert_eq!(count(&result, "details"), 0, "{result}");
     assert!(count(&result, "frames") >= 30, "{result}");
 }
+
+/// Typing in the reply box redraws the window's outer parts (the box grows, the slash menu shows),
+/// not the conversation, the Sidebar or the Details Panel: no part shows a draft.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_typing_draws_no_part() {
+    let result = bench_for("typing", 3);
+    assert_eq!(count(&result, "conversation"), 0, "{result}");
+    assert_eq!(count(&result, "sidebar"), 0, "{result}");
+    assert_eq!(count(&result, "details"), 0, "{result}");
+}

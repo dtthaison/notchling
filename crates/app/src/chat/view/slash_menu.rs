@@ -53,7 +53,7 @@ impl ChatView {
             return;
         };
         self.put_draft(&id, picked(command), cx);
-        cx.notify();
+        self.redraw_chrome(cx);
     }
 
     /// Up, Down, Tab, Return and Esc while the list shows; anything else goes on to the box.
@@ -88,7 +88,7 @@ impl ChatView {
             _ => return,
         }
         cx.stop_propagation();
-        cx.notify();
+        self.redraw_chrome(cx);
     }
 }
 

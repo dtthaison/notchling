@@ -204,7 +204,8 @@ impl ChatView {
             self.tools.drafts.insert(id, text);
         }
         self.share_drafts(cx);
-        cx.notify();
+        // The box and the slash menu are drawn by the root; no cached part shows a draft.
+        self.redraw_chrome(cx);
     }
 
     /// Sets a row's draft; the editor follows when that row is the one on show.
