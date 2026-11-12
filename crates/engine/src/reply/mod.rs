@@ -26,6 +26,8 @@ pub mod read;
 pub mod shell;
 
 #[cfg(test)]
+mod exec_permission_tests;
+#[cfg(test)]
 mod exec_tests;
 #[cfg(test)]
 mod pin_tests;

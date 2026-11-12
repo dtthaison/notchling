@@ -1,6 +1,7 @@
 //! One connection: the peer check, then lines until the client goes, a deadline passes or the
 //! server stops. Replies and events leave through a writer thread with a bounded queue.
 
+use crate::audit::audit_reason;
 use crate::framing::{encode_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
 use crate::server::{Caller, Shared, Slot};
@@ -374,11 +375,12 @@ impl Session {
         *extras = more;
         if spec.tier == Tier::App {
             // Every privileged call is on the record, not only the refusals.
-            let outcome = match &result {
-                Ok(_) => "ok",
-                Err(e) => e.code.as_str(),
+            let (outcome, reason) = match &result {
+                Ok(_) => ("ok", None),
+                Err(e) => (e.code.as_str(), audit_reason(op, &e.message)),
             };
-            self.shared.audit(op, Some(self.tier), self.peer(), outcome);
+            self.shared
+                .audit_with(op, Some(self.tier), self.peer(), outcome, reason);
         }
         result
     }

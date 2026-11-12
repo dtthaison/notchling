@@ -16,6 +16,7 @@ use super::cards::{line, text, A};
 use super::requests::HookRequest;
 use super::view::NotchView;
 use crate::acting::{Control, Decision, Request};
+use crate::chat::prompt_flow::{failure_text, sending_text, Sending};
 use crate::mac::gate;
 
 pub(super) const HEADER: f32 = 22.0;
@@ -135,8 +136,8 @@ impl NotchView {
         if let Some(error) = &self.send_error {
             return Some(error);
         }
-        if self.sending {
-            return Some("Sending…");
+        if let Some(sending) = self.sending {
+            return Some(sending_text(sending));
         }
         gate.tooltip
     }
@@ -148,12 +149,13 @@ impl NotchView {
         &mut self,
         key: Option<String>,
         request: Request,
+        sending: Sending,
         cx: &mut Context<Self>,
     ) {
-        if self.sending || !self.gate().enabled {
+        if self.sending.is_some() || !self.gate().enabled {
             return;
         }
-        self.sending = true;
+        self.sending = Some(sending);
         self.send_error = None;
         let actions = self.actions.clone();
         let shared = self.sessions.clone();
@@ -163,7 +165,7 @@ impl NotchView {
                 .spawn(async move { actions.send(&request) })
                 .await;
             this.update(cx, |view, cx| {
-                view.sending = false;
+                view.sending = None;
                 match result {
                     Ok(_) => {
                         if let Some(key) = &key {
@@ -175,7 +177,7 @@ impl NotchView {
                         }
                         view.fold_peek();
                     }
-                    Err(message) => view.send_error = Some(message),
+                    Err(message) => view.send_error = Some(failure_text(&message)),
                 }
                 cx.notify();
             })
@@ -226,6 +228,7 @@ impl NotchView {
                             this.send_for(
                                 key,
                                 Request::answer_for(&session, &question, &answers),
+                                Sending::Answer,
                                 cx,
                             );
                         }
@@ -328,7 +331,7 @@ impl NotchView {
                             if let Some(answers) = this.draft.submit_text(&question) {
                                 let request = Request::answer_for(&session, &question, &answers);
                                 let key = this.model.answer_key(&session);
-                                this.send_for(key, request, cx);
+                                this.send_for(key, request, Sending::Answer, cx);
                             }
                         }
                         Typed::Changed => {}
@@ -344,7 +347,7 @@ impl NotchView {
     fn submit_row(&self, id: &str, q: &PendingQuestion, cx: &mut Context<Self>) -> Div {
         let gate = self.gate();
         let ready = Control {
-            enabled: gate.enabled && self.draft.complete() && !self.sending,
+            enabled: gate.enabled && self.draft.complete() && self.sending.is_none(),
             tooltip: gate.tooltip,
         };
         let multi = q.items.get(self.draft.tab).is_some_and(|i| i.multi_select);
@@ -373,7 +376,12 @@ impl NotchView {
             b.on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(answers) = this.draft.answers(&question) {
                     let key = this.model.answer_key(&session);
-                    this.send_for(key, Request::answer_for(&session, &question, &answers), cx);
+                    this.send_for(
+                        key,
+                        Request::answer_for(&session, &question, &answers),
+                        Sending::Answer,
+                        cx,
+                    );
                 }
             }))
         });
@@ -408,26 +416,41 @@ impl NotchView {
             ));
         }
         choices.push((Decision::Deny, "Deny", "Claude tries something else"));
+        let sending = self.sending;
+        let chosen = match sending {
+            Some(Sending::Decision { decision, .. }) => Some(decision),
+            _ => None,
+        };
         let options = choices
             .into_iter()
             .enumerate()
             .map(|(i, (decision, title, detail))| {
+                // While one goes out, the one picked is lit and the rest are off.
+                let (state, picked) = match sending {
+                    None => (gate::state(gate), false),
+                    Some(_) if chosen == Some(decision) => (PartState::Selected, true),
+                    Some(_) => (PartState::Disabled, false),
+                };
                 let row = option_row(
                     SharedString::from(format!("permission-{i}")),
                     i + 1,
                     title,
                     detail,
-                    false,
-                    gate::state(gate),
+                    picked,
+                    state,
                     A,
                 )
                 .line_height(px(line(TypeRole::Heading)));
                 // The decision goes to the prompt by its own id, and hides that prompt only.
                 let prompt = r.id.clone();
-                gate::tip(row, gate, A).when(gate.enabled, |row| {
+                let sent = Sending::Decision {
+                    decision,
+                    on_screen: false,
+                };
+                gate::tip(row, gate, A).when(gate.enabled && sending.is_none(), |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
                         let request = Request::permission(&prompt, decision);
-                        this.send_for(Some(prompt.clone()), request, cx);
+                        this.send_for(Some(prompt.clone()), request, sent, cx);
                     }))
                 })
             });

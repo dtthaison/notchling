@@ -47,7 +47,10 @@ pub mod page_panel;
 mod parse_cost_tests;
 pub mod paths;
 pub mod pickers;
+pub mod prompt_flow;
 pub mod prompts;
+#[cfg(test)]
+mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;

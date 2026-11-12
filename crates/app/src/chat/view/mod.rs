@@ -99,7 +99,8 @@ pub const DETAILS_HIDDEN_ENV: &str = "NOTCHLING_RENDER_DETAILS_HIDDEN";
 pub const ACTIONS_ENV: &str = "NOTCHLING_RENDER_ACTIONS";
 /// Set to `1`, a render draws the drop hint over the middle column (`drop::PREVIEW_ENV`).
 pub const DROP_ENV: &str = drop::PREVIEW_ENV;
-/// Set to `question` or `permission`, a render draws that card above the reply box, over the
+/// Set to `question`, `permission` or one of its file states (`permission-file`, `-sending`,
+/// `-failed`, `-next`), a render draws that card above the reply box, over the
 /// selected Claude Code session, with its controls live (`chat::prompts::Preview`).
 pub const PROMPT_ENV: &str = "NOTCHLING_RENDER_PROMPT";
 /// Set to `1` (or `expanded`), a render draws the terminal panel with two tabs over a sample screen.
@@ -271,9 +272,12 @@ impl ChatView {
             },
             cx,
         );
-        view.prompt.preview = std::env::var(PROMPT_ENV)
+        if let Some(preview) = std::env::var(PROMPT_ENV)
             .ok()
-            .and_then(|v| crate::chat::prompts::Preview::parse(&v));
+            .and_then(|v| crate::chat::prompts::Preview::parse(&v))
+        {
+            view.prompt.apply_preview(preview);
+        }
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         view.slash_preview = std::env::var(SLASH_ENV).ok();
