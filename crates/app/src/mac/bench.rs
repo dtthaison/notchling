@@ -3,6 +3,8 @@
 //! terminal's output, a reload) and prints what the window spent on it: the `bench:` line for a
 //! person, then `bench-json:` with the same numbers and the counters for a test.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -16,6 +18,16 @@ use crate::chat::view::{bench_point, ChatView};
 
 /// The environment's name for what the driver does each step.
 pub const MODE_ENV: &str = "NOTCHLING_RENDER_BENCH_MODE";
+
+/// `1` forces frames by hand always, `0` never; unset: only when no display-link frame arrives
+/// (a locked screen), which the bench finds out first.
+pub const FORCE_ENV: &str = "NOTCHLING_BENCH_FORCE_FRAMES";
+
+/// How long a mode runs before its numbers start.
+const WARM_UP: Duration = Duration::from_millis(1500);
+
+/// How often a forced frame is tried.
+const FORCED_EVERY: Duration = Duration::from_millis(16);
 
 /// What the driver does while the bench runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,10 +195,9 @@ async fn prepare(mode: Mode, target: &mut Target, cx: &mut AsyncApp) {
         Mode::Terminal => target.chat(cx, |chat, cx| chat.bench_terminal_start(cx)),
         _ => {}
     }
-    // The first frames after a change draw it for the first time: not what the bench measures.
-    cx.background_executor()
-        .timer(Duration::from_millis(400))
-        .await;
+    // The first frames after a change draw it for the first time, and the window's own first
+    // reloads land in its first seconds: not what the bench measures.
+    cx.background_executor().timer(WARM_UP).await;
 }
 
 /// Where a mode ends: a drag lets go.
@@ -197,10 +208,46 @@ fn finish(mode: Mode, target: &Target) {
     }
 }
 
+/// Whether the bench has to draw the window itself: the window drew nothing in a moment after it
+/// was told to (a locked screen sends the display link no frames).
+async fn needs_forcing(target: &Target, cx: &mut AsyncApp) -> bool {
+    match std::env::var(FORCE_ENV).as_deref() {
+        Ok("1") => return true,
+        Ok("0") => return false,
+        _ => {}
+    }
+    let before = FRAMES.load(Ordering::Relaxed);
+    target.chat(cx, |chat, cx| chat.bench_chrome(cx));
+    cx.background_executor()
+        .timer(Duration::from_millis(300))
+        .await;
+    FRAMES.load(Ordering::Relaxed) == before
+}
+
+/// Draws the window every 16 ms (it draws only when dirty) until the returned flag is set.
+fn force_frames(driver: super::bench_events::FrameDriver, cx: &mut AsyncApp) -> Rc<Cell<bool>> {
+    let stop = Rc::new(Cell::new(false));
+    let done = stop.clone();
+    cx.spawn(async move |cx| {
+        while !done.get() {
+            driver.frame();
+            cx.background_executor().timer(FORCED_EVERY).await;
+        }
+    })
+    .detach();
+    stop
+}
+
 /// Keeps the window up for `seconds` driving `mode`, then prints what it drew and spent. Prints
 /// `bench: ready` first, for a test that has to start something of its own.
 pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncApp) {
     println!("bench: ready");
+    let forcing = match target.injector.as_ref() {
+        Some(injector) if needs_forcing(&target, cx).await => {
+            Some(force_frames(injector.frame_driver(), cx))
+        }
+        _ => None,
+    };
     prepare(mode, &mut target, cx).await;
     let drawn = || {
         [
@@ -235,6 +282,10 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
     }
     let frames = FRAMES.load(Ordering::Relaxed) - frames;
     let after = drawn();
+    let forced = forcing.is_some();
+    if let Some(stop) = forcing {
+        stop.set(true);
+    }
     let [conversations, sidebars, details, roots, rows, parsed] =
         [0, 1, 2, 3, 4, 5].map(|i| after[i] - before[i]);
     let (cpu, wall) = (cpu_ms() - cpu, at.elapsed().as_secs_f64());
@@ -256,6 +307,7 @@ pub async fn bench(seconds: f64, mode: Mode, mut target: Target, cx: &mut AsyncA
         "details": details,
         "rows": rows,
         "parsed_bytes": parsed,
+        "forced": forced,
     });
     println!("bench-json: {json}");
 }

@@ -4,7 +4,9 @@
 //! `handle_view_event`. Nothing here moves the real pointer or posts a system event.
 
 use gpui::Pixels;
+use objc2::msg_send;
 use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSResponder, NSView};
 use objc2_core_graphics::{CGEvent, CGEventField, CGScrollEventUnit};
 use objc2_foundation::NSPoint;
@@ -37,6 +39,13 @@ impl Injector {
             height,
             scroll_origin: None,
         })
+    }
+
+    /// A handle that draws the window by hand (see [`FrameDriver`]).
+    pub fn frame_driver(&self) -> FrameDriver {
+        FrameDriver {
+            view: self.view.clone(),
+        }
     }
 
     fn at(&self, x: Pixels, y: Pixels) -> NSPoint {
@@ -124,6 +133,26 @@ impl Injector {
         place(&cg, origin - wanted.y);
         if let Some(event) = NSEvent::eventWithCGEvent(&cg) {
             NSResponder::scrollWheel(&self.view, &event);
+        }
+    }
+}
+
+/// Draws the window the way AppKit does when a layer needs display, for a bench that has to run
+/// while no display link ticks (the Mac's screen is locked or its display asleep). GPUI's
+/// `displayLayer:` is its own first-frame path: it runs the window's frame callback, which draws
+/// only when the window is dirty and presents, so a frame costs what a display link's would.
+pub struct FrameDriver {
+    view: Retained<NSView>,
+}
+
+impl FrameDriver {
+    /// One frame, if the window has anything to draw.
+    pub fn frame(&self) {
+        // SAFETY: GPUI's view class implements `displayLayer:` (it ignores its argument); both
+        // calls run on the main thread, outside any borrow of the app.
+        unsafe {
+            let layer: *mut AnyObject = msg_send![&*self.view, layer];
+            let _: () = msg_send![&*self.view, displayLayer: layer];
         }
     }
 }

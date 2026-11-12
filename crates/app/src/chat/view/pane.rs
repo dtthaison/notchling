@@ -180,6 +180,12 @@ impl ChatView {
         self.chrome.update(cx, |_, cx| cx.notify());
     }
 
+    /// `--render`'s bench: makes the window draw without waking a part, to see whether frames
+    /// arrive at all.
+    pub fn bench_chrome(&self, cx: &mut Context<ChatView>) {
+        self.redraw_chrome(cx);
+    }
+
     /// Draws the Sidebar again (and the window's outer parts), not the conversation: for a change
     /// only the Sidebar and the chrome show (the rows' accounts after an accounts poll).
     pub(super) fn redraw_sidebar(&self, cx: &mut Context<ChatView>) {

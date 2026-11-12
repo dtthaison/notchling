@@ -165,3 +165,69 @@ What the Phase 6 implementer must know, from what the probe found:
 - `canvas(...).absolute().size_full()` needs `.top_0().left_0()` too: without them GPUI puts it
   after its siblings, and the bounds it records are the wrong place (the first run of the probe
   read a 584 px gap for exactly that reason).
+
+## Running the bench while the screen is locked
+
+A locked screen (or a sleeping display) sends a window no display-link frames, so every mode printed
+`frames: 0` and `bench_chat`'s `check` failed, although `--render` still captured a PNG (its one
+frame comes from AppKit's `displayLayer:`, which GPUI answers by running the window's frame
+callback). The bench now does the same on a timer: `mac/bench.rs` first makes the window dirty
+(`ChatView::bench_chrome`, which wakes only the root) and, when no frame arrives in 300 ms, calls
+`displayLayer:` on the window's view every 16 ms (`bench_events::FrameDriver`) for the rest of the
+run. GPUI draws only when the window is dirty, so a forced frame draws what a display-link frame
+would. `NOTCHLING_BENCH_FORCE_FRAMES=1` forces it always and `=0` never; the `bench-json:` line says
+`"forced":true` when it did. Nothing else changes outside bench mode, and `vendor/` is untouched.
+
+What is comparable: the counts (`conversation`, `sidebar`, `details`, `rows`, `parsed_bytes`),
+which come from what the window draws and not from how it is paced. What is not: `ms/frame` and
+`fps` (a forced frame is presented with a transaction and restarts GPUI's display link each time, so a
+frame costs more, and a heavy mode draws fewer of them), so judge a task on counts. A run takes the
+first 1.5 s as warm-up before it counts (it was 0.4 s; the window's first reloads land in the
+first second or two, and a draw of every part from one of them showed up in some runs).
+
+Verified on 2026-11-12 with the screen unlocked, by `NOTCHLING_BENCH_FORCE_FRAMES=1` against the
+display link's own frames (the Mac was not locked when this was written, so the automatic
+detection was only seen choosing "not forced"; the forced loop itself is what `=1` runs). Counts
+per mode, 10 s each, median of 2 forced runs against the median of 3 display-link runs:
+`terminal` 0 / 0 / 0 and 0 / 0 / 0, `typing` 0 or 1 / 0 / 0 (the box growing past a line) in both,
+`select` 59.5 / 0 / 0 and 58 / 0 / 0, `scroll` 99 / 0 / 0 and 101 / 0 / 0, `reload` 0 / 19 / 19 and
+0 / 20 / 20, `menu` 49.5 / 49.5 / 49.5 and 49 / 49 / 49, `hover` 1 / 0 / 0 in both, `append` 5 / 5 / 5
+in both.
+
+A run on a busy Mac shows a stray draw of every part once or twice (a 3 s count test asserting 0
+failed about one run in six, with or without forced frames), and under load a forced run draws
+fewer frames (one set of runs gave `scroll` 82 and `menu` 44). Repeat a run before believing a
+single 1.
+
+## Phase 3 (Tasks 3.1 to 3.4)
+
+Commit `10b2c82` plus the forced-frame bench, a release build, 2026-11-12, 10 s per mode. The first
+set is median of 3 display-link runs (`forced: false`, the screen unlocked); the second median of 2
+runs with every frame forced (`NOTCHLING_BENCH_FORCE_FRAMES=1`), whose ms/frame is not comparable.
+Same machine as the baseline.
+
+| Task | Mode | ms/frame | fps | root | conversation | sidebar | details | rows | parsed bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 3.4 (Phase 3) | idle | 6.00 | 10.0 | 100 | 0 | 0 | 0 | 0 | 0 |
+| 3.4 (Phase 3) | append | 10.27 | 10.3 | 103 | 5 | 5 | 5 | 2500 | 5408 |
+| 3.4 (Phase 3) | scroll | 100.18 | 10.0 | 101 | 101 | 0 | 0 | 50500 | 0 |
+| 3.4 (Phase 3) | hover | 11.63 | 10.1 | 101 | 1 | 0 | 0 | 500 | 0 |
+| 3.4 (Phase 3) | select | 45.06 | 13.7 | 137 | 58 | 0 | 0 | 29000 | 0 |
+| 3.4 (Phase 3) | typing | 5.46 | 18.3 | 183 | 1 | 0 | 0 | 500 | 0 |
+| 3.4 (Phase 3) | terminal | 4.43 | 36.5 | 365 | 0 | 0 | 0 | 0 | 0 |
+| 3.4 (Phase 3) | reload | 6.50 | 11.4 | 118 | 0 | 20 | 20 | 0 | 0 |
+| 3.4 (Phase 3) | menu | 40.37 | 13.1 | 134 | 49 | 49 | 49 | 24500 | 0 |
+| 3.4 (Phase 3, forced frames) | idle | 6.46 | 9.5 | 95 | 0 | 0 | 0 | 0 | 0 |
+| 3.4 (Phase 3, forced frames) | append | 12.67 | 10.2 | 102.5 | 5 | 5 | 5 | 2500 | 5269.5 |
+| 3.4 (Phase 3, forced frames) | scroll | 91.53 | 10.2 | 101.5 | 99 | 0 | 0 | 49500 | 0 |
+| 3.4 (Phase 3, forced frames) | hover | 14.54 | 9.2 | 92 | 1 | 0 | 0 | 500 | 0 |
+| 3.4 (Phase 3, forced frames) | select | 43.60 | 13.6 | 136.5 | 59.5 | 0 | 0 | 29750 | 0 |
+| 3.4 (Phase 3, forced frames) | typing | 6.05 | 17.6 | 176.5 | 0.5 | 0 | 0 | 250 | 0 |
+| 3.4 (Phase 3, forced frames) | terminal | 4.56 | 28.2 | 282 | 0 | 0 | 0 | 0 | 0 |
+| 3.4 (Phase 3, forced frames) | reload | 6.38 | 11.4 | 114.5 | 0 | 19 | 19 | 0 | 0 |
+| 3.4 (Phase 3, forced frames) | menu | 43.68 | 12.4 | 125.5 | 49.5 | 49.5 | 49.5 | 24750 | 0 |
+
+Against Phase 1 the counts are the same: Phase 3 moved work off the main thread (the engine hands out
+`Arc<Conversation>`, the loader diffs), which no count here shows. `parsed bytes` in `append` is
+about half of Phase 1's because the run now starts counting after the longer warm-up, while the test
+appends a line every 500 ms from `bench: ready`.

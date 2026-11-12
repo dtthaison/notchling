@@ -267,3 +267,12 @@ fn bench_select_draws_no_sidebar_or_details() {
     assert_eq!(count(&result, "sidebar"), 0, "{result}");
     assert_eq!(count(&result, "details"), 0, "{result}");
 }
+
+/// The `bench-json:` line says whether the bench had to draw frames itself (a locked screen sends
+/// the window no display-link frames), since a forced frame's ms/frame is not a display link's.
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
+fn bench_says_whether_frames_were_forced() {
+    let result = bench_for("idle", 2);
+    assert!(result["forced"].is_boolean(), "{result}");
+}
