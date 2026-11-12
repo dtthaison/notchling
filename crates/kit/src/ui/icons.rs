@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     div, prelude::*, px, radians, svg, AnyElement, AnyView, App, AssetSource, Bounds, Context, Div,
-    Element, ElementId, Entity, FontWeight, GlobalElementId, InspectorElementId, LayoutId, Pixels,
-    SharedString, Transformation, Window,
+    Element, ElementId, Entity, EntityId, FontWeight, Global, GlobalElementId, InspectorElementId,
+    LayoutId, Pixels, SharedString, Transformation, Window,
 };
 
 use super::hsla;
@@ -73,20 +73,20 @@ fn spin_turns(t: f32) -> f32 {
 
 /// Where every spinner is `since` the clock they share started, in turns: they all turn
 /// together, and a spinner drawn by another redraw (a hover, a scroll) is where the clock says.
-fn turns_at(since: Duration) -> f32 {
+pub(super) fn turns_at(since: Duration) -> f32 {
     let turn = SPIN.as_nanos();
     spin_turns((since.as_nanos() % turn) as f32 / turn as f32)
 }
 
 /// How long until the next spinner frame, on one grid for every spinner, so several spinners on
 /// screen move in the same frame rather than each asking for its own.
-fn until_next_frame(since: Duration) -> Duration {
+pub(super) fn until_next_frame(since: Duration) -> Duration {
     let frame = SPIN_FRAME.as_nanos();
     Duration::from_nanos((frame - since.as_nanos() % frame) as u64)
 }
 
 /// The clock every spinner reads.
-fn spin_clock() -> Duration {
+pub(super) fn spin_clock() -> Duration {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed()
 }
@@ -110,32 +110,54 @@ pub fn spinner(id: impl Into<ElementId>, diameter: f32, ink: Ink, a: Appearance)
         })
 }
 
-/// The ring itself, a view of its own: its timer wakes only it, so the views above it draw again
+/// Spinners waiting for the next frame, woken together by one timer: two timers for the same
+/// moment woke apart and drew two frames.
+#[derive(Default)]
+struct Ticker {
+    waiting: Vec<EntityId>,
+    timer: bool,
+}
+
+impl Global for Ticker {}
+
+/// Wakes the view `view` (a spinner, or a layer of them) at the next spinner frame, with every
+/// other spinner that asked.
+pub(super) fn next_spin_frame(cx: &mut App, view: EntityId) {
+    let ticker = cx.default_global::<Ticker>();
+    if !ticker.waiting.contains(&view) {
+        ticker.waiting.push(view);
+    }
+    if std::mem::replace(&mut ticker.timer, true) {
+        return;
+    }
+    let wait = until_next_frame(spin_clock());
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(wait).await;
+        cx.update(|cx| {
+            let ticker = cx.default_global::<Ticker>();
+            ticker.timer = false;
+            for view in std::mem::take(&mut ticker.waiting) {
+                cx.notify(view);
+            }
+        })
+        .ok();
+    })
+    .detach();
+}
+
+/// The ring itself, a view of its own: its frame wakes only it, so the views above it draw again
 /// (GPUI redraws a view's ancestors) but nothing beside them does, and a view that observes
 /// another (Chat's conversation, cached apart from the window) isn't told the window changed.
 struct Turning {
     size: Pixels,
     color: Color,
-    /// A timer for the next frame is set; one at a time.
-    ticking: bool,
 }
 
 impl Render for Turning {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let since = spin_clock();
-        if !self.ticking {
-            self.ticking = true;
-            let wait = until_next_frame(since);
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(wait).await;
-                this.update(cx, |turning, cx| {
-                    turning.ticking = false;
-                    cx.notify();
-                })
-                .ok();
-            })
-            .detach();
-        }
+        let id = cx.entity_id();
+        next_spin_frame(cx, id);
         svg()
             .path(Icon::Spinner.svg().unwrap_or("icons/loader-circle.svg"))
             .size(self.size)
@@ -179,13 +201,13 @@ impl Element for Spin {
         cx: &mut App,
     ) -> (LayoutId, AnyElement) {
         let (size, color) = (self.size, self.color);
-        let new = |cx: &mut App| {
-            cx.new(|_| Turning {
-                size,
-                color,
-                ticking: false,
-            })
-        };
+        // In a host drawn cached, a slot the host's layer paints (`spin_layer`), so the host
+        // isn't drawn again for each frame of the spinner.
+        if let Some(slots) = super::spin_layer::slots_here(window, cx) {
+            let mut element = super::spin_layer::Slot { slots, size, color }.into_any_element();
+            return (element.request_layout(window, cx), element);
+        }
+        let new = |cx: &mut App| cx.new(|_| Turning { size, color });
         let view = match id {
             Some(id) => window.with_element_state(id, |kept: Option<Entity<Turning>>, _| {
                 let view = kept.unwrap_or_else(|| new(cx));

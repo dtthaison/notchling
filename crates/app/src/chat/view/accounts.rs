@@ -48,10 +48,31 @@ impl ChatView {
             cx.background_executor()
                 .spawn(async move { store.refresh(&switches) })
                 .await;
-            // The meters and the menu are outside the conversation, which needn't draw again.
-            this.update(cx, |view, cx| view.redraw_chrome(cx)).ok();
+            // The meters and the menu are outside the conversation, which needn't draw again; the
+            // Sidebar does only when a row's account changed.
+            this.update(cx, |view, cx| {
+                view.redraw_chrome(cx);
+                let rows = view.row_accounts();
+                if rows != view.row_accounts {
+                    view.row_accounts = rows;
+                    view.redraw_sidebar(cx);
+                }
+            })
+            .ok();
         })
         .detach();
+    }
+
+    /// The account each sidebar row names, from the accounts store now.
+    pub(super) fn row_accounts(&self) -> Vec<Option<(String, bool)>> {
+        let snapshot = self.accounts.snapshot();
+        self.sessions
+            .iter()
+            .map(|s| {
+                crate::chat::sidebar::row_account(s.tool, s.agent.config_dir.as_deref(), &snapshot)
+                    .map(|a| (a.text, a.lane))
+            })
+            .collect()
     }
 
     /// The menu for the selected Claude Code session, if it has an account to show.

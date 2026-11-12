@@ -6,6 +6,7 @@
 //! model and effort.
 
 mod calls;
+mod stamped;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
 
@@ -17,7 +18,10 @@ use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+
+use stamped::{Stamp, Stamped};
 
 /// A session's id and folder from its first line, and its title from the first thing you typed.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +71,8 @@ fn meta_cache() -> &'static Mutex<HashMap<String, Meta>> {
 }
 
 /// The session's id and folder from its first line, and its title from the first thing you typed
-/// (read once; the head of a session doesn't change).
+/// (read once; the head of a session doesn't change). Until it has a title, read again only when
+/// the file changed.
 pub fn meta(path: &str) -> Option<Meta> {
     if let Some(hit) = meta_cache()
         .lock()
@@ -76,6 +81,14 @@ pub fn meta(path: &str) -> Option<Meta> {
     {
         return Some(hit.clone());
     }
+    static UNTITLED: Stamped<Option<Meta>> = Stamped::new();
+    match Stamp::of(Path::new(path)) {
+        Some(stamp) => UNTITLED.get(path, stamp, || read_meta(path)),
+        None => read_meta(path),
+    }
+}
+
+fn read_meta(path: &str) -> Option<Meta> {
     // The developer prompt and tool list come first and run to a few hundred KB.
     let mut head = Vec::new();
     File::open(path)
@@ -123,8 +136,17 @@ pub fn meta(path: &str) -> Option<Meta> {
     Some(found)
 }
 
-/// The last turn started and hasn't ended, from the file's tail.
+/// The last turn started and hasn't ended, from the file's tail; read again only when the file
+/// changed.
 pub fn turn_open(path: &str) -> bool {
+    static OPEN: Stamped<bool> = Stamped::new();
+    match Stamp::of(Path::new(path)) {
+        Some(stamp) => OPEN.get(path, stamp, || read_turn_open(path)),
+        None => false,
+    }
+}
+
+fn read_turn_open(path: &str) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
     };

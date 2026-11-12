@@ -54,6 +54,16 @@ pub fn for_step<'a>(subagents: &'a [Subagent], tool_use_id: &str) -> Option<&'a 
         .find(|s| s.tool_use_id.as_deref() == Some(tool_use_id))
 }
 
+/// Which subagent each Agent call opens (its tool call id, the subagent's id): all a conversation
+/// shows of the list, so a load whose subagents only moved on (a running one's file grew) leaves
+/// the conversation as it was.
+pub fn links(subagents: &[Subagent]) -> Vec<(Option<String>, String)> {
+    subagents
+        .iter()
+        .map(|s| (s.tool_use_id.clone(), s.id.clone()))
+        .collect()
+}
+
 /// What the slim header above a subagent's transcript says: its description, and the detail line
 /// its row in the panel shows ("Running · sonnet high · Explore").
 pub fn header_text(agent: &Subagent) -> (String, String) {
@@ -90,6 +100,16 @@ mod tests {
         let bare = [agent("c", None)];
         assert!(for_step(&bare, "").is_none());
         assert!(for_step(&bare, "toolu_1").is_none());
+    }
+
+    #[test]
+    fn links_change_with_a_new_subagent_and_not_with_one_moving_on() {
+        let before = [agent("a", Some("toolu_1"))];
+        let mut moved = agent("a", Some("toolu_1"));
+        moved.updated = 9.0;
+        moved.status = Status::Completed;
+        assert_eq!(links(&before), links(&[moved.clone()]));
+        assert_ne!(links(&before), links(&[moved, agent("b", Some("toolu_2"))]));
     }
 
     #[test]

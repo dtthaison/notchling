@@ -6,7 +6,7 @@
 //! system's, for checking both without changing the Mac's setting. `NOTCHLING_RENDER_SCROLLBARS=1`
 //! draws every overlay scroll bar as if it had just scrolled, since a still frame has no scroll.
 //! `NOTCHLING_RENDER_BENCH=<seconds>` keeps the view up that long before the capture and prints
-//! `bench: <frames> frames in <s> s (<n> drew the conversation), <cpu> ms CPU (<ms>/frame, <fps> fps, <pct>% of a core)`: what
+//! `bench: <frames> frames in <s> s (<n> drew the conversation, <n> the sidebar, <n> the details), <cpu> ms CPU (<ms>/frame, <fps> fps, <pct>% of a core)`: what
 //! the window costs while nothing happens but what it animates (a spinner, a clock, a reload).
 
 use std::path::Path;
@@ -73,17 +73,20 @@ fn cpu_ms() -> f64 {
 
 /// Keeps the window up for `seconds` and prints what it drew and spent meanwhile.
 async fn bench(seconds: f64, cx: &gpui::AsyncApp) {
-    let drawn = || crate::chat::view::pane::RENDERS.load(Ordering::Relaxed);
-    let (frames, conversations) = (FRAMES.load(Ordering::Relaxed), drawn());
+    use crate::chat::view::pane::{DETAILS_RENDERS, RENDERS, SIDEBAR_RENDERS};
+    let drawn =
+        || [&RENDERS, &SIDEBAR_RENDERS, &DETAILS_RENDERS].map(|n| n.load(Ordering::Relaxed));
+    let (frames, before) = (FRAMES.load(Ordering::Relaxed), drawn());
     let (cpu, at) = (cpu_ms(), Instant::now());
     cx.background_executor()
         .timer(Duration::from_secs_f64(seconds))
         .await;
     let frames = FRAMES.load(Ordering::Relaxed) - frames;
-    let conversations = drawn() - conversations;
+    let after = drawn();
+    let [conversations, sidebars, details] = [0, 1, 2].map(|i| after[i] - before[i]);
     let (cpu, wall) = (cpu_ms() - cpu, at.elapsed().as_secs_f64());
     println!(
-        "bench: {frames} frames in {wall:.1} s ({conversations} drew the conversation), {cpu:.0} ms CPU ({:.2} ms/frame, {:.1} fps, {:.1}% of a core)",
+        "bench: {frames} frames in {wall:.1} s ({conversations} drew the conversation, {sidebars} the sidebar, {details} the details), {cpu:.0} ms CPU ({:.2} ms/frame, {:.1} fps, {:.1}% of a core)",
         cpu / frames.max(1) as f64,
         frames as f64 / wall,
         cpu / wall / 10.0

@@ -54,7 +54,6 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
-use crate::chat::follow::{self, Scroll};
 use crate::chat::message_meta;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
@@ -151,8 +150,12 @@ pub struct ChatView {
     conversation_scroll: ScrollHandle,
     /// Each drawn message's Markdown, parsed once and its paths looked up once per load.
     markdown: std::cell::RefCell<crate::chat::markdown_cache::Cache>,
-    /// The conversation's column, drawn cached apart from the rest of the window (`pane`).
-    pane: Entity<pane::ConversationPane>,
+    /// The conversation's column, the Sidebar and the Details Panel, each drawn cached apart from
+    /// the rest of the window, and the layer that turns their spinners (`pane`).
+    parts: pane::Parts,
+    /// The account each sidebar row named when last polled: a poll that changes one draws the
+    /// Sidebar again.
+    row_accounts: Vec<Option<(String, bool)>>,
     /// Woken for a redraw of everything but the conversation (`redraw_chrome`).
     chrome: Entity<pane::Chrome>,
     /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
@@ -458,10 +461,11 @@ impl ChatView {
             watch,
             conversation_scroll: ScrollHandle::new(),
             markdown: Default::default(),
-            pane: {
+            parts: {
                 let chat = cx.entity();
-                cx.new(|cx| pane::ConversationPane::new(&chat, cx))
+                pane::Parts::new(&chat, cx)
             },
+            row_accounts: Vec::new(),
             chrome: cx.new(|_| pane::Chrome),
             expanded: HashSet::new(),
             expand_all: false,
@@ -626,7 +630,12 @@ impl ChatView {
         }
         // What the disk says about the paths in messages is asked again once per load.
         self.markdown.get_mut().reloaded();
+        // Whether the conversation shows anything new: a load of the files another working session
+        // changed leaves this one as it was, and its long layout needn't be done again.
+        let selected_before = self.selected_session().cloned();
+        let mut conversation_changed = false;
         self.sessions = self.open_rows(all);
+        conversation_changed |= self.selected_session() != selected_before.as_ref();
         if self.selected == asked {
             let was = self.selected.take();
             // The loader doesn't know a draft New Session opened; it stays picked.
@@ -657,13 +666,22 @@ impl ChatView {
             // files have none to put in its place.
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
             let session_changed = std::mem::take(&mut self.scroll_to_end);
+            conversation_changed |= self.selected != was || session_changed;
             if !agy {
-                self.follow_content(session_changed);
+                conversation_changed |= self.loading || self.conversation != loaded.conversation;
+                if conversation_changed {
+                    self.follow_content(session_changed);
+                }
                 self.conversation = loaded.conversation;
                 self.loading = false;
             } else if session_changed {
                 self.conversation_scroll.scroll_to_bottom();
             }
+            // The conversation shows which subagent an Agent step opens, not how it's doing.
+            let links = crate::chat::subagent_view::links;
+            conversation_changed |= links(&self.subagents) != links(&loaded.subagents)
+                || self.open_subagent.is_some()
+                || self.prompt.transcript != loaded.question;
             self.subagents = loaded.subagents;
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply(&self.subagents, loaded.subagent);
@@ -676,22 +694,10 @@ impl ChatView {
             self.start_load(cx);
         }
         self.sync_tools(cx);
-        cx.notify();
-    }
-
-    /// Before new content replaces the conversation: stay on the newest message when the view is
-    /// at the bottom (or a message was just sent, or another session was picked), else leave it
-    /// where it is (`chat::follow`). The numbers are those of the last frame, so a reply that
-    /// grew since is measured by the next one, which the scroll handle then pins to the end.
-    pub(super) fn follow_content(&mut self, session_changed: bool) {
-        let handle = &self.conversation_scroll;
-        let prev = Scroll {
-            offset_y: f32::from(handle.offset().y),
-            max_y: f32::from(handle.max_offset().height),
-        };
-        let sent = std::mem::take(&mut self.follow_sent);
-        if follow::decide(prev, prev.max_y, sent, session_changed).scroll {
-            handle.scroll_to_bottom();
+        if conversation_changed {
+            cx.notify();
+        } else {
+            self.redraw_all_but_conversation(cx);
         }
     }
 
@@ -728,27 +734,6 @@ impl ChatView {
             self.selected_working(),
             now_ms() as f64 / 1000.0,
         )
-    }
-
-    /// Whether the "Latest" pill shows: the conversation is scrolled up from its newest message.
-    fn latest_pill(&self) -> bool {
-        if self.loading {
-            return false;
-        }
-        let handle = &self.conversation_scroll;
-        self.latest_preview
-            || !Scroll {
-                offset_y: f32::from(handle.offset().y),
-                max_y: f32::from(handle.max_offset().height),
-            }
-            .at_bottom()
-    }
-
-    /// The pill's click: to the newest message, and following again.
-    fn jump_to_latest(&mut self, cx: &mut Context<Self>) {
-        self.latest_preview = false;
-        self.conversation_scroll.scroll_to_bottom();
-        cx.notify();
     }
 
     /// Reads again now, past the gate (something this window did changed the files).
@@ -881,7 +866,7 @@ impl Render for ChatView {
             .min_h(px(0.0))
             .flex()
             .flex_col()
-            .child(pane::element(&self.pane))
+            .child(self.parts.conversation(cx))
             // Over the messages, so it stays while they scroll.
             .children(tasks::render(self, a, cx))
             .children(conversation::latest_pill(self, a, cx))
@@ -944,7 +929,7 @@ impl Render for ChatView {
                 }
                 this.capture_slash_key(event, window, cx)
             }))
-            .children((!self.sidebar_hidden).then(|| sidebar::render(self, a, cx)))
+            .children((!self.sidebar_hidden).then(|| self.parts.sidebar(cx)))
             // The header runs across the conversation and the Details Panel, so both start under it.
             .child(
                 div()
@@ -974,11 +959,13 @@ impl Render for ChatView {
                                     && !self.terminal.shown()
                                     && !self.simulator.shown()
                                     && !self.details_hidden)
-                                    .then(|| inspector::render(self, a, cx).into_any_element()),
+                                    .then(|| self.parts.details(cx)),
                             ),
                         cx,
                     )),
             )
+            // The spinners of the parts above, over them and under what follows.
+            .child(self.parts.spins.clone())
             // Beside the traffic lights, over the sidebar's top or the header's start.
             .child(sidebar::toggle_button(self, a, cx))
             .child(sidebar::new_session_button(self, a, cx))
