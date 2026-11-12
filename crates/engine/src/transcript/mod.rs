@@ -1,8 +1,10 @@
 //! E1: transcript readers (Claude Code, Codex, Antigravity), subagents, background shells.
 //!
-//! Every reader is bounded: it reads the last 2 MB (notch) or 4 MB (Chat) of a file, skips lines over
-//! 100 KB (screenshots, huge tool output) and never reads a file whole. Nothing here writes a file or
-//! starts a process. Times are `f64` seconds since the epoch ([`model::Timestamp`]); counts are in
+//! Every reader is bounded: it reads the last 2 MB (notch) or 4 MB (Chat) of lines, skips lines over
+//! 100 KB (screenshots, huge tool output; Chat's parser takes up to 400 KB) and never reads a file whole.
+//! Skipped lines don't use that budget (`tail::Cursors::skipping_lines_over`, `scan::scan_lines`), so a
+//! few base64 pictures can't push the conversation before them out; a reader looks back at most 64 MB.
+//! Nothing here writes a file or starts a process. Times are `f64` seconds since the epoch ([`model::Timestamp`]); counts are in
 //! Unicode scalars where the Swift app counted grapheme clusters.
 //!
 //! # Public API
@@ -13,7 +15,7 @@
 //! | [`conversation::read_subagent`]`(path)` / [`subagents::read`]`(path)` | The same for a subagent's own sidechain transcript. |
 //! | [`conversation::Parser`] | The line-at-a-time parser behind `read`: `Parser::new()`, `consume(&[u8])`, `conversation()`. |
 //! | [`tail::read_lines`]`(path, max_bytes)` | `io::Result<Vec<String>>`: the file's last `max_bytes` as lines, the cut first line dropped. |
-//! | [`tail::Cursors`] / [`tail::LineParser`] | The incremental reader: `Cursors::new(tail_bytes, limit, render)` and `read(path) -> Option<O>`. The conversation readers keep `Arc<Conversation>` in them and expose it as `conversation::read_shared`, `read_subagent_shared`, `codex::read_shared` and `subagents::read_shared`: an unchanged file gives the same `Arc`, so a caller tells "nothing changed" by `Arc::ptr_eq`; `read` and friends return an owned copy. |
+//! | [`tail::Cursors`] / [`tail::LineParser`] | The incremental reader: `Cursors::new(tail_bytes, limit, render)` and `read(path) -> Option<O>`; `.skipping_lines_over(cap, scan_limit)` makes the window a budget of parsed bytes ([`scan::scan_lines`] streams past longer lines and [`tail::LineParser::consume_oversized`] hears of them). The conversation readers keep `Arc<Conversation>` in them and expose it as `conversation::read_shared`, `read_subagent_shared`, `codex::read_shared` and `subagents::read_shared`: an unchanged file gives the same `Arc`, so a caller tells "nothing changed" by `Arc::ptr_eq`; `read` and friends return an owned copy. |
 //! | [`snapshot::read`]`(path)` | [`snapshot::Snapshot`] for the notch: the last lines, `last_prompt`, `activity`, the pending [`snapshot::PendingQuestion`], `subagents_active`. |
 //! | [`errors::limit_hit_in_file`], [`errors::sleep_cut_in_file`], [`errors::tool_finished`] | What a transcript's end says. |
 //! | [`locate::project_folder`], [`locate::find_transcript`], [`locate::job_transcript`], [`locate::successor`] | Where a session's transcript is, a job that moved into a worktree, the file a `/clear` started. |
