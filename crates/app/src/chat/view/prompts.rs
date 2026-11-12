@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 
+use std::time::Duration;
+
 use gpui::{
     div, prelude::*, px, Context, Div, FocusHandle, KeyDownEvent, SharedString, Stateful, Window,
 };
@@ -23,9 +25,13 @@ use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
+use crate::chat::prompt_flow::{
+    confirmation, failure_text, file_name, is_gone, sending_text, Confirmed, Sending, Told,
+    CONFIRM_MS,
+};
 use crate::chat::prompts::{
     is_dialog, permission_request, preview_prompt, prompt_for, question_key, screen_question,
-    screen_read_key, Preview, Prompt,
+    screen_read_key, Preview, Prompt, NEEDS_PREFIX,
 };
 use crate::mac::gate;
 use crate::notch::answer::{type_key, QuestionDraft, Typed};
@@ -55,8 +61,12 @@ pub struct State {
     /// it waits), in ms.
     screen_retry_ms: i64,
     draft: QuestionDraft,
-    sending: bool,
+    /// What is going out now: the card's controls are off meanwhile and say so.
+    sending: Option<Sending>,
     error: Option<String>,
+    /// The decision that last went through, with the session it was for: shown for a moment above
+    /// the card that follows, which can look just like the one answered.
+    confirmed: Option<(String, Confirmed)>,
     focus: FocusHandle,
     /// A render's forced prompt (`NOTCHLING_RENDER_PROMPT`).
     pub(super) preview: Option<Preview>,
@@ -72,8 +82,9 @@ impl State {
             screen_asked: None,
             screen_retry_ms: 0,
             draft: QuestionDraft::default(),
-            sending: false,
+            sending: None,
             error: None,
+            confirmed: None,
             focus: cx.focus_handle(),
             preview,
         }
@@ -82,6 +93,37 @@ impl State {
     /// Whether a card is up: the reply box's refusal points at it then.
     pub fn is_shown(&self) -> bool {
         self.shown.is_some()
+    }
+
+    /// A render's forced prompt, and the state around it that a picture can't wait for.
+    pub fn apply_preview(&mut self, preview: Preview) {
+        use crate::chat::prompts::PREVIEW_BEFORE;
+        self.preview = Some(preview);
+        // Shown from the first draw, so the state set below isn't cleared as another card's.
+        self.shown = Some(preview_prompt(preview));
+        match preview {
+            Preview::PermissionSending => {
+                self.sending = Some(Sending::Decision {
+                    decision: Decision::Allow,
+                    on_screen: true,
+                });
+            }
+            Preview::PermissionFailed => {
+                self.error = Some(failure_text(
+                    "The terminal asks about something else than Chat shows, so nothing was typed. Answer it in the terminal.",
+                ));
+            }
+            Preview::PermissionNext => {
+                self.confirmed = Some((
+                    String::new(),
+                    Confirmed {
+                        text: confirmation("Write", PREVIEW_BEFORE, Decision::Allow),
+                        until_ms: i64::MAX,
+                    },
+                ));
+            }
+            _ => {}
+        }
     }
 }
 
@@ -163,7 +205,7 @@ impl ChatView {
         self.read_screen_question(cx);
         let shown = self.prompt_now();
         let key = |p: &Option<Prompt>| p.as_ref().map(Prompt::key);
-        if key(&shown) != key(&self.prompt.shown) {
+        if self.prompt.preview.is_none() && key(&shown) != key(&self.prompt.shown) {
             self.prompt.error = None;
         }
         if let Some(Prompt::Question(q)) = &shown {
@@ -186,12 +228,24 @@ impl ChatView {
     /// Sends an answer or a decision; on success the prompt it answered (`key`, taken when the
     /// button was pressed) is hidden everywhere, and no other: the session may have a newer one
     /// by the time the reply comes back.
-    fn answer_prompt(&mut self, key: String, request: Request, cx: &mut Context<Self>) {
-        if self.prompt.sending || !self.prompt_gate(cx).enabled {
+    /// `sending` is what the card says meanwhile; `told` is what it leaves behind (a permission's
+    /// decision, named so the next card isn't taken for the same one). A refusal that the
+    /// terminal shows no such permission any more means it was answered there: the card goes, as
+    /// after an answer, with a note saying so, instead of an error nothing can be done about.
+    fn answer_prompt(
+        &mut self,
+        key: String,
+        request: Request,
+        sending: Sending,
+        told: Option<Told>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.prompt.sending.is_some() || !self.prompt_gate(cx).enabled {
             return;
         }
-        self.prompt.sending = true;
+        self.prompt.sending = Some(sending);
         self.prompt.error = None;
+        let row = self.selected.clone();
         // As a sent message does: the answer and what the session does next show at the end.
         self.follow_sent_now(cx);
         let actions = self.acts(cx).actions;
@@ -201,17 +255,27 @@ impl ChatView {
                 .spawn(async move { actions.send(&request) })
                 .await;
             this.update(cx, |view, cx| {
-                view.prompt.sending = false;
+                view.prompt.sending = None;
                 match result {
                     Ok(_) => {
                         view.source.mark_answered(&key);
+                        if let (Some(told), Some(row)) = (&told, &row) {
+                            view.keep_note(row, told.went_through.clone(), cx);
+                        }
                         // "Answer it above" is answered.
                         if view.tools.error.as_deref().is_some_and(is_dialog) {
                             view.tools.error = None;
                         }
                         view.reload_now(cx);
                     }
-                    Err(message) => view.prompt.error = Some(message),
+                    Err(message) => match (&told, &row) {
+                        (Some(told), Some(row)) if is_gone(&message) => {
+                            view.source.mark_answered(&key);
+                            view.keep_note(row, told.already_answered.clone(), cx);
+                            view.reload_now(cx);
+                        }
+                        _ => view.prompt.error = Some(failure_text(&message)),
+                    },
                 }
                 cx.notify();
             })
@@ -220,18 +284,83 @@ impl ChatView {
         .detach();
         cx.notify();
     }
+
+    /// Shows `text` over what follows for a moment ([`confirmed`]).
+    fn keep_note(&mut self, row: &str, text: String, cx: &mut Context<Self>) {
+        self.prompt.confirmed = Some((row.to_owned(), Confirmed::new(text, now_ms())));
+        self.draw_when_confirmation_ends(cx);
+    }
+
+    /// The confirmation goes by itself: one more draw when its moment is over.
+    fn draw_when_confirmation_ends(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(CONFIRM_MS as u64 + 50))
+                .await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .detach();
+    }
 }
 
-/// The line under the controls: the send error, "Sending…", or why they are off.
+/// The line under the controls: what is going out, or why they are off.
 fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
-    let (text, ink) = if let Some(error) = &view.prompt.error {
-        (error.as_str(), Ink::Needs)
-    } else if view.prompt.sending {
-        ("Sending…", Ink::TextMuted)
-    } else {
-        (gate.tooltip?, Ink::TextMuted)
+    let text = match view.prompt.sending {
+        Some(sending) => sending_text(sending),
+        None => gate.tooltip?,
     };
-    Some(label(&sentence(text), TypeRole::Meta, ink, a))
+    Some(label(&sentence(text), TypeRole::Meta, Ink::TextMuted, a))
+}
+
+/// Why the last answer didn't go through, over the options: where a click's eye goes, not a small
+/// line under them. The card stays answerable.
+fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let message = view.prompt.error.as_deref()?;
+    Some(
+        div()
+            .flex()
+            .items_start()
+            .gap(px(8.0))
+            .p(px(8.0))
+            .rounded(px(RADIUS_MD))
+            .fill(Ink::Raised, a)
+            .child(icon(
+                Icon::Warning,
+                TypeRole::Label.spec().size,
+                Ink::Needs,
+                a,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .gap(px(2.0))
+                    .child(label("Not answered", TypeRole::Label, Ink::Needs, a))
+                    .child(label(message, TypeRole::Meta, Ink::Text, a)),
+            )
+            .part_at("Answer Error", Corner::TopTrailing, a, cx),
+    )
+}
+
+/// "Allowed: Write notes.md": the answer that just went through, for a moment, over what follows.
+fn confirmed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let (row, done) = view.prompt.confirmed.as_ref()?;
+    let for_this_session = view.prompt.preview.is_some() || view.selected.as_ref() == Some(row);
+    if !for_this_session || !done.visible(now_ms()) {
+        return None;
+    }
+    Some(
+        div()
+            .mx(px(SIDE_PADDING))
+            .mb(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(icon(Icon::Check, TypeRole::Label.spec().size, Ink::Done, a))
+            .child(label(&done.text, TypeRole::Label, Ink::Text, a).elide())
+            .part_at("Answer Confirmation", Corner::TopTrailing, a, cx),
+    )
 }
 
 /// A card's header: icon and title in an ink, and a step count.
@@ -267,14 +396,23 @@ pub(super) fn card(
     window: &Window,
     cx: &mut Context<ChatView>,
 ) -> Option<Div> {
-    let prompt = view.prompt.shown.clone()?;
+    let done = confirmed(view, a, cx);
+    let Some(prompt) = view.prompt.shown.clone() else {
+        return done;
+    };
     let row = view.selected.clone()?;
     let gate = view.prompt_gate(cx);
     let content = match &prompt {
         Prompt::Question(q) => question(view, &row, q, gate, a, window, cx),
         Prompt::Permission(r) => permission(view, r, gate, a, cx),
     };
-    Some(frame(&prompt, content, a, cx))
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .children(done)
+            .child(frame(&prompt, content, a, cx)),
+    )
 }
 
 /// "Claude asks": tabs across the questions, the one on show with its options, a box and Submit.
@@ -310,11 +448,18 @@ fn question(
                 a,
             );
             let (session, question) = (row.to_owned(), q.clone());
-            gate::tip(row_el, gate, a).when(gate.enabled, |el| {
+            // `w_auto`: see the permission card's rows.
+            gate::tip(row_el.w_auto(), gate, a).when(gate.enabled, |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(answers) = this.prompt.draft.choose(&question, i + 1) {
                         let request = Request::answer_for(&session, &question, &answers);
-                        this.answer_prompt(question_key(&question), request, cx);
+                        this.answer_prompt(
+                            question_key(&question),
+                            request,
+                            Sending::Answer,
+                            None,
+                            cx,
+                        );
                     }
                     cx.notify();
                 }))
@@ -333,6 +478,7 @@ fn question(
         .children(tabs)
         .child(label(&item.question, TypeRole::Heading, Ink::Text, a))
         .children(hint)
+        .children(failed(view, a, cx))
         .children(options)
         .child(answer_box(view, row, q, gate, a, window, cx))
         .children(submit)
@@ -421,7 +567,13 @@ fn answer_box(
                     Typed::Submit => {
                         if let Some(answers) = this.prompt.draft.submit_text(&question) {
                             let request = Request::answer_for(&session, &question, &answers);
-                            this.answer_prompt(question_key(&question), request, cx);
+                            this.answer_prompt(
+                                question_key(&question),
+                                request,
+                                Sending::Answer,
+                                None,
+                                cx,
+                            );
                         }
                     }
                     Typed::Changed => {}
@@ -444,7 +596,7 @@ fn submit_row(
 ) -> Div {
     let draft = &view.prompt.draft;
     let ready = Control {
-        enabled: gate.enabled && draft.complete() && !view.prompt.sending,
+        enabled: gate.enabled && draft.complete() && view.prompt.sending.is_none(),
         tooltip: gate.tooltip,
     };
     let multi = q.items.get(draft.tab).is_some_and(|i| i.multi_select);
@@ -473,7 +625,7 @@ fn submit_row(
         b.on_click(cx.listener(move |this, _, _, cx| {
             if let Some(answers) = this.prompt.draft.answers(&question) {
                 let request = Request::answer_for(&session, &question, &answers);
-                this.answer_prompt(question_key(&question), request, cx);
+                this.answer_prompt(question_key(&question), request, Sending::Answer, None, cx);
             }
         }))
     });
@@ -504,28 +656,70 @@ fn permission(
         ));
     }
     choices.push((Decision::Deny, "Deny", "Claude tries something else"));
+    let on_screen = r.id.starts_with(NEEDS_PREFIX);
+    let sending = view.prompt.sending;
+    let chosen = match sending {
+        Some(Sending::Decision { decision, .. }) => Some(decision),
+        _ => None,
+    };
     let options = choices
         .into_iter()
         .enumerate()
         .map(|(i, (decision, title, detail))| {
+            // While one goes out, the one picked is lit and the rest are off, so a second click
+            // can't send another and the card shows something is happening.
+            let (state, picked) = match sending {
+                None => (gate::state(gate), false),
+                Some(_) if chosen == Some(decision) => (PartState::Selected, true),
+                Some(_) => (PartState::Disabled, false),
+            };
             let row = option_row(
                 SharedString::from(format!("prompt-permission-{i}")),
                 i + 1,
                 title,
                 detail,
-                false,
-                gate::state(gate),
+                picked,
+                state,
                 a,
             );
             // A hook's prompt is decided by its own id; one read from the job's state is typed
             // into its terminal, checked against what this card shows. Either hides that one only.
             let (key, request) = (r.id.clone(), permission_request(r, decision));
-            gate::tip(row, gate, a).when(gate.enabled, |el| {
+            let (sent, said) = (
+                Sending::Decision {
+                    decision,
+                    on_screen,
+                },
+                Told::new(&r.tool_name, &r.summary, decision),
+            );
+            // `w_auto`: the kit's row is `w_full`, which a card with wrapped text above it (a long
+            // path) doesn't resolve, and the rows shrank to their text; stretch gives the width.
+            gate::tip(row.w_auto(), gate, a).when(gate.enabled && sending.is_none(), |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| {
-                    this.answer_prompt(key.clone(), request.clone(), cx);
+                    this.answer_prompt(key.clone(), request.clone(), sent, Some(said.clone()), cx);
                 }))
             })
-        });
+        })
+        .collect::<Vec<_>>();
+    // The file's own name, big: a long path wraps, and the next request in the folder reads alike.
+    let file = file_name(&r.tool_name, &r.summary).map(|name| {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(icon(
+                Icon::File,
+                TypeRole::Title.spec().size,
+                Ink::AccentText,
+                a,
+            ))
+            .child(label(name, TypeRole::Title, Ink::Text, a))
+    });
+    let path = label(&r.summary, TypeRole::Mono, Ink::Text, a)
+        .line_clamp(SUMMARY_LINES)
+        .p(px(8.0))
+        .rounded(px(RADIUS_MD))
+        .fill(Ink::Raised, a);
     div()
         .flex()
         .flex_col()
@@ -543,13 +737,9 @@ fn permission(
             Ink::Text,
             a,
         ))
-        .child(
-            label(&r.summary, TypeRole::Mono, Ink::Text, a)
-                .line_clamp(SUMMARY_LINES)
-                .p(px(8.0))
-                .rounded(px(RADIUS_MD))
-                .fill(Ink::Raised, a),
-        )
+        .children(file)
+        .child(path)
+        .children(failed(view, a, cx))
         .children(options)
         .children(status(view, gate, a))
 }

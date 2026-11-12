@@ -1,7 +1,9 @@
 //! The audit log: `<data dir>/audit.jsonl`, 0600, one line per privileged call or refusal, with the
 //! time, op, tier, peer path and result. It rotates at 5 MB, keeping one old file
 //! (`audit.jsonl.1`). Refusals are logged, and since Milestone 3 every app-tier call with its
-//! outcome (`ok`, or the error code).
+//! outcome (`ok`, or the error code). A failed call that types into a session's terminal also
+//! keeps why, as `reason` ([`audit_reason`]): without it "failed" says nothing about which check
+//! stopped the answer.
 
 use crate::wire::Tier;
 use serde::Serialize;
@@ -27,6 +29,10 @@ pub struct AuditEntry {
     pub peer: Option<String>,
     /// `forbidden`, `needs_approval`, `other_user`...
     pub result: String,
+    /// Why a failed call failed: one capped line, only for the ops [`audit_reason`] names. Left
+    /// out of the line when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl AuditEntry {
@@ -41,8 +47,48 @@ impl AuditEntry {
             tier,
             peer: peer.map(|p| p.to_string_lossy().into_owned()),
             result: result.to_string(),
+            reason: None,
         }
     }
+
+    /// The same line with the reason the call failed.
+    pub fn with_reason(mut self, reason: Option<String>) -> AuditEntry {
+        self.reason = reason;
+        self
+    }
+}
+
+/// The ops whose failures keep their message in the audit line: the ones that type into a
+/// session's terminal. Their messages are fixed sentences about the screen ("The terminal asks
+/// about something else than Chat shows"), not paths, accounts or secrets, which other ops' errors
+/// may carry.
+const REASON_OPS: [&str; 6] = [
+    "session.permission",
+    "session.answer",
+    "session.reply",
+    "session.interrupt",
+    "session.take_back",
+    "session.question",
+];
+
+/// The longest reason kept, in characters.
+pub const REASON_CHARS: usize = 200;
+
+/// What the audit line keeps of a failed call's message: `None` for an op not listed, else the
+/// message on one line, cut at [`REASON_CHARS`] characters.
+pub fn audit_reason(op: &str, message: &str) -> Option<String> {
+    if !REASON_OPS.contains(&op) {
+        return None;
+    }
+    let one_line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    if one_line.chars().count() <= REASON_CHARS {
+        return Some(one_line);
+    }
+    let cut: String = one_line.chars().take(REASON_CHARS).collect();
+    Some(format!("{cut}…"))
 }
 
 /// An append-only log shared by every connection.
@@ -121,6 +167,7 @@ mod tests {
             tier: Some(Tier::Agent),
             peer: Some("/bin/x".into()),
             result: "forbidden".into(),
+            reason: None,
         }
     }
 

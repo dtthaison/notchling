@@ -312,7 +312,11 @@ impl DataRoot {
         };
         let path = path.to_string_lossy();
         match session.tool {
-            Tool::Claude => conversation::read_shared(&path),
+            Tool::Claude => super::cleared::with_model(
+                &path,
+                &session.agent.name,
+                conversation::read_shared(&path),
+            ),
             Tool::Codex => codex::read_shared(&path),
             // The daemon's, fetched by the view; never read from Antigravity's files.
             Tool::Antigravity => Arc::default(),
@@ -332,11 +336,18 @@ impl DataRoot {
         now_secs: f64,
     ) -> Vec<Subagent> {
         match (&session.transcript, session.tool) {
-            (Some(path), Tool::Claude) => subagents::list(
-                &path.to_string_lossy(),
-                &conversation.finished_agents,
-                now_secs,
-            ),
+            (Some(path), Tool::Claude) => {
+                let path = path.to_string_lossy();
+                let mut list = subagents::list(&path, &conversation.finished_agents, now_secs);
+                // A /clear leaves the old conversation's running subagents beside the old file.
+                for agent in super::cleared::running_before(&path, &session.agent.name, now_secs) {
+                    if !list.iter().any(|a| a.id == agent.id) {
+                        list.push(agent);
+                    }
+                }
+                list.sort_by(|a, b| a.started.total_cmp(&b.started));
+                list
+            }
             _ => Vec::new(),
         }
     }

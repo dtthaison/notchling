@@ -52,7 +52,18 @@ impl Locator {
         {
             return None;
         }
-        let found = find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd);
+        // A session that entered a worktree mid-run has its file moved to the worktree's project
+        // folder while the job's state still names the old place: look for that file by name.
+        let moved = agent
+            .transcript_path
+            .as_deref()
+            .map(Path::new)
+            .filter(|p| p.is_absolute())
+            .and_then(Path::file_stem)
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .and_then(|stem| find_transcript(&projects.to_string_lossy(), &stem, &agent.cwd));
+        let found =
+            moved.or_else(|| find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd));
         if found.is_none() {
             self.missed.insert(agent.id.clone(), now_ms);
         }

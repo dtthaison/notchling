@@ -1,5 +1,6 @@
 //! The inspector beside the conversation: tasks, the session's facts, subagents, background shells.
 
+use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
 use notchling_engine::transcript::shells::{self, ShellState};
 use notchling_engine::transcript::subagents::{Status as SubagentStatus, Subagent};
@@ -30,6 +31,8 @@ pub struct SubagentRow {
     pub status_word: String,
     pub running: bool,
     pub mark: Mark,
+    /// What a running subagent is doing now, from its own transcript ("Running cargo test…").
+    pub doing: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -158,6 +161,8 @@ pub fn subagent_row(agent: &Subagent) -> SubagentRow {
         status_word: word.to_owned(),
         running: agent.is_running(),
         mark,
+        doing: (agent.is_running() && !agent.path.is_empty())
+            .then(|| super::activity::doing(&conversation::read_subagent_shared(&agent.path))),
     }
 }
 
@@ -509,6 +514,7 @@ mod tests {
                 status_word: "Done".into(),
                 running: false,
                 mark: Mark::Icon(Icon::Done, Ink::Done),
+                doing: None,
             }
         );
         assert_eq!(i.subagents_title(), "Subagents · 1");
@@ -545,6 +551,28 @@ mod tests {
         assert_eq!(i.subagents[0].detail, "Running");
         assert_eq!(i.subagents[1].detail, "Failed · Plan");
         assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn a_running_subagent_says_what_it_is_doing_now() {
+        let s = crate::testutil::Scratch::new("subagent-doing");
+        let file = s.write(
+            "agent-a.jsonl",
+            concat!(
+                r#"{"isSidechain":true,"type":"user","message":{"role":"user","content":"Fix it"},"uuid":"u1","timestamp":"2026-11-08T08:00:00.000Z"}"#,
+                "\n",
+                r#"{"isSidechain":true,"type":"assistant","message":{"id":"a1","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}]},"uuid":"u2","timestamp":"2026-11-08T08:00:05.000Z"}"#,
+                "\n"
+            ),
+        );
+        let mut running = agent(SubagentStatus::Running, "general-purpose");
+        running.path = file.to_string_lossy().into_owned();
+        let mut done = agent(SubagentStatus::Completed, "general-purpose");
+        done.path = running.path.clone();
+        let i = inspector(&Conversation::default(), &[running, done], &no_writers);
+        let doing = i.subagents[0].doing.as_deref().expect("a running one says");
+        assert!(doing.contains("Run the tests"), "{doing}");
+        assert_eq!(i.subagents[1].doing, None, "a finished one doesn't");
     }
 
     #[test]
