@@ -16,6 +16,7 @@ pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
 pub mod claude_picker;
+pub mod cleared;
 pub mod closed;
 pub mod codex_list;
 pub mod composer;
@@ -46,7 +47,10 @@ pub mod page_panel;
 mod parse_cost_tests;
 pub mod paths;
 pub mod pickers;
+pub mod prompt_flow;
 pub mod prompts;
+#[cfg(test)]
+mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;
