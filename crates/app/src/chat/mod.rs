@@ -29,6 +29,8 @@ pub mod inspector;
 pub mod lane_limits;
 pub mod limit_ring;
 pub mod loader;
+#[cfg(test)]
+mod loader_change_tests;
 pub mod log;
 #[cfg(test)]
 mod log_tests;

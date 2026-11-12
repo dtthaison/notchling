@@ -5,6 +5,7 @@
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::transcript::model::Conversation;
@@ -303,18 +304,24 @@ impl DataRoot {
         out
     }
 
-    /// The session's conversation, read incrementally by the engine; empty without a transcript.
-    pub fn conversation(&self, session: &Session) -> Conversation {
+    /// The session's conversation, read incrementally by the engine; empty without a transcript. An
+    /// unchanged file gives the same `Arc` as the last read.
+    pub fn conversation_shared(&self, session: &Session) -> Arc<Conversation> {
         let Some(path) = &session.transcript else {
-            return Conversation::default();
+            return Arc::default();
         };
         let path = path.to_string_lossy();
         match session.tool {
-            Tool::Claude => conversation::read(&path),
-            Tool::Codex => codex::read(&path),
+            Tool::Claude => conversation::read_shared(&path),
+            Tool::Codex => codex::read_shared(&path),
             // The daemon's, fetched by the view; never read from Antigravity's files.
-            Tool::Antigravity => Conversation::default(),
+            Tool::Antigravity => Arc::default(),
         }
+    }
+
+    /// [`DataRoot::conversation_shared`] as an owned copy.
+    pub fn conversation(&self, session: &Session) -> Conversation {
+        (*self.conversation_shared(session)).clone()
     }
 
     /// The subagents a Claude Code session started, with how each ended.

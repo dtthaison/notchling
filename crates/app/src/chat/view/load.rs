@@ -152,11 +152,23 @@ impl ChatView {
             let session_changed = std::mem::take(&mut self.scroll_to_end);
             conversation_changed |= self.selected != was || session_changed;
             if !agy {
-                conversation_changed |= self.loading || self.conversation != loaded.conversation;
+                let content_changed = match &loaded.change {
+                    // The loader compared against the conversation on show: trust it.
+                    Some((from, change)) if Arc::ptr_eq(from, &self.conversation) => {
+                        *change != Change::Same
+                    }
+                    // Anything else (first load, a subagent in between): pointer, then content.
+                    _ => {
+                        !Arc::ptr_eq(&self.conversation, &loaded.conversation)
+                            && *self.conversation != *loaded.conversation
+                    }
+                };
+                conversation_changed |= self.loading || content_changed;
                 if conversation_changed {
                     self.follow_content(session_changed);
                 }
                 self.conversation = loaded.conversation;
+                self.pending_change = loaded.change;
                 self.loading = false;
             } else if session_changed {
                 self.conversation_scroll.scroll_to_bottom();
@@ -168,7 +180,7 @@ impl ChatView {
                 || self.prompt.transcript != loaded.question;
             self.subagents = loaded.subagents;
             if let Some(open) = self.open_subagent.as_mut() {
-                open.apply(&self.subagents, loaded.subagent);
+                open.apply_shared(&self.subagents, loaded.subagent);
             }
             self.prompt.transcript = loaded.question;
         } else {
@@ -199,7 +211,7 @@ impl ChatView {
         select::clear();
         self.markdown.get_mut().switched();
         self.mark_used(id);
-        self.conversation = Conversation::default();
+        self.conversation = Arc::default();
         self.subagents.clear();
         self.open_subagent = None;
         self.prompt.transcript = None;

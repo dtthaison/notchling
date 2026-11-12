@@ -6,6 +6,7 @@
 //! control follows `Acting::control`; nothing is sent while acting isn't on.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscription};
 
@@ -815,10 +816,11 @@ impl ChatView {
                 if done.apply && view.selected.as_deref() == Some(asked.as_str()) {
                     if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
                         view.follow_content(false);
-                        view.conversation = c.conversation.clone();
-                        if view.conversation.facts.context_tokens == 0 {
-                            view.conversation.facts.context_tokens = context.unwrap_or(0);
+                        let mut shown = c.conversation.clone();
+                        if shown.facts.context_tokens == 0 {
+                            shown.facts.context_tokens = context.unwrap_or(0);
                         }
+                        view.conversation = Arc::new(shown);
                         view.loading = false;
                         view.tools.agy = Some(c);
                     }

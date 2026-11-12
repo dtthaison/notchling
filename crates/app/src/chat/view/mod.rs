@@ -59,6 +59,7 @@ use notchling_platform::watch::{Batch, Watcher};
 
 use crate::chat::activity::{self, Activity};
 use crate::chat::data::{DataRoot, Loaded, Loader, Session, Tool};
+use crate::chat::log::Change;
 use crate::chat::message_meta;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
@@ -130,7 +131,10 @@ pub struct ChatView {
     /// the session or another row is picked.
     new_drafts: Vec<Session>,
     selected: Option<String>,
-    conversation: Conversation,
+    conversation: Arc<Conversation>,
+    /// What the last load changed in `conversation` and the conversation it started from; Task 4.4's
+    /// `ConversationView` reads it to splice rows.
+    pending_change: Option<(Arc<Conversation>, Change)>,
     subagents: Vec<Subagent>,
     /// The subagent shown read-only in place of the conversation (opened from the Details Panel or
     /// an Agent step). Kept here, not in the load, so it outlives every reload; cleared by Back,
@@ -457,7 +461,8 @@ impl ChatView {
             sessions: Vec::new(),
             new_drafts: Vec::new(),
             selected: None,
-            conversation: Conversation::default(),
+            conversation: Arc::default(),
+            pending_change: None,
             subagents: Vec::new(),
             open_subagent: None,
             now_ms: 0,

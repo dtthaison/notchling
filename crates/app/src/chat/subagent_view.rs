@@ -2,6 +2,8 @@
 //! goes (the Swift `ChatModel.subagentID`). Which one is open, how a step's tool use id finds its
 //! subagent and what the slim header says are plain functions here; the window keeps one [`Open`].
 
+use std::sync::Arc;
+
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 
@@ -13,7 +15,7 @@ pub struct Open {
     /// As the last load listed it, so the header's status word stays current.
     pub agent: Subagent,
     /// Its transcript once a load has read it; `None` until then.
-    pub conversation: Option<Conversation>,
+    pub conversation: Option<Arc<Conversation>>,
 }
 
 impl Open {
@@ -27,7 +29,7 @@ impl Open {
     /// Takes a finished load: the listing's newer copy of the subagent (a missing one stays as it
     /// was, the list can be empty for a moment) and, when `read` is this subagent's file, its
     /// conversation.
-    pub fn apply(&mut self, listed: &[Subagent], read: Option<(String, Conversation)>) {
+    pub fn apply_shared(&mut self, listed: &[Subagent], read: Option<(String, Arc<Conversation>)>) {
         if let Some(agent) = find(listed, &self.agent.id) {
             self.agent = agent.clone();
         }
@@ -36,6 +38,11 @@ impl Open {
                 self.conversation = Some(conversation);
             }
         }
+    }
+
+    /// [`Open::apply_shared`] for an owned conversation.
+    pub fn apply(&mut self, listed: &[Subagent], read: Option<(String, Conversation)>) {
+        self.apply_shared(listed, read.map(|(path, c)| (path, Arc::new(c))));
     }
 }
 

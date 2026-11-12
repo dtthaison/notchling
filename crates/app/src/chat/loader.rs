@@ -4,6 +4,7 @@
 //! and takes it back.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use notchling_engine::sessions::{Agent, Monitor};
 use notchling_engine::transcript::model::Conversation;
@@ -11,6 +12,7 @@ use notchling_engine::transcript::snapshot::{self, PendingQuestion};
 use notchling_engine::transcript::subagents::{self, Subagent};
 
 use super::data::{DataRoot, Session, Tool};
+use super::log::{self, Change};
 use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
@@ -22,11 +24,15 @@ pub struct Loaded {
     pub sessions: Vec<Session>,
     /// The session the conversation is of: the one asked for if it is listed, else the first.
     pub selected: Option<String>,
-    pub conversation: Conversation,
+    pub conversation: Arc<Conversation>,
+    /// What changed from the conversation this loader handed out last, when that was the same
+    /// session's: the conversation the change starts from, and the change. `None` for the first
+    /// load, another session or a draft: the view then compares the conversations itself.
+    pub change: Option<(Arc<Conversation>, Change)>,
     pub subagents: Vec<Subagent>,
     /// The transcript of the subagent Chat has open ([`Loader::subagent_path`]), by that path, read
     /// again with every load so a running one follows.
-    pub subagent: Option<(String, Conversation)>,
+    pub subagent: Option<(String, Arc<Conversation>)>,
     /// The selected Claude Code session's unanswered AskUserQuestion, from its transcript tail.
     pub question: Option<PendingQuestion>,
     /// The Swift hook's held prompts by session id (`requests/`), read only while the daemon's
@@ -48,6 +54,8 @@ pub struct Loader {
     pub files_prompts: bool,
     /// The file of the subagent Chat shows in place of the conversation, read with each load.
     pub subagent_path: Option<String>,
+    /// The session and conversation of the last load, what the next one's change starts from.
+    last: Option<(String, Arc<Conversation>)>,
 }
 
 impl Loader {
@@ -58,6 +66,7 @@ impl Loader {
             agy: root.new_agy_list(),
             files_prompts: false,
             subagent_path: None,
+            last: None,
             root,
         }
     }
@@ -131,22 +140,34 @@ impl Loader {
         };
         let (conversation, subagents) = match session {
             Some(session) => {
-                let conversation = self.root.conversation(session);
+                let conversation = self.root.conversation_shared(session);
                 let subagents = self
                     .root
                     .subagents(session, &conversation, now_ms as f64 / 1000.0);
                 (conversation, subagents)
             }
-            None => (Conversation::default(), Vec::new()),
+            None => (Arc::default(), Vec::new()),
         };
+        // Compared here, off the main thread: the view only checks the pointer it starts from.
+        let change = match (&selected, self.last.take()) {
+            (Some(id), Some((last_id, last))) if *id == last_id => {
+                let change = log::diff(&last, &conversation);
+                Some((last, change))
+            }
+            _ => None,
+        };
+        self.last = selected
+            .as_ref()
+            .map(|id| (id.clone(), Arc::clone(&conversation)));
         let subagent = self
             .subagent_path
             .as_ref()
-            .map(|path| (path.clone(), subagents::read(path)));
+            .map(|path| (path.clone(), subagents::read_shared(path)));
         Loaded {
             sessions,
             selected,
             conversation,
+            change,
             subagents,
             subagent,
             question,
