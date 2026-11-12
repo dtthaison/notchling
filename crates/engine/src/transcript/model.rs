@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::snapshot::PendingQuestion;
+
 /// Seconds since the Unix epoch.
 pub type Timestamp = f64;
 
@@ -196,6 +198,11 @@ pub struct Conversation {
     pub finished_agents: HashMap<String, String>,
     /// Bash calls run in the background, oldest first.
     pub shells: Vec<BackgroundShell>,
+    /// The AskUserQuestion the session asked last and nothing has answered yet. Only the Claude Code
+    /// reader fills it; left out of the JSON while there is none, so `agy.conversation` answers are
+    /// as they were.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_question: Option<PendingQuestion>,
 }
 
 impl Conversation {

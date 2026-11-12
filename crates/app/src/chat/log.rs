@@ -19,7 +19,8 @@ pub enum Change {
     /// Same `Arc`, or equal: nothing the column shows changed.
     Same,
     /// Splices in old-item order, none overlapping; `other` says a field besides `items` changed
-    /// (tasks, facts, queued, activity, turn start or tokens, finished agents, shells).
+    /// (tasks, facts, queued, activity, turn start or tokens, finished agents, shells, the pending
+    /// question).
     Items { splices: Vec<Splice>, other: bool },
     /// The ids don't line up (another session, a fresh cursor renumbered them): start over.
     Reset,
@@ -113,4 +114,5 @@ fn other_changed(old: &Conversation, new: &Conversation) -> bool {
         || old.queued != new.queued
         || old.finished_agents != new.finished_agents
         || old.shells != new.shells
+        || old.pending_question != new.pending_question
 }

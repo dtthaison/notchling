@@ -6,6 +6,7 @@ use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, 
 use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::model::*;
 use crate::transcript::shells;
+use crate::transcript::snapshot::{self, PendingQuestion};
 use crate::transcript::subagents::notification_statuses;
 use crate::transcript::tail::LineParser;
 use crate::transcript::util::{count_of, date_field, parse_object, str_of};
@@ -38,6 +39,9 @@ pub struct Parser {
     queue: Queue,
     /// Reading a subagent's transcript: its lines are all marked sidechain.
     pub include_sidechain: bool,
+    /// The last AskUserQuestion asked and whether a tool result has answered it since.
+    last_question: Option<PendingQuestion>,
+    last_question_answered: bool,
 }
 
 impl LineParser for Parser {
@@ -297,6 +301,12 @@ impl Parser {
             .get("input")
             .and_then(Value::as_object)
             .unwrap_or(&empty);
+        if name == "AskUserQuestion" {
+            if let Some(q) = snapshot::question(id, input) {
+                self.last_question = Some(q);
+                self.last_question_answered = false;
+            }
+        }
         let call = make_call(id, name, input);
         if call.kind == ToolKind::Shell {
             self.c.facts.commands += 1;
@@ -398,6 +408,11 @@ impl Parser {
 
     fn tool_result(&mut self, block: &Value, result: Option<&Value>, date: Option<Timestamp>) {
         let tool_use_id = str_of(block, "tool_use_id");
+        if tool_use_id.is_some()
+            && tool_use_id == self.last_question.as_ref().map(|q| q.tool_use_id.as_str())
+        {
+            self.last_question_answered = true;
+        }
         let is_error = block.get("is_error").and_then(Value::as_bool) == Some(true);
         // A foreground subagent ends with its Agent call's result (a background one's result only says
         // it launched; `subagents::status_of` ignores it for those).
@@ -543,6 +558,10 @@ impl Parser {
             let extra = c.items.len() - KEEP_ITEMS;
             c.items.drain(..extra);
         }
+        c.pending_question = self
+            .last_question
+            .clone()
+            .filter(|_| !self.last_question_answered);
         c
     }
 }

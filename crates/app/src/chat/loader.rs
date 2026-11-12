@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use notchling_engine::sessions::{Agent, Monitor};
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::snapshot::{self, PendingQuestion};
+use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Subagent};
 
 use super::data::{DataRoot, Session, Tool};
@@ -129,10 +129,6 @@ impl Loader {
         let session = selected
             .as_deref()
             .and_then(|id| sessions.iter().find(|s| s.agent.id == id));
-        let question = session
-            .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
-            .and_then(|s| s.transcript.as_ref())
-            .and_then(|path| snapshot::read(&path.to_string_lossy()).question);
         let requests = if self.files_prompts {
             requests::read_dir(&self.root.data_dir.join("requests"), now_ms as f64 / 1000.0)
         } else {
@@ -148,6 +144,10 @@ impl Loader {
             }
             None => (Arc::default(), Vec::new()),
         };
+        // The open question comes from the same read as the conversation, not a second one.
+        let question = session
+            .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
+            .and_then(|_| conversation.pending_question.clone());
         // Compared here, off the main thread: the view only checks the pointer it starts from.
         let change = match (&selected, self.last.take()) {
             (Some(id), Some((last_id, last))) if *id == last_id => {

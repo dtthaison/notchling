@@ -161,3 +161,21 @@ fn only_the_queue_changed_is_items_with_no_splices_and_other() {
         }
     );
 }
+
+#[test]
+fn a_changed_pending_question_is_other() {
+    use notchling_engine::transcript::snapshot::PendingQuestion;
+    let old = run(0, 3);
+    let mut next = (*old).clone();
+    next.pending_question = Some(PendingQuestion {
+        tool_use_id: "q1".into(),
+        items: Vec::new(),
+    });
+    assert_eq!(
+        diff(&old, &Arc::new(next)),
+        Change::Items {
+            splices: Vec::new(),
+            other: true
+        }
+    );
+}

@@ -44,6 +44,8 @@ mod parse_cost_tests;
 pub mod paths;
 pub mod pickers;
 pub mod prompts;
+#[cfg(test)]
+mod question_parity_tests;
 pub mod reload;
 pub mod renders;
 pub mod rows;

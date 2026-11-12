@@ -6,6 +6,7 @@ use super::tail::{Cursors, LineParser, MAX_LINE_BYTES, TAIL_BYTES};
 use super::tally::{describe, ToolTally};
 use super::text::{collapse_pastes, suffix_chars};
 use super::util::{now_secs, parse_object, str_of};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
@@ -25,7 +26,7 @@ pub struct ChatLine {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuestionItem {
     pub header: String,
     pub question: String,
@@ -36,7 +37,7 @@ pub struct QuestionItem {
 }
 
 /// A question the agent asked with AskUserQuestion that hasn't been answered yet.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingQuestion {
     pub tool_use_id: String,
     pub items: Vec<QuestionItem>,
