@@ -47,6 +47,7 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
         capture: Arc::new(|program, args| capture(program, args, MODELS_TIMEOUT)),
         depth: 1,
         stop,
+        recorder: None,
         cancel_grace: Deps::CANCEL_GRACE,
         terminate_after: Deps::TERMINATE_AFTER,
     }

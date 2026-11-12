@@ -27,6 +27,7 @@ fn delegate(rig: &Rig, args: &[&str], depth: Option<&str>) -> Ran {
         cwd: &rig.folder,
         home: Some(&rig.root),
         depth,
+        record: None,
     };
     let code = run(&words(args), &ctx, rig.deps.clone(), &mut out, &mut err);
     Ran {
@@ -289,4 +290,103 @@ fn a_timeout_longer_than_the_run_does_not_cut_it_short() {
     let ran = delegate(&rig, &["codex", "--timeout", "600", "x"], None);
     assert_eq!(ran.code, 0);
     assert!(began.elapsed() < Duration::from_secs(5));
+}
+
+// MARK: The record a job leaves for Chat
+
+use crate::delegate::record::{self, End};
+
+/// `delegate` as called from an agent session `parent-1`, recording into the rig's folder.
+fn delegate_recorded(rig: &Rig, args: &[&str]) -> (Ran, std::path::PathBuf) {
+    let dir = rig.root.join("data/delegations");
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ctx = Context {
+        cwd: &rig.folder,
+        home: Some(&rig.root),
+        depth: None,
+        record: Some(RecordTo {
+            dir: &dir,
+            parent_session: "parent-1",
+            parent_cwd: "/work/app",
+            pid: std::process::id(),
+        }),
+    };
+    let code = run(&words(args), &ctx, rig.deps.clone(), &mut out, &mut err);
+    let ran = Ran {
+        code,
+        out: String::from_utf8(out).unwrap(),
+        err: String::from_utf8(err).unwrap(),
+    };
+    (ran, dir)
+}
+
+#[test]
+fn a_codex_job_from_a_session_leaves_a_finished_record_under_its_session_id() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    let (ran, dir) = delegate_recorded(
+        &rig,
+        &[
+            "codex",
+            "--model",
+            "m1",
+            "--effort",
+            "high",
+            "--",
+            "Review the diff\nand be brief",
+        ],
+    );
+    assert_eq!(ran.code, 0);
+    let records = record::read_all(&dir);
+    assert_eq!(records.len(), 1, "the pending file is gone: {records:?}");
+    let r = &records[0];
+    assert_eq!(r.file_name(), "codex-019e-s1.json");
+    assert_eq!(r.parent_session, "parent-1");
+    assert_eq!(r.parent_cwd, "/work/app");
+    assert_eq!(r.tool, "codex");
+    assert_eq!(r.model.as_deref(), Some("m1"));
+    assert_eq!(r.effort.as_deref(), Some("high"));
+    assert_eq!(r.description, "Review the diff");
+    assert_eq!(r.outcome, Some(End::Ok));
+    assert!(r.ended.is_some_and(|e| e >= r.started));
+    assert_eq!(r.pid, std::process::id());
+}
+
+#[test]
+fn a_failed_job_is_recorded_as_failed_and_a_call_without_a_session_leaves_nothing() {
+    let failing = rig(AcpFake::new());
+    failing
+        .codex
+        .push(FakeRun::ok(&[STARTED, r#"{"type":"error","message":"nope"}"#]).exiting(1));
+    let (ran, dir) = delegate_recorded(&failing, &["codex", "x"]);
+    assert_eq!(ran.code, 1);
+    assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Failed));
+
+    let plain = rig(AcpFake::new());
+    plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    assert_eq!(delegate(&plain, &["codex", "x"], None).code, 0);
+    assert!(
+        !plain.root.join("data").exists(),
+        "no CLAUDE_CODE_SESSION_ID, no record"
+    );
+}
+
+#[test]
+fn a_job_that_is_stopped_by_a_signal_is_recorded_as_stopped() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::held(&[STARTED]));
+    rig.deps
+        .stop
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (ran, dir) = delegate_recorded(&rig, &["codex", "x"]);
+    assert_eq!(ran.code, 1);
+    assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Stopped));
+}
+
+#[test]
+fn a_refused_command_line_leaves_no_record() {
+    let rig = rig(AcpFake::new());
+    let (ran, dir) = delegate_recorded(&rig, &["codex"]);
+    assert_eq!(ran.code, 2);
+    assert!(!dir.exists());
 }

@@ -9,10 +9,14 @@
 use super::deps::Deps;
 use super::options::{self, Tool};
 use super::outcome::{render, to_json, Outcome};
+use super::record::{Delegation, Recorder};
 use super::{agy_pick, agy_run, codex_run, media};
 use crate::tools::codex::models;
+use crate::transcript::util::now_secs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 /// Where the command runs.
 pub struct Context<'a> {
@@ -22,6 +26,21 @@ pub struct Context<'a> {
     pub home: Option<&'a Path>,
     /// The value of `NOTCHLING_DELEGATE_DEPTH` in this process, if set.
     pub depth: Option<&'a str>,
+    /// Where to leave a record of the job and for which session, when an agent session called
+    /// ([`super::record`]); `None` records nothing.
+    pub record: Option<RecordTo<'a>>,
+}
+
+/// The record a job leaves for Chat.
+pub struct RecordTo<'a> {
+    /// `<data>/delegations`.
+    pub dir: &'a Path,
+    /// Claude Code's id of the session that called (`CLAUDE_CODE_SESSION_ID`).
+    pub parent_session: &'a str,
+    /// The caller's folder.
+    pub parent_cwd: &'a str,
+    /// This process.
+    pub pid: u32,
 }
 
 /// Runs a job; `args` are what follows `delegate`. Prints the outcome on `out` and returns the
@@ -45,6 +64,18 @@ pub fn run(
     if !Path::new(&options.folder).exists() {
         return usage_error(err, &format!("No folder at {}.", options.folder));
     }
+    let recorder = ctx.record.as_ref().map(|to| {
+        let record = Delegation::new(
+            to.parent_session,
+            to.parent_cwd,
+            &options,
+            now_secs(),
+            to.pid,
+        );
+        Arc::new(Recorder::start(to.dir, record, now_secs()))
+    });
+    deps.recorder = recorder.clone();
+    let stop = deps.stop.clone();
     let mut outcome = match options.tool {
         Tool::Codex => codex_run::run(&options, &deps),
         Tool::Agy => agy_run::run(&options, &deps, err),
@@ -64,6 +95,9 @@ pub fn run(
                     .or_else(|| Some(format!("Couldn't copy to {dir}: {e}")));
             }
         }
+    }
+    if let Some(recorder) = &recorder {
+        recorder.finish(&outcome, stop.load(Ordering::SeqCst), now_secs());
     }
     finish(&outcome, parsed.json, out)
 }

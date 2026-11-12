@@ -17,6 +17,7 @@
 //! | One Codex turn (read-only sandbox unless `--write`) | [`codex_run`] |
 //! | One Antigravity turn over ACP (permissions declined and listed; edits only with `--write`) | [`agy_run`] |
 //! | Waiting for agy's subagents, by file events | [`progress`] |
+//! | The record a delegation leaves for Chat (a subagent of the session that handed it over) | [`record`] |
 //! | Generated media pickup and `--out` copies (no traversal, no symlink out) | [`media`] |
 //! | agy's model and thinking level | [`agy_pick`] |
 //! | The result as text and `--json` | [`outcome`] |
@@ -38,6 +39,7 @@ pub mod options;
 pub mod outcome;
 pub mod progress;
 pub mod real;
+pub mod record;
 pub mod second_opinion;
 pub mod second_opinion_host;
 pub mod second_opinion_store;

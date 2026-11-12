@@ -348,6 +348,10 @@ fn drive(
         .session
         .clone()
         .ok_or_else(|| Stop::Error("Antigravity didn't open a session.".into()))?;
+    // Chat lists the job as a subagent from the moment its session has an id.
+    if let Some(recorder) = &deps.recorder {
+        recorder.session_known(&session, None, None);
+    }
 
     configure(
         run,
@@ -356,6 +360,9 @@ fn drive(
         &session,
         &ConfigOption::parse(opened.get("configOptions")),
     )?;
+    if let Some(recorder) = &deps.recorder {
+        recorder.session_known(&session, o.model.as_deref(), o.effort.as_deref());
+    }
 
     let answer = run.call(
         "session/prompt",
