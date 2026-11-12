@@ -487,4 +487,22 @@ mod tests {
         );
         assert_eq!(got[4].link.as_deref(), Some("mailto:a@b.c"));
     }
+
+    /// Antigravity links a file it wrote as an absolute `file://` URL with its spaces escaped.
+    #[test]
+    fn a_file_url_with_escaped_spaces_links_the_file() {
+        let s = Scratch::new("paths-file-url");
+        let prompt = s.write("the batch/prompts/S09-end.txt", "a prompt");
+        let probe = Temp {
+            home: s.path().to_path_buf(),
+        };
+        let url = format!("file://{}", prompt.to_string_lossy().replace(' ', "%20"));
+        let got = link_spans(
+            spans(&format!("Saved to [S09-end.txt]({url}).")),
+            &[],
+            &probe,
+        );
+        let linked: Vec<_> = got.iter().filter_map(|s| s.link.as_deref()).collect();
+        assert_eq!(linked, vec![&*prompt.to_string_lossy()]);
+    }
 }
