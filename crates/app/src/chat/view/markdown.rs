@@ -13,7 +13,7 @@ use notchling_kit::ui::{button_with, hsla, icon, label, KitStyled, MONO_FONT, SY
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use crate::chat::markdown::{LinkPress, Span};
-use crate::chat::markdown_cache::{Inline, Item, Part};
+use crate::chat::markdown_cache::{spans_text, Inline, Item, Part};
 
 /// Body lines get a little air, as the Swift app's `lineSpacing(3)`.
 const BODY_LINE: f32 = 20.0;
@@ -25,16 +25,17 @@ const IMAGE_WIDTH: f32 = 360.0;
 /// `weight` is the text's own weight (a heading's), `ink` its color. `key` makes the element's id
 /// unique in the window.
 fn inline(key: &str, spans: &[Span], weight: FontWeight, ink: Ink, a: Appearance) -> AnyElement {
-    let mut full = String::new();
+    let full = spans_text(spans);
     let mut runs: Vec<TextRun> = Vec::with_capacity(spans.len());
     let mut links: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    let mut start = 0;
     for span in spans {
-        let start = full.len();
-        full.push_str(&span.text);
+        let end = start + span.text.len();
         runs.push(run(span, weight, ink, a));
         if let Some(url) = &span.link {
-            links.push((start..full.len(), url.clone()));
+            links.push((start..end, url.clone()));
         }
+        start = end;
     }
     let plain_text = full.clone();
     let styled = StyledText::new(SharedString::from(full)).with_runs(runs);

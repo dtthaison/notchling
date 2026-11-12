@@ -23,6 +23,18 @@ pub struct Inline {
     pub images: Vec<String>,
 }
 
+impl Inline {
+    /// The words, the spans' text joined: what the paragraph's text element holds and selects.
+    pub fn text(&self) -> String {
+        spans_text(&self.spans)
+    }
+}
+
+/// The spans' text joined.
+pub fn spans_text(spans: &[Span]) -> String {
+    spans.iter().map(|span| span.text.as_str()).collect()
+}
+
 /// A list item, ready to draw.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {

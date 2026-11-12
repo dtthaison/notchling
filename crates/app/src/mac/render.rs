@@ -41,6 +41,14 @@ pub const SCROLLBARS_ENV: &str = "NOTCHLING_RENDER_SCROLLBARS";
 /// The environment's name for the bench's length in seconds.
 pub const BENCH_ENV: &str = "NOTCHLING_RENDER_BENCH";
 
+/// The environment's name for the switch that checks the conversation's selectable texts against
+/// the model's blocks (`ChatView::check_blocks`) and prints `blocks-check: ok <n>`.
+pub const CHECK_BLOCKS_ENV: &str = "NOTCHLING_RENDER_CHECK_BLOCKS";
+
+/// The environment's name for the switch that draws frames by hand when the screen sends none
+/// (locked), so a render sees what loads after the first frame.
+pub const FORCE_FRAMES_ENV: &str = "NOTCHLING_RENDER_FORCE_FRAMES";
+
 /// Frames the window has drawn: the root view renders once per frame, whatever made it.
 pub(super) static FRAMES: AtomicU64 = AtomicU64::new(0);
 
@@ -181,9 +189,25 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
             };
             cx.new(|cx| {
                 cx.spawn(async move |_, cx| {
+                    // A locked screen sends no frames: draw them, so what loads after the first
+                    // frame shows (the blocks check and a capture need it).
+                    let draw = bench_seconds.is_none()
+                        && (std::env::var_os(CHECK_BLOCKS_ENV).is_some()
+                            || std::env::var_os(FORCE_FRAMES_ENV).is_some_and(|v| v == "1"));
+                    let forcing = if draw {
+                        bench::keep_drawing(&target, cx).await
+                    } else {
+                        None
+                    };
                     cx.background_executor().timer(SETTLE).await;
+                    if std::env::var_os(CHECK_BLOCKS_ENV).is_some_and(|v| v == "1") {
+                        check_blocks(&target, cx).await;
+                    }
                     if let Some(seconds) = bench_seconds {
                         bench::bench(seconds, mode, target, cx).await;
+                    }
+                    if let Some(stop) = forcing {
+                        stop.set(true);
                     }
                     let result = ns
                         .as_deref()
@@ -218,6 +242,38 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
         }
     });
     0
+}
+
+/// Runs the blocks check once the conversation has drawn (it is loaded in the background, so an
+/// empty or not yet drawn window is tried again for a few seconds); a mismatch ends the render with exit code 1.
+async fn check_blocks(target: &bench::Target, cx: &mut gpui::AsyncApp) {
+    let Some(chat) = target.chat.clone() else {
+        println!("blocks-check: mismatch: this view is not a Chat");
+        std::process::exit(1);
+    };
+    let mut last = Err("the window never drew".to_owned());
+    for _ in 0..25 {
+        last = cx
+            .update(|cx| chat.read(cx).check_blocks(cx))
+            .unwrap_or_else(|e| Err(e.to_string()));
+        if matches!(last, Ok(n) if n > 0) {
+            break;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(200))
+            .await;
+    }
+    match last {
+        Ok(n) if n > 0 => println!("blocks-check: ok {n}"),
+        Ok(_) => {
+            println!("blocks-check: mismatch: no selectable text was drawn");
+            std::process::exit(1);
+        }
+        Err(message) => {
+            println!("blocks-check: {message}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Drawn when a view name isn't known here (the CLI refuses those first).

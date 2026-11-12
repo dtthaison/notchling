@@ -142,35 +142,25 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ConversationView>
     match steps::detail(step) {
         Detail::None => return None,
         Detail::Diff => detail = detail.child(diff_view(step, a, cx)),
-        Detail::Text {
-            input_title,
-            has_output,
-        } => {
-            if let Some(title) = input_title {
+        Detail::Text { input_title, .. } => {
+            if let (Some(title), Some(text)) = (input_title, steps::input_text(step)) {
                 detail = detail.child(markdown::mono_box(
                     &format!("{}-in", step.id),
                     title,
-                    &step.input,
+                    &text,
                     false,
                     a,
                 ));
             }
-            if has_output {
-                if let Some(output) = &step.output {
-                    let text = if output.more > 0 {
-                        format!("{}\n… +{} lines", output.text, output.more)
-                    } else {
-                        output.text.clone()
-                    };
-                    let title = if step.is_error { "Error" } else { "Output" };
-                    detail = detail.child(markdown::mono_box(
-                        &format!("{}-out", step.id),
-                        title,
-                        &text,
-                        step.is_error,
-                        a,
-                    ));
-                }
+            if let Some(text) = steps::output_text(step) {
+                let title = if step.is_error { "Error" } else { "Output" };
+                detail = detail.child(markdown::mono_box(
+                    &format!("{}-out", step.id),
+                    title,
+                    &text,
+                    step.is_error,
+                    a,
+                ));
             }
         }
     }

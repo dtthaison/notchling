@@ -383,6 +383,16 @@ fn row_with_opinions(
         .into_any_element()
 }
 
+/// The newest step group of a working session stays open with its running call spinning (the
+/// Swift app's `liveTools`): the session works, and the last item is that group.
+fn live_group_of(input: &ConversationInput) -> Option<usize> {
+    let working = match &input.subagent {
+        Some(sub) => sub.running,
+        None => input.held_working || input.session.as_ref().is_some_and(|s| s.working),
+    };
+    crate::chat::activity::live_group(&input.shown, working)
+}
+
 pub(super) fn render(
     input: &ConversationInput,
     s: &ConversationState,
@@ -437,16 +447,69 @@ pub(super) fn render(
             .unwrap_or("No transcript yet for this session");
         return column.child(label(note, TypeRole::Meta, Ink::TextMuted, a));
     }
-    // The newest step group of a working session stays open with its running call spinning (the
-    // Swift app's `liveTools`): the session works, and the last item is that group.
-    let working = match &input.subagent {
-        Some(sub) => sub.running,
-        None => input.held_working || input.session.as_ref().is_some_and(|s| s.working),
-    };
-    let last_tools = crate::chat::activity::live_group(shown, working);
+    let last_tools = live_group_of(input);
     column.children(
         rows.iter()
             .enumerate()
             .map(|(i, row)| row_with_opinions(input, s, i, row, last_tools == Some(i), a, cx)),
     )
+}
+
+impl ChatView {
+    /// The render check (`NOTCHLING_RENDER_CHECK_BLOCKS=1`): the texts the last frame made
+    /// selectable, in the order they were noted, against `chat::blocks::plain_blocks` over the
+    /// rows shown, from the model alone. Meant for a window with no file panel open. The number
+    /// of texts, or what differs first.
+    pub fn check_blocks(&self, cx: &App) -> Result<usize, String> {
+        use crate::chat::blocks::{plain_blocks, Shown};
+        let input = self.conversation_input(cx);
+        let s = &self.parts.conversation.read(cx).s;
+        let rows = with_outgoing(rows(&input.shown), &input.outgoing);
+        let live = live_group_of(&input);
+        let folder = input.session.as_ref().map_or("", |s| s.cwd.as_str());
+        let is_open = |key: &str| s.is_open(key);
+        let is_file = |path: &std::path::Path| s.markdown.borrow().is_file(path);
+        let mut model = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            let id = input
+                .shown
+                .items
+                .get(i)
+                .map_or("queued", |item| item.id.as_str());
+            let message = match row {
+                Row::Assistant { text } => Some(s.markdown.borrow_mut().message(id, text, folder)),
+                _ => None,
+            };
+            let shown = Shown {
+                is_open: &is_open,
+                live: live == Some(i),
+                is_file: &is_file,
+            };
+            model.extend(plain_blocks(
+                row,
+                id,
+                message.as_deref().map(Vec::as_slice),
+                &shown,
+            ));
+        }
+        let drawn = super::select::noted();
+        for i in 0..drawn.len().max(model.len()) {
+            match (drawn.get(i), model.get(i)) {
+                (Some((_, text)), Some(block)) if text == block => {}
+                (Some((key, text)), model) => {
+                    return Err(format!(
+                        "mismatch at {i}: drawn {key} {text:?} model {:?}",
+                        model.map(String::as_str)
+                    ))
+                }
+                (None, model) => {
+                    return Err(format!(
+                        "mismatch at {i}: drawn nothing model {:?}",
+                        model.map(String::as_str)
+                    ))
+                }
+            }
+        }
+        Ok(drawn.len())
+    }
 }

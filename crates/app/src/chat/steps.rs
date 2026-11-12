@@ -144,6 +144,34 @@ pub fn detail(step: &ToolRow) -> Detail {
     }
 }
 
+/// The text of the input box under a step (a shell's command, any other call's input): the
+/// string `step_detail` shows, when it shows one.
+pub fn input_text(step: &ToolRow) -> Option<String> {
+    match detail(step) {
+        Detail::Text {
+            input_title: Some(_),
+            ..
+        } => Some(step.input.clone()),
+        _ => None,
+    }
+}
+
+/// The text of the output box under a step: the output, with "… +n lines" when it was cut.
+pub fn output_text(step: &ToolRow) -> Option<String> {
+    match detail(step) {
+        Detail::Text {
+            has_output: true, ..
+        } => step.output.as_ref().map(|output| {
+            if output.more > 0 {
+                format!("{}\n… +{} lines", output.text, output.more)
+            } else {
+                output.text.clone()
+            }
+        }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -157,6 +157,18 @@ pub fn copied() -> Option<String> {
     })
 }
 
+/// The texts the last frame noted, in reading order, each with its key: what the render check
+/// (`ChatView::check_blocks`) holds the model's blocks to.
+pub fn noted() -> Vec<(String, String)> {
+    STATE.with(|s| {
+        s.borrow()
+            .notes
+            .iter()
+            .map(|n| (n.key.clone(), n.text.clone()))
+            .collect()
+    })
+}
+
 /// Forgets the selection (another session opened).
 pub fn clear() {
     STATE.with(|s| {

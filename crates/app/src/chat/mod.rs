@@ -12,6 +12,9 @@
 
 pub mod activity;
 pub mod bench_fixture;
+pub mod blocks;
+#[cfg(test)]
+mod blocks_tests;
 pub mod claude_picker;
 pub mod closed;
 pub mod codex_list;

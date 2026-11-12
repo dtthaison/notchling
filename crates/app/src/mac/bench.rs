@@ -224,6 +224,16 @@ async fn needs_forcing(target: &Target, cx: &mut AsyncApp) -> bool {
     FRAMES.load(Ordering::Relaxed) == before
 }
 
+/// For a `--render` that must see the window draw after its first frame (a locked screen sends no
+/// display-link frames, so the load that fills the conversation would never show): the same
+/// forcing the bench does, when the window needs it. Set the returned flag to stop.
+pub async fn keep_drawing(target: &Target, cx: &mut AsyncApp) -> Option<Rc<Cell<bool>>> {
+    let injector = target.injector.as_ref()?;
+    needs_forcing(target, cx)
+        .await
+        .then(|| force_frames(injector.frame_driver(), cx))
+}
+
 /// Draws the window every 16 ms (it draws only when dirty) until the returned flag is set.
 fn force_frames(driver: super::bench_events::FrameDriver, cx: &mut AsyncApp) -> Rc<Cell<bool>> {
     let stop = Rc::new(Cell::new(false));
