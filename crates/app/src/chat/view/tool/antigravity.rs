@@ -3,7 +3,7 @@
 //! Level, Mode), and the account and limits are the active Antigravity login's, the session
 //! model's group first.
 
-use gpui::Context;
+use gpui::{App, Context};
 
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::ANTIGRAVITY;
@@ -46,7 +46,7 @@ impl ChatTool for Antigravity {
         agy_cancel(id)
     }
 
-    fn menus(&self, view: &ChatView, session: &Session) -> Vec<Menu> {
+    fn menus(&self, view: &ChatView, session: &Session, _cx: &App) -> Vec<Menu> {
         pickers::antigravity(
             &view.tools.agy_config,
             !is_draft(&session.agent.id),

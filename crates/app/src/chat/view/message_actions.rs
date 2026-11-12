@@ -17,6 +17,7 @@ use notchling_kit::metric::RADIUS_SM;
 use notchling_kit::ui::{hsla, icon, icon_in, label, parts_on, KitPart};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::conversation_view::ConversationState;
 use super::{now_ms, ChatView};
 use crate::chat::message_meta::{self, Plan, Role};
 use crate::chat::rows::Row;
@@ -76,7 +77,10 @@ fn copy_button(
     let button = ghost_icon(SharedString::from(format!("copy-msg-{id}")), glyph, a).on_click(
         cx.listener(move |this, _, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-            this.copied = Some((key.clone(), now_ms()));
+            let at = now_ms();
+            this.parts
+                .conversation
+                .update(cx, |v, _| v.s.copied = Some((key.clone(), at)));
             cx.notify();
         }),
     );
@@ -157,7 +161,7 @@ fn actions_row(
 /// `element` (a message) with its row beneath, when it is a message that has one. `item` is the
 /// transcript line it came from; a queued bubble has none and no row.
 pub fn with_actions(
-    view: &ChatView,
+    s: &ConversationState,
     row: &Row,
     item: Option<&ChatItem>,
     element: Div,
@@ -168,7 +172,7 @@ pub fn with_actions(
     let (role, text, queued) = match row {
         Row::User { text, queued, .. } => (Role::User, text, *queued),
         Row::Assistant { text } => (Role::Assistant, text, false),
-        _ => return hover_only(view, item, element, trailing, cx),
+        _ => return hover_only(s, item, element, trailing, cx),
     };
     let Some(item) = item else {
         return element.into_any_element();
@@ -177,14 +181,14 @@ pub fn with_actions(
     let plan = message_meta::plan(role, queued, date.is_some(), text);
     // Only a reply's row carries Second Opinion; anywhere else it gets a row of its own.
     if !plan.any() || (role == Role::User && trailing.is_some()) {
-        return hover_only(view, Some(item), element, trailing, cx);
+        return hover_only(s, Some(item), element, trailing, cx);
     }
     let id = item.id.as_str();
     let group = SharedString::from(format!("msg-{id}"));
-    let shown = view.actions_preview || parts_on(cx);
+    let shown = s.actions_preview || parts_on(cx);
     let hover_id = id.to_owned();
     let items_end = role == Role::User;
-    let copied = view
+    let copied = s
         .copied
         .as_ref()
         .is_some_and(|(key, at)| key == id && message_meta::copied_shows(*at, now_ms()));
@@ -220,7 +224,7 @@ pub fn with_actions(
 /// `element` with `trailing` (the Second Opinion buttons) on a row of its own beneath, shown only
 /// while the pointer is over the two, for a row that has no actions of its own to share.
 fn hover_only(
-    view: &ChatView,
+    s: &ConversationState,
     item: Option<&ChatItem>,
     element: Div,
     trailing: Option<Div>,
@@ -231,7 +235,7 @@ fn hover_only(
     };
     let key = item.map(|i| i.id.as_str()).unwrap_or("row");
     let group = SharedString::from(format!("opinion-{key}"));
-    let shown = view.actions_preview || parts_on(cx);
+    let shown = s.actions_preview || parts_on(cx);
     div()
         .id(group.clone())
         .group(group.clone())

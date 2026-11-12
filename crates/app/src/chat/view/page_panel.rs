@@ -657,7 +657,7 @@ pub fn render(
 
     // A file: its text, in the room below the header.
     let page = match shown.file.as_ref() {
-        Some(file) => file_body(file, width, &view.markdown, a),
+        Some(file) => file_body(file, width, &view.parts.conversation.read(cx).s.markdown, a),
         None => web_page(view, shown, a),
     };
 

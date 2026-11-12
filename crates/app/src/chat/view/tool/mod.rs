@@ -8,7 +8,7 @@
 //! Where a tool can't do something it still answers: a refusal with the reason, a disabled menu
 //! with a tooltip. A part is never just missing for one tool (`docs/chat-composer-parity.md`).
 
-use gpui::Context;
+use gpui::{App, Context};
 
 use super::limit_ring::Shown;
 use super::ChatView;
@@ -63,7 +63,7 @@ pub(super) trait ChatTool: Sync {
     fn stop(&self, id: &str) -> Request;
 
     /// The pickers under the box (`chat::pickers`): Model, Effort and any other choice.
-    fn menus(&self, view: &ChatView, session: &Session) -> Vec<Menu>;
+    fn menus(&self, view: &ChatView, session: &Session, cx: &App) -> Vec<Menu>;
 
     /// Called as one of its menus opens, to read what the menu lists.
     fn menu_opening(&self, _view: &mut ChatView) {}

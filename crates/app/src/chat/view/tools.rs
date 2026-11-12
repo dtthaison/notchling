@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscription};
+use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Global, Subscription};
 
 /// Every row's unsent text, kept by the app rather than the Chat window, so closing Chat and
 /// opening it again finds what you were typing.
@@ -375,8 +375,7 @@ impl ChatView {
             .or_default()
             .push(Outgoing::new(&text, &self.conversation));
         // The next reload goes to the end, wherever you were reading.
-        self.follow_sent = true;
-        self.conversation_scroll.scroll_to_bottom();
+        self.follow_sent_now(cx);
         let sent_text = text;
         self.spawn_send(
             request,
@@ -500,7 +499,7 @@ impl ChatView {
                                 match result {
                                     Ok(_) => {
                                         view.tools.delivered(&row, &sent, now_ms());
-                                        view.follow_sent = true;
+                                        view.conversation_state(cx, |s| s.follow_sent = true);
                                         view.reload_now(cx);
                                     }
                                     Err(message) => {
@@ -565,9 +564,9 @@ impl ChatView {
     }
 
     /// The selected row's pickers, from its tool (`chat::pickers`): the same parts for every tool.
-    pub(super) fn menus(&self) -> Vec<crate::chat::pickers::Menu> {
+    pub(super) fn menus(&self, cx: &App) -> Vec<crate::chat::pickers::Menu> {
         match self.selected_session() {
-            Some(session) => super::tool::of(session.tool).menus(self, session),
+            Some(session) => super::tool::of(session.tool).menus(self, session, cx),
             None => Vec::new(),
         }
     }
@@ -612,7 +611,7 @@ impl ChatView {
     }
 
     /// The model the selected row shows: the pick not yet in the transcript, else the transcript's.
-    pub(super) fn claude_model(&self) -> Option<&str> {
+    pub(super) fn claude_model(&self, cx: &App) -> Option<&str> {
         let hint = self
             .selected
             .as_deref()
@@ -620,12 +619,12 @@ impl ChatView {
         Hint::shown(
             hint,
             self.conversation.facts.model.as_deref(),
-            self.drawn_ms,
+            self.parts.conversation.read(cx).s.drawn_ms,
         )
     }
 
     /// The effort the selected row shows, the same way.
-    pub(super) fn claude_effort(&self) -> Option<&str> {
+    pub(super) fn claude_effort(&self, cx: &App) -> Option<&str> {
         let hint = self
             .selected
             .as_deref()
@@ -633,7 +632,7 @@ impl ChatView {
         Hint::shown(
             hint,
             self.conversation.facts.effort.as_deref(),
-            self.drawn_ms,
+            self.parts.conversation.read(cx).s.drawn_ms,
         )
     }
 
@@ -815,7 +814,7 @@ impl ChatView {
                 let done = view.tools.fetches.finished(&asked, number);
                 if done.apply && view.selected.as_deref() == Some(asked.as_str()) {
                     if let Some(c) = conversation.as_ref().and_then(parse_conversation) {
-                        view.follow_content(false);
+                        view.follow_content(false, cx);
                         let mut shown = c.conversation.clone();
                         if shown.facts.context_tokens == 0 {
                             shown.facts.context_tokens = context.unwrap_or(0);

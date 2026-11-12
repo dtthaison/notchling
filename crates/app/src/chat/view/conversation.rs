@@ -19,6 +19,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::conversation_view::ConversationState;
 use super::steps_view::{hairline, step_group, thinking};
 use super::{markdown, message_actions, opinions, ChatView};
 use crate::chat::activity::Activity;
@@ -113,7 +114,7 @@ pub(super) fn activity_row(
 /// button: a secondary kit button with an arrow, 20 pt from the corner). It sits in the
 /// conversation, above the reply box. A click goes to the newest message and follows again.
 pub fn latest_pill(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
-    if !view.latest_pill() {
+    if !view.parts.conversation.read(cx).s.latest_pill(view.loading) {
         return None;
     }
     let content = div()
@@ -243,6 +244,7 @@ fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoEle
 /// is the newest step group of a working session.
 fn row_element(
     view: &ChatView,
+    s: &ConversationState,
     row: &Row,
     id: &str,
     live: bool,
@@ -257,8 +259,7 @@ fn row_element(
             sending,
         } => {
             // The pictures you sent show as pictures, their paths taken out of the words.
-            let split =
-                crate::chat::drops::split_images(text, |p| view.markdown.borrow().is_file(p));
+            let split = crate::chat::drops::split_images(text, |p| s.markdown.borrow().is_file(p));
             user_row(id, split, *images, *queued, *sending, a, cx)
         }
         // No mark before each reply: the bubble alone says who wrote it. Its edge is the column's
@@ -280,14 +281,14 @@ fn row_element(
                     .border_color(hsla(Ink::Hairline.color(a)))
                     .child(markdown::render(
                         id,
-                        &view.markdown.borrow_mut().message(id, text, folder),
+                        &s.markdown.borrow_mut().message(id, text, folder),
                         a,
                     ))
                     .part("Claude's Reply", a, cx),
             )
         }
-        Row::Thinking { title, text } => thinking(view, id, title, text, a, cx),
-        Row::Tools(tools) => step_group(view, id, tools, live, a, cx),
+        Row::Thinking { title, text } => thinking(s, id, title, text, a, cx),
+        Row::Tools(tools) => step_group(view, s, id, tools, live, a, cx),
         Row::TurnEnd { text } => div()
             .w_full()
             .py(px(2.0))
@@ -331,6 +332,7 @@ fn row_element(
 /// item has something to review.
 fn row_with_opinions(
     view: &ChatView,
+    s: &ConversationState,
     i: usize,
     row: &Row,
     live: bool,
@@ -340,7 +342,7 @@ fn row_with_opinions(
     super::pane::ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let item = view.shown_conversation().items.get(i);
     let id = item.map(|item| item.id.as_str()).unwrap_or("queued");
-    let element = row_element(view, row, id, live, a, cx);
+    let element = row_element(view, s, row, id, live, a, cx);
     // A subagent's transcript is only read: no second opinions on it.
     let subjects = item
         .filter(|_| view.open_subagent.is_none())
@@ -363,7 +365,7 @@ fn row_with_opinions(
             )
     });
     // Your messages and Claude's replies get their row of actions beneath.
-    let element = message_actions::with_actions(view, row, item, element, buttons, a, cx);
+    let element = message_actions::with_actions(s, row, item, element, buttons, a, cx);
     if anchors.is_empty() {
         return element;
     }
@@ -380,7 +382,12 @@ fn row_with_opinions(
         .into_any_element()
 }
 
-pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Stateful<Div> {
+pub fn render(
+    view: &ChatView,
+    s: &ConversationState,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Stateful<Div> {
     let shown = view.shown_conversation();
     // What was typed to the session isn't waiting in a subagent's transcript.
     let outgoing = if view.open_subagent.is_some() {
@@ -394,7 +401,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
         .flex_1()
         .min_h(px(0.0))
         .overflow_y_scroll()
-        .track_scroll(&view.conversation_scroll)
+        .track_scroll(&s.scroll)
         .px(px(SIDE_PADDING))
         .pb(px(COLUMN_PADDING_VERTICAL))
         // The Tasks bar sits over the top, so the first row starts under it.
@@ -459,6 +466,6 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Sta
     column.children(
         rows.iter()
             .enumerate()
-            .map(|(i, row)| row_with_opinions(view, i, row, last_tools == Some(i), a, cx)),
+            .map(|(i, row)| row_with_opinions(view, s, i, row, last_tools == Some(i), a, cx)),
     )
 }

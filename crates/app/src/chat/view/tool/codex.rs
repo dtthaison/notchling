@@ -2,7 +2,7 @@
 //! queued in its outbox while one runs), Stop is `codex.stop`, the pickers set the next turn's
 //! model and effort, and the account and limits are the active Codex login's.
 
-use gpui::Context;
+use gpui::{App, Context};
 
 use super::{active_email, AccountButton, ChatTool};
 use crate::accounts::model::CODEX;
@@ -44,7 +44,7 @@ impl ChatTool for Codex {
         codex_stop(id)
     }
 
-    fn menus(&self, view: &ChatView, _session: &Session) -> Vec<Menu> {
+    fn menus(&self, view: &ChatView, _session: &Session, _cx: &App) -> Vec<Menu> {
         pickers::codex(&view.codex_picker())
     }
 

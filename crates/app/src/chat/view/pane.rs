@@ -18,14 +18,13 @@ use gpui::{
     WeakEntity, Window,
 };
 use notchling_kit::ui::{
-    drop_spinner_host, host_spinners, scrollable, spin_host, window_appearance, SpinLayer,
-    SpinSlots,
+    drop_spinner_host, host_spinners, spin_host, window_appearance, SpinLayer, SpinSlots,
 };
 use notchling_kit::Appearance;
 
+use super::conversation_view::ConversationView;
 use super::inspector::DetailsModel;
-use super::{conversation, inspector, now_ms, sidebar, ChatView};
-use crate::chat::follow::{self, Scroll};
+use super::{inspector, sidebar, ChatView};
 use crate::chat::sidebar::SidebarModel;
 
 /// Times each part was drawn, for `--render`'s bench.
@@ -36,60 +35,13 @@ pub static DETAILS_RENDERS: AtomicU64 = AtomicU64::new(0);
 pub static ROWS: AtomicU64 = AtomicU64::new(0);
 pub static ROOT_RENDERS: AtomicU64 = AtomicU64::new(0);
 
-/// What a part draws, from the chat's state.
-type Draw = fn(&mut ChatView, Appearance, &mut Context<ChatView>) -> AnyElement;
-
 /// What a model part draws, computed from the chat on each of its notifies.
 type Select<M> = fn(&ChatView, &App) -> M;
 /// Draws a model part from its model; listeners still reach `ChatView` through `cx`.
 type DrawFrom<M> = fn(&M, Appearance, &mut Context<ChatView>) -> AnyElement;
 
-/// A part that draws whatever `ChatView` says (the conversation, until Task 4.3).
-pub struct RawPart {
-    chat: WeakEntity<ChatView>,
-    draw: Draw,
-    renders: &'static AtomicU64,
-    spins: SpinSlots,
-    _changes: Subscription,
-    _release: Subscription,
-}
-
-impl RawPart {
-    fn new(
-        chat: &Entity<ChatView>,
-        draw: Draw,
-        renders: &'static AtomicU64,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let spins = SpinSlots::default();
-        let id = cx.entity_id();
-        host_spinners(cx, id, &spins);
-        RawPart {
-            chat: chat.downgrade(),
-            draw,
-            renders,
-            spins,
-            _changes: cx.observe(chat, |_, _, cx| cx.notify()),
-            _release: cx.on_release(move |_, cx| drop_spinner_host(cx, id)),
-        }
-    }
-}
-
-impl Render for RawPart {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.renders.fetch_add(1, Ordering::Relaxed);
-        self.spins.clear();
-        let a = window_appearance(window);
-        let Some(chat) = self.chat.upgrade() else {
-            return div().into_any_element();
-        };
-        let draw = self.draw;
-        chat.update(cx, |chat, cx| draw(chat, a, cx))
-    }
-}
-
 /// A part that draws from a model of what it shows, and only when that model changes. It watches
-/// `ChatView` like a [`RawPart`], but each notify only computes the model again: an equal one
+/// `ChatView`, but each notify only computes the model again: an equal one
 /// draws nothing, so a change no part shows (a draft, a menu) costs the part a comparison.
 pub struct ModelPart<M: PartialEq + 'static> {
     chat: WeakEntity<ChatView>,
@@ -176,7 +128,7 @@ impl<M: PartialEq + 'static> Render for ModelPart<M> {
 
 /// The parts and the layer that paints their spinners, made with the view.
 pub struct Parts {
-    pub conversation: Entity<RawPart>,
+    pub conversation: Entity<ConversationView>,
     pub sidebar: Entity<ModelPart<SidebarModel>>,
     pub details: Entity<ModelPart<DetailsModel>>,
     pub spins: Entity<SpinLayer>,
@@ -184,7 +136,7 @@ pub struct Parts {
 
 impl Parts {
     pub fn new(chat: &Entity<ChatView>, cx: &mut Context<ChatView>) -> Parts {
-        let conversation = cx.new(|cx| RawPart::new(chat, draw_conversation, &RENDERS, cx));
+        let conversation = cx.new(|cx| ConversationView::new(chat, cx));
         let sidebar = cx
             .new(|cx| ModelPart::new(chat, sidebar::model, sidebar::render, &SIDEBAR_RENDERS, cx));
         let details = cx.new(|cx| {
@@ -208,17 +160,6 @@ impl Parts {
             details,
         }
     }
-}
-
-fn draw_conversation(chat: &mut ChatView, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
-    // A hovered message's relative time is kept fresh from when it was last drawn.
-    chat.drawn_ms = now_ms();
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .child(scrollable(conversation::render(chat, a, cx)).tracking(&chat.conversation_scroll))
-        .into_any_element()
 }
 
 /// A part as an element of `ChatView`'s tree, in a box of `style`.
@@ -317,42 +258,5 @@ impl ChatView {
         self.redraw_sidebar(cx);
         self.refresh_details(cx);
         self.redraw_chrome(cx);
-    }
-
-    /// Before new content replaces the conversation: stay on the newest message when the view is
-    /// at the bottom (or a message was just sent, or another session was picked), else leave it
-    /// where it is (`chat::follow`). The numbers are those of the last frame, so a reply that
-    /// grew since is measured by the next one, which the scroll handle then pins to the end.
-    pub(super) fn follow_content(&mut self, session_changed: bool) {
-        let handle = &self.conversation_scroll;
-        let prev = Scroll {
-            offset_y: f32::from(handle.offset().y),
-            max_y: f32::from(handle.max_offset().height),
-        };
-        let sent = std::mem::take(&mut self.follow_sent);
-        if follow::decide(prev, prev.max_y, sent, session_changed).scroll {
-            handle.scroll_to_bottom();
-        }
-    }
-
-    /// Whether the "Latest" pill shows: the conversation is scrolled up from its newest message.
-    pub(super) fn latest_pill(&self) -> bool {
-        if self.loading {
-            return false;
-        }
-        let handle = &self.conversation_scroll;
-        self.latest_preview
-            || !Scroll {
-                offset_y: f32::from(handle.offset().y),
-                max_y: f32::from(handle.max_offset().height),
-            }
-            .at_bottom()
-    }
-
-    /// The pill's click: to the newest message, and following again.
-    pub(super) fn jump_to_latest(&mut self, cx: &mut Context<Self>) {
-        self.latest_preview = false;
-        self.conversation_scroll.scroll_to_bottom();
-        cx.notify();
     }
 }

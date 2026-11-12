@@ -10,6 +10,7 @@
 mod accounts;
 mod composer;
 mod conversation;
+mod conversation_view;
 mod drop;
 mod header;
 mod inspector;
@@ -39,14 +40,12 @@ mod terminal;
 mod tool;
 mod tools;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui::{
-    div, prelude::*, px, Context, Entity, ExternalPaths, Render, ScrollHandle, Subscription, Window,
-};
+use gpui::{div, prelude::*, px, Context, Entity, ExternalPaths, Render, Subscription, Window};
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
@@ -148,8 +147,6 @@ pub struct ChatView {
     /// A session was picked and its conversation hasn't arrived: draw nothing rather than the
     /// previous session's.
     loading: bool,
-    /// Scroll to the end once the picked session's conversation is in.
-    scroll_to_end: bool,
     gate: ReloadGate,
     /// Claude Code's rows from the daemon while it answers; the folders are read otherwise.
     source: Arc<SessionSource>,
@@ -164,9 +161,6 @@ pub struct ChatView {
     /// and Context Meter read it.
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     watch: Option<(Watcher, Receiver<Batch>)>,
-    conversation_scroll: ScrollHandle,
-    /// Each drawn message's Markdown, parsed once and its paths looked up once per load.
-    markdown: std::cell::RefCell<crate::chat::markdown_cache::Cache>,
     /// The conversation's column, the Sidebar and the Details Panel, each drawn cached apart from
     /// the rest of the window, and the layer that turns their spinners (`pane`).
     parts: pane::Parts,
@@ -175,31 +169,11 @@ pub struct ChatView {
     row_accounts: Vec<Option<(String, bool)>>,
     /// Woken for a redraw of everything but the conversation (`redraw_chrome`).
     chrome: Entity<pane::Chrome>,
-    /// The step groups, steps and thoughts clicked open, by item or call id (`ChatExpansion` in
-    /// the Swift app). Kept outside the rows so a reload doesn't fold them.
-    expanded: HashSet<String>,
-    /// Every group, step and thought drawn open: a render over a fixture
-    /// (`NOTCHLING_RENDER_EXPAND=1`), since nothing clicks in a picture.
-    expand_all: bool,
     /// The Tasks bar drawn open (`NOTCHLING_RENDER_TASKS_OPEN=1`).
     tasks_open_preview: bool,
     /// The drop hint drawn as if a file were over the column (`NOTCHLING_RENDER_DROP=1`), since
     /// nothing drags in a picture.
     drop_preview: bool,
-    /// The "Latest" pill drawn as if scrolled up (`NOTCHLING_RENDER_LATEST=1`).
-    latest_preview: bool,
-    /// Every message's row of actions drawn, as if hovered (`NOTCHLING_RENDER_ACTIONS=1`).
-    actions_preview: bool,
-    /// The message whose Copy was clicked and when (ms), for its check.
-    copied: Option<(String, i64)>,
-    /// The message the pointer is over. Set without a redraw: the row shows by a group hover, and
-    /// this only says whether its time needs keeping fresh.
-    hovered_message: Option<String>,
-    /// When the conversation was last drawn (ms), so a hovered row's relative time is redrawn
-    /// once it is stale.
-    drawn_ms: i64,
-    /// A message was sent and hasn't shown up in a reload yet: that reload goes to the end.
-    follow_sent: bool,
     /// Whether a sheet, menu, panel or the part names were up when last drawn: Esc then belongs
     /// to them, not to Stop.
     overlay_open: bool,
@@ -278,11 +252,13 @@ impl ChatView {
     /// A Chat that reads the folders only (a render, a fixture root).
     pub fn new(root: DataRoot, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = ChatView::with_source(root, Arc::new(SessionSource::files()), window, cx);
-        view.expand_all = switch(EXPAND_ENV);
+        view.parts.conversation.update(cx, |v, _| {
+            v.s.expand_all = switch(EXPAND_ENV);
+            v.s.latest_preview = switch(LATEST_ENV);
+            v.s.actions_preview = switch(ACTIONS_ENV);
+        });
         view.tasks_open_preview = switch(TASKS_OPEN_ENV);
         view.drop_preview = switch(DROP_ENV);
-        view.latest_preview = switch(LATEST_ENV);
-        view.actions_preview = switch(ACTIONS_ENV);
         view.limit_ring = limit_ring::State::preview(switch(LIMITS_ENV));
         view.preview_composer(
             composer::Preview {
@@ -342,37 +318,6 @@ impl ChatView {
             return;
         }
         self.details_hidden = !self.details_hidden;
-        cx.notify();
-    }
-
-    /// The pointer entered or left message `id` (its row of actions shows by a group hover). The
-    /// times it shows are as old as the last draw, so entering after a while redraws once.
-    pub(super) fn message_hover(&mut self, id: &str, hovered: bool, cx: &mut Context<Self>) {
-        if hovered {
-            self.hovered_message = Some(id.to_owned());
-            if message_meta::stale(self.drawn_ms, now_ms()) {
-                cx.notify();
-            }
-        } else if self.hovered_message.as_deref() == Some(id) {
-            self.hovered_message = None;
-        }
-    }
-
-    /// Whether the group, step or thought `id` is drawn open.
-    pub(super) fn is_open(&self, id: &str) -> bool {
-        self.expand_all || self.expanded.contains(id)
-    }
-
-    /// Whether the Tasks bar is open.
-    pub(super) fn tasks_open(&self) -> bool {
-        self.tasks_open_preview || self.expanded.contains(tasks::OPEN_ID)
-    }
-
-    /// Opens or folds `id`.
-    pub(super) fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
-        if !self.expanded.remove(id) {
-            self.expanded.insert(id.to_owned());
-        }
         cx.notify();
     }
 
@@ -473,8 +418,6 @@ impl ChatView {
             now_ms: 0,
             load_again: false,
             loading: true,
-            // The first conversation opens at its newest message, as a picked one does.
-            scroll_to_end: true,
             gate: ReloadGate::default(),
             seen_generation: source.generation(),
             seen_catalog: source.catalog_generation(),
@@ -482,23 +425,14 @@ impl ChatView {
             catalog: HashMap::from([(CatalogTool::Claude, source.catalog(CatalogTool::Claude))]),
             source,
             watch,
-            conversation_scroll: ScrollHandle::new(),
-            markdown: Default::default(),
             parts: {
                 let chat = cx.entity();
                 pane::Parts::new(&chat, cx)
             },
             row_accounts: Vec::new(),
             chrome: cx.new(|_| pane::Chrome),
-            expanded: HashSet::new(),
-            expand_all: false,
             tasks_open_preview: false,
             drop_preview: false,
-            latest_preview: false,
-            actions_preview: false,
-            copied: None,
-            hovered_message: None,
-            drawn_ms: 0,
             sidebar_hidden: false,
             details_hidden: false,
             shell_probe: shell_probe::Probe::default(),
@@ -508,7 +442,6 @@ impl ChatView {
             slash: Default::default(),
             slash_commands: None,
             slash_preview: None,
-            follow_sent: false,
             overlay_open: false,
             page_covered: false,
             tools: tools::ChatTools::new(cx),

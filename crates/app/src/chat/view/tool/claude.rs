@@ -2,7 +2,7 @@
 //! `session.interrupt`, the pickers as `/model` and `/effort` replies, the account menu of lanes,
 //! and the 5-hour and weekly limits of the account in use (the main login's, or its lane's).
 
-use gpui::Context;
+use gpui::{App, Context};
 
 use super::{AccountButton, ChatTool};
 use crate::accounts::model::CLAUDE_CODE;
@@ -86,10 +86,10 @@ impl ChatTool for Claude {
         Request::interrupt(id)
     }
 
-    fn menus(&self, view: &ChatView, _session: &Session) -> Vec<Menu> {
+    fn menus(&self, view: &ChatView, _session: &Session, cx: &App) -> Vec<Menu> {
         pickers::claude(
-            view.claude_model(),
-            view.claude_effort(),
+            view.claude_model(cx),
+            view.claude_effort(cx),
             view.claude_catalog(),
         )
     }

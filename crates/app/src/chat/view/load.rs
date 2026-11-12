@@ -113,7 +113,7 @@ impl ChatView {
             }
         }
         // What the disk says about the paths in messages is asked again once per load.
-        self.markdown.get_mut().reloaded();
+        self.conversation_state(cx, |s| s.markdown.get_mut().reloaded());
         // Whether the conversation shows anything new: a load of the files another working session
         // changed leaves this one as it was, and its long layout needn't be done again.
         let selected_before = self.selected_session().cloned();
@@ -137,7 +137,7 @@ impl ChatView {
                         .map(|r| r.id)
                         .next();
                     if self.selected.is_some() {
-                        self.scroll_to_end = true;
+                        self.open_at_end(cx);
                         self.reload_now(cx);
                     }
                 }
@@ -149,7 +149,7 @@ impl ChatView {
             // An Antigravity row's conversation is the daemon's, fetched by `sync_tools`; the
             // files have none to put in its place.
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
-            let session_changed = std::mem::take(&mut self.scroll_to_end);
+            let session_changed = self.take_open_at_end(cx);
             conversation_changed |= self.selected != was || session_changed;
             if !agy {
                 let content_changed = match &loaded.change {
@@ -165,13 +165,13 @@ impl ChatView {
                 };
                 conversation_changed |= self.loading || content_changed;
                 if conversation_changed {
-                    self.follow_content(session_changed);
+                    self.follow_content(session_changed, cx);
                 }
                 self.conversation = loaded.conversation;
                 self.pending_change = loaded.change;
                 self.loading = false;
             } else if session_changed {
-                self.conversation_scroll.scroll_to_bottom();
+                self.scroll_to_end_now(cx);
             }
             // The conversation shows which subagent an Agent step opens, not how it's doing.
             let links = crate::chat::subagent_view::links;
@@ -209,14 +209,14 @@ impl ChatView {
         }
         self.selected = Some(id.to_owned());
         select::clear();
-        self.markdown.get_mut().switched();
+        self.conversation_state(cx, |s| s.markdown.get_mut().switched());
         self.mark_used(id);
         self.conversation = Arc::default();
         self.subagents.clear();
         self.open_subagent = None;
         self.prompt.transcript = None;
         self.loading = true;
-        self.scroll_to_end = true;
+        self.open_at_end(cx);
         self.tools.error = None;
         self.tools.picker = None;
         self.tools.agy = None;
@@ -263,13 +263,18 @@ impl ChatView {
             }
         }
         // The check on Copy goes after a moment; a hovered row's time is kept fresh.
-        if let Some((_, at)) = &self.copied {
-            if !message_meta::copied_shows(*at, now_ms()) {
-                self.copied = None;
-                cx.notify();
+        let now = now_ms();
+        let redraw = self.conversation_state(cx, |s| {
+            let copy_over = s
+                .copied
+                .as_ref()
+                .is_some_and(|(_, at)| !message_meta::copied_shows(*at, now));
+            if copy_over {
+                s.copied = None;
             }
-        }
-        if self.hovered_message.is_some() && message_meta::stale(self.drawn_ms, now_ms()) {
+            copy_over || (s.hovered_message.is_some() && message_meta::stale(s.drawn_ms, now))
+        });
+        if redraw {
             cx.notify();
         }
         // A second opinion's card changes when its command ends, which nothing else signals.

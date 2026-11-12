@@ -106,7 +106,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     }
     let tasks = task_rows(&view.conversation);
     let summary = TaskSummary::of(&tasks)?;
-    let open = view.tasks_open();
+    let open = view.tasks_open(cx);
 
     let close = gate::tip_text(
         icon_button(

@@ -71,7 +71,7 @@ impl ChatView {
             return;
         };
         self.open_subagent = Some(crate::chat::subagent_view::Open::new(agent));
-        self.conversation_scroll.scroll_to_bottom();
+        self.scroll_to_end_now(cx);
         self.reload_now(cx);
         cx.notify();
     }
@@ -80,7 +80,7 @@ impl ChatView {
     pub(super) fn close_subagent(&mut self, cx: &mut Context<Self>) {
         if self.open_subagent.take().is_some() {
             // The scroll position was the subagent's; the session's conversation opens at its end.
-            self.conversation_scroll.scroll_to_bottom();
+            self.scroll_to_end_now(cx);
             cx.notify();
         }
     }

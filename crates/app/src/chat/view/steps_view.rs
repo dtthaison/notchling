@@ -12,6 +12,7 @@ use notchling_kit::ui::{button, hsla, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::conversation::chevron;
+use super::conversation_view::ConversationState;
 use super::{markdown, ChatView};
 use crate::chat::rows::ToolRow;
 use crate::chat::steps::{self, Detail};
@@ -179,13 +180,14 @@ fn step_detail(step: &ToolRow, a: Appearance, cx: &mut Context<ChatView>) -> Opt
 /// One call (`ToolCallRow`): icon, title, diff counts, its state, a chevron when something opens.
 fn step_row(
     view: &ChatView,
+    s: &ConversationState,
     step: &ToolRow,
     live: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
     let has_detail = steps::detail(step) != Detail::None;
-    let open = has_detail && view.is_open(&step.id);
+    let open = has_detail && s.is_open(&step.id);
     let running = live && !step.finished;
     let icon_ink = if step.is_error {
         Ink::Expired
@@ -325,13 +327,14 @@ fn step_chip(
 /// A run of calls: the chip, and when open each call on its own line beside a hairline.
 pub(super) fn step_group(
     view: &ChatView,
+    s: &ConversationState,
     id: &str,
     steps: &[ToolRow],
     live: bool,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Div {
-    let open = live || view.is_open(id);
+    let open = live || s.is_open(id);
     div()
         .flex()
         .flex_col()
@@ -348,7 +351,11 @@ pub(super) fn step_group(
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
-                    .children(steps.iter().map(|step| step_row(view, step, live, a, cx))),
+                    .children(
+                        steps
+                            .iter()
+                            .map(|step| step_row(view, s, step, live, a, cx)),
+                    ),
             )
         })
         .part_at("Tool Steps", Corner::TopTrailing, a, cx)
@@ -357,7 +364,7 @@ pub(super) fn step_group(
 /// "Thought for 16s" (`ThinkingRow`): faint, with the text under it when opened. Claude Code keeps
 /// the text only sometimes; without it there is nothing to open.
 pub(super) fn thinking(
-    view: &ChatView,
+    s: &ConversationState,
     id: &str,
     title: &str,
     text: &str,
@@ -365,7 +372,7 @@ pub(super) fn thinking(
     cx: &mut Context<ChatView>,
 ) -> Div {
     let has_text = !text.is_empty();
-    let open = has_text && view.is_open(id);
+    let open = has_text && s.is_open(id);
     let key = id.to_owned();
     div()
         .flex()

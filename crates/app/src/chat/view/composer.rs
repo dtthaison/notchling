@@ -339,7 +339,7 @@ fn pickers_row(
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Option<Div> {
-    let menus = view.menus();
+    let menus = view.menus(cx);
     if menus.is_empty() {
         return None;
     }
