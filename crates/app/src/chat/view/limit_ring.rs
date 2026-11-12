@@ -43,6 +43,11 @@ pub struct State {
 }
 
 impl State {
+    /// Whether the card is up over the reply box.
+    pub fn card_open(&self) -> bool {
+        self.hover.open(self.preview)
+    }
+
     /// The render constructor's: the card drawn open (`NOTCHLING_RENDER_LIMITS=1`).
     pub fn preview(on: bool) -> State {
         State {

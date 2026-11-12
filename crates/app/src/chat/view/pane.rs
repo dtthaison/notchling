@@ -18,7 +18,7 @@ use gpui::{
     WeakEntity, Window,
 };
 use notchling_kit::ui::{
-    drop_spinner_host, host_spinners, spin_host, window_appearance, SpinLayer, SpinSlots,
+    drop_spinner_host, host_spinners, spin_host, window_appearance, SpinGate, SpinLayer, SpinSlots,
 };
 use notchling_kit::Appearance;
 
@@ -132,6 +132,13 @@ pub struct Parts {
     pub sidebar: Entity<ModelPart<SidebarModel>>,
     pub details: Entity<ModelPart<DetailsModel>>,
     pub spins: Entity<SpinLayer>,
+    /// The spinners `ChatView` lays out itself (the Activity Line's): it is a host that takes only
+    /// those, cleared and marked on screen at the start of each draw.
+    pub root_spins: SpinSlots,
+    /// Whether the window's spinners may be drawn by Core Animation: cleared by `ChatView` while
+    /// something GPUI draws over the window is open (`native_spin::covered`).
+    pub native: SpinGate,
+    _release: gpui::Subscription,
 }
 
 impl Parts {
@@ -148,16 +155,33 @@ impl Parts {
                 cx,
             )
         });
+        let root_spins = SpinSlots::only(super::native_spin::ROOT_SPINNERS);
+        let root = cx.entity_id();
+        host_spinners(cx, root, &root_spins);
         let hosts = vec![
             conversation.read(cx).spins.clone(),
             sidebar.read(cx).spins.clone(),
             details.read(cx).spins.clone(),
+            root_spins.clone(),
         ];
+        let native = SpinGate::default();
+        let layer = if super::native_spin::enabled() {
+            SpinLayer::native(
+                hosts,
+                crate::mac::native_spin::CaSpinners::new(),
+                native.clone(),
+            )
+        } else {
+            SpinLayer::new(hosts)
+        };
         Parts {
-            spins: cx.new(|_| SpinLayer::new(hosts)),
+            spins: cx.new(|_| layer),
             conversation,
             sidebar,
             details,
+            root_spins,
+            native,
+            _release: cx.on_release(move |_, cx| drop_spinner_host(cx, root)),
         }
     }
 }

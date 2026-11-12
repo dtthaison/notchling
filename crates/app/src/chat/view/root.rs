@@ -31,6 +31,23 @@ impl Render for ChatView {
             || self.tools.picker.is_some()
             || self.composer.is_open()
             || parts_on(cx);
+        // Set again when the composer draws the Activity Line below.
+        self.activity_drawn.set(None);
+        // The Activity Line's spinner is laid out below: this draw's slot replaces last draw's.
+        self.parts.root_spins.clear();
+        self.parts.root_spins.seen();
+        self.parts
+            .native
+            .set(!native_spin::covered(native_spin::Covers {
+                sheet: self.sheet.is_some(),
+                menu: self.account_menu || self.row_menu.is_some() || self.phone.is_some(),
+                composer_menu: self.tools.picker.is_some()
+                    || self.composer.is_open()
+                    || !self.slash_rows(cx).is_empty(),
+                limit_card: self.limit_ring.card_open(),
+                drop_hint: self.drop_preview,
+                part_names: parts_on(cx),
+            }));
         self.page_covered =
             crate::chat::page_panel::page_covered(crate::chat::page_panel::Covers {
                 sheet: self.sheet.is_some(),

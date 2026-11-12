@@ -192,10 +192,38 @@ pub fn is_stopping(stopped_ms: Option<i64>, working: bool, now_ms: i64) -> bool 
     working && stopped_ms.is_some_and(|at| now_ms - at < STOPPING_MS)
 }
 
+/// Whether the Activity Line's clock ("Writing… (26s)") needs drawing again: it was drawn in
+/// the whole second `drawn_ms` falls in (`None`: it isn't on screen) and a new second has begun.
+/// The line's spinner used to redraw the window ten times a second and the clock came along; a
+/// native spinner draws nothing, so the tick asks for this once a second.
+pub fn clock_due(drawn_ms: Option<i64>, now_ms: i64) -> bool {
+    drawn_ms.is_some_and(|drawn| now_ms.div_euclid(1000) > drawn.div_euclid(1000))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use notchling_engine::transcript::model::{BackgroundShell, ChatItem};
+
+    #[test]
+    fn the_clock_is_drawn_again_once_a_second_while_the_line_shows() {
+        assert!(!clock_due(None, 5_000), "not on screen: nothing to redraw");
+        assert!(!clock_due(Some(5_000), 5_999), "same second");
+        assert!(clock_due(Some(5_000), 6_000), "a new second");
+        assert!(
+            clock_due(Some(5_999), 6_000),
+            "drawn late in a second, due at the next"
+        );
+        assert!(
+            clock_due(Some(5_000), 9_500),
+            "a late tick catches up in one redraw"
+        );
+        assert!(!clock_due(Some(6_000), 6_400), "drawn this second already");
+        assert!(
+            !clock_due(Some(6_000), 5_999),
+            "a clock that stepped back waits"
+        );
+    }
 
     fn item(kind: ItemKind) -> ChatItem {
         ChatItem {

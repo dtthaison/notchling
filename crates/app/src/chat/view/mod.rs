@@ -21,6 +21,7 @@ mod list_probe_run;
 mod load;
 mod markdown;
 mod message_actions;
+mod native_spin;
 mod opinions;
 mod page_panel;
 pub mod pane;
@@ -179,6 +180,9 @@ pub struct ChatView {
     overlay_open: bool,
     /// Whether something drawn over the page panel is open, so its web view hides.
     page_covered: bool,
+    /// When the Activity Line was last drawn (ms), `None` while it isn't on screen: its clock
+    /// has no spinner frames to ride on, so the tick redraws it once a second (`activity::clock_due`).
+    activity_drawn: std::cell::Cell<Option<i64>>,
     /// The reply box, the other tools' live state and the selected Antigravity row's conversation.
     tools: tools::ChatTools,
     /// New Session or Settings, over the window.
@@ -443,6 +447,7 @@ impl ChatView {
             slash_preview: None,
             overlay_open: false,
             page_covered: false,
+            activity_drawn: std::cell::Cell::new(None),
             tools: tools::ChatTools::new(cx),
             sheet: None,
             bridge: phone::app_bridge(cx),
