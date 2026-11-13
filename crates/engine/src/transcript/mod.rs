@@ -4,6 +4,7 @@ pub mod chat;
 pub mod codex;
 pub mod conversation;
 pub mod errors;
+pub mod glance;
 pub mod locate;
 pub mod model;
 pub mod scan;

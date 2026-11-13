@@ -5,6 +5,7 @@ use notchling_app::chat::header::header;
 use notchling_app::chat::inspector::{inspector, no_writers};
 use notchling_app::chat::rows::{rows, Row};
 use notchling_app::chat::sidebar::sections;
+use notchling_app::chat::subagent_rows::SubagentRows;
 use notchling_kit::{Icon, Status};
 
 const NOW_MS: i64 = 1_794_182_400_000;
@@ -160,7 +161,9 @@ fn header_and_inspector_read_the_facts() {
 
     let subagents = root.subagents(fix, &c, &[], NOW_MS as f64 / 1000.0);
     assert_eq!(subagents.len(), 1);
-    let i = inspector(&c, &subagents, &no_writers);
+    let shown: Vec<usize> = (0..subagents.len()).collect();
+    let listed = SubagentRows::default().rows(&subagents, &shown);
+    let i = inspector(&c, &listed, &no_writers);
     assert_eq!(i.tasks.len(), 3);
     assert_eq!(i.tasks[0].status, Status::Done);
     assert!(i.facts.contains(&("Branch", "m1-chat".to_owned())));

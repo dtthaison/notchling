@@ -16,10 +16,9 @@ use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::inspector::{
-    fact_icon, fact_text, inspector, Fold, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
+    fact_icon, fact_text, inspector, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::Subagent;
 
 pub(super) const WIDTH: f32 = 260.0;
 const MARK_BOX: f32 = 14.0;
@@ -28,7 +27,6 @@ const ROW_LINE: f32 = 16.0;
 #[derive(Default)]
 struct Folds {
     folded: HashMap<WindowId, HashSet<&'static str>>,
-    all_subagents: HashSet<WindowId>,
 }
 
 impl Global for Folds {}
@@ -50,19 +48,17 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
-    pub agent_ids: Vec<String>,
 }
 
 fn model_of(
     conversation: &Conversation,
-    subagents: &[Subagent],
+    subagents: &[SubagentRow],
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
 ) -> DetailsModel {
     DetailsModel {
         i: inspector(conversation, subagents, writers),
         folder,
-        agent_ids: subagents.iter().map(|s| s.id.clone()).collect(),
     }
 }
 
@@ -71,12 +67,14 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    model_of(
+    let mut model = model_of(
         &view.conversation,
-        &view.subagents,
+        &view.subagent_rows,
         &|p: &str| view.shell_probe.writers(p),
         folder,
-    )
+    );
+    model.i.subagent_counts = view.subagent_counts;
+    model
 }
 
 pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -85,7 +83,6 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
         folder: m.folder.clone(),
         a,
         chat: cx.entity().downgrade(),
-        agent_ids: m.agent_ids.clone(),
     }
     .into_any_element()
 }
@@ -96,7 +93,6 @@ struct Panel {
     folder: Option<(String, String)>,
     a: Appearance,
     chat: WeakEntity<ChatView>,
-    agent_ids: Vec<String>,
 }
 
 impl RenderOnce for Panel {
@@ -134,37 +130,21 @@ impl RenderOnce for Panel {
             }
         };
 
-        let all = cx
-            .try_global::<Folds>()
-            .is_some_and(|f| f.all_subagents.contains(&id));
-        let listing = i.subagent_listing(all);
         let subagents = if i.subagents.is_empty() {
             empty("None started", a)
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0));
-            for index in &listing.rows {
-                list = list.child(subagent_row(
-                    *index,
-                    &i.subagents[*index],
-                    a,
-                    &self.chat,
-                    &self.agent_ids,
-                ));
+            for s in &i.subagents {
+                list = list.child(subagent_row(s, a, &self.chat));
             }
-            match listing.fold {
-                Fold::More(n) => {
-                    list = list.child(fold_row(
-                        id,
-                        "subagents-more",
-                        &format!("Show {n} more"),
-                        true,
-                        a,
-                    ));
-                }
-                Fold::Less => {
-                    list = list.child(fold_row(id, "subagents-less", "Show less", false, a));
-                }
-                Fold::None => {}
+            let next = i.subagent_counts.next_page();
+            if next > 0 {
+                list = list.child(more_row(
+                    "subagents-more",
+                    &format!("Load {next} More"),
+                    &self.chat,
+                    a,
+                ));
             }
             list
         };
@@ -351,16 +331,10 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         )
 }
 
-fn subagent_row(
-    index: usize,
-    s: &SubagentRow,
-    a: Appearance,
-    chat: &WeakEntity<ChatView>,
-    ids: &[String],
-) -> Stateful<Div> {
-    let (chat, agent) = (chat.clone(), ids.get(index).cloned());
+fn subagent_row(s: &SubagentRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Stateful<Div> {
+    let (chat, agent) = (chat.clone(), s.id.clone());
     div()
-        .id(SharedString::from(format!("subagent-{index}")))
+        .id(SharedString::from(format!("subagent-{}", s.id)))
         .mx(px(-4.0))
         .px(px(4.0))
         .py(px(2.0))
@@ -368,10 +342,8 @@ fn subagent_row(
         .cursor_pointer()
         .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
         .on_click(move |_, _, cx| {
-            if let Some(agent) = &agent {
-                chat.update(cx, |this, cx| this.open_subagent(agent, cx))
-                    .ok();
-            }
+            chat.update(cx, |this, cx| this.open_subagent(&agent, cx))
+                .ok();
         })
         .flex()
         .items_start()
@@ -462,20 +434,16 @@ fn output_link(
         })
 }
 
-fn fold_row(window: WindowId, key: &'static str, text: &str, expand: bool, a: Appearance) -> Div {
+fn more_row(key: &'static str, text: &str, chat: &WeakEntity<ChatView>, a: Appearance) -> Div {
+    let chat = chat.clone();
     div().child(
         div()
             .id(key)
             .cursor_pointer()
             .child(label(text, TypeRole::Meta, Ink::AccentText, a))
-            .on_click(move |_, window_ref, cx| {
-                let folds = cx.default_global::<Folds>();
-                if expand {
-                    folds.all_subagents.insert(window);
-                } else {
-                    folds.all_subagents.remove(&window);
-                }
-                window_ref.refresh();
+            .on_click(move |_, _, cx| {
+                chat.update(cx, |this, cx| this.load_more_subagents(cx))
+                    .ok();
             }),
     )
 }

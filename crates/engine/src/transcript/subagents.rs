@@ -211,6 +211,22 @@ pub fn read_shared(path: &str) -> std::sync::Arc<Conversation> {
     super::conversation::read_subagent_shared(path)
 }
 
+pub fn context_tokens(origin: Origin, path: &str) -> Option<u64> {
+    match origin {
+        Origin::Claude => super::conversation::subagent_context_tokens(path),
+        Origin::Codex => super::codex::context_tokens(path),
+        Origin::Antigravity => None,
+    }
+}
+
+pub fn recent(origin: Origin, path: &str) -> Option<Conversation> {
+    match origin {
+        Origin::Claude => super::conversation::recent_subagent(path),
+        Origin::Codex => super::codex::recent(path),
+        Origin::Antigravity => None,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConsoleMeta {

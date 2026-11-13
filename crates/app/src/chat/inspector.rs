@@ -1,14 +1,10 @@
-use notchling_engine::transcript::codex;
-use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::model::{Conversation, TaskStatus};
 use notchling_engine::transcript::shells::{self, ShellState};
-use notchling_engine::transcript::subagents::{
-    Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
-};
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
 use super::format::{model_name, tokens};
+use super::paging::Counts;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskRow {
@@ -25,6 +21,7 @@ pub enum Mark {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubagentRow {
+    pub id: String,
     pub description: String,
     pub detail: String,
     pub status: Status,
@@ -51,6 +48,7 @@ pub struct Inspector {
     pub tasks: Vec<TaskRow>,
     pub facts: Vec<(&'static str, String)>,
     pub subagents: Vec<SubagentRow>,
+    pub subagent_counts: Counts,
     pub shells: Vec<ShellRow>,
 }
 
@@ -110,83 +108,6 @@ impl TaskSummary {
     }
 }
 
-pub fn subagent_row(agent: &Subagent) -> SubagentRow {
-    let (status, word, mark) = match agent.status {
-        SubagentStatus::Running => (Status::Working, "Running", Mark::Spinner),
-        SubagentStatus::Completed => (Status::Done, "Done", Mark::Icon(Icon::Done, Ink::Done)),
-        SubagentStatus::Failed => (
-            Status::Needs,
-            "Failed",
-            Mark::Icon(Icon::Failed, Ink::Expired),
-        ),
-        SubagentStatus::Stopped => (
-            Status::Needs,
-            "Stopped",
-            Mark::Icon(Icon::Failed, Ink::TextFaint),
-        ),
-        SubagentStatus::Quiet => (
-            Status::Done,
-            "Not running",
-            Mark::Icon(Icon::Clock, Ink::TextFaint),
-        ),
-    };
-    let model = [agent.model.as_deref(), agent.effort.as_deref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let kind = (agent.agent_type != "general-purpose" && !agent.agent_type.is_empty())
-        .then_some(agent.agent_type.as_str());
-    let handed_over = agent.origin != SubagentOrigin::Claude;
-    let parts = if handed_over {
-        [
-            Some(word),
-            Some(agent.agent_type.as_str()).filter(|t| !t.is_empty()),
-            (!model.is_empty()).then_some(model.as_str()),
-        ]
-    } else {
-        [
-            Some(word),
-            (!model.is_empty()).then_some(model.as_str()),
-            kind,
-        ]
-    };
-    let read = (!agent.path.is_empty())
-        .then(|| match agent.origin {
-            SubagentOrigin::Claude => Some(conversation::read_subagent_shared(&agent.path)),
-            SubagentOrigin::Codex => Some(codex::read_shared(&agent.path)),
-            SubagentOrigin::Antigravity => None,
-        })
-        .flatten();
-    let context = read
-        .as_ref()
-        .map(|c| c.facts.context_tokens)
-        .filter(|n| *n > 0)
-        .map(tokens);
-    let detail = parts
-        .into_iter()
-        .flatten()
-        .chain(context.as_deref())
-        .collect::<Vec<_>>()
-        .join(" · ");
-    SubagentRow {
-        description: agent.description.clone(),
-        detail,
-        status,
-        status_word: word.to_owned(),
-        running: agent.is_running(),
-        mark,
-        tool: match agent.origin {
-            SubagentOrigin::Claude => ToolMark::Claude,
-            SubagentOrigin::Codex => ToolMark::Codex,
-            SubagentOrigin::Antigravity => ToolMark::Antigravity,
-        },
-        doing: read
-            .filter(|_| agent.is_running())
-            .map(|c| super::activity::doing(&c)),
-    }
-}
-
 pub fn token_line(input: u64, output: u64, cached: u64) -> String {
     let mut line = format!("{} in · {} out", tokens(input), tokens(output));
     if cached > 0 && input > 0 {
@@ -194,71 +115,6 @@ pub fn token_line(input: u64, output: u64, cached: u64) -> String {
         line.push_str(&format!("\n{} cached ({share}%)", tokens(cached)));
     }
     line
-}
-
-pub const FINISHED_SHOWN: usize = 3;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fold {
-    None,
-    More(usize),
-    Less,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Listing {
-    pub rows: Vec<usize>,
-    pub hidden: usize,
-    pub fold: Fold,
-}
-
-pub fn list_subagents(running: &[bool], expanded: bool) -> Listing {
-    let newest_first = (0..running.len()).rev();
-    if running.iter().any(|r| *r) {
-        let mut rows: Vec<usize> = newest_first.clone().filter(|i| running[*i]).collect();
-        let finished: Vec<usize> = newest_first.filter(|i| !running[*i]).collect();
-        if finished.is_empty() {
-            return Listing {
-                rows,
-                hidden: 0,
-                fold: Fold::None,
-            };
-        }
-        if expanded {
-            rows.extend(finished);
-            return Listing {
-                rows,
-                hidden: 0,
-                fold: Fold::Less,
-            };
-        }
-        return Listing {
-            rows,
-            hidden: finished.len(),
-            fold: Fold::More(finished.len()),
-        };
-    }
-    let all: Vec<usize> = newest_first.collect();
-    if all.len() <= FINISHED_SHOWN {
-        return Listing {
-            rows: all,
-            hidden: 0,
-            fold: Fold::None,
-        };
-    }
-    if expanded {
-        return Listing {
-            rows: all,
-            hidden: 0,
-            fold: Fold::Less,
-        };
-    }
-    let hidden = all.len() - FINISHED_SHOWN;
-    Listing {
-        rows: all[..FINISHED_SHOWN].to_vec(),
-        hidden,
-        fold: Fold::More(hidden),
-    }
 }
 
 pub fn counted_title(name: &str, running: usize, total: usize) -> String {
@@ -285,18 +141,13 @@ impl Inspector {
     }
 
     pub fn subagents_title(&self) -> String {
-        let running = self.subagents.iter().filter(|s| s.running).count();
-        counted_title("Subagents", running, self.subagents.len())
+        let counts = self.subagent_counts;
+        counted_title("Subagents", counts.running, counts.total)
     }
 
     pub fn shells_title(&self) -> String {
         let running = self.shells.iter().filter(|s| s.running).count();
         counted_title("Shells", running, self.shells.len())
-    }
-
-    pub fn subagent_listing(&self, expanded: bool) -> Listing {
-        let running: Vec<bool> = self.subagents.iter().map(|s| s.running).collect();
-        list_subagents(&running, expanded)
     }
 }
 
@@ -329,13 +180,18 @@ pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
 
 pub fn inspector(
     conversation: &Conversation,
-    subagents: &[Subagent],
+    subagents: &[SubagentRow],
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
     Inspector {
         tasks: task_rows(conversation),
         facts: facts(conversation),
-        subagents: subagents.iter().map(subagent_row).collect(),
+        subagent_counts: Counts {
+            total: subagents.len(),
+            running: subagents.iter().filter(|s| s.running).count(),
+            hidden: 0,
+        },
+        subagents: subagents.to_vec(),
         shells: running_first(
             conversation
                 .shells
@@ -428,7 +284,16 @@ pub fn no_writers(_: &str) -> Vec<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::subagent_rows::SubagentRows;
     use notchling_engine::transcript::model::{BackgroundShell, SessionFacts, TaskEntry};
+    use notchling_engine::transcript::subagents::{
+        Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
+    };
+
+    fn rows(agents: &[Subagent]) -> Vec<SubagentRow> {
+        let all: Vec<usize> = (0..agents.len()).collect();
+        SubagentRows::default().rows(agents, &all)
+    }
 
     #[test]
     fn tasks_facts_and_shells() {
@@ -514,10 +379,11 @@ mod tests {
             status: SubagentStatus::Completed,
             origin: Default::default(),
         };
-        let i = inspector(&Conversation::default(), &[agent], &no_writers);
+        let i = inspector(&Conversation::default(), &rows(&[agent]), &no_writers);
         assert_eq!(
             i.subagents[0],
             SubagentRow {
+                id: "abg".into(),
                 description: "Survey the repo".into(),
                 detail: "Done · sonnet high · Explore".into(),
                 status: Status::Done,
@@ -553,10 +419,10 @@ mod tests {
     fn a_running_subagent_has_the_spinner_and_the_plain_type_is_left_out() {
         let i = inspector(
             &Conversation::default(),
-            &[
+            &rows(&[
                 agent(SubagentStatus::Running, "general-purpose"),
                 agent(SubagentStatus::Failed, "Plan"),
-            ],
+            ]),
             &no_writers,
         );
         assert_eq!(i.subagents[0].mark, Mark::Spinner);
@@ -573,7 +439,7 @@ mod tests {
         job.effort = Some("high".into());
         let mut gone = agent(SubagentStatus::Stopped, "Antigravity CLI");
         gone.origin = SubagentOrigin::Antigravity;
-        let i = inspector(&Conversation::default(), &[job, gone], &no_writers);
+        let i = inspector(&Conversation::default(), &rows(&[job, gone]), &no_writers);
         assert_eq!(i.subagents[0].detail, "Running · Codex · gpt-5.5 high");
         assert_eq!(i.subagents[0].doing, None, "no rollout yet, nothing to say");
         assert_eq!(i.subagents[1].detail, "Stopped · Antigravity CLI");
@@ -597,7 +463,7 @@ mod tests {
         let mut job = agent(SubagentStatus::Running, "Codex");
         job.origin = SubagentOrigin::Codex;
         job.path = rollout.to_string_lossy().into_owned();
-        let i = inspector(&Conversation::default(), &[job], &no_writers);
+        let i = inspector(&Conversation::default(), &rows(&[job]), &no_writers);
         let doing = i.subagents[0].doing.as_deref().expect("a running job says");
         assert!(doing.ends_with('…'), "{doing}");
         assert_ne!(doing, "Thinking…", "it is running a command");
@@ -619,7 +485,11 @@ mod tests {
         running.path = file.to_string_lossy().into_owned();
         let mut done = agent(SubagentStatus::Completed, "general-purpose");
         done.path = running.path.clone();
-        let i = inspector(&Conversation::default(), &[running, done], &no_writers);
+        let i = inspector(
+            &Conversation::default(),
+            &rows(&[running, done]),
+            &no_writers,
+        );
         let doing = i.subagents[0].doing.as_deref().expect("a running one says");
         assert!(doing.contains("Run the tests"), "{doing}");
         assert_eq!(i.subagents[1].doing, None, "a finished one doesn't");
@@ -726,38 +596,5 @@ mod tests {
             fact_text("Tokens", "15.4k in · 900 out"),
             "15.4k in · 900 out"
         );
-    }
-
-    #[test]
-    fn while_any_run_those_show_and_the_finished_ones_open_from_show_more() {
-        let l = list_subagents(&[false, true, false, true, false], false);
-        assert_eq!(l.rows, [3, 1], "newest first");
-        assert_eq!((l.hidden, l.fold), (3, Fold::More(3)));
-        let open = list_subagents(&[false, true, false, true, false], true);
-        assert_eq!(open.rows, [3, 1, 4, 2, 0]);
-        assert_eq!((open.hidden, open.fold), (0, Fold::Less));
-        let all = list_subagents(&[true, true], false);
-        assert_eq!((all.rows, all.fold), (vec![1, 0], Fold::None));
-    }
-
-    #[test]
-    fn with_none_running_the_three_latest_show_then_show_more() {
-        let l = list_subagents(&[false; 7], false);
-        assert_eq!(l.rows, [6, 5, 4]);
-        assert_eq!((l.hidden, l.fold), (4, Fold::More(4)));
-        let l = list_subagents(&[false; 7], true);
-        assert_eq!(l.rows, [6, 5, 4, 3, 2, 1, 0]);
-        assert_eq!((l.hidden, l.fold), (0, Fold::Less));
-    }
-
-    #[test]
-    fn three_or_fewer_finished_show_whole_with_no_fold_row() {
-        for n in 0..=FINISHED_SHOWN {
-            let l = list_subagents(&vec![false; n], false);
-            assert_eq!(l.rows.len(), n);
-            assert_eq!((l.hidden, l.fold), (0, Fold::None));
-            assert_eq!(list_subagents(&vec![false; n], true), l);
-        }
-        assert_eq!(list_subagents(&[false; 4], false).fold, Fold::More(1));
     }
 }

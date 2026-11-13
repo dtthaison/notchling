@@ -1,7 +1,9 @@
 mod calls;
+mod glance;
 mod stamped;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
+pub use glance::{context_tokens, recent};
 
 use super::model::*;
 use super::tail::{Cursors, LineParser, CHAT_TAIL_BYTES};

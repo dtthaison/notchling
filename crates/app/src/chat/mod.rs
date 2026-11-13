@@ -32,6 +32,7 @@ pub mod markdown_cache;
 pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;
+pub mod paging;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;
@@ -54,6 +55,7 @@ pub mod sidebar;
 pub mod simulator;
 pub mod slash_menu;
 pub mod steps;
+pub mod subagent_rows;
 pub mod subagent_view;
 pub mod tasks_bar;
 pub mod terminal;
