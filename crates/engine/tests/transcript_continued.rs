@@ -128,7 +128,7 @@ fn the_notch_snapshot_of_the_new_session_has_the_earlier_lines_and_last_prompt()
 }
 
 #[test]
-fn a_new_session_that_says_something_keeps_its_own_last_prompt_after_the_old_lines() {
+fn a_new_session_that_has_messages_is_shown_alone() {
     let scratch = Scratch::new("own-prompt");
     scratch.write(
         "p/a.jsonl",
@@ -145,31 +145,87 @@ fn a_new_session_that_says_something_keeps_its_own_last_prompt_after_the_old_lin
             .iter()
             .map(|l| l.text.as_str())
             .collect::<Vec<_>>(),
-        ["from a", "a answers", "from b", "b answers"]
+        ["from b", "b answers"]
     );
+    assert_eq!(texts_of(&b), ["from b"]);
 }
 
 #[test]
-fn a_chain_is_followed_back_to_its_first_session() {
+fn a_new_session_that_holds_copies_of_the_old_messages_shows_them_once() {
+    let scratch = Scratch::new("copies");
+    scratch.write(
+        "p/a.jsonl",
+        &(said("a", "one") + &replied("a", "r1", None) + &continued("a", "b")),
+    );
+    let b = scratch.write(
+        "p/b.jsonl",
+        &(titled("b")
+            + &said("b", "one")
+            + &replied("b", "r1", None)
+            + &said("b", "two")
+            + &replied("b", "r2", None)),
+    );
+    let read = conversation::read_shared(&s(&b));
+    assert_eq!(user_texts(&read), ["one", "two"]);
+    let kinds = read
+        .items
+        .iter()
+        .filter(|i| matches!(i.kind, ItemKind::Assistant { .. }));
+    assert_eq!(kinds.count(), 2);
+    assert_eq!(
+        read.facts.output_tokens, 7,
+        "B's own reply once; a join would add A's"
+    );
+    let ids: std::collections::HashSet<_> = read.items.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids.len(), read.items.len());
+    assert!(read.items.iter().all(|i| !i.id.starts_with("a:")));
+    let shot = snapshot::read(&s(&b));
+    assert_eq!(
+        shot.lines
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect::<Vec<_>>(),
+        ["one", "r1", "two", "r2"]
+    );
+    assert_eq!(shot.last_prompt.as_deref(), Some("two"));
+}
+
+#[test]
+fn a_chain_is_followed_back_while_every_newer_session_is_empty() {
     let scratch = Scratch::new("chain");
     scratch.write(
         "p/a.jsonl",
         &(said("a", "first") + &replied("a", "one", None) + &continued("a", "b")),
     );
-    scratch.write(
-        "p/b.jsonl",
-        &(titled("b") + &said("b", "second") + &replied("b", "two", None) + &continued("b", "c")),
-    );
-    let c = scratch.write("p/c.jsonl", &(titled("c") + &said("c", "third")));
+    scratch.write("p/b.jsonl", &(titled("b") + &continued("b", "c")));
+    let c = scratch.write("p/c.jsonl", &titled("c"));
     assert_eq!(
         earlier(&s(&c)),
         [s(&scratch.path("p/a.jsonl")), s(&scratch.path("p/b.jsonl"))]
     );
-    assert_eq!(texts_of(&c), ["first", "second", "third"]);
+    assert_eq!(texts_of(&c), ["first"]);
     let read = conversation::read_shared(&s(&c));
-    assert_eq!(read.facts.output_tokens, 14, "two earlier replies of 7");
-    assert_eq!(texts_of(&scratch.path("p/b.jsonl")), ["first", "second"]);
+    assert_eq!(read.facts.output_tokens, 7);
+    assert_eq!(texts_of(&scratch.path("p/b.jsonl")), ["first"]);
     assert_eq!(texts_of(&scratch.path("p/a.jsonl")), ["first"]);
+}
+
+#[test]
+fn a_chain_stops_at_the_first_earlier_session_that_has_messages() {
+    let scratch = Scratch::new("chain-stops");
+    scratch.write("p/a.jsonl", &(said("a", "first") + &continued("a", "b")));
+    scratch.write(
+        "p/b.jsonl",
+        &(said("b", "first")
+            + &replied("b", "ok", None)
+            + &said("b", "second")
+            + &continued("b", "c")),
+    );
+    let c = scratch.write("p/c.jsonl", &titled("c"));
+    assert_eq!(texts_of(&c), ["first", "second"]);
+    let shot = snapshot::read(&s(&c));
+    assert_eq!(shot.last_prompt.as_deref(), Some("second"));
+    assert_eq!(shot.lines.len(), 3);
 }
 
 #[test]
@@ -177,11 +233,20 @@ fn a_loop_or_a_link_to_itself_ends_the_chain() {
     let scratch = Scratch::new("loop");
     scratch.write(
         "p/a.jsonl",
-        &(said("a", "from a") + &continued("a", "b") + &continued("a", "a")),
+        &(titled("a") + &continued("a", "b") + &continued("a", "a")),
     );
-    let b = scratch.write("p/b.jsonl", &(said("b", "from b") + &continued("b", "a")));
-    assert_eq!(texts_of(&b), ["from a", "from b"]);
-    assert_eq!(texts_of(&scratch.path("p/a.jsonl")), ["from b", "from a"]);
+    scratch.write("p/b.jsonl", &(titled("b") + &continued("b", "c")));
+    let c = scratch.write("p/c.jsonl", &(titled("c") + &continued("c", "a")));
+    for file in ["a", "b", "c"] {
+        let path = s(&scratch.path(&format!("p/{file}.jsonl")));
+        let chain = earlier(&path);
+        let distinct: std::collections::HashSet<_> = chain.iter().collect();
+        assert_eq!(distinct.len(), chain.len(), "{file}: {chain:?}");
+        assert!(!chain.contains(&path), "{file}: {chain:?}");
+        assert!(chain.len() <= 2, "{file}: {chain:?}");
+        let _ = conversation::read_shared(&path);
+    }
+    assert!(texts_of(&c).is_empty());
 }
 
 #[test]
@@ -191,8 +256,9 @@ fn a_continued_in_copied_from_another_session_is_not_a_link() {
         "p/copy.jsonl",
         &(said("copy", "copied history") + &continued("someone-else", "b")),
     );
-    let b = scratch.write("p/b.jsonl", &said("b", "mine"));
-    assert_eq!(texts_of(&b), ["mine"]);
+    let b = scratch.write("p/b.jsonl", &titled("b"));
+    assert_eq!(earlier(&s(&b)), Vec::<String>::new());
+    assert!(texts_of(&b).is_empty());
 }
 
 #[test]
@@ -206,20 +272,14 @@ fn a_clear_successor_and_a_continued_in_do_not_disturb_each_other() {
             + &continued("w", "x")),
     );
     tick();
-    let x = scratch.write(
-        "p/x.jsonl",
-        &(named("worker") + &said("x", "after the move")),
-    );
+    let x = scratch.write("p/x.jsonl", &named("worker"));
     tick();
     let y = scratch.write(
         "p/y.jsonl",
         &(cleared("worker") + &said("y", "after the clear")),
     );
     let (x, y) = (s(&x), s(&y));
-    assert_eq!(
-        texts_of(Path::new(&x)),
-        ["before the move", "after the move"]
-    );
+    assert_eq!(texts_of(Path::new(&x)), ["before the move"]);
     assert_eq!(successor(&x, "worker"), Some(y.clone()));
     assert_eq!(predecessor(&y, "worker"), Some(x.clone()));
     assert_eq!(
@@ -254,12 +314,13 @@ fn a_continued_in_naming_a_missing_file_leaves_everything_readable() {
 fn a_predecessor_that_was_deleted_ends_the_chain_at_what_is_left() {
     let scratch = Scratch::new("deleted");
     scratch.write("p/a.jsonl", &(said("a", "first") + &continued("a", "b")));
-    scratch.write("p/b.jsonl", &(said("b", "second") + &continued("b", "c")));
-    let c = scratch.write("p/c.jsonl", &said("c", "third"));
-    assert_eq!(texts_of(&c), ["first", "second", "third"]);
+    scratch.write("p/b.jsonl", &(titled("b") + &continued("b", "c")));
+    let c = scratch.write("p/c.jsonl", &titled("c"));
+    assert_eq!(texts_of(&c), ["first"]);
     tick();
     std::fs::remove_file(scratch.path("p/a.jsonl")).expect("remove");
-    assert_eq!(texts_of(&c), ["second", "third"]);
+    assert!(texts_of(&c).is_empty());
+    assert_eq!(earlier(&s(&c)), [s(&scratch.path("p/b.jsonl"))]);
 }
 
 #[test]
@@ -269,7 +330,7 @@ fn tool_calls_of_an_earlier_session_are_never_shown_as_still_running() {
         "p/a.jsonl",
         &(said("a", "go") + &replied("a", "running", Some("t1")) + &continued("a", "b")),
     );
-    let b = scratch.write("p/b.jsonl", &said("b", "next"));
+    let b = scratch.write("p/b.jsonl", &titled("b"));
     let read = conversation::read_shared(&s(&b));
     let calls: Vec<_> = read
         .items
@@ -293,9 +354,21 @@ fn tool_calls_of_an_earlier_session_are_never_shown_as_still_running() {
 fn a_continued_in_written_after_the_new_file_exists_is_found() {
     let scratch = Scratch::new("late");
     let a = scratch.write("p/a.jsonl", &said("a", "history"));
-    let b = scratch.write("p/b.jsonl", &said("b", "now"));
-    assert_eq!(texts_of(&b), ["now"]);
+    let b = scratch.write("p/b.jsonl", &titled("b"));
+    assert!(texts_of(&b).is_empty());
     scratch.append("p/a.jsonl", &continued("a", "b"));
-    assert_eq!(texts_of(&b), ["history", "now"]);
+    assert_eq!(texts_of(&b), ["history"]);
     assert_eq!(earlier(&s(&b)), [s(&a)]);
+}
+
+#[test]
+fn a_continued_in_with_no_session_id_is_not_a_link() {
+    let scratch = Scratch::new("no-id");
+    scratch.write(
+        "p/a.jsonl",
+        &(said("a", "history") + r#"{"type":"continued-in","continuedInSessionId":"b"}"# + "\n"),
+    );
+    let b = scratch.write("p/b.jsonl", &titled("b"));
+    assert_eq!(earlier(&s(&b)), Vec::<String>::new());
+    assert!(texts_of(&b).is_empty());
 }

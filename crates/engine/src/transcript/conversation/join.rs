@@ -28,16 +28,35 @@ fn same(a: &[Arc<Conversation>], b: &[Arc<Conversation>]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Arc::ptr_eq(x, y))
 }
 
+fn has_messages(conversation: &Conversation) -> bool {
+    conversation
+        .items
+        .iter()
+        .any(|i| matches!(i.kind, ItemKind::User { .. } | ItemKind::Assistant { .. }))
+}
+
 pub(super) fn read(path: &str) -> Arc<Conversation> {
     let own = session_cursors().read(path).unwrap_or_else(empty);
-    let before = continued::earlier(path);
-    if before.is_empty() {
+    if has_messages(&own) {
         return own;
     }
-    let earlier: Vec<Arc<Conversation>> = before
-        .iter()
-        .map(|p| session_cursors().read(p).unwrap_or_else(empty))
-        .collect();
+    let mut before = continued::earlier(path);
+    let mut earlier: Vec<Arc<Conversation>> = Vec::new();
+    let mut kept = 0;
+    for earlier_path in before.iter().rev() {
+        let read = session_cursors().read(earlier_path).unwrap_or_else(empty);
+        let messages = has_messages(&read);
+        earlier.push(read);
+        kept += 1;
+        if messages {
+            break;
+        }
+    }
+    if earlier.is_empty() {
+        return own;
+    }
+    earlier.reverse();
+    before.drain(..before.len() - kept);
     let known = cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())

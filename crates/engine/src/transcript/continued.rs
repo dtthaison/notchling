@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
-const TAIL_BYTES: u64 = 65_536;
+const TAIL_BYTES: u64 = 16_384;
 const MAX_CHAIN: usize = 8;
 const MAX_FOLDERS: usize = 64;
 const HOT: Duration = Duration::from_secs(600);
@@ -60,7 +60,7 @@ fn link(line: &str, own_id: &str) -> Option<Link> {
     if str_of(&obj, "type")? != "continued-in" {
         return None;
     }
-    if str_of(&obj, "sessionId").is_some_and(|from| from != own_id) {
+    if str_of(&obj, "sessionId")? != own_id {
         return None;
     }
     let to = str_of(&obj, "continuedInSessionId").filter(|to| !to.is_empty() && *to != own_id)?;

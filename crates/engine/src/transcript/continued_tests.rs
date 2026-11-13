@@ -76,9 +76,9 @@ fn a_continued_in_far_from_the_end_of_a_big_file_is_still_found_but_not_beyond_t
     let dir = TempDir::new("continued-window");
     let filler = "x".repeat(200);
     let line = format!(r#"{{"type":"user","note":"{filler}"}}"#) + "\n";
-    let near = continued("near", "b") + &line.repeat(100);
+    let near = continued("near", "b") + &line.repeat(50);
     dir.write("p/near.jsonl", &near);
-    let far = continued("far", "b") + &line.repeat(2000);
+    let far = continued("far", "b") + &line.repeat(200);
     dir.write("p/far.jsonl", &far);
     dir.write("p/b.jsonl", &said("b"));
     assert_eq!(earlier(&path_of(&dir, "b")), [path_of(&dir, "near")]);

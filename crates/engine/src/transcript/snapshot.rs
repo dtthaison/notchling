@@ -270,14 +270,18 @@ fn cursors() -> &'static Cursors<SnapshotParser, Snapshot> {
 }
 
 fn carry_earlier(path: &str, snapshot: &mut Snapshot) {
-    let before = continued::earlier(path);
-    if before.is_empty() {
-        return;
+    let mut kept: Vec<Snapshot> = Vec::new();
+    for earlier in continued::earlier(path).iter().rev() {
+        let read = cursors().read(earlier).unwrap_or_default();
+        let messages = !read.lines.is_empty();
+        kept.push(read);
+        if messages {
+            break;
+        }
     }
     let mut lines: Vec<ChatLine> = Vec::new();
     let mut prompt = None;
-    for earlier in &before {
-        let read = cursors().read(earlier).unwrap_or_default();
+    for read in kept.into_iter().rev() {
         lines.extend(read.lines);
         prompt = read.last_prompt.or(prompt);
     }
@@ -293,7 +297,7 @@ fn carry_earlier(path: &str, snapshot: &mut Snapshot) {
 
 pub fn read(path: &str) -> Snapshot {
     let mut snapshot = cursors().read(path).unwrap_or_default();
-    if snapshot.lines.len() < SHOWN_LINES || snapshot.last_prompt.is_none() {
+    if snapshot.lines.is_empty() {
         carry_earlier(path, &mut snapshot);
     }
     snapshot.subagents_active = subagents::active_count(path, now_secs());
