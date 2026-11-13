@@ -46,8 +46,9 @@ means the code there.
 9. Six phases, each shippable on its own: the contract and the matrix (no behavior change); subagents
    in one shape with the Codex and Antigravity readers; signals; delegate everywhere; the held queue
    for every tool; the rest of 0016's ports and the gaps.
-10. Three questions for the maintainer: the default for finished notifications, how strict the gap
-    rule is, and Claude Code as a delegate target ([section 14](#14-open-questions)).
+10. No open questions. The user decided the three this draft asked: Tell Me When Work Finishes
+    (default Long Turns and Jobs), gaps that only shrink, and Claude Code as a delegate target with the
+    guidance for delegating in Notchling's delegate skill ([section 14](#14-decided-by-the-user)).
 
 ## Calls settled after review
 
@@ -105,7 +106,7 @@ sections it touches, where it is marked "call N".
 11. [How "every capability" is enforced](#11-how-every-capability-is-enforced)
 12. [Phases](#12-phases)
 13. [Left to the builder, and to check while building](#13-left-to-the-builder-and-to-check-while-building)
-14. [Open questions](#14-open-questions)
+14. [Decided by the user](#14-decided-by-the-user)
 15. [Sources](#15-sources)
 
 ## 1. Why
@@ -530,7 +531,7 @@ it.
 | `usage.limits` | N | N | N: the local language server |
 | `usage.cost` | N | N; check the forked block isn't counted twice | N |
 | `catalog.models` | N: Anthropic's list, data file | N: `models_cache.json` (the app still reads it directly) | N: `configOptions`, cached; GAP: no context windows (`catalog-data` once the data file has them) |
-| `delegate.target` | GAP: no `notchling delegate claude` (question 3) | N: `codex exec` | N: `agy acp` |
+| `delegate.target` | GAP: no `notchling delegate claude` yet; decided (14.3), phase 3 | N: `codex exec` | N: `agy acp` |
 | `delegate.caller` | N: `CLAUDE_CODE_SESSION_ID` | GAP: `CODEX_THREAD_ID` (phase 3) | GAP: `NOTCHLING_SESSION` on the runner's `agy acp`, `process-tree` for a terminal run (phase 3) |
 | `setup.rules` | GAP (design: 0019): `~/.claude/rules/` | GAP (design: 0019): `~/.codex/AGENTS.md` | GAP (design: 0019): a plugin's `rules/` |
 | `setup.skills` | GAP (design: 0019): built today in `install::skills` | GAP (design: 0019): built today in `install::skills` | GAP (design: 0019): built today in `install::skills` |
@@ -552,12 +553,13 @@ Where a surface still misses a capability for some tool, or branches on the tool
 | Chat: Sidebar, conversation | Every tool; rows built per tool in the app | `session.list`, `conversation.*` through the registry |
 | Chat: Details Panel subagents | Claude Code sessions only | Every session: native and delegated rows, as a tree (call 3) |
 | Chat: composer | `ChatTool` per tool (0015) | `ChatTool` presents the registry's answers (0016) |
-| Notch | Rows and a peek when a turn ends, every tool | Plus `subagent.finished` and `delegate.finished` (question 1) |
+| Notch | Rows and a peek when a turn ends, every tool | Plus `subagent.finished` and `delegate.finished` (14.1) |
 | Phone: list, chat | Every tool (`foreign_rows`) | The daemon's own list of every tool's sessions (call 5) |
 | Phone: subagents | None for any tool (never filled) | Every tool, with `tool` and `via` |
 | Phone: alerts | Turn finished and needs you, from the phone's own diff | Pushed by the Hub from `signals.recent`, subagents included (call 5); the phone's own diff stays for an older Mac |
 | Search | Claude Code, Codex text; Antigravity titles | Every tool's `search.text`; children under their parent |
-| Inbox | No session items | `delegate.finished` for background jobs (question 1) |
+| Inbox | No session items | `delegate.finished` for background jobs (14.1) |
+| System banners | None for a finish | Tell Me When Work Finishes: Off, Long Turns and Jobs (the default), Everything (14.1) |
 | Keep awake | Working sessions | Plus running subagents and jobs (a background job with an idle parent let the Mac sleep) |
 | `notchling sessions` | Claude Code only | Every tool, from phase 2 (call 5) |
 | Activity log (logging design) | `tool.turn` for Codex and Antigravity, `session.*` kinds for Claude Code | One `turn.finished` and one `subagent.finished` kind, `tool` a field |
@@ -697,19 +699,26 @@ client that connects later sees what it missed, and the phone Hub reads it with 
 | Surface | Does |
 | --- | --- |
 | Details Panel | On a `subagent.finished` for the selected session, asks the loader for a load; the row's status comes from that load, never from the event |
-| Notch | Peeks the parent, after the existing order: a question, then needs you, then a turn finished, then a subagent or job finished. A subagent of a session that still works doesn't peek (question 1) |
+| Notch | Peeks the parent, after the existing order: a question, then needs you, then a turn finished, then a subagent or job finished. A subagent of a session that still works doesn't peek (14.1) |
 | Inbox | A `delegate.finished` of a `--background` job raises a done item ("Codex job finished · Check the parser"), Open goes to the parent's row. New `Kind::JobFinished` (additive), no responder, expires by the clock |
 | Phone | The Hub reads `signals.recent` with a cursor per connection and pushes each finish as a new, additive message, so finish events have one source (call 5); a phone keeps its own diff for an older Mac. `Session.subagents` is filled from the daemon's registry. Schema first (`add-protocol-field`): optional `tool`, `via`, `outcome`, `parent` on `Subagent`. `SubagentState` keeps `running` and `done`: a new value would break older phones |
 | Keep awake | Counts running subagents and jobs as work |
 | Activity log | `turn.finished` and `subagent.finished` kinds (Toggle, on; Activity and Diagnostics) with `session`, `tool`, `via`, `status`, `duration_ms`, `tokens`, no text; the logging design's `tool.turn` becomes `turn.finished` |
-| System banner | Question 1 |
+| System banner | The setting **Tell Me When Work Finishes** (14.1; key `notifyFinished` in `settings/keys.rs`, allowed `off`, `long`, `all`, default `long`), in Settings > General: Off; Long Turns and Jobs, a `turn.finished` that ran over 60 s and a `--background` job's `delegate.finished`; Everything, every finish. Shown only when Chat isn't in front, and never for a subagent of a session that still works, in any mode. Through the app's one notification worker (`system::Detached`), once per event `seq`. Off stops banners only: the notch, the Inbox item and the phone stay |
 
 ## 10. Delegate: target, caller, wait
 
 ### 10.1 Targets
 
-Codex (`codex exec`) and Antigravity (`agy acp`), as now. Claude Code is a GAP: `claude -p` with
-`--output-format stream-json` on a chosen model would make it a target (question 3).
+Codex (`codex exec`) and Antigravity (`agy acp`), as now, and Claude Code from phase 3 (the user's
+decision, 14.3): `notchling delegate claude [--model <m>] [--effort <e>] ...` runs `claude -p` with
+`--output-format stream-json` on the main login, never a lane's (the job's environment drops
+`CLAUDE_CONFIG_DIR` with the ids 10.2 removes). The default is `sonnet` at `medium` effort; both are
+selectable, and `delegate-models` lists Claude Code's models and efforts from the catalog. Without
+`--write` the job gets read-only tools, with it edits in `--folder`; the flags come from the installed
+`claude --help` when it is built. `notchling hook` already passes on a `claude -p` session, so a job
+never asks the Mac. Each job is a turn on the user's Claude account and counts in its limits; the skill
+says so (10.4). Until phase 3 the matrix cell stays a Gap.
 
 ### 10.2 Callers: who is the parent
 
@@ -753,8 +762,36 @@ Claude Code parents.
 
 Like `notchling delegate` today, these need no daemon and no `acting` switch, and the depth limit
 (`NOTCHLING_DELEGATE_DEPTH`, 2) stays. Results and records are the user's own files, 0600, kept 30 days
-as records are. The `notchling-delegate` skill text (decision 0019's data file) gains two lines: start
-a long job with `--background`, keep working, then `--wait`.
+as records are. The `notchling-delegate` skill says when to use them (10.4).
+
+### 10.4 The delegate skill
+
+The guidance for delegating lives in Notchling's `notchling-delegate` skill, not only in code (the
+user's decision, 14.3). Its text is `delegate::skill::TEMPLATE` with a note per tool (`SkillTool`), and
+`install::skills` writes a copy for each tool. Phase 3, the phase that adds the Claude target, rewrites
+it to say:
+
+- **Which tool for what**: Claude for review and the hardest work; Codex or Antigravity for images, and
+  for a second opinion from a different model (a session never asks its own tool for one); any of them
+  for work that can run beside the caller's.
+- **Model and effort**: `delegate-models` lists them; a cheap model at low effort for lookups and
+  mechanical work, a stronger one at high effort for review, the strongest at its highest effort only for
+  the hardest work; the Claude target's default is `sonnet` at `medium`.
+- **Cost**: each Claude delegation costs a turn on the user's Claude account and counts in its limits;
+  Codex and Antigravity jobs spend those accounts the same way.
+- **Waiting**: a short job in the foreground; a long one with `--background`, keep working, then
+  `--wait <job>`; `--status <job>` to look without waiting, `--jobs` to list them.
+- **Results**: a job's end is a `delegate.finished` signal. It shows under the caller's session in the
+  Details Panel, peeks the notch, raises an Inbox item for a background job, and `--wait` prints the
+  result.
+
+The user asked for the Claude Code and Codex copies, and an Antigravity one when 0019's per-tool
+instructions land. On the base, `install_ops.rs` already writes an Antigravity copy from the same
+template, so it gets the new text in phase 3 too. The text must stay in sync with decision 0019's
+instructions per tool: when 0019 lands, this skill is one of its per-tool data files and every copy is
+written from there, so the skill and the instructions never say different things. The two sentences
+today's tests pin ("Nested delegation stops at two levels." and "It sees the folder, not your
+context.") stay, so the change adds tests for the new lines and edits none.
 
 ## 11. How "every capability" is enforced
 
@@ -770,7 +807,7 @@ Linux, so CI's clippy sees it.
 `contract/registry_tests.rs`, for every tool and capability: `why` and `plan` are not empty and fit a
 tooltip (120 characters); a `Fallback` flow covers that capability (`Flow::covers`); every Gap is in
 `contract/gaps.json` and every line there is still a Gap (the file shrinks with the work); a new tool's
-gaps are empty (question 2). The same for `contract/unwired.json` (call 2): every line names a Native
+gaps are empty (14.2). The same for `contract/unwired.json` (call 2): every line names a Native
 or Fallback cell, and a new tool starts with none. A Gap whose reason is "design: 0019" or "design:
 version-sync" is the only kind a test lets name a design rather than a phase (call 1).
 
@@ -836,7 +873,8 @@ that can't name a tool can't leave one out.
 4. Make `tests/fixtures/conformance/<tool>/` with the shared cast, and add the macro line.
 5. Accounts and limits: an `AccountProvider` and a `ProviderSource` (the login rules in
    `crates/engine/AGENTS.md`); catalog: a `CatalogSource` and its rows in `catalog.json`.
-6. Setup: an `instructions::Target` (0019); versions: a reader and an installer (version-sync).
+6. Setup: an `instructions::Target` (0019) and the tool's lines in the delegate skill (10.4);
+   versions: a reader and an installer (version-sync).
 7. Run the checks, regenerate `docs/provider-matrix.md`, add the tool's facts to the engine's
    AGENTS.md "Things that bit before" and its row to `docs/feature-map.md`.
 
@@ -848,8 +886,8 @@ Each phase is its own pull request into the integration branch, with the app wor
 | --- | --- | --- | --- |
 | 0. Contract and matrix | `contract/` types, the three `support.rs` with today's truth, the registry (routing only what exists), `gaps.json` (38, the setup and version rows as "design: …" gaps, call 1), `unwired.json` (every Native and Fallback cell not routed yet, call 2), the golden `docs/provider-matrix.md`, `notchling providers`, `catalog::Tool` moved, the add-provider skill rewritten, decision record. Declares the truth only: no behavior change | registry tests, golden; the conformance suite runs, with every unwired cell skipped and counted | engine and `.claude/`: maintainer |
 | 1. Subagents in one shape | `Origin {tool, via}`, `session`, `parent`, `depth`; `Registry::subagents` recursing (call 3) replaces `ChatData::subagents` and `delegated::subagents`; the Details Panel's tree, collapsed past depth 1; Codex: first `session_meta` decides, the daemon's child index and `codex.children` (call 4), child reader skipping the forked block (conversation, status, glance, Search, cost); Antigravity: children query on the copy, status mapping, glance and open from the child log; the wire name `antigravity`, read-both and the one-time key rewrite (call 8); Details Panel for Codex and Antigravity sessions | conformance for `subagent.*` and `session.list` over synthetic rollouts (with the forked block) and a summaries db built in the test; the index over a temp folder (backfill limit, a changed file read once, an unchanged one never, a gone one swept); the tree's paging; ids and records read under `agy` and `antigravity`; `bench_subagents` still reads no subagent file in a steady state | `transcript/`, `search/`, app: auto; the index and its op, `tools/codex`, `tools/agy`, `cost`, the key rewrite: maintainer (`CAP-FILEWRITE`) |
-| 2. Signals | `contract::signals` (pure), `SignalWatch` and `signals.recent {after}` in the daemon; the daemon lists every tool's sessions through `bridge::foreign`, read-only, whatever the bridge switch and with no app (call 5); the daemon's finished-agents reader (call 6); a terminal-run Antigravity session's `turn.finished` from its summaries status, else the quiet rule; `held_ops` on `turn.finished`, the notch's peek, Inbox `JobFinished`; the phone Hub pushes from `signals.recent` and fills `subagents` and the schema fields; keep awake, the log kinds | pure step tests (baseline, once only, quiet is not finished, first seen finished, the quiet rule's window); the finished-agents reader over a growing fixture (reads only what was added); socket tests over a fixture root with the bridge off and no app; the Hub's cursor; a Flutter test for the alert | daemon, bridge, protocol: maintainer; app and phone features: auto |
-| 3. Delegate everywhere | Record v2 (`"tool": "antigravity"`), the caller chain, innermost first (`NOTCHLING_SESSION`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, `process-tree`), the scrub of inherited ids and `NOTCHLING_SESSION=job:<id>` on each job, the agy runner's `NOTCHLING_SESSION` (call 3), `--background`, `--wait`, `--status`, `--jobs`, `--stop`, the skill text | option and record tests; the chain over `FakeProcs` with every combination of the three variables; a job's environment holds only its own id; e2e over a fixture root with fake tools in `<root>/.local/bin`: a job that ends, fails, times out, loses its pid, delegates again | engine `delegate`, `notchlingd`: maintainer (`CAP-PROCESS`, `CAP-FILEWRITE`) |
+| 2. Signals | `contract::signals` (pure), `SignalWatch` and `signals.recent {after}` in the daemon; the daemon lists every tool's sessions through `bridge::foreign`, read-only, whatever the bridge switch and with no app (call 5); the daemon's finished-agents reader (call 6); a terminal-run Antigravity session's `turn.finished` from its summaries status, else the quiet rule; `held_ops` on `turn.finished`, the notch's peek, Inbox `JobFinished`, the Tell Me When Work Finishes setting and its banners (14.1); the phone Hub pushes from `signals.recent` and fills `subagents` and the schema fields; keep awake, the log kinds | pure step tests (baseline, once only, quiet is not finished, first seen finished, the quiet rule's window, the banner rule per mode: 60 s, Chat in front, a working parent's subagent never); the finished-agents reader over a growing fixture (reads only what was added); socket tests over a fixture root with the bridge off and no app; the Hub's cursor; a Flutter test for the alert | daemon, bridge, protocol, the setting's key: maintainer; app and phone features: auto |
+| 3. Delegate everywhere | Record v2 (`"tool": "antigravity"`), the caller chain, innermost first (`NOTCHLING_SESSION`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, `process-tree`), the scrub of inherited ids and `NOTCHLING_SESSION=job:<id>` on each job, the agy runner's `NOTCHLING_SESSION` (call 3), `--background`, `--wait`, `--status`, `--jobs`, `--stop`; the Claude target, `notchling delegate claude` on the main login, `sonnet` at `medium` by default (14.3); the delegate skill's new text in every copy (10.4) | option and record tests; the chain over `FakeProcs` with every combination of the three variables; a job's environment holds only its own id; e2e over a fixture root with fake tools in `<root>/.local/bin`: a job that ends, fails, times out, loses its pid, delegates again; the Claude target over a fake `claude` (main login, default model and effort, read-only without `--write`); the skill's new lines, the pinned ones unchanged | engine `delegate`, `notchlingd`: maintainer (`CAP-PROCESS`, `CAP-FILEWRITE`) |
 | 4. Held queue for every tool | One held message per session for every tool, everything sent meanwhile joined into it (call 7): Codex's outbox becomes `held-queue` (one turn per message becomes one joined turn), Antigravity's box no longer refuses while busy, take back for all, `session.reply` routed by id. An Antigravity session another `agy` holds keeps sending off, with its reason, and the held queue takes nothing for it | `held_tests` per tool's rows; `codex_acting_tests`, `agy_ops_tests` with `FakeSpawner`. Codex's outbox tests change from one turn per message to a joined turn: flagged for the maintainer (`WEAK-TEST-EDIT`) | sending: maintainer |
 | 5. 0016's other ports | Sessions (the rest of the port; its listing slice came in phase 2, call 5), Turns, Prompts, Commands as ports (0016 phases 2 to 4); slash commands for Codex and Antigravity in Chat; Antigravity's Remove as `hide-row`; Antigravity's `search.text` from its logs; Gemini windows in `catalog.json`; Codex `CODEX_HOME` lanes if wanted | conformance for each | mixed; one PR per item |
 | 6. Clean-up | `codex.*`/`agy.*` alias ops removed, `GUARD-TOOL-BRANCH` and `GUARD-PROVIDER-GAPS` on, the other tool enums gone, folder notes | guard rules with bad examples | `tools/guard`, docs: maintainer |
@@ -875,26 +913,28 @@ within the kit's tokens and today's row sizes).
   open failure after a run (the copy route is unaffected) matters anywhere else.
 - Claude Code: nothing new; the `SubagentStop` hook stays unused.
 
-## 14. Open questions
+## 14. Decided by the user
 
-Only the maintainer can answer these. Each has my recommendation.
+Open questions: none. The user answered the three the first draft asked (2026-11-14); each is now the
+user's decision, worked into the sections it touches.
 
-1. **Finished notifications: how loud by default?** Today a finished turn peeks the notch and the phone
-   alerts; nothing else. Options: (a) keep that, and raise an Inbox item only for `--background` jobs;
-   (b) also a macOS banner for a turn that ran over 60 s or a background job, when Chat isn't in front;
-   (c) a banner for every finish. **Recommendation: (b)**, as a Settings choice "Tell Me When Work
-   Finishes: Off, Long Turns and Jobs, Everything", with subagents of a session that still works never
-   bannered (its parent reads the result itself; six Codex workers would be six banners).
-2. **How strict is "every capability"?** (a) Strict now: every Gap must become Native, Fallback or
-   NotApplicable before phase 0 merges; (b) today's 38 gaps go in `gaps.json` (15 of them the setup
-   and version rows waiting on decision 0019 and the version-sync design, call 1), which only shrinks,
-   and a new provider starts with none. **Recommendation: (b).** (a) would hold the contract back behind the
-   Codex and Antigravity readers, and the gaps are visible in the matrix and in Settings either way.
-3. **Claude Code as a delegate target?** `notchling delegate claude` (`claude -p`, model and effort
-   chosen) lets Codex and Antigravity hand review or hard work to Claude, spending the Claude Code
-   account's limits from another tool's session. **Recommendation: yes**, on the main login only (not a
-   lane's), default `sonnet` at `medium`, listed in the delegate skill for review and the hardest work;
-   until then the cell stays a Gap.
+1. **Finished notifications** (user's decision). A Settings choice, **Tell Me When Work Finishes**: Off,
+   Long Turns and Jobs, Everything; the default is Long Turns and Jobs: a banner for a turn that ran over
+   60 s and for a background job, only when Chat isn't in front. A subagent of a session that still
+   works never notifies (its parent reads the result itself; six Codex workers would be six banners).
+   See 9.3.
+2. **Gaps only shrink** (user's decision). `gaps.json` lists today's gaps and may only shrink; a new
+   provider starts with zero gaps. The user's answer counted the first draft's 24. Call 1 made the setup
+   and version rows Gap for every tool, which adds 14 (Antigravity's `version.detect` was one of the
+   24), so the file starts with 38; the 15 "design: …" cells leave it when decision 0019 and the
+   version-sync design land. See 11.2 and 11.4.
+3. **Claude Code is a delegate target** (user's decision). `notchling delegate claude` runs `claude -p`
+   on the main login, `sonnet` at `medium` effort by default, model and effort selectable. The guidance
+   for delegating goes into Notchling's delegate skill, not only into code: which tool for what, how to
+   pick model and effort, that each Claude delegation costs a turn on the user's Claude account, how to
+   wait (`--wait`, `--background`, `--status`), and that results come back as a finished signal. The
+   target and the skill text come in phase 3, and the text stays in sync with decision 0019's per-tool
+   instructions. See 10.1 and 10.4.
 
 ## 15. Sources
 
