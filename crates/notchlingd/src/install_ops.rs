@@ -6,6 +6,7 @@ use notchling_engine::install::{
     self, Action, FileError, FilePlan, Found, SkillPlan, SkillSpec, ToolRoots, Want, Wanted,
 };
 use notchling_engine::pages::skill::content as pages_text;
+use notchling_engine::settings::skill as settings_skill;
 use notchling_engine::tools::codex::models;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
 use notchling_platform::paths::Os;
@@ -52,6 +53,7 @@ impl InstallSetup {
 pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
     let for_delegate = binary.to_string_lossy().into_owned();
     let for_pages = for_delegate.clone();
+    let for_settings = for_delegate.clone();
     let codex_home = codex_home.to_path_buf();
     vec![
         SkillSpec {
@@ -66,6 +68,11 @@ pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
             name: notchling_engine::pages::skill::NAME.to_string(),
             tools: vec![SkillTool::Claude],
             text: Box::new(move |_| pages_text(&for_pages)),
+        },
+        SkillSpec {
+            name: settings_skill::NAME.to_string(),
+            tools: settings_skill::TOOLS.to_vec(),
+            text: Box::new(move |tool| settings_skill::content(&for_settings, tool)),
         },
     ]
 }

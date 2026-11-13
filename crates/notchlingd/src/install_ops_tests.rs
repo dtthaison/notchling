@@ -149,7 +149,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
         .unwrap()
         .contains("add PreToolUse (AskUserQuestion)"));
     let skills = plan["skills"].as_array().unwrap();
-    assert_eq!(skills.len(), 4);
+    assert_eq!(skills.len(), 6);
     assert!(skills.iter().all(|s| s["action"] == "write"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), USER_SETTINGS);
@@ -252,6 +252,8 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
         (".claude", "notchling-pages"),
         (".codex", "notchling-delegate"),
         (".gemini/config", "notchling-delegate"),
+        (".claude", "notchling-settings"),
+        (".codex", "notchling-settings"),
     ] {
         let skill = dir.path(&format!("home/{tool}/skills/{name}"));
         assert!(skill.join("SKILL.md").is_file(), "{tool} {name}");
@@ -260,6 +262,9 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
             .contains(BINARY));
     }
     assert!(!dir.path("home/.codex/skills/notchling-pages").exists());
+    assert!(!dir
+        .path("home/.gemini/config/skills/notchling-settings")
+        .exists());
     assert!(reply["plan"]["skills"]
         .as_array()
         .unwrap()
@@ -277,6 +282,7 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
     assert!(!dir.path("home/.claude/skills/notchling-delegate").exists());
     assert!(!dir.path("home/.codex/skills/notchling-delegate").exists());
     assert!(!dir.path("home/.claude/skills/notchling-pages").exists());
+    assert!(!dir.path("home/.claude/skills/notchling-settings").exists());
 }
 
 #[test]
@@ -506,7 +512,11 @@ fn the_layout_puts_every_tool_where_the_swift_app_looked() {
         .collect();
     assert_eq!(
         names,
-        vec![("notchling-delegate", 3), ("notchling-pages", 1)]
+        vec![
+            ("notchling-delegate", 3),
+            ("notchling-pages", 1),
+            ("notchling-settings", 2)
+        ]
     );
     assert!(InstallSetup::from_layout(&fixture, None).skills.is_empty());
 }

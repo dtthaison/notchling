@@ -147,6 +147,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         }
         let vault = Arc::new(crate::vault::store::Vault::for_run(root.as_ref()));
         cx.set_global(AppVault(vault.clone()));
+        if let Some(root) = root.as_ref().filter(|_| feed.is_live()) {
+            super::settings_live::watch(cx, feed.clone(), root.data_dir.clone());
+        }
         if feed.is_live() {
             super::vault_prompts::watch(cx, feed, vault);
         }
@@ -259,7 +262,7 @@ fn refresh_tray(shell: &Shell) {
     }
 }
 
-fn chat_window(cx: &App) -> Option<WindowHandle<ChatView>> {
+pub(crate) fn chat_window(cx: &App) -> Option<WindowHandle<ChatView>> {
     let handle = cx.global::<Shell>().chat?;
     let open = cx
         .windows()

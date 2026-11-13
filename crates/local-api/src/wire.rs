@@ -57,6 +57,10 @@ pub mod ops {
     pub const INSTALL_REMOVE: &str = "install.remove";
     pub const SETTINGS_SET_SWITCH: &str = "settings.set_switch";
     pub const SETTINGS_SWITCHES: &str = "settings.switches";
+    pub const SETTINGS_LIST: &str = "settings.list";
+    pub const SETTINGS_GET: &str = "settings.get";
+    pub const SETTINGS_SET: &str = "settings.set";
+    pub const SETTINGS_ASKED: &str = "settings.asked";
 
     pub const ACCOUNTS_LIST: &str = "accounts.list";
     pub const ACCOUNTS_SWITCH: &str = "accounts.switch";
@@ -106,6 +110,7 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     pub const ACTING_CHANGED: &str = "settings.acting";
     pub const SWITCH_CHANGED: &str = "settings.switch";
+    pub const SETTINGS_CHANGED: &str = "settings.changed";
     pub const ACCOUNTS: &str = "accounts";
     pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
     pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";

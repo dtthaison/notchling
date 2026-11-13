@@ -58,6 +58,13 @@ impl SettingsView {
         }
     }
 
+    pub fn show_value(&mut self, key: &str, value: Value, cx: &mut Context<Self>) {
+        if self.values.get(key) != Some(&value) {
+            self.values.insert(key.to_owned(), value);
+            cx.notify();
+        }
+    }
+
     pub fn with_hooks(mut self, hooks: HooksShown) -> SettingsView {
         self.hooks = hooks;
         self

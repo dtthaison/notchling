@@ -9,6 +9,7 @@ use notchling_engine::tools::codex::models;
 use notchling_engine::tools::codex::plan::find_binary;
 use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Appearance, Ink};
+use serde_json::Value;
 
 use super::ChatView;
 use crate::accounts::menu::targets;
@@ -191,6 +192,22 @@ impl ChatView {
         self.open_settings(cx);
     }
 
+    pub fn applied_setting(&mut self, key: &str, value: &Value, cx: &mut Context<Self>) {
+        if crate::chat::history::on_change(key, value) {
+            self.reload_now(cx);
+        }
+    }
+
+    pub fn show_setting(&mut self, key: &str, value: &Value, cx: &mut Context<Self>) {
+        let open = self
+            .sheet
+            .as_ref()
+            .and_then(|s| s.view.clone().downcast::<SettingsView>().ok());
+        if let Some(sheet) = open {
+            sheet.update(cx, |view, cx| view.show_value(key, value.clone(), cx));
+        }
+    }
+
     pub(super) fn open_settings(&mut self, cx: &mut Context<Self>) {
         let data_dir = self
             .root
@@ -201,9 +218,7 @@ impl ChatView {
         let hooks = Arc::new(Hooks::for_run(Some(&self.root)));
         let entity = cx.new(|_| SettingsView::new(data_dir.as_deref(), acts));
         cx.subscribe(&entity, |this, _, e: &SettingChanged, cx| {
-            if crate::chat::history::on_change(&e.key, &e.value) {
-                this.reload_now(cx);
-            }
+            this.applied_setting(&e.key, &e.value, cx);
         })
         .detach();
         entity.update(cx, |view, cx| view.ask_hooks(hooks, cx));

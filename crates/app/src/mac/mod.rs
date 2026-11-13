@@ -11,6 +11,7 @@ pub mod native_spin_geometry;
 pub mod pair_prompt;
 pub mod render;
 pub mod restart_notice;
+pub mod settings_live;
 pub mod shell;
 pub mod tray;
 pub mod vault_prompts;
