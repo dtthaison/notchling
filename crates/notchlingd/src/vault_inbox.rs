@@ -12,14 +12,14 @@ struct ApprovalResponder {
 }
 
 impl Responder for ApprovalResponder {
-    fn answered(&self, _item: &Item, action: ActionId) {
+    fn answered(&self, _item: &Item, action: ActionId) -> bool {
         let decision = match action {
             ActionId::AllowOnce => Decision::Once,
             ActionId::AllowAlways => Decision::Always,
             ActionId::Deny => Decision::Deny,
-            _ => return,
+            _ => return false,
         };
-        self.approvals.answer(&self.ticket, decision);
+        self.approvals.answer(&self.ticket, decision)
     }
 }
 
@@ -29,10 +29,8 @@ struct RequestResponder {
 }
 
 impl Responder for RequestResponder {
-    fn answered(&self, _item: &Item, action: ActionId) {
-        if action == ActionId::Cancel {
-            self.requests.answer(&self.ticket, None);
-        }
+    fn answered(&self, _item: &Item, action: ActionId) -> bool {
+        action == ActionId::Cancel && self.requests.answer(&self.ticket, None)
     }
 }
 
@@ -91,11 +89,8 @@ impl VaultOps {
             format!("Allow {} for {command}", names.join(", ")),
             folder.to_string(),
         );
-        raised.expires_ms = Some(
-            raised
-                .created_ms
-                .saturating_add(wait_ms(self.timing.approval_wait)),
-        );
+        let lasts = self.timing.approval_wait + self.timing.slice;
+        raised.expires_ms = Some(raised.created_ms.saturating_add(wait_ms(lasts)));
         raised.actions = vec![
             action(ActionId::AllowOnce, "Allow Once", true),
             action(ActionId::AllowAlways, "Always Allow", false),

@@ -32,9 +32,9 @@ impl VaultOps {
         let event = json!({"id": id, "names": names, "entries": entries, "command": command,
                            "folder": folder, "verified": verified});
         self.approvals.describe(&id, &event);
+        self.raise_approval(&id, &names, command, folder);
         self.room
             .publish(topics::VAULT, topics::VAULT_APPROVAL_PENDING, &event);
-        self.raise_approval(&id, &names, command, folder);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
         let started = Instant::now();
         let decided =
@@ -132,9 +132,9 @@ impl VaultOps {
         let event = json!({"id": id, "request": request, "entry": entry_json(&entry),
                            "existing": existing.is_some(), "changes": changes});
         self.requests.describe(&id, &event);
+        self.raise_request(&id, &request);
         self.room
             .publish(topics::VAULT, topics::VAULT_REQUEST_PENDING, &event);
-        self.raise_request(&id, &request);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
         let started = Instant::now();
         let answered =

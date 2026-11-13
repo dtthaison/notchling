@@ -36,7 +36,6 @@
 //! - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
 //!   topic (app tier), for the app to show.
 
-use crate::acting_ops::now_ms;
 use crate::acting_ops::Room;
 use crate::cost_ops;
 use crate::inbox_ops::InboxOps;
@@ -151,6 +150,7 @@ pub struct LimitsOps {
     claude_usage: ClaudeUsage,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     inbox: Option<Arc<InboxOps>>,
+    raised: Arc<AtomicU64>,
     tick: Duration,
     stop: Mutex<Option<Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -160,7 +160,7 @@ fn limit_item(id: String, text: &str, created_ms: i64) -> Item {
     Item {
         id,
         kind: Kind::LimitNotice,
-        title: text.chars().take(120).collect(),
+        title: text.to_string(),
         detail: String::new(),
         source: Source::default(),
         created_ms,
@@ -220,6 +220,7 @@ impl LimitsOps {
             claude_usage: ClaudeUsage::default(),
             now: Arc::new(system_now),
             inbox: None,
+            raised: Arc::new(AtomicU64::new(0)),
             tick: TICK_EVERY,
             stop: Mutex::new(None),
             thread: Mutex::new(None),
@@ -287,7 +288,7 @@ impl LimitsOps {
         let room = self.room.clone();
         let now = self.now.clone();
         let inbox = self.inbox.clone();
-        let raised = AtomicU64::new(0);
+        let raised = self.raised.clone();
         Arc::new(move |text: &str| {
             let at = now();
             let mut list = lock(&notices);
@@ -298,7 +299,7 @@ impl LimitsOps {
             drop(list);
             room.publish(TOPIC_LIMITS, EVENT_NOTICE, &json!({"at": at, "text": text}));
             if let Some(inbox) = &inbox {
-                let created_ms = now_ms();
+                let created_ms = (at * 1000.0) as i64;
                 let seq = raised.fetch_add(1, Ordering::SeqCst);
                 inbox.raise(
                     limit_item(format!("limit:{created_ms}:{seq}"), text, created_ms),

@@ -109,7 +109,7 @@ fn approval_raises_item_and_inbox_answer_decides() {
         ])
     );
     let created = item["created_ms"].as_i64().unwrap();
-    assert_eq!(item["expires_ms"].as_i64().unwrap(), created + 10_000);
+    assert_eq!(item["expires_ms"].as_i64().unwrap(), created + 10_010);
     let got = r.answer(&id, "allow_once");
     assert_eq!(got["answered"], true);
     let reply = user.join().unwrap().unwrap();
@@ -309,4 +309,72 @@ fn inbox_events_follow_the_item() {
     assert_eq!(changed.len(), 2);
     assert_eq!(changed[0]["item"]["state"], "open");
     assert_eq!(changed[1]["item"]["state"], "answered");
+}
+
+#[test]
+fn window_answer_first_wins_over_a_late_inbox_answer() {
+    let r = rig("inbox-late", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    r.s.ops
+        .call(
+            &app(),
+            ops::VAULT_APPROVAL_ANSWER,
+            &json!({"id": event["id"], "decision": "deny"}),
+        )
+        .unwrap();
+    let late = r.answer(&id, "allow_once");
+    assert_eq!(late["answered"], false);
+    assert!(user.join().unwrap().is_err());
+    let item = r.item(&id);
+    assert_eq!(item["state"], "answered");
+    assert_eq!(item["answer"], "deny");
+}
+
+#[test]
+fn request_saved_first_wins_over_a_late_inbox_cancel() {
+    let r = rig("inbox-late-request", None);
+    let (asker, event) = r.start_request();
+    let id = request_item_id(&event);
+    r.s.ops
+        .call(
+            &app(),
+            ops::VAULT_SAVE,
+            &json!({"entry": {"name": "npm", "kind": "token"}, "value": {"secret": "fake-npm-1"},
+                    "request": event["id"]}),
+        )
+        .unwrap();
+    let late = r.answer(&id, "cancel");
+    assert_eq!(late["answered"], false);
+    assert!(asker.join().unwrap().is_ok());
+    let item = r.item(&id);
+    assert_eq!(item["state"], "answered");
+    assert_eq!(item["answer"], "open");
+}
+
+#[test]
+fn opening_the_form_through_the_inbox_changes_nothing() {
+    let r = rig("inbox-open", None);
+    let (asker, event) = r.start_request();
+    let id = request_item_id(&event);
+    let out = r.answer(&id, "open");
+    assert_eq!(out["answered"], false);
+    assert_eq!(r.item(&id)["state"], "open");
+    r.answer(&id, "cancel");
+    assert!(asker.join().unwrap().is_err());
+}
+
+#[test]
+fn the_item_exists_before_the_pending_event_is_published() {
+    let r = rig("inbox-order", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    assert_eq!(
+        r.list().iter().filter(|i| i["id"] == id.as_str()).count(),
+        1
+    );
+    r.answer(&id, "deny");
+    let _ = user.join().unwrap();
 }

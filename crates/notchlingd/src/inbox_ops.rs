@@ -1,6 +1,6 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::op_group::OpGroup;
-use notchling_engine::inbox::{self, ActionId, AnswerError, Book, Change, Item, State};
+use notchling_engine::inbox::{self, ActionId, Book, Change, Item, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,7 @@ const TICK: Duration = Duration::from_secs(1);
 const ANSWERED_BY: &str = "mac";
 
 pub trait Responder: Send + Sync {
-    fn answered(&self, item: &Item, action: ActionId);
+    fn answered(&self, item: &Item, action: ActionId) -> bool;
 }
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -274,39 +274,39 @@ impl InboxOps {
             serde_json::from_value(args.get("action").cloned().unwrap_or(Value::Null))
                 .map_err(|_| bad("action is not one the inbox knows"))?;
         let now = (self.clock)();
-        let (change, responder) = {
-            let mut inner = lock(&self.inner);
-            match inner.book.answer(id, action, ANSWERED_BY, now) {
-                Ok(change) => {
-                    inner.send(vec![change.clone()]);
-                    (change, inner.responders.remove(id))
-                }
-                Err(AnswerError::NotOpen(state)) => {
-                    let answer = inner
-                        .book
-                        .items()
-                        .into_iter()
-                        .find(|item| item.id == id)
-                        .and_then(|item| item.answer);
-                    return Ok(
-                        json!({"answered": false, "state": state_name(state), "answer": answer_json(answer)}),
-                    );
-                }
-                Err(AnswerError::Unknown) => {
-                    return Err(ApiError::new(ErrorCode::Failed, "No such inbox item."));
-                }
-                Err(AnswerError::NotAnAction) => {
-                    return Err(bad("The item doesn't offer that action."));
-                }
-            }
-        };
-        if let (Change::Updated(item), Some(responder)) = (&change, responder) {
-            responder.answered(item, action);
+        let mut inner = lock(&self.inner);
+        let current = inner
+            .book
+            .items()
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| ApiError::new(ErrorCode::Failed, "No such inbox item."))?;
+        if current.state != State::Open {
+            return Ok(refused(&current));
         }
-        Ok(
-            json!({"answered": true, "state": state_name(State::Answered), "answer": answer_json(Some(action))}),
-        )
+        if !current.actions.iter().any(|offered| offered.id == action) {
+            return Err(bad("The item doesn't offer that action."));
+        }
+        if let Some(responder) = inner.responders.get(id).cloned() {
+            if !responder.answered(&current, action) {
+                return Ok(refused(&current));
+            }
+        }
+        match inner.book.answer(id, action, ANSWERED_BY, now) {
+            Ok(change) => {
+                inner.send(vec![change]);
+                inner.responders.remove(id);
+                Ok(
+                    json!({"answered": true, "state": state_name(State::Answered), "answer": answer_json(Some(action))}),
+                )
+            }
+            Err(_) => Ok(refused(&current)),
+        }
     }
+}
+
+fn refused(item: &Item) -> Value {
+    json!({"answered": false, "state": state_name(item.state), "answer": answer_json(item.answer)})
 }
 
 impl OpGroup for InboxOps {

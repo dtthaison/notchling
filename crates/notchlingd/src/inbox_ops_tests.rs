@@ -15,8 +15,17 @@ const NOW: i64 = 1_800_000_000_000;
 struct Calls(Mutex<Vec<(String, ActionId)>>);
 
 impl Responder for Calls {
-    fn answered(&self, item: &Item, action: ActionId) {
+    fn answered(&self, item: &Item, action: ActionId) -> bool {
         self.0.lock().unwrap().push((item.id.clone(), action));
+        true
+    }
+}
+
+struct Refuses;
+
+impl Responder for Refuses {
+    fn answered(&self, _item: &Item, _action: ActionId) -> bool {
+        false
     }
 }
 
@@ -494,4 +503,23 @@ fn dropping_without_close_still_ends_the_writer() {
     }
     assert_eq!(Arc::strong_count(&room), 1);
     assert_eq!(changed(&room).len(), 1);
+}
+
+#[test]
+fn a_refusing_responder_leaves_the_item_open() {
+    let r = rig();
+    r.ops.raise(item("a"), Some(Arc::new(Refuses)));
+    let out = answer(&r.ops, "a", "allow");
+    assert_eq!(out["answered"], false);
+    assert_eq!(out["state"], "open");
+    assert_eq!(out["answer"], Value::Null);
+    r.ops.flush();
+    let list = r.ops.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
+    assert_eq!(list["items"][0]["state"], "open");
+    assert_eq!(list["items"][0]["answer"], Value::Null);
+    r.ops.resolve("a", State::Answered, Some(ActionId::Deny));
+    let out = answer(&r.ops, "a", "allow");
+    assert_eq!(out["answered"], false);
+    assert_eq!(out["state"], "answered");
+    assert_eq!(out["answer"], "deny");
 }

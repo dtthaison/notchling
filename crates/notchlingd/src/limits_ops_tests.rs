@@ -572,3 +572,33 @@ fn two_limit_notices_are_two_items() {
     say("one");
     assert_eq!(inbox_items(&inbox).len(), 2);
 }
+
+#[test]
+fn announcers_sharing_a_millisecond_raise_distinct_items() {
+    use crate::inbox_ops::InboxOps;
+    let (tmp, _flag, _room, ops) = rig();
+    let inbox = InboxOps::new(tmp.path("inbox"), Arc::new(FakeRoom::default()));
+    let ops = ops.with_inbox(inbox.clone());
+    let (claude, codex) = (ops.announcer(), ops.announcer());
+    claude("Claude: at 92%");
+    codex("Codex: at 92%");
+    let items = inbox_items(&inbox);
+    assert_eq!(items.len(), 2);
+    assert_ne!(items[0]["id"], items[1]["id"]);
+    assert!(items.iter().all(|i| i["created_ms"] == (NOW as i64) * 1000));
+}
+
+#[test]
+fn a_long_limit_notice_is_cut_with_an_ellipsis() {
+    use crate::inbox_ops::InboxOps;
+    let (tmp, _flag, _room, ops) = rig();
+    let inbox = InboxOps::new(tmp.path("inbox"), Arc::new(FakeRoom::default()));
+    let ops = ops.with_inbox(inbox.clone());
+    ops.announcer()(&"x".repeat(300));
+    let title = inbox_items(&inbox)[0]["title"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(title.chars().count(), 120);
+    assert!(title.ends_with('…'));
+}
