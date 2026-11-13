@@ -105,6 +105,8 @@ mod inbox_ops_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]
+mod limits_inbox_tests;
+#[cfg(test)]
 mod limits_ops_tests;
 #[cfg(test)]
 mod pages_ops_tests;

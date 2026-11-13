@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 
 use notchling_engine::inbox::{ActionId, Item, State};
@@ -32,24 +33,29 @@ pub fn notify_new(
     }
 }
 
-pub struct Detached(Arc<dyn Notifier>);
+pub struct Detached(Option<Sender<Notification>>);
 
 impl Detached {
     pub fn new(inner: Arc<dyn Notifier>) -> Detached {
-        Detached(inner)
+        let (sender, receiver) = mpsc::channel::<Notification>();
+        let spawned = std::thread::Builder::new()
+            .name("notchling-inbox-banner".into())
+            .spawn(move || {
+                for notification in receiver {
+                    let _ = inner.notify(&notification);
+                }
+            });
+        Detached(spawned.ok().map(|_| sender))
     }
 }
 
 impl Notifier for Detached {
     fn notify(&self, notification: &Notification) -> Result<()> {
-        let inner = self.0.clone();
-        let notification = notification.clone();
-        std::thread::Builder::new()
-            .name("notchling-inbox-banner".into())
-            .spawn(move || {
-                let _ = inner.notify(&notification);
-            })
-            .map(|_| ())
+        let Some(sender) = &self.0 else {
+            return Err(Error::System("the banner thread did not start".into()));
+        };
+        sender
+            .send(notification.clone())
             .map_err(|e| Error::System(e.to_string()))
     }
 }

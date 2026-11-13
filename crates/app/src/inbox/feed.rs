@@ -55,14 +55,16 @@ impl Shared {
 
     fn apply(&self, event: &Event) {
         let wire = json!({"event": event.event, "data": event.data});
-        let (before, after) = {
-            let mut model = self.model();
-            let before = model.clone();
-            model.apply(&wire);
-            (before, model.clone())
-        };
         if event.event == topics::INBOX_CHANGED {
+            let (before, after) = {
+                let mut model = self.model();
+                let before = model.clone();
+                model.apply(&wire);
+                (before, model.clone())
+            };
             notify_new(&before, &after, &mut self.notified(), &*self.notifier);
+        } else {
+            self.model().apply(&wire);
         }
         self.bump();
     }

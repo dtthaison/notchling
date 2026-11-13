@@ -115,15 +115,16 @@ fn a_reseed_after_a_loss_does_not_notify_what_was_remembered() {
 }
 
 #[test]
-fn a_detached_notifier_hands_each_banner_to_the_inner_one() {
+fn a_detached_notifier_hands_banners_to_the_inner_one_in_order() {
     let inner = Arc::new(RecordingNotifier::new());
     let detached = Detached::new(inner.clone());
-    detached
-        .notify(&Notification::new("t", "b"))
-        .expect("accepted");
+    let first = Notification::new("t1", "b1");
+    let second = Notification::new("t2", "b2");
+    detached.notify(&first).expect("accepted");
+    detached.notify(&second).expect("accepted");
     let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while inner.sent().is_empty() && std::time::Instant::now() < end {
+    while inner.sent().len() < 2 && std::time::Instant::now() < end {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    assert_eq!(inner.sent(), [Notification::new("t", "b")]);
+    assert_eq!(inner.sent(), [first, second]);
 }
