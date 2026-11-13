@@ -47,6 +47,10 @@ impl Book {
         Self::default()
     }
 
+    pub fn from_items(items: Vec<Item>) -> Self {
+        Self { items }
+    }
+
     pub fn raise(&mut self, mut item: Item) -> Vec<Change> {
         item.title = cut(item.title, TITLE_MAX);
         item.detail = cut(item.detail, DETAIL_MAX);

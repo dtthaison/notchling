@@ -23,7 +23,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 pub const DB_NAME: &str = "notchling.db";
 
 /// The schema's version (`PRAGMA user_version`).
-const SCHEMA: i64 = 2;
+const SCHEMA: i64 = 3;
 
 /// How long a write waits for another process's write to finish.
 const BUSY: Duration = Duration::from_secs(5);
@@ -128,7 +128,9 @@ fn migrate(db: &Connection) -> Result<(), String> {
          CREATE TABLE IF NOT EXISTS drafts (
              row_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_ms INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS docs (name TEXT PRIMARY KEY, value TEXT NOT NULL);
-         PRAGMA user_version = 2;
+         CREATE TABLE IF NOT EXISTS inbox (
+             id TEXT PRIMARY KEY, value TEXT NOT NULL, updated_ms INTEGER NOT NULL);
+         PRAGMA user_version = 3;
          COMMIT;",
         )
     })
