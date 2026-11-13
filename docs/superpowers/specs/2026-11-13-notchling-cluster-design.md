@@ -178,3 +178,7 @@ These were open after an independent read; each is the author's call, for the ma
 - **Replicas are encrypted at rest** on Standbys: transcripts, worktrees, `notchling.db` and the login store are under the vault key, like the vault. Consequence: a Standby that rebooted cannot lead until someone unlocks it (Face ID or Touch ID). The cluster view warns when no unlocked Standby is reachable.
 - **OS user on a node:** cluster work runs as a dedicated, non-admin account (`notchling`), beside the sd worker's account, never root and never the maintainer's own login on a shared machine. On the maintainer's own Macs it is the maintainer's user. Its tools' configs and logins live in that account.
 - **Moving a live session:** a session can be moved from the leader to a Worker and back with the journalled move (copy, quiet point, stop, final sync, resume on the target), using the same transcript path rule as failover. In step 1 a session is only started on a node; moving is step 3, with Standby replication.
+
+## Maintainer's answers (2026-11-13)
+
+- **Secrets for Workers:** a Worker's job may ask for any vault entry by name; there is no per-node allowlist. An entry marked **Always ask** (the vault's Ask me first) is released only after the maintainer allows it: the request goes to the leader, which shows it in Chat and on the phone, and nothing is delivered until Allow.
