@@ -5,6 +5,7 @@ mod conversation_list;
 mod conversation_view;
 mod copy;
 mod copy_menu;
+mod diff_panel;
 mod drop;
 mod header;
 mod inbox;
@@ -18,10 +19,13 @@ mod message_actions;
 mod native_spin;
 mod opinions;
 mod page_panel;
+mod paged_rows;
 pub mod pane;
 mod phone;
 mod prompts;
 mod render_map;
+mod repo;
+mod repo_section;
 mod root;
 mod row_blocks;
 mod row_menu;
@@ -93,6 +97,7 @@ pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
+pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
 
 fn switch(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| v == "1")
@@ -165,6 +170,7 @@ pub struct ChatView {
     details_hidden: bool,
     shell_probe: shell_probe::Probe,
     page: page_panel::State,
+    repo: repo::State,
     terminal: terminal::State,
     simulator: simulator::State,
     slash: crate::chat::slash_menu::SlashMenu,
@@ -210,6 +216,7 @@ impl ChatView {
         {
             view.prompt.apply_preview(preview);
         }
+        view.tools.sending = switch(SENDING_ENV);
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
         view.slash_preview = std::env::var(SLASH_ENV).ok();
@@ -260,6 +267,7 @@ impl ChatView {
             return;
         }
         self.details_hidden = !self.details_hidden;
+        self.git_ask(crate::chat::git::Why::Opened, cx);
         cx.notify();
     }
 
@@ -381,6 +389,7 @@ impl ChatView {
             details_hidden: false,
             shell_probe: shell_probe::Probe::default(),
             page: page_panel::State::default(),
+            repo: repo::State::default(),
             terminal: terminal::State::default(),
             simulator: simulator::State::default(),
             slash: Default::default(),
@@ -422,6 +431,21 @@ impl ChatView {
         self.tools
             .editor
             .update(cx, |editor, cx| editor.insert(text, cx));
+    }
+
+    pub fn bench_sending(&mut self, cx: &mut Context<Self>) -> bool {
+        let idle = self
+            .sessions
+            .iter()
+            .find(|s| !self.tools.live.is_working(&s.agent.id) && !tool::of(s.tool).working(s))
+            .map(|s| s.agent.id.clone());
+        let Some(id) = idle else {
+            return false;
+        };
+        self.select(&id, cx);
+        self.tools.sending = true;
+        cx.notify();
+        true
     }
 
     pub fn bench_reload(&mut self, cx: &mut Context<Self>) {

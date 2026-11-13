@@ -28,10 +28,22 @@ pub fn build(
     match kind {
         "kit-gallery" => Some(cx.new(|cx| KitGallery::new(appearance, window, cx)).into()),
         "shell" => Some(cx.new(|cx| ShellView::new(appearance, window, cx)).into()),
-        "chat" => {
+        "chat" | "chat-git" => {
             let root = DataRoot::for_render(data_root);
             cx.set_global(AppAccounts(Arc::new(Accounts::fixed(chat_accounts(&root)))));
-            Some(cx.new(|cx| ChatView::new(root, window, cx)).into())
+            let git = kind == "chat-git";
+            Some(
+                cx.new(|cx| {
+                    let mut view = ChatView::new(root, window, cx);
+                    if git {
+                        let diff =
+                            std::env::var_os("NOTCHLING_RENDER_GIT_DIFF").is_some_and(|v| v == "1");
+                        view.preview_git(diff, cx);
+                    }
+                    view
+                })
+                .into(),
+            )
         }
         notch if notch.starts_with("notch-") => crate::notch::backdrop::build_render(notch, cx),
         other => crate::chat::view::list_probe::build_render(other, cx)

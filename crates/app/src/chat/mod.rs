@@ -16,6 +16,7 @@ pub mod escape;
 pub mod file_panel;
 pub mod follow;
 pub mod format;
+pub mod git;
 pub mod header;
 pub mod history;
 pub mod image_size;

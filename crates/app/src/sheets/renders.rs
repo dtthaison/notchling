@@ -1,13 +1,17 @@
+use serde_json::{json, Value};
+
+use super::hook_rows::HooksShown;
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
 use crate::views::ViewSpec;
+use crate::welcome::facts::HookFacts;
 
 use super::banner::{Banner, Banners};
 use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 4] = [
+pub const VIEWS: [ViewSpec; 7] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -26,7 +30,22 @@ pub const VIEWS: [ViewSpec; 4] = [
     ViewSpec {
         name: "settings",
         size: (620.0, 1460.0),
-        about: "the Settings sheet with acting shown read-only (defaults)",
+        about: "the Settings sheet with acting shown read-only (defaults), the Chat section, and Notchling's five hooks (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-hooks",
+        size: (620.0, 1960.0),
+        about: "the Settings sheet tall enough to show the Hooks section with Notchling's five hooks (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-hooks-swift",
+        size: (620.0, 1960.0),
+        about: "the Settings sheet's Hooks section with a Swift app entry and an unmanaged one (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-hooks-empty",
+        size: (620.0, 1960.0),
+        about: "the Settings sheet's Hooks section with none installed (fixture reply)",
     },
 ];
 
@@ -36,6 +55,9 @@ pub enum Shown {
     NewSession,
     TrustFolder,
     Settings,
+    SettingsHooks,
+    SettingsHooksSwift,
+    SettingsHooksEmpty,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -44,6 +66,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "new-session" => Shown::NewSession,
         "trust-folder" => Shown::TrustFolder,
         "settings" => Shown::Settings,
+        "settings-hooks" => Shown::SettingsHooks,
+        "settings-hooks-swift" => Shown::SettingsHooksSwift,
+        "settings-hooks-empty" => Shown::SettingsHooksEmpty,
         _ => return None,
     })
 }
@@ -51,8 +76,42 @@ pub fn shown(name: &str) -> Option<Shown> {
 pub fn acting(shown: Shown) -> Acting {
     match shown {
         Shown::TrustFolder => Acting::On,
-        Shown::Banner | Shown::NewSession | Shown::Settings => Acting::Off,
+        Shown::Banner
+        | Shown::NewSession
+        | Shown::Settings
+        | Shown::SettingsHooks
+        | Shown::SettingsHooksSwift
+        | Shown::SettingsHooksEmpty => Acting::Off,
     }
+}
+
+fn hook(event: &str, matcher: &str, origin: &str, managed: bool) -> Value {
+    json!({"event": event, "matcher": matcher, "origin": origin,
+        "command": "'/Applications/Notchling.app/Contents/MacOS/notchling' hook",
+        "managed": managed})
+}
+
+pub fn hooks(shown: Shown) -> HooksShown {
+    let present = match shown {
+        Shown::SettingsHooksEmpty => vec![],
+        Shown::SettingsHooksSwift => vec![
+            hook("PermissionRequest", "*", "swift", false),
+            hook("PreToolUse", "AskUserQuestion", "notchling", true),
+            hook("PostToolUse", "Artifact", "notchling", false),
+        ],
+        _ => vec![
+            hook("PermissionRequest", "*", "notchling", true),
+            hook("PreToolUse", "AskUserQuestion", "notchling", true),
+            hook("PreToolUse", "Artifact", "notchling", true),
+            hook("PostToolUse", "Artifact", "notchling", true),
+            hook("PostToolUseFailure", "Artifact", "notchling", true),
+        ],
+    };
+    let reply = json!({"on": false, "applied": false,
+        "plan": {"blocked": null, "skills": [],
+            "hooks": {"state": "present", "refused": null, "changes": [], "notes": [],
+                      "present": present}}});
+    HooksShown::from_plan(HookFacts::parse(&reply).ok_or_else(|| "no plan".to_owned()))
 }
 
 pub fn new_session(shown: Shown) -> NewSession {
@@ -119,5 +178,8 @@ mod tests {
         assert_eq!(trust.stage, Stage::Untrusted);
         assert_eq!(acting(Shown::TrustFolder), Acting::On);
         assert_eq!(banners().all().len(), 4);
+        assert_eq!(hooks(Shown::Settings).lines().len(), 5);
+        assert_eq!(hooks(Shown::SettingsHooksSwift).lines().len(), 3);
+        assert_eq!(hooks(Shown::SettingsHooksEmpty), HooksShown::Empty);
     }
 }

@@ -1,4 +1,4 @@
-pub const ROOT_SPINNERS: &[&str] = &["spin-activity"];
+pub const ROOT_SPINNERS: &[&str] = &["spin-activity", "send-spin"];
 
 pub const NATIVE_ENV: &str = "NOTCHLING_NATIVE_SPINNER";
 

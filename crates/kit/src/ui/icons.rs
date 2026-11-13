@@ -70,6 +70,10 @@ pub(super) fn spin_clock() -> Duration {
 }
 
 pub fn spinner(id: impl Into<ElementId>, diameter: f32, ink: Ink, a: Appearance) -> Div {
+    spinner_in(id, diameter, ink.color(a))
+}
+
+pub fn spinner_in(id: impl Into<ElementId>, diameter: f32, color: Color) -> Div {
     let size = px(diameter * SPIN_BOX);
     div()
         .flex_shrink_0()
@@ -80,7 +84,7 @@ pub fn spinner(id: impl Into<ElementId>, diameter: f32, ink: Ink, a: Appearance)
         .child(Spin {
             id: id.into(),
             size,
-            color: ink.color(a),
+            color,
         })
 }
 

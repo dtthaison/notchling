@@ -1,4 +1,5 @@
 mod glance;
+mod join;
 mod parser;
 mod queue;
 mod tools;
@@ -51,7 +52,7 @@ fn subagent_cursors() -> &'static Cursors<SubagentParser, Arc<Conversation>> {
 }
 
 pub fn read_shared(path: &str) -> Arc<Conversation> {
-    session_cursors().read(path).unwrap_or_default()
+    join::read(path)
 }
 
 pub fn read(path: &str) -> Conversation {

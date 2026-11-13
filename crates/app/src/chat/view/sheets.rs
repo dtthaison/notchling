@@ -24,6 +24,7 @@ use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDr
 use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
 use crate::vault::view::VaultSheetView;
+use crate::welcome::hooks::Hooks;
 
 pub struct Sheet {
     pub view: AnyView,
@@ -197,6 +198,7 @@ impl ChatView {
             .is_none()
             .then(|| self.root.data_dir.clone());
         let acts = self.acts(cx);
+        let hooks = Arc::new(Hooks::for_run(Some(&self.root)));
         let entity = cx.new(|_| SettingsView::new(data_dir.as_deref(), acts));
         cx.subscribe(&entity, |this, _, e: &SettingChanged, cx| {
             if crate::chat::history::on_change(&e.key, &e.value) {
@@ -204,6 +206,7 @@ impl ChatView {
             }
         })
         .detach();
+        entity.update(cx, |view, cx| view.ask_hooks(hooks, cx));
         self.show(entity, cx);
     }
 }

@@ -90,6 +90,8 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         ops::VAULT_LIST,
         ops::INBOX_LIST,
         ops::INSTALL_PLAN,
+        ops::GIT_STATUS,
+        ops::GIT_DIFF,
     ] {
         assert!(ops.spec(op).is_some(), "{op}");
     }
@@ -97,6 +99,8 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         assert!(ops.topics().contains(&topic), "{topic}");
         assert_eq!(ops.topic_tier(topic), Tier::App, "{topic}");
     }
+    assert_eq!(ops.spec(ops::GIT_STATUS), Some(OpSpec::APP_QUIET));
+    assert_eq!(ops.spec(ops::GIT_DIFF), Some(OpSpec::APP_QUIET));
     assert_eq!(w.switches.vault.name(), VAULT);
     let plan = ops
         .call(

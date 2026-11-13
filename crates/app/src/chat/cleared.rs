@@ -151,3 +151,7 @@ mod tests {
         assert_eq!(carried[0].description, "Port it");
     }
 }
+
+#[cfg(test)]
+#[path = "cleared_continued_tests.rs"]
+mod continued_tests;
