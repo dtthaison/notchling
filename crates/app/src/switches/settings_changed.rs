@@ -18,30 +18,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    struct Dir(std::path::PathBuf);
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn dir(tag: &str) -> Dir {
-        let d =
-            std::env::temp_dir().join(format!("nl-settings-changed-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        Dir(d)
-    }
-
     #[test]
     fn a_change_is_read_back_from_the_store_not_taken_from_the_event() {
-        let d = dir("store");
-        let mut store = Settings::open(&d.0.join("settings.json")).unwrap();
+        let d = crate::testutil::Scratch::new("settings-changed");
+        let mut store = Settings::open(&d.path().join("settings.json")).unwrap();
         store.set("chatHistory", json!("16mb")).unwrap();
         let keys = ["chatHistory", "showPet", "noSuchKey"].map(String::from);
         assert_eq!(
-            current(&d.0, &keys),
+            current(d.path(), &keys),
             vec![
                 ("chatHistory".to_owned(), json!("16mb")),
                 ("showPet".to_owned(), json!(true)),
@@ -50,7 +34,7 @@ mod tests {
         );
         store.set("chatHistory", json!("2mb")).unwrap();
         assert_eq!(
-            current(&d.0, &keys[..1]),
+            current(d.path(), &keys[..1]),
             vec![("chatHistory".to_owned(), json!("2mb"))],
             "a later write wins over what an older event said"
         );
