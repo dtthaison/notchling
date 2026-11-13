@@ -38,6 +38,10 @@ fn is_notice(kind: Kind) -> bool {
     matches!(kind, Kind::Notice | Kind::LimitNotice)
 }
 
+fn is_secret(kind: Kind) -> bool {
+    matches!(kind, Kind::SecretApproval | Kind::SecretRequest)
+}
+
 impl Book {
     pub fn new() -> Self {
         Self::default()
@@ -46,13 +50,14 @@ impl Book {
     pub fn raise(&mut self, mut item: Item) -> Vec<Change> {
         item.title = cut(item.title, TITLE_MAX);
         item.detail = cut(item.detail, DETAIL_MAX);
+        let now_ms = item.created_ms;
+        let id = item.id.clone();
         let mut changes = Vec::new();
-        match self
-            .items
-            .iter()
-            .position(|existing| existing.id == item.id)
-        {
+        match self.items.iter().position(|existing| existing.id == id) {
             Some(index) => {
+                if self.items[index].state != State::Open {
+                    return changes;
+                }
                 self.items[index] = item.clone();
                 changes.push(Change::Updated(item));
             }
@@ -62,9 +67,16 @@ impl Book {
             }
         }
         if self.open_count() > MAX_OPEN {
-            if let Some(index) = self.victim() {
-                let gone = self.items.remove(index);
-                changes.push(Change::Removed(gone.id));
+            if let Some(index) = self.victim(&id) {
+                if is_secret(self.items[index].kind) {
+                    let item = &mut self.items[index];
+                    item.state = State::Withdrawn;
+                    item.closed_ms = Some(now_ms);
+                    changes.push(Change::Updated(item.clone()));
+                } else {
+                    let gone = self.items.remove(index);
+                    changes.push(Change::Removed(gone.id));
+                }
             }
         }
         changes
@@ -75,7 +87,7 @@ impl Book {
         id: &str,
         action: ActionId,
         by: &str,
-        _now_ms: i64,
+        now_ms: i64,
     ) -> Result<Change, AnswerError> {
         let item = self
             .items
@@ -91,16 +103,24 @@ impl Book {
         item.state = State::Answered;
         item.answer = Some(action);
         item.answered_by = Some(by.to_string());
+        item.closed_ms = Some(now_ms);
         Ok(Change::Updated(item.clone()))
     }
 
-    pub fn resolve(&mut self, id: &str, state: State, answer: Option<ActionId>) -> Option<Change> {
+    pub fn resolve(
+        &mut self,
+        id: &str,
+        state: State,
+        answer: Option<ActionId>,
+        now_ms: i64,
+    ) -> Option<Change> {
         let item = self.items.iter_mut().find(|item| item.id == id)?;
         if item.state != State::Open {
             return None;
         }
         item.state = state;
         item.answer = answer;
+        item.closed_ms = Some(now_ms);
         Some(Change::Updated(item.clone()))
     }
 
@@ -109,6 +129,7 @@ impl Book {
         for item in &mut self.items {
             if item.state == State::Open && item.expires_ms.is_some_and(|at| at <= now_ms) {
                 item.state = State::Expired;
+                item.closed_ms = Some(now_ms);
                 changes.push(Change::Updated(item.clone()));
             }
         }
@@ -127,8 +148,10 @@ impl Book {
     }
 
     pub fn prune(&mut self, now_ms: i64) {
-        self.items
-            .retain(|item| item.state == State::Open || now_ms - item.created_ms <= DONE_KEEP_MS);
+        self.items.retain(|item| {
+            item.state == State::Open
+                || now_ms - item.closed_ms.unwrap_or(item.created_ms) <= DONE_KEEP_MS
+        });
     }
 
     pub fn items(&self) -> Vec<Item> {
@@ -151,13 +174,15 @@ impl Book {
             .count()
     }
 
-    fn victim(&self) -> Option<usize> {
+    fn victim(&self, keep: &str) -> Option<usize> {
         let oldest = |only_notices: bool| {
             self.items
                 .iter()
                 .enumerate()
                 .filter(|(_, item)| {
-                    item.state == State::Open && (!only_notices || is_notice(item.kind))
+                    item.id != keep
+                        && item.state == State::Open
+                        && (!only_notices || is_notice(item.kind))
                 })
                 .min_by_key(|(_, item)| item.created_ms)
                 .map(|(index, _)| index)

@@ -61,4 +61,6 @@ pub struct Item {
     pub answered_by: Option<String>,
     pub seen: bool,
     pub open: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_ms: Option<i64>,
 }

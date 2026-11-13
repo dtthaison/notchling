@@ -23,6 +23,7 @@ fn item(id: &str, kind: Kind, created_ms: i64, actions: &[ActionId]) -> Item {
         answered_by: None,
         seen: false,
         open: None,
+        closed_ms: None,
     }
 }
 
@@ -109,7 +110,7 @@ fn caps_open_items_at_200_dropping_oldest_notices() {
 }
 
 #[test]
-fn cap_drops_oldest_of_any_kind_when_no_notice_is_open() {
+fn cap_withdraws_oldest_secret_when_no_notice_is_open() {
     let mut book = Book::new();
     for n in 0..MAX_OPEN {
         book.raise(item(
@@ -121,7 +122,9 @@ fn cap_drops_oldest_of_any_kind_when_no_notice_is_open() {
     }
     let changes = book.raise(item("late", Kind::SecretRequest, 500, &[ActionId::Allow]));
     assert_eq!(open_count(&book), 200);
-    assert_eq!(changes[1], Change::Removed("a0".to_string()));
+    assert!(
+        matches!(&changes[1], Change::Updated(item) if item.id == "a0" && item.state == State::Withdrawn)
+    );
 }
 
 #[test]
@@ -159,8 +162,8 @@ fn prunes_done_after_seven_days() {
     book.raise(item("done", Kind::Notice, 0, &[ActionId::Done]));
     book.raise(item("open", Kind::Notice, 0, &[ActionId::Done]));
     book.raise(item("fresh", Kind::Notice, 1000, &[ActionId::Done]));
-    book.answer("done", ActionId::Done, "app", 10).unwrap();
-    book.answer("fresh", ActionId::Done, "app", 10).unwrap();
+    book.answer("done", ActionId::Done, "app", 0).unwrap();
+    book.answer("fresh", ActionId::Done, "app", 1000).unwrap();
     book.prune(DONE_KEEP_MS);
     assert_eq!(book.items().len(), 3);
     book.prune(DONE_KEEP_MS + 1);
@@ -218,8 +221,89 @@ fn items_are_newest_first_with_ties_newest_inserted_first() {
 fn resolve_changes_open_items_only() {
     let mut book = Book::new();
     book.raise(item("a", Kind::Notice, 1, &[ActionId::Done]));
-    let change = book.resolve("a", State::Withdrawn, None).unwrap();
-    assert!(matches!(change, Change::Updated(item) if item.state == State::Withdrawn));
-    assert!(book.resolve("a", State::Expired, None).is_none());
-    assert!(book.resolve("zzz", State::Expired, None).is_none());
+    let change = book.resolve("a", State::Withdrawn, None, 77).unwrap();
+    assert!(
+        matches!(&change, Change::Updated(item) if item.state == State::Withdrawn && item.closed_ms == Some(77))
+    );
+    assert!(book.resolve("a", State::Expired, None, 78).is_none());
+    assert!(book.resolve("zzz", State::Expired, None, 78).is_none());
+}
+
+const DAY: i64 = 86_400_000;
+
+#[test]
+fn prune_counts_from_close_time() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Notice, 0, &[ActionId::Done]));
+    let Change::Updated(closed) = book.answer("a", ActionId::Done, "app", 8 * DAY).unwrap() else {
+        panic!("expected Updated");
+    };
+    assert_eq!(closed.closed_ms, Some(8 * DAY));
+    book.prune(8 * DAY);
+    assert_eq!(book.items().len(), 1);
+    book.prune(15 * DAY + 1);
+    assert!(book.items().is_empty());
+}
+
+#[test]
+fn expire_sets_close_time() {
+    let mut book = Book::new();
+    let mut expiring = item("a", Kind::SecretApproval, 0, &[ActionId::Allow]);
+    expiring.expires_ms = Some(10);
+    book.raise(expiring);
+    let changes = book.expire(50);
+    assert!(matches!(&changes[0], Change::Updated(item) if item.closed_ms == Some(50)));
+}
+
+#[test]
+fn cap_never_evicts_the_item_being_raised() {
+    let mut book = Book::new();
+    for n in 0..MAX_OPEN {
+        book.raise(item(&format!("n{n}"), Kind::Notice, n as i64, &[]));
+    }
+    let changes = book.raise(item(
+        "approval",
+        Kind::SecretApproval,
+        -5,
+        &[ActionId::Allow],
+    ));
+    assert_eq!(open_count(&book), 200);
+    assert!(book.items().iter().any(|item| item.id == "approval"));
+    assert_eq!(changes[1], Change::Removed("n0".to_string()));
+}
+
+#[test]
+fn cap_withdraws_the_oldest_other_approval() {
+    let mut book = Book::new();
+    for n in 0..MAX_OPEN {
+        book.raise(item(
+            &format!("a{n}"),
+            Kind::SecretApproval,
+            n as i64 + 10,
+            &[ActionId::Allow],
+        ));
+    }
+    let changes = book.raise(item("late", Kind::SecretRequest, 500, &[ActionId::Allow]));
+    assert_eq!(open_count(&book), 200);
+    assert_eq!(changes.len(), 2);
+    let Change::Updated(withdrawn) = &changes[1] else {
+        panic!("expected Updated");
+    };
+    assert_eq!(withdrawn.id, "a0");
+    assert_eq!(withdrawn.state, State::Withdrawn);
+    assert_eq!(withdrawn.closed_ms, Some(500));
+    assert!(book.items().iter().any(|item| item.id == "a0"));
+    assert!(book.items().iter().any(|item| item.id == "late"));
+}
+
+#[test]
+fn raise_of_a_closed_id_changes_nothing() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Notice, 1, &[ActionId::Done]));
+    book.answer("a", ActionId::Done, "app", 5).unwrap();
+    let before = book.items();
+    let mut again = item("a", Kind::Notice, 9, &[ActionId::Done]);
+    again.title = "new".to_string();
+    assert!(book.raise(again).is_empty());
+    assert_eq!(book.items(), before);
 }
