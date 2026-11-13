@@ -1,5 +1,5 @@
 {
-  "action": "allow_once",
+  "action": "deny",
   "id": 32,
   "itemId": "vault-approval-1",
   "op": "inbox.answer"
