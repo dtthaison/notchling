@@ -279,6 +279,7 @@ impl ChatView {
         if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms()) {
             self.redraw_chrome(cx);
         }
+        self.inbox_tick(cx);
         let dot = self.bridge_on();
         if dot != self.phone_dot {
             self.phone_dot = dot;

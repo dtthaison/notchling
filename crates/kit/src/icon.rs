@@ -101,6 +101,8 @@ pub enum Icon {
     Unsure,
     /// The Secret Vault (SF `key`).
     Key,
+    /// The inbox (SF `bell`).
+    Bell,
     /// Handing sessions over to Notchling (SF `arrow.left.arrow.right`).
     Handover,
     /// A caution (SF `exclamationmark.triangle`).
@@ -162,7 +164,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 72] = [
+    pub const ALL: [Icon; 73] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -216,6 +218,7 @@ impl Icon {
         Icon::Fail,
         Icon::Unsure,
         Icon::Key,
+        Icon::Bell,
         Icon::Handover,
         Icon::Warning,
         Icon::PanelLeft,
@@ -294,6 +297,7 @@ impl Icon {
             Icon::Fail => "xmark.circle",
             Icon::Unsure => "questionmark.circle",
             Icon::Key => "key",
+            Icon::Bell => "bell",
             Icon::Handover => "arrow.left.arrow.right",
             Icon::Warning => "exclamationmark.triangle",
             Icon::PanelLeft => "sidebar.left",
@@ -375,6 +379,7 @@ impl Icon {
             Icon::Fail => "✗",
             Icon::Unsure => "?",
             Icon::Key => "⚿",
+            Icon::Bell => "◍",
             Icon::Handover => "⇄",
             Icon::Warning => "⚠",
             Icon::PanelLeft => "◧",
@@ -445,6 +450,7 @@ impl Icon {
             Icon::Fail => "icons/circle-x.svg",
             Icon::Unsure => "icons/circle-help.svg",
             Icon::Key => "icons/key-round.svg",
+            Icon::Bell => "icons/bell.svg",
             Icon::Handover => "icons/arrow-left-right.svg",
             Icon::Warning => "icons/triangle-alert.svg",
             Icon::PanelLeft => "icons/panel-left.svg",
@@ -513,11 +519,12 @@ macro_rules! icons {
 }
 
 /// The vendored SVGs (lucide-static 0.460.0), by asset path.
-const SVGS: [(&str, &[u8]); 69] = icons![
+const SVGS: [(&str, &[u8]); 70] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
     "arrow-up",
+    "bell",
     "bot",
     "brain",
     "camera",

@@ -48,6 +48,7 @@ pub fn build(
             .or_else(|| crate::tools::view::build_render(other, cx))
             .or_else(|| crate::accounts::window::build_render(other, cx))
             .or_else(|| crate::vault::view::build_render(other, cx))
+            .or_else(|| crate::inbox::view::build_render(other, cx))
             .or_else(|| crate::welcome::view::build_render(other, cx))
             .or_else(|| crate::switches::restart_view::build_render(other, cx))
             .or_else(|| crate::machines::view::build_render(other, cx)),

@@ -4,8 +4,8 @@
 
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::TOOL_ICON;
 use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
+use notchling_kit::metric::{SPACE, TOOL_ICON};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
@@ -45,8 +45,48 @@ fn footer_button(
     )
 }
 
+pub(super) const FOOTER_HEIGHT: f32 = 44.0;
+
+fn inbox_button(unread: usize, a: Appearance, cx: &Context<ChatView>) -> Div {
+    let button = footer_button(
+        "inbox",
+        Icon::Bell,
+        "Inbox",
+        "Notifications that need you",
+        a,
+        cx,
+    )
+    .on_click(cx.listener(|this, _, _, cx| this.toggle_inbox(cx)));
+    let badge = (unread > 0).then(|| {
+        let text = if unread > 9 {
+            "9+".to_owned()
+        } else {
+            unread.to_string()
+        };
+        div()
+            .absolute()
+            .top(px(0.0))
+            .right(px(0.0))
+            .min_w(px(SPACE[3]))
+            .h(px(SPACE[3]))
+            .px(px(SPACE[0] / 2.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(SPACE[3]))
+            .fill(Ink::Accent, a)
+            .child(label(&text, TypeRole::Meta, Ink::OnAccent, a))
+    });
+    div().relative().child(button).children(badge)
+}
+
 /// The footer, with what there is to say about the daemon (down, or not trusted).
-fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>) -> Div {
+fn footer(
+    a: Appearance,
+    note: Option<&'static str>,
+    unread: usize,
+    cx: &mut Context<ChatView>,
+) -> Div {
     let on = parts_on(cx);
     let parts = gate::tip_text(parts_button("parts", a, cx), parts_tip(on).into(), a)
         .on_click(|_, _, cx| {
@@ -54,7 +94,7 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
         })
         .part_at("Parts Button", Corner::TopLeading, a, cx);
     div()
-        .min_h(px(44.0))
+        .min_h(px(FOOTER_HEIGHT))
         .flex_shrink_0()
         .px(px(12.0))
         .py(px(6.0))
@@ -84,6 +124,7 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
             )
             .on_click(cx.listener(|this, _, _, cx| this.open_accounts_sheet(None, cx))),
         )
+        .child(inbox_button(unread, a, cx))
         .child(
             footer_button(
                 "vault",
@@ -194,13 +235,16 @@ fn mark_of(tool: Tool) -> ToolMark {
 /// What the Sidebar shows, from the chat now: its rows and their accounts (from what the accounts
 /// store holds), the selection and the footer's note.
 pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
-    sidebar_model(
-        &view.sessions,
-        view.now_ms,
-        view.selected.as_deref(),
-        &view.accounts.snapshot(),
-        view.daemon_note,
-    )
+    SidebarModel {
+        unread: view.inbox.unread(),
+        ..sidebar_model(
+            &view.sessions,
+            view.now_ms,
+            view.selected.as_deref(),
+            &view.accounts.snapshot(),
+            view.daemon_note,
+        )
+    }
 }
 
 /// The Sidebar, drawn from its model alone.
@@ -321,7 +365,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
         // The traffic lights and the two buttons beside them (drawn over this row) sit here.
         .child(div().h(px(TITLE_BAR)).flex_shrink_0())
         .child(scrollable(list))
-        .child(footer(a, m.daemon_note, cx))
+        .child(footer(a, m.daemon_note, m.unread, cx))
         .part_inside("Sidebar", Corner::Trailing, a, cx)
         .into_any_element()
 }

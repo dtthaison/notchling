@@ -34,6 +34,34 @@ use crate::vault::wire::{Approval, Decision, PendingRequest};
 /// How often the feed is looked at.
 const TICK: Duration = Duration::from_millis(200);
 
+static RAISE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn raise(ticket: &str) {
+    RAISE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(ticket.to_owned());
+}
+
+fn take_raised() -> Vec<String> {
+    std::mem::take(&mut *RAISE.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+fn bring_forward(cx: &mut App, open: &Open, tickets: &[String]) {
+    let mut any = false;
+    for ticket in tickets {
+        if let Some(handle) = open.approvals.get(ticket) {
+            any |= handle.update(cx, |_, w, _| w.activate_window()).is_ok();
+        }
+        if let Some(handle) = open.requests.get(ticket) {
+            any |= handle.update(cx, |_, w, _| w.activate_window()).is_ok();
+        }
+    }
+    if any {
+        cx.activate(true);
+    }
+}
+
 /// What the loop keeps between ticks.
 #[derive(Default)]
 struct Open {
@@ -57,7 +85,12 @@ pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
                 .collect();
             let (f, v) = (feed.clone(), vault.clone());
             let now = std::mem::take(&mut open);
-            match cx.update(move |cx| sync(cx, now, approvals, requests, f, v)) {
+            let raised = take_raised();
+            match cx.update(move |cx| {
+                let next = sync(cx, now, approvals, requests, f, v);
+                bring_forward(cx, &next, &raised);
+                next
+            }) {
                 Ok(next) => open = next,
                 // The app is quitting.
                 Err(_) => return,

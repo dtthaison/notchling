@@ -35,11 +35,12 @@ pub struct Covers {
     pub drop_hint: bool,
     /// The ? button's part names.
     pub part_names: bool,
+    pub inbox: bool,
 }
 
 /// Whether anything is open that GPUI draws over a spinner.
 pub fn covered(c: Covers) -> bool {
-    c.sheet || c.menu || c.composer_menu || c.limit_card || c.drop_hint || c.part_names
+    c.sheet || c.menu || c.composer_menu || c.limit_card || c.drop_hint || c.part_names || c.inbox
 }
 
 #[cfg(test)]
@@ -76,6 +77,10 @@ mod tests {
             },
             Covers {
                 part_names: true,
+                ..Covers::default()
+            },
+            Covers {
+                inbox: true,
                 ..Covers::default()
             },
         ];

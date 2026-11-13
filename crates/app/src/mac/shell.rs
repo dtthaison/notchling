@@ -73,6 +73,10 @@ pub struct AppSwitchFeed(pub Arc<crate::switches::feed::SwitchFeed>);
 
 impl Global for AppSwitchFeed {}
 
+pub struct AppInbox(pub Arc<crate::inbox::feed::InboxFeed>);
+
+impl Global for AppInbox {}
+
 /// The accounts store (Claude Code, lanes, the other providers, limits, cost). Not set in a render.
 pub struct AppAccounts(pub Arc<crate::accounts::store::Accounts>);
 
@@ -150,6 +154,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
             restart.clone(),
         ));
         cx.set_global(AppSwitchFeed(feed.clone()));
+        cx.set_global(AppInbox(Arc::new(crate::inbox::feed::InboxFeed::for_run(
+            root.as_ref(),
+        ))));
         if feed.is_live() {
             super::restart_notice::watch(
                 cx,
