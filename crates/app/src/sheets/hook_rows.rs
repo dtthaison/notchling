@@ -1,3 +1,6 @@
+use notchling_engine::install::summary;
+
+use super::agents::{info, HOOKS};
 use crate::welcome::facts::{HookFacts, PresentHook};
 use crate::welcome::hooks::DETACHED;
 
@@ -6,18 +9,37 @@ pub const FOOTER: &str =
     "Read from Claude Code's settings.json when Settings opened. Install Hook in \
                           Welcome adds or changes them.";
 pub const CHECKING: &str = "Checking Claude Code's settings";
-pub const EMPTY: &str = "No hooks installed";
-pub const EMPTY_NOTE: &str = "Use Install Hook in Welcome to add them.";
-pub const SWIFT_TAG: &str = "Swift app";
-pub const UNMANAGED_TAG: &str = "Not managed";
+pub const OTHER: &str = "Runs Notchling's hook";
 
 const LONGEST: usize = 40;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookState {
+    Installed,
+    Missing,
+    Swift,
+    NotManaged,
+    Unknown,
+}
+
+impl HookState {
+    pub fn word(self) -> Option<&'static str> {
+        match self {
+            HookState::Installed => Some("Installed"),
+            HookState::Missing => Some("Not installed"),
+            HookState::Swift => Some("Swift app"),
+            HookState::NotManaged => Some("Not managed"),
+            HookState::Unknown => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HookLine {
     pub title: String,
-    pub note: Option<&'static str>,
-    pub tag: Option<&'static str>,
+    pub state: HookState,
+    pub command: Option<String>,
+    pub what: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,8 +48,7 @@ pub enum HooksShown {
     Detached,
     Failed(String),
     Refused(&'static str),
-    Empty,
-    Found(Vec<HookLine>),
+    Found(Vec<PresentHook>),
 }
 
 impl HooksShown {
@@ -38,28 +59,70 @@ impl HooksShown {
             Ok(facts) if facts.state == "refused" => {
                 HooksShown::Refused(category(facts.refused.as_deref()))
             }
-            Ok(facts) if facts.entries.is_empty() => HooksShown::Empty,
-            Ok(facts) => HooksShown::Found(facts.entries.iter().map(line).collect()),
+            Ok(facts) => HooksShown::Found(facts.entries),
+        }
+    }
+
+    pub fn status(&self) -> Option<String> {
+        match self {
+            HooksShown::Checking => Some(CHECKING.into()),
+            HooksShown::Detached => Some(DETACHED.into()),
+            HooksShown::Failed(e) => Some(e.clone()),
+            HooksShown::Refused(why) => Some(format!(
+                "Claude Code's settings.json was left alone: it {why}."
+            )),
+            HooksShown::Found(_) => None,
         }
     }
 
     pub fn lines(&self) -> Vec<HookLine> {
-        let plain = |title: String, note| HookLine {
-            title,
-            note,
-            tag: None,
+        let HooksShown::Found(present) = self else {
+            return HOOKS
+                .iter()
+                .map(|h| slot_line(h.event, h.matcher, HookState::Unknown, None))
+                .collect();
         };
-        match self {
-            HooksShown::Checking => vec![plain(CHECKING.into(), None)],
-            HooksShown::Detached => vec![plain(DETACHED.into(), None)],
-            HooksShown::Failed(e) => vec![plain(e.clone(), None)],
-            HooksShown::Refused(why) => vec![plain(
-                format!("Claude Code's settings.json was left alone: it {why}."),
-                None,
-            )],
-            HooksShown::Empty => vec![plain(EMPTY.into(), Some(EMPTY_NOTE))],
-            HooksShown::Found(lines) => lines.clone(),
+        let mut used = vec![false; present.len()];
+        let mut lines: Vec<HookLine> = HOOKS
+            .iter()
+            .map(|h| {
+                let find = |swift: bool, used: &[bool]| {
+                    present.iter().enumerate().position(|(i, p)| {
+                        !used[i]
+                            && p.swift == swift
+                            && p.event == h.event
+                            && p.matcher == h.matcher
+                            && (swift || p.managed)
+                    })
+                };
+                let (state, at) = match (find(false, &used), find(true, &used)) {
+                    (Some(i), _) => (HookState::Installed, Some(i)),
+                    (None, Some(i)) => (HookState::Swift, Some(i)),
+                    (None, None) => (HookState::Missing, None),
+                };
+                if let Some(i) = at {
+                    used[i] = true;
+                }
+                let command = at
+                    .filter(|_| state == HookState::Installed)
+                    .map(|i| summary(&present[i].command));
+                slot_line(h.event, h.matcher, state, command)
+            })
+            .collect();
+        for (p, _) in present.iter().zip(&used).filter(|(_, u)| !**u) {
+            let state = if p.swift {
+                HookState::Swift
+            } else {
+                HookState::NotManaged
+            };
+            lines.push(slot_line(
+                &p.event,
+                &p.matcher,
+                state,
+                Some(summary(&p.command)),
+            ));
         }
+        lines
     }
 }
 
@@ -92,34 +155,16 @@ fn cut(text: &str) -> String {
     text.chars().take(LONGEST).collect()
 }
 
-fn matcher(m: &str) -> String {
-    match m.trim() {
-        "" | "*" => "All tools".into(),
-        other => cut(other),
-    }
-}
-
-fn what(hook: &PresentHook) -> Option<&'static str> {
-    match (hook.event.as_str(), hook.matcher.as_str()) {
-        ("PermissionRequest", _) => Some("Asks for permission in the notch and Chat"),
-        ("PreToolUse", "AskUserQuestion") => Some("Shows Claude's questions in the notch and Chat"),
-        ("PreToolUse" | "PostToolUse" | "PostToolUseFailure", "Artifact") => {
-            Some("Saves and finds published pages on this Mac")
-        }
-        _ => None,
-    }
-}
-
-fn line(hook: &PresentHook) -> HookLine {
+fn slot_line(event: &str, matcher: &str, state: HookState, command: Option<String>) -> HookLine {
+    let matcher = if matcher.trim().is_empty() {
+        "*"
+    } else {
+        matcher.trim()
+    };
     HookLine {
-        title: format!("{} · {}", cut(&hook.event), matcher(&hook.matcher)),
-        note: Some(what(hook).unwrap_or("Runs Notchling's hook")),
-        tag: if hook.swift {
-            Some(SWIFT_TAG)
-        } else if !hook.managed {
-            Some(UNMANAGED_TAG)
-        } else {
-            None
-        },
+        title: format!("{} · {}", cut(event), cut(matcher)),
+        state,
+        command,
+        what: info(event, matcher).map_or(OTHER, |h| h.what),
     }
 }

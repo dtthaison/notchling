@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 
+use super::agents::Page;
 use super::hook_rows::HooksShown;
 use crate::acting::Acting;
 use crate::notch::source::{fixture_clock, DataRoot, Source};
@@ -11,7 +12,7 @@ use super::new_session::{accounts, folders, NewSession};
 use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 
-pub const VIEWS: [ViewSpec; 7] = [
+pub const VIEWS: [ViewSpec; 8] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -29,23 +30,28 @@ pub const VIEWS: [ViewSpec; 7] = [
     },
     ViewSpec {
         name: "settings",
-        size: (620.0, 1460.0),
-        about: "the Settings sheet with acting shown read-only (defaults), the Chat section, and Notchling's five hooks (fixture reply)",
+        size: (620.0, 1360.0),
+        about: "the Settings sheet's General page with acting shown read-only (defaults) and the Chat section",
     },
     ViewSpec {
-        name: "settings-hooks",
-        size: (620.0, 1960.0),
-        about: "the Settings sheet tall enough to show the Hooks section with Notchling's five hooks (fixture reply)",
+        name: "settings-agents",
+        size: (620.0, 760.0),
+        about: "the Settings sheet's Agents page: Claude Code's Hooks with all five installed (fixture reply)",
     },
     ViewSpec {
-        name: "settings-hooks-swift",
-        size: (620.0, 1960.0),
-        about: "the Settings sheet's Hooks section with a Swift app entry and an unmanaged one (fixture reply)",
+        name: "settings-agents-partial",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with a Swift app entry, an unmanaged one and some missing (fixture reply)",
     },
     ViewSpec {
-        name: "settings-hooks-empty",
-        size: (620.0, 1960.0),
-        about: "the Settings sheet's Hooks section with none installed (fixture reply)",
+        name: "settings-agents-empty",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with none installed (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-agents-detached",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with no daemon attached: the five explained, none checked",
     },
 ];
 
@@ -55,9 +61,10 @@ pub enum Shown {
     NewSession,
     TrustFolder,
     Settings,
-    SettingsHooks,
-    SettingsHooksSwift,
-    SettingsHooksEmpty,
+    SettingsAgents,
+    SettingsAgentsPartial,
+    SettingsAgentsEmpty,
+    SettingsAgentsDetached,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -66,9 +73,10 @@ pub fn shown(name: &str) -> Option<Shown> {
         "new-session" => Shown::NewSession,
         "trust-folder" => Shown::TrustFolder,
         "settings" => Shown::Settings,
-        "settings-hooks" => Shown::SettingsHooks,
-        "settings-hooks-swift" => Shown::SettingsHooksSwift,
-        "settings-hooks-empty" => Shown::SettingsHooksEmpty,
+        "settings-agents" => Shown::SettingsAgents,
+        "settings-agents-partial" => Shown::SettingsAgentsPartial,
+        "settings-agents-empty" => Shown::SettingsAgentsEmpty,
+        "settings-agents-detached" => Shown::SettingsAgentsDetached,
         _ => return None,
     })
 }
@@ -79,9 +87,20 @@ pub fn acting(shown: Shown) -> Acting {
         Shown::Banner
         | Shown::NewSession
         | Shown::Settings
-        | Shown::SettingsHooks
-        | Shown::SettingsHooksSwift
-        | Shown::SettingsHooksEmpty => Acting::Off,
+        | Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsDetached => Acting::Off,
+    }
+}
+
+pub fn page(shown: Shown) -> Page {
+    match shown {
+        Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsDetached => Page::Agents,
+        _ => Page::General,
     }
 }
 
@@ -93,11 +112,13 @@ fn hook(event: &str, matcher: &str, origin: &str, managed: bool) -> Value {
 
 pub fn hooks(shown: Shown) -> HooksShown {
     let present = match shown {
-        Shown::SettingsHooksEmpty => vec![],
-        Shown::SettingsHooksSwift => vec![
+        Shown::SettingsAgentsDetached => return HooksShown::Detached,
+        Shown::SettingsAgentsEmpty => vec![],
+        Shown::SettingsAgentsPartial => vec![
             hook("PermissionRequest", "*", "swift", false),
             hook("PreToolUse", "AskUserQuestion", "notchling", true),
-            hook("PostToolUse", "Artifact", "notchling", false),
+            hook("PostToolUse", "Artifact", "notchling", true),
+            hook("SessionStart", "*", "swift", false),
         ],
         _ => vec![
             hook("PermissionRequest", "*", "notchling", true),
@@ -178,8 +199,11 @@ mod tests {
         assert_eq!(trust.stage, Stage::Untrusted);
         assert_eq!(acting(Shown::TrustFolder), Acting::On);
         assert_eq!(banners().all().len(), 4);
-        assert_eq!(hooks(Shown::Settings).lines().len(), 5);
-        assert_eq!(hooks(Shown::SettingsHooksSwift).lines().len(), 3);
-        assert_eq!(hooks(Shown::SettingsHooksEmpty), HooksShown::Empty);
+        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 5);
+        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 6);
+        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 5);
+        assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
+        assert_eq!(page(Shown::Settings), Page::General);
+        assert_eq!(page(Shown::SettingsAgents), Page::Agents);
     }
 }

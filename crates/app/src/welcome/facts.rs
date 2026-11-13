@@ -79,6 +79,7 @@ pub struct PresentHook {
     pub matcher: String,
     pub swift: bool,
     pub managed: bool,
+    pub command: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -141,6 +142,11 @@ impl HookFacts {
                         .to_owned(),
                     swift,
                     managed: f.get("managed").and_then(Value::as_bool).unwrap_or(false),
+                    command: f
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
                 })
             })
             .collect();
@@ -240,7 +246,8 @@ mod tests {
                 event: "PermissionRequest".into(),
                 matcher: "*".into(),
                 swift: true,
-                managed: false
+                managed: false,
+                command: "'/Applications/Notchling.app/Contents/MacOS/Notchling' --hook".into(),
             }]
         );
         assert!(!facts.install_on && !facts.applied);

@@ -8,15 +8,16 @@ use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitStyled,
+    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart, KitStyled,
 };
 use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::{Map, Value};
 
+use super::agents::{Page, Tool};
+use super::agents_view::agents_page;
 use super::banner::Banners;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
-use super::settings_hooks_view::hooks_section;
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
@@ -30,6 +31,8 @@ pub struct SettingsView {
     error: Option<String>,
     busy: Option<Area>,
     hooks: HooksShown,
+    page: Page,
+    tool: Tool,
 }
 
 pub struct SettingChanged {
@@ -55,11 +58,18 @@ impl SettingsView {
             error: None,
             busy: None,
             hooks: HooksShown::Checking,
+            page: Page::General,
+            tool: Tool::ClaudeCode,
         }
     }
 
     pub fn with_hooks(mut self, hooks: HooksShown) -> SettingsView {
         self.hooks = hooks;
+        self
+    }
+
+    pub fn with_page(mut self, page: Page) -> SettingsView {
+        self.page = page;
         self
     }
 
@@ -160,6 +170,35 @@ impl SettingsView {
             value,
         });
         cx.notify();
+    }
+
+    fn page_tabs(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .p(px(2.0))
+            .gap(px(2.0))
+            .rounded(px(RADIUS_SM))
+            .fill(Ink::Raised, a)
+            .part("Settings Pages", a, cx)
+            .children(Page::ALL.iter().map(|&page| {
+                let kind = if self.page == page {
+                    ButtonKind::Secondary
+                } else {
+                    ButtonKind::Ghost
+                };
+                button(
+                    SharedString::from(format!("settings-page-{}", page.title())),
+                    page.title(),
+                    kind,
+                    PartState::Rest,
+                    a,
+                )
+                .flex_1()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.page = page;
+                    cx.notify();
+                }))
+            }))
     }
 
     fn field(&self, row: &Row, i: usize, a: Appearance, cx: &mut Context<Self>) -> Div {
@@ -281,7 +320,13 @@ impl Render for SettingsView {
             .flex_col()
             .gap(px(14.0));
         let mut n = 0;
-        for section in sections(&read, &daemon) {
+        list = list.child(self.page_tabs(a, cx));
+        let general = if self.page == Page::General {
+            sections(&read, &daemon)
+        } else {
+            Vec::new()
+        };
+        for section in general {
             let mut rows = card(a).flex().flex_col();
             for (k, row) in section.rows.iter().enumerate() {
                 n += 1;
@@ -328,7 +373,9 @@ impl Render for SettingsView {
                     ),
             );
         }
-        list = list.child(hooks_section(&self.hooks, a));
+        if self.page == Page::Agents {
+            list = list.child(agents_page(self.tool, &self.hooks, a, cx));
+        }
         div()
             .size_full()
             .flex()

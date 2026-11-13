@@ -1,12 +1,15 @@
 use serde_json::{json, Value};
 
+use super::agents::HOOKS;
 use super::hook_rows::*;
 use crate::welcome::facts::HookFacts;
 use crate::welcome::hooks::DETACHED;
 
+const COMMAND: &str = "'/Users/someone/secret-folder/notchling' hook";
+
 fn entry(event: &str, matcher: &str, origin: &str, managed: bool) -> Value {
     json!({"event": event, "matcher": matcher, "origin": origin,
-        "command": "'/Users/someone/secret-folder/notchling' hook", "managed": managed})
+        "command": COMMAND, "managed": managed})
 }
 
 fn facts(state: &str, refused: Option<&str>, present: Vec<Value>) -> HookFacts {
@@ -18,119 +21,160 @@ fn facts(state: &str, refused: Option<&str>, present: Vec<Value>) -> HookFacts {
 }
 
 fn ours() -> Vec<Value> {
-    vec![
-        entry("PermissionRequest", "*", "notchling", true),
-        entry("PreToolUse", "AskUserQuestion", "notchling", true),
-        entry("PreToolUse", "Artifact", "notchling", true),
-        entry("PostToolUse", "Artifact", "notchling", true),
-        entry("PostToolUseFailure", "Artifact", "notchling", true),
-    ]
+    HOOKS
+        .iter()
+        .map(|h| entry(h.event, h.matcher, "notchling", true))
+        .collect()
+}
+
+fn shown(present: Vec<Value>) -> HooksShown {
+    HooksShown::from_plan(Ok(facts("present", None, present)))
 }
 
 fn titles(shown: &HooksShown) -> Vec<String> {
     shown.lines().into_iter().map(|l| l.title).collect()
 }
 
+fn states(shown: &HooksShown) -> Vec<HookState> {
+    shown.lines().into_iter().map(|l| l.state).collect()
+}
+
 #[test]
-fn every_entry_is_a_row_with_what_it_does() {
-    let shown = HooksShown::from_plan(Ok(facts("present", None, ours())));
+fn the_five_hooks_are_rows_with_their_text_and_command() {
+    let shown = shown(ours());
     assert_eq!(
         titles(&shown),
         [
-            "PermissionRequest · All tools",
+            "PermissionRequest · *",
             "PreToolUse · AskUserQuestion",
             "PreToolUse · Artifact",
             "PostToolUse · Artifact",
             "PostToolUseFailure · Artifact",
         ]
     );
-    let notes: Vec<_> = shown.lines().into_iter().map(|l| l.note.unwrap()).collect();
+    assert_eq!(states(&shown), [HookState::Installed; 5]);
+    for (line, hook) in shown.lines().iter().zip(HOOKS) {
+        assert_eq!(line.what, hook.what);
+        assert_eq!(
+            line.command.as_deref(),
+            Some("'/Users/someone/secret-folder/notchling' hook")
+        );
+    }
+    assert_eq!(shown.status(), None);
+}
+
+#[test]
+fn a_hook_that_is_not_in_the_file_says_so_and_has_no_command() {
+    let shown = shown(vec![entry("PreToolUse", "Artifact", "notchling", true)]);
     assert_eq!(
-        notes,
+        states(&shown),
         [
-            "Asks for permission in the notch and Chat",
-            "Shows Claude's questions in the notch and Chat",
-            "Saves and finds published pages on this Mac",
-            "Saves and finds published pages on this Mac",
-            "Saves and finds published pages on this Mac",
+            HookState::Missing,
+            HookState::Missing,
+            HookState::Installed,
+            HookState::Missing,
+            HookState::Missing,
         ]
     );
-    assert!(shown.lines().iter().all(|l| l.tag.is_none()));
+    let lines = shown.lines();
+    assert_eq!(lines.len(), 5);
+    assert!(lines[0].command.is_none() && lines[2].command.is_some());
+    assert!(lines.iter().all(|l| l.what != OTHER));
+    let none = self::shown(vec![]);
+    assert_eq!(states(&none), [HookState::Missing; 5]);
 }
 
 #[test]
 fn swift_and_unmanaged_entries_are_told_apart() {
-    let shown = HooksShown::from_plan(Ok(facts(
-        "present",
-        None,
-        vec![
-            entry("PermissionRequest", "*", "swift", false),
-            entry("PostToolUse", "Artifact", "notchling", false),
-            entry("PreToolUse", "AskUserQuestion", "notchling", true),
-        ],
-    )));
-    let tags: Vec<_> = shown.lines().into_iter().map(|l| l.tag).collect();
-    assert_eq!(tags, [Some("Swift app"), Some("Not managed"), None]);
+    let shown = shown(vec![
+        entry("PermissionRequest", "*", "swift", false),
+        entry("PostToolUse", "Artifact", "notchling", false),
+        entry("PreToolUse", "AskUserQuestion", "notchling", true),
+        entry("Stop", "*", "swift", false),
+    ]);
+    assert_eq!(
+        states(&shown),
+        [
+            HookState::Swift,
+            HookState::Installed,
+            HookState::Missing,
+            HookState::Missing,
+            HookState::Missing,
+            HookState::NotManaged,
+            HookState::Swift,
+        ]
+    );
+    let lines = shown.lines();
+    assert_eq!(lines[0].command, None);
+    assert_eq!(lines[5].title, "PostToolUse · Artifact");
+    assert_eq!(lines[6].title, "Stop · *");
+    assert_eq!(lines[6].what, OTHER);
 }
 
 #[test]
 fn an_unknown_slot_still_gets_a_plain_line_and_a_cut_name() {
     let long = "X".repeat(100);
-    let shown = HooksShown::from_plan(Ok(facts(
-        "present",
-        None,
-        vec![entry("Stop", &long, "notchling", true)],
-    )));
-    let line = shown.lines().remove(0);
+    let shown = shown(vec![entry("Stop", &long, "notchling", true)]);
+    let line = shown.lines().remove(5);
     assert_eq!(line.title, format!("Stop · {}", "X".repeat(40)));
-    assert_eq!(line.note, Some("Runs Notchling's hook"));
-    let empty_matcher = HooksShown::from_plan(Ok(facts(
-        "present",
-        None,
-        vec![entry("PermissionRequest", "", "notchling", true)],
-    )));
-    assert_eq!(titles(&empty_matcher), ["PermissionRequest · All tools"]);
+    assert_eq!(line.what, OTHER);
+    let empty_matcher = shown_one(entry("PermissionRequest", "", "notchling", false));
+    assert_eq!(empty_matcher.lines()[5].title, "PermissionRequest · *");
+}
+
+fn shown_one(e: Value) -> HooksShown {
+    shown(vec![e])
 }
 
 #[test]
-fn other_hooks_and_commands_never_show() {
-    let shown = HooksShown::from_plan(Ok(facts(
-        "present",
-        None,
-        vec![
-            entry("Stop", "*", "other", false),
-            entry("PermissionRequest", "*", "notchling", true),
-        ],
-    )));
-    assert_eq!(titles(&shown), ["PermissionRequest · All tools"]);
-    let all = format!("{:?}", shown.lines());
-    assert!(!all.contains("secret-folder") && !all.contains("Stop"));
+fn other_hooks_never_show() {
+    let shown = shown(vec![
+        entry("Stop", "*", "other", false),
+        entry("PermissionRequest", "*", "notchling", true),
+    ]);
+    assert_eq!(shown.lines().len(), 5);
+    assert_eq!(shown.lines()[0].state, HookState::Installed);
+    assert!(!format!("{:?}", shown.lines()).contains("Stop"));
 }
 
 #[test]
-fn no_entries_says_so_and_points_to_welcome() {
-    for state in ["missing", "empty", "present"] {
-        let shown = HooksShown::from_plan(Ok(facts(state, None, vec![])));
-        assert_eq!(shown, HooksShown::Empty);
-    }
-    let line = HooksShown::Empty.lines().remove(0);
-    assert_eq!(line.title, "No hooks installed");
-    assert_eq!(line.note, Some("Use Install Hook in Welcome to add them."));
+fn the_state_words_are_plain() {
+    let words: Vec<_> = [
+        HookState::Installed,
+        HookState::Missing,
+        HookState::Swift,
+        HookState::NotManaged,
+        HookState::Unknown,
+    ]
+    .iter()
+    .map(|s| s.word())
+    .collect();
+    assert_eq!(
+        words,
+        [
+            Some("Installed"),
+            Some("Not installed"),
+            Some("Swift app"),
+            Some("Not managed"),
+            None
+        ]
+    );
 }
 
 #[test]
-fn a_detached_daemon_shows_the_existing_line() {
+fn a_detached_daemon_says_so_above_the_five_unchecked_rows() {
     let shown = HooksShown::from_plan(Err(DETACHED.to_owned()));
     assert_eq!(shown, HooksShown::Detached);
-    assert_eq!(titles(&shown), [DETACHED]);
+    assert_eq!(shown.status().as_deref(), Some(DETACHED));
+    assert_eq!(states(&shown), [HookState::Unknown; 5]);
 }
 
 #[test]
 fn a_daemon_error_shows_its_message() {
     let shown = HooksShown::from_plan(Err("the daemon's plan isn't one this app reads".into()));
     assert_eq!(
-        titles(&shown),
-        ["the daemon's plan isn't one this app reads"]
+        shown.status().as_deref(),
+        Some("the daemon's plan isn't one this app reads")
     );
 }
 
@@ -169,19 +213,19 @@ fn a_refused_file_shows_one_category_and_none_of_its_text() {
     ];
     for (reason, category) in cases {
         let shown = HooksShown::from_plan(Ok(facts("refused", Some(reason), vec![])));
-        let lines = shown.lines();
-        assert_eq!(lines.len(), 1);
+        let status = shown.status().unwrap();
         assert_eq!(
-            lines[0].title,
+            status,
             format!("Claude Code's settings.json was left alone: it {category}.")
         );
-        assert!(!lines[0].title.contains("SECRET-TOKEN"));
+        assert!(!status.contains("SECRET-TOKEN"));
+        assert_eq!(states(&shown), [HookState::Unknown; 5]);
     }
     let none = HooksShown::from_plan(Ok(facts("refused", None, vec![])));
-    assert!(titles(&none)[0].ends_with("can't be read."));
+    assert!(none.status().unwrap().ends_with("can't be read."));
 }
 
 #[test]
 fn checking_is_one_plain_line() {
-    assert_eq!(titles(&HooksShown::Checking), [CHECKING]);
+    assert_eq!(HooksShown::Checking.status().as_deref(), Some(CHECKING));
 }
