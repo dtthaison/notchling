@@ -5,6 +5,7 @@ mod conversation_list;
 mod conversation_view;
 mod copy;
 mod copy_menu;
+mod diff_panel;
 mod drop;
 mod header;
 mod inbox;
@@ -22,6 +23,8 @@ pub mod pane;
 mod phone;
 mod prompts;
 mod render_map;
+mod repo;
+mod repo_section;
 mod root;
 mod row_blocks;
 mod row_menu;
@@ -160,6 +163,7 @@ pub struct ChatView {
     details_hidden: bool,
     shell_probe: shell_probe::Probe,
     page: page_panel::State,
+    repo: repo::State,
     terminal: terminal::State,
     simulator: simulator::State,
     slash: crate::chat::slash_menu::SlashMenu,
@@ -255,6 +259,7 @@ impl ChatView {
             return;
         }
         self.details_hidden = !self.details_hidden;
+        self.git_ask(crate::chat::git::Why::Opened, cx);
         cx.notify();
     }
 
@@ -371,6 +376,7 @@ impl ChatView {
             details_hidden: false,
             shell_probe: shell_probe::Probe::default(),
             page: page_panel::State::default(),
+            repo: repo::State::default(),
             terminal: terminal::State::default(),
             simulator: simulator::State::default(),
             slash: Default::default(),

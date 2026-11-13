@@ -14,9 +14,11 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
+use super::diff_panel::{self, DiffBody, DiffState};
 use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::file_panel::{self, Body, Loaded, Pic};
+use crate::chat::git::DiffText;
 use crate::chat::markdown_cache::Cache as MarkdownCache;
 use crate::chat::page_panel::{
     artifact_link, decide, dragged_width, panel_width, subtitle, ArtifactLink, Frame, Opens,
@@ -43,6 +45,7 @@ pub struct Shown {
     pub link: String,
     pub error: Option<String>,
     pub file: Option<FileState>,
+    pub diff: Option<DiffState>,
 }
 
 pub struct FileState {
@@ -122,6 +125,48 @@ impl State {
         self.shown.is_some()
     }
 
+    pub fn asked(&self) -> u64 {
+        self.asked
+    }
+
+    pub fn show_diff(&mut self, path: &str) -> u64 {
+        self.web.borrow_mut().take();
+        self.asked += 1;
+        self.shown = Some(diff_panel::shown(path));
+        self.asked
+    }
+
+    pub fn diff_path(&self) -> Option<String> {
+        self.shown
+            .as_ref()?
+            .diff
+            .as_ref()
+            .map(|diff| diff.path.clone())
+    }
+
+    pub fn set_diff(&mut self, asked: u64, path: &str, result: Result<DiffText, String>) -> bool {
+        if self.asked != asked {
+            return false;
+        }
+        let Some(Shown {
+            diff: Some(diff),
+            subtitle,
+            ..
+        }) = self.shown.as_mut()
+        else {
+            return false;
+        };
+        if diff.path != path {
+            return false;
+        }
+        *subtitle = diff_panel::subtitle(path, result.as_ref().ok());
+        diff.body = match result {
+            Ok(text) => DiffBody::Ready(text),
+            Err(why) => DiffBody::Failed(why),
+        };
+        true
+    }
+
     pub fn take_keys_back(&self) {
         if let Some(web) = self.web.borrow().as_ref() {
             web.take_keys_back();
@@ -138,7 +183,9 @@ fn shown(opens: Opens) -> Shown {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
         Opens::Live(link) => ("Artifact".to_owned(), link.live_url()),
         Opens::File(path) => (file_panel::title(path), String::new()),
-        Opens::Folder(_) | Opens::System(_) | Opens::Browser => (String::new(), String::new()),
+        Opens::Diff(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => {
+            (String::new(), String::new())
+        }
     };
     let file = match &opens {
         Opens::File(path) => Some(FileState::read(path)),
@@ -157,6 +204,7 @@ fn shown(opens: Opens) -> Shown {
         link,
         error: None,
         file,
+        diff: None,
     }
 }
 
@@ -321,6 +369,7 @@ impl ChatView {
         self.page.web.borrow_mut().take();
         super::select::clear();
         self.details_hidden = false;
+        self.git_ask(crate::chat::git::Why::Opened, cx);
         cx.notify();
     }
 
@@ -524,15 +573,12 @@ pub fn render(
     view.page.drawn_width.set(width);
 
     let file_path = shown.file.as_ref().map(|f| f.path.clone());
-    let is_file = file_path.is_some();
+    let is_diff = shown.diff.is_some();
+    let is_file = file_path.is_some() || is_diff;
 
     let mark = gate::tip_text(
         div().id("page-panel-mark").flex_shrink_0().child(icon(
-            if file_path.is_some() {
-                Icon::File
-            } else {
-                Icon::Page
-            },
+            if is_file { Icon::File } else { Icon::Page },
             12.0,
             Ink::AccentText,
             a,
@@ -560,7 +606,7 @@ pub fn render(
         .flex_shrink_0()
     };
     let web_for_reload = view.page.web.clone();
-    let refresh = file_path.is_none().then(|| {
+    let refresh = (!is_file).then(|| {
         tool("page-panel-refresh", Icon::Resume, "Reload the page").on_click(move |_, _, _| {
             if let Some(web) = web_for_reload.borrow().as_ref() {
                 web.reload();
@@ -583,11 +629,7 @@ pub fn render(
     let back = tool(
         "page-panel-back",
         Icon::Close,
-        if file_path.is_some() {
-            "Close"
-        } else {
-            "Back to Details"
-        },
+        if is_file { "Close" } else { "Back to Details" },
     )
     .on_click(cx.listener(|this, _, _, cx| this.close_page(cx)));
     let header = div()
@@ -606,8 +648,9 @@ pub fn render(
         .children(open_with)
         .child(back);
 
-    let page = match shown.file.as_ref() {
-        Some(file) => file_body(
+    let page = match (shown.file.as_ref(), shown.diff.as_ref()) {
+        (_, Some(diff)) => diff_panel::body(diff, cx.entity().downgrade(), a),
+        (Some(file), None) => file_body(
             file,
             width,
             &view.parts.conversation.read(cx).s.markdown,
@@ -615,7 +658,7 @@ pub fn render(
             a,
             cx,
         ),
-        None => web_page(view, shown, a),
+        (None, None) => web_page(view, shown, a),
     };
 
     let edge = div()

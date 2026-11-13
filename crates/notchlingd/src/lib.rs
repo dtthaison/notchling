@@ -18,6 +18,7 @@ pub mod cost_ops;
 pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
+pub mod git_ops;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
@@ -63,6 +64,8 @@ mod control_ops_tests;
 mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
+#[cfg(test)]
+mod git_ops_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]

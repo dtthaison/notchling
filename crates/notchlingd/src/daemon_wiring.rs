@@ -8,6 +8,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::git_ops::{live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
@@ -394,6 +395,14 @@ impl Wired {
         first_scan: Arc<FirstScan>,
         first_wait: Duration,
     ) -> Ops {
+        let folders = live_folders(
+            sessions.clone(),
+            self.agy.titles(),
+            layout.codex_dir().join("sessions"),
+            layout.fixture,
+        );
+        let claude = claude_path(Path::new(&home_of(&layout.roots())));
+        let git = GitOps::new(Arc::new(RealLauncher::with_claude(claude)), folders);
         Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
@@ -412,6 +421,7 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
+            .with_group(Arc::new(git))
             .with_first_scan(first_scan, first_wait)
     }
 

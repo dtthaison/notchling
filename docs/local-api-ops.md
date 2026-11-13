@@ -277,6 +277,37 @@ account), and writes only the daemon's own cache.
 - The lists are cut to 50 rows, and `by_account` is left out if the reply would pass 700 KB
   (a line is at most 1 MiB).
 
+## `git_ops.rs`
+
+What Chat's Details Panel shows of a session's folder: `git.status` and `git.diff`, over
+`notchling_engine::git` and the engine's `control::Launcher`. App tier, read only, no switch:
+the app never runs a process, so the daemon runs `git` for it (decision 0004). Every call is
+refused (`forbidden`) unless `cwd` is absolute, has no `..`, and (after symlinks) is a known
+session's folder or below one; the known folders are the session list's `cwd`s, Antigravity's
+rows and the last 14 days' (30 newest) Codex rollouts, read again at most every 5 s. A `path`
+is refused if it is empty, absolute, has a `..` or a NUL, or goes through a link that leaves
+the repository.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `git.status` | app | `{cwd}` | `{repo: false}` when `cwd` is in no repository; else `{repo: true, branch, head, detached, initial, upstream, ahead, behind, changes: [{path, status, from, added, removed}], truncated}` |
+| `git.diff` | app | `{cwd, path}` | `{path, text, truncated, untracked}` |
+
+- `status` is one of `M`, `A`, `D`, `R`, `U` (unmerged) or `?` (untracked). `path` is relative to the
+  repository's root, as `git` prints it, not to `cwd`; `from` is a rename's old path. `added` and
+  `removed` are `null` for an untracked or binary file. `branch` is `null` while `detached`
+  (then `head` is the short commit); `upstream`, `ahead` and `behind` are only set with an upstream.
+  `initial` is a repository with no commit yet.
+- `changes` is cut at 500 files and `truncated` says so. `diff.text` is cut at 400 lines or
+  128 KB (a single line is cut on a character boundary), and an untracked file over 2 MB gives
+  an empty `text` with `truncated: true`. An untracked file's diff is the whole file as added
+  lines (`git diff --no-index /dev/null <path>`).
+- Reads: `git --no-optional-locks -c core.fsmonitor=false -C <dir> status --porcelain=v2
+  --branch -z --untracked-files=all`, then `diff --numstat -z HEAD` (or `--cached` with no
+  commit); a diff is `diff --no-color --no-ext-diff --no-textconv HEAD -- :(literal)<path>`. Each
+  command has a 3 s timeout, `GIT_TERMINAL_PROMPT=0` and `GIT_PAGER=cat`. A timeout or any other
+  failure answers `failed`.
+
 ## `hook_ops.rs`
 
 The hook's side of [`ActingOps`]: `hook.request`, and who may make it.

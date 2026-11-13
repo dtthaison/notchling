@@ -180,6 +180,9 @@ impl ChatView {
             self.start_load(cx);
         }
         self.sync_tools(cx);
+        if conversation_changed && !self.selected_working() {
+            self.git_ask(crate::chat::git::Why::TurnEnded, cx);
+        }
         if layout_changed {
             self.redraw_conversation(cx);
         }
@@ -219,6 +222,7 @@ impl ChatView {
         self.tools.agy_config.clear();
         self.show_draft(cx);
         self.start_load(cx);
+        self.git_ask(crate::chat::git::Why::Folder, cx);
         cx.notify();
     }
 
@@ -279,6 +283,7 @@ impl ChatView {
             self.redraw_conversation(cx);
         }
         self.refresh_file(cx);
+        self.git_ask(crate::chat::git::Why::Tick, cx);
         if self.gate.due(now_ms()) {
             self.start_load(cx);
         }

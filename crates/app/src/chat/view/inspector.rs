@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, relative, AnyElement, App, Context, Div, Global, SharedString, Stateful,
@@ -13,8 +14,9 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
-use super::ChatView;
+use super::{repo_section, ChatView};
 use crate::chat::format::short_path;
+use crate::chat::git::GitModel;
 use crate::chat::inspector::{
     fact_icon, fact_text, inspector, Fold, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
@@ -22,8 +24,8 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 
 pub(super) const WIDTH: f32 = 260.0;
-const MARK_BOX: f32 = 14.0;
-const ROW_LINE: f32 = 16.0;
+pub(super) const MARK_BOX: f32 = 14.0;
+pub(super) const ROW_LINE: f32 = 16.0;
 
 #[derive(Default)]
 struct Folds {
@@ -51,6 +53,7 @@ pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
     pub agent_ids: Vec<String>,
+    pub git: Option<Arc<GitModel>>,
 }
 
 fn model_of(
@@ -58,11 +61,13 @@ fn model_of(
     subagents: &[Subagent],
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
+    git: Option<Arc<GitModel>>,
 ) -> DetailsModel {
     DetailsModel {
         i: inspector(conversation, subagents, writers),
         folder,
         agent_ids: subagents.iter().map(|s| s.id.clone()).collect(),
+        git,
     }
 }
 
@@ -76,6 +81,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         &view.subagents,
         &|p: &str| view.shell_probe.writers(p),
         folder,
+        view.git_for_details(),
     )
 }
 
@@ -86,6 +92,7 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
         a,
         chat: cx.entity().downgrade(),
         agent_ids: m.agent_ids.clone(),
+        git: m.git.clone(),
     }
     .into_any_element()
 }
@@ -97,6 +104,7 @@ struct Panel {
     a: Appearance,
     chat: WeakEntity<ChatView>,
     agent_ids: Vec<String>,
+    git: Option<Arc<GitModel>>,
 }
 
 impl RenderOnce for Panel {
@@ -180,12 +188,20 @@ impl RenderOnce for Panel {
             )
         };
 
-        let sections = [
+        let mut sections = vec![
             ("Tasks", "Task Panel", i.tasks_title(), tasks),
             ("Facts", "Session Facts", "Session".to_owned(), facts),
             ("Subagents", "Subagents", i.subagents_title(), subagents),
             ("Shells", "Background Shells", i.shells_title(), shells),
         ];
+        if let Some(git) = &self.git {
+            sections.push((
+                "Git",
+                "Git Changes",
+                git.title(),
+                repo_section::content(git, &self.chat, a),
+            ));
+        }
         let mut column = div()
             .id("inspector")
             .flex_1()
@@ -252,7 +268,7 @@ fn section(
         .part_at(part, Corner::TopTrailing, a, cx)
 }
 
-fn empty(text: &str, a: Appearance) -> Div {
+pub(super) fn empty(text: &str, a: Appearance) -> Div {
     label(text, TypeRole::Meta, Ink::TextMuted, a)
 }
 
@@ -279,7 +295,7 @@ fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
     }
 }
 
-fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
+pub(super) fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
     div()
         .flex()
         .items_start()
@@ -505,25 +521,29 @@ mod tests {
     #[test]
     fn the_details_model_is_equal_for_the_same_inputs() {
         let c = with_task("Port");
-        let a = model_of(&c, &[], &no_writers, folder());
-        let b = model_of(&with_task("Port"), &[], &no_writers, folder());
+        let a = model_of(&c, &[], &no_writers, folder(), None);
+        let b = model_of(&with_task("Port"), &[], &no_writers, folder(), None);
         assert_eq!(a, b);
-        assert_ne!(a, model_of(&c, &[], &no_writers, None), "the folder line");
+        assert_ne!(
+            a,
+            model_of(&c, &[], &no_writers, None, None),
+            "the folder line"
+        );
     }
 
     #[test]
     fn a_new_task_changes_the_details_model() {
-        let before = model_of(&with_task("Port"), &[], &no_writers, folder());
+        let before = model_of(&with_task("Port"), &[], &no_writers, folder(), None);
         let mut more = with_task("Port");
         more.tasks.push(TaskEntry {
             id: "2".into(),
             subject: "Test".into(),
             status: TaskStatus::Pending,
         });
-        assert_ne!(before, model_of(&more, &[], &no_writers, folder()));
+        assert_ne!(before, model_of(&more, &[], &no_writers, folder(), None));
         assert_ne!(
             before,
-            model_of(&with_task("Port it"), &[], &no_writers, folder())
+            model_of(&with_task("Port it"), &[], &no_writers, folder(), None)
         );
     }
 
@@ -539,7 +559,7 @@ mod tests {
             }],
             ..Conversation::default()
         };
-        let idle = model_of(&c, &[], &no_writers, None);
+        let idle = model_of(&c, &[], &no_writers, None, None);
         let writing = model_of(
             &c,
             &[],
@@ -550,6 +570,7 @@ mod tests {
                     vec![]
                 }
             },
+            None,
             None,
         );
         assert_ne!(
