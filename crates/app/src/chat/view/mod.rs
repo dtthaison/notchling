@@ -10,6 +10,7 @@ mod copy_menu;
 mod diff_panel;
 mod drop;
 mod header;
+mod html_panel;
 mod inbox;
 mod inspector;
 mod limit_ring;
@@ -256,6 +257,9 @@ impl ChatView {
         }
         if let Ok(path) = std::env::var(page_panel::FILE_ENV) {
             view.page.preview_file(&path);
+            if let Ok(how) = std::env::var(page_panel::HTML_ENV) {
+                view.preview_html(&how, window, cx);
+            }
         }
         view.page.render_only = true;
         if switch(PARTS_ENV) {

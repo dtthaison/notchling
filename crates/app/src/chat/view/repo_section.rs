@@ -154,8 +154,8 @@ fn file_row(
         .rounded(px(RADIUS_SM))
         .cursor_pointer()
         .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
-        .on_click(move |_, _, cx| {
-            chat.update(cx, |this, cx| this.open_git_diff(&path, cx))
+        .on_click(move |_, window, cx| {
+            chat.update(cx, |this, cx| this.open_git_row(&path, window, cx))
                 .ok();
         })
         .flex()

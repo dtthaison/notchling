@@ -2,6 +2,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::chat::html_preview::is_html;
 use crate::chat::page_panel::Opens;
 
 pub const MAX_TEXT: usize = 1024 * 1024;
@@ -11,6 +12,7 @@ const SNIFF: usize = 8 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Markdown,
+    Html,
     Text,
     Image(Pic),
     Other,
@@ -66,10 +68,10 @@ pub fn kind(path: &Path, head: &[u8]) -> Kind {
     ) {
         return Kind::Markdown;
     }
-    if reads_as_text(head) {
-        Kind::Text
-    } else {
-        Kind::Other
+    match (reads_as_text(head), is_html(path)) {
+        (true, true) => Kind::Html,
+        (true, false) => Kind::Text,
+        (false, _) => Kind::Other,
     }
 }
 
@@ -89,6 +91,7 @@ pub fn opens(path: &Path) -> Opens {
     match kind(path, &head_of(path)) {
         Kind::Other => Opens::System(path.to_path_buf()),
         Kind::Image(_) if too_big => Opens::System(path.to_path_buf()),
+        Kind::Html => Opens::Html(path.to_path_buf()),
         _ => Opens::File(path.to_path_buf()),
     }
 }
@@ -140,11 +143,11 @@ pub fn load(path: &Path) -> Loaded {
     let head_end = bytes.len().min(SNIFF);
     let body = match kind(path, &bytes[..head_end]) {
         Kind::Image(format) if bytes.len() as u64 <= MAX_IMAGE => Body::Image { format, bytes },
-        Kind::Markdown | Kind::Text if bytes.is_empty() => Body::Text {
+        Kind::Markdown | Kind::Html | Kind::Text if bytes.is_empty() => Body::Text {
             text: String::new(),
             cut: false,
         },
-        kind @ (Kind::Markdown | Kind::Text) => {
+        kind @ (Kind::Markdown | Kind::Html | Kind::Text) => {
             bytes.truncate(MAX_TEXT);
             let text = String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\u{FFFD}')

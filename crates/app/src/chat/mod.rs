@@ -21,6 +21,9 @@ pub mod format;
 pub mod git;
 pub mod header;
 pub mod history;
+pub mod html_preview;
+#[cfg(test)]
+mod html_preview_tests;
 pub mod image_size;
 pub mod inspector;
 pub mod lane_limits;

@@ -18,6 +18,7 @@ use super::diff_panel::{self, DiffState};
 use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::file_panel::{self, Body, Loaded, Pic};
+use crate::chat::html_preview::HtmlView;
 use crate::chat::markdown_cache::Cache as MarkdownCache;
 use crate::chat::page_panel::{
     artifact_link, decide, dragged_width, panel_width, subtitle, ArtifactLink, Frame, Opens,
@@ -33,6 +34,8 @@ pub const PAGE_ENV: &str = "NOTCHLING_RENDER_PAGE";
 
 pub const FILE_ENV: &str = "NOTCHLING_RENDER_FILE";
 
+pub const HTML_ENV: &str = "NOTCHLING_RENDER_HTML";
+
 const HEADER: f32 = 36.0;
 
 struct PanelEdge;
@@ -45,6 +48,7 @@ pub struct Shown {
     pub error: Option<String>,
     pub file: Option<FileState>,
     pub diff: Option<DiffState>,
+    pub html: Option<HtmlView>,
 }
 
 pub struct FileState {
@@ -54,7 +58,7 @@ pub struct FileState {
 }
 
 impl FileState {
-    fn read(path: &Path) -> FileState {
+    pub(super) fn read(path: &Path) -> FileState {
         let loaded = file_panel::load(path);
         let image = match &loaded.body {
             Body::Image { format, bytes } => Some(Arc::new(gpui::Image::from_bytes(
@@ -117,7 +121,18 @@ impl State {
 
     pub fn preview_file(&mut self, path: &str) {
         self.render_only = true;
-        self.shown = Some(shown(Opens::File(PathBuf::from(path))));
+        let path = PathBuf::from(path);
+        let opens = match file_panel::opens(&path) {
+            opens @ Opens::Html(_) => opens,
+            _ => Opens::File(path),
+        };
+        self.shown = Some(shown(opens));
+    }
+
+    pub fn attach_html(&mut self, html: HtmlView) {
+        if let Some(shown) = self.shown.as_mut() {
+            shown.html = Some(html);
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -147,7 +162,7 @@ fn shown(opens: Opens) -> Shown {
     let (title, link) = match &opens {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
         Opens::Live(link) => ("Artifact".to_owned(), link.live_url()),
-        Opens::File(path) => (file_panel::title(path), String::new()),
+        Opens::File(path) | Opens::Html(path) => (file_panel::title(path), String::new()),
         Opens::Diff(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => {
             (String::new(), String::new())
         }
@@ -156,10 +171,15 @@ fn shown(opens: Opens) -> Shown {
         Opens::File(path) => Some(FileState::read(path)),
         _ => None,
     };
-    let subtitle = match (&opens, &file) {
-        (Opens::File(path), Some(f)) => {
+    let html = match &opens {
+        Opens::Html(path) => Some(HtmlView::file(path.clone(), home().as_deref())),
+        _ => None,
+    };
+    let subtitle = match (&opens, &file, &html) {
+        (Opens::File(path), Some(f), _) => {
             file_panel::subtitle(path, home().as_deref(), &f.loaded.body)
         }
+        (_, _, Some(h)) => h.page_subtitle.clone(),
         _ => subtitle(&opens),
     };
     Shown {
@@ -170,10 +190,11 @@ fn shown(opens: Opens) -> Shown {
         error: None,
         file,
         diff: None,
+        html,
     }
 }
 
-fn home() -> Option<PathBuf> {
+pub(super) fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
@@ -250,7 +271,12 @@ impl ChatView {
         }
         self.page.web.borrow_mut().take();
         let mut page = shown(opens);
-        if !self.page.render_only && matches!(page.opens, Opens::Saved(_) | Opens::Live(_)) {
+        if !self.page.render_only
+            && matches!(
+                page.opens,
+                Opens::Saved(_) | Opens::Live(_) | Opens::Html(_)
+            )
+        {
             match self.make_web(&page.opens, window, cx) {
                 Ok(web) => *self.page.web.borrow_mut() = Some(web),
                 Err(e) => page.error = Some(e),
@@ -261,30 +287,24 @@ impl ChatView {
     }
 
     pub(super) fn refresh_file(&mut self, cx: &mut Context<Self>) {
-        let Some(Shown {
+        if let Some(Shown {
             file: Some(file), ..
         }) = self.page.shown.as_mut()
-        else {
-            return;
-        };
-        if file_panel::stamp(&file.path) == file.loaded.stamp {
-            return;
+        {
+            if file_panel::stamp(&file.path) != file.loaded.stamp {
+                *file = FileState::read(&file.path);
+                cx.notify();
+            }
         }
-        *file = FileState::read(&file.path);
-        cx.notify();
+        self.refresh_html(cx);
     }
 
-    fn make_web(
-        &self,
-        opens: &Opens,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<PanelWeb, String> {
+    pub(super) fn web_hooks(&self, cx: &mut Context<Self>) -> PanelHooks {
         let asked = self.page.asked;
         let weak = cx.weak_entity();
         let titles = cx.to_async();
         let links = cx.to_async();
-        let hooks = PanelHooks {
+        PanelHooks {
             title: Box::new(move |title| {
                 let weak = weak.clone();
                 titles
@@ -312,8 +332,18 @@ impl ChatView {
                     })
                     .detach();
             }),
-        };
+        }
+    }
+
+    fn make_web(
+        &self,
+        opens: &Opens,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PanelWeb, String> {
+        let hooks = self.web_hooks(cx);
         match opens {
+            Opens::Html(path) => self.make_html_web(path, window, cx),
             Opens::Saved(page) => {
                 let pages_dir = cx
                     .try_global::<AppPagesDir>()
@@ -369,6 +399,7 @@ fn web_page(view: &ChatView, shown: &Shown, a: Appearance) -> AnyElement {
     let note = match (&shown.error, &shown.opens) {
         (Some(error), _) => error.clone(),
         (None, Opens::Live(_)) => "Opening the page on claude.ai…".to_owned(),
+        (None, _) if shown.html.is_some() => "Opening the page…".to_owned(),
         (None, _) => "Opening the saved copy…".to_owned(),
     };
     let ink = if shown.error.is_some() {
@@ -545,9 +576,18 @@ pub fn render(
     let width = panel_width(view.page.width, available);
     view.page.drawn_width.set(width);
 
-    let file_path = shown.file.as_ref().map(|f| f.path.clone());
+    let html_page = shown.html.as_ref().is_some_and(HtmlView::is_page);
+    let file_path = shown
+        .file
+        .as_ref()
+        .map(|f| f.path.clone())
+        .or_else(|| shown.html.as_ref().map(|h| h.path.clone()));
     let is_diff = shown.diff.is_some();
     let is_file = file_path.is_some() || is_diff;
+    let subtitle = match &shown.html {
+        Some(html) if html.is_page() => html.page_subtitle.clone(),
+        _ => shown.subtitle.clone(),
+    };
 
     let mark = gate::tip_text(
         div().id("page-panel-mark").flex_shrink_0().child(icon(
@@ -556,7 +596,7 @@ pub fn render(
             Ink::AccentText,
             a,
         )),
-        shown.subtitle.clone().into(),
+        subtitle.into(),
         a,
     );
     let title = label(&shown.title, TypeRole::Label, Ink::Text, a)
@@ -579,7 +619,7 @@ pub fn render(
         .flex_shrink_0()
     };
     let web_for_reload = view.page.web.clone();
-    let refresh = (!is_file).then(|| {
+    let refresh = (!is_file || html_page).then(|| {
         tool("page-panel-refresh", Icon::Resume, "Reload the page").on_click(move |_, _, _| {
             if let Some(web) = web_for_reload.borrow().as_ref() {
                 web.reload();
@@ -599,6 +639,10 @@ pub fn render(
         tool("page-panel-open", Icon::Expand, "Open in Default App")
             .on_click(move |_, _, cx| cx.open_with_system(&path))
     });
+    let looks = shown
+        .html
+        .as_ref()
+        .map(|html| super::html_panel::looks(html, a, cx));
     let back = tool(
         "page-panel-back",
         Icon::Close,
@@ -615,6 +659,7 @@ pub fn render(
         .gap(px(6.0))
         .child(mark)
         .child(title)
+        .children(looks)
         .children(refresh)
         .children(browser)
         .children(reveal)
@@ -622,6 +667,7 @@ pub fn render(
         .child(back);
 
     let page = match (shown.file.as_ref(), shown.diff.as_ref()) {
+        _ if html_page => web_page(view, shown, a),
         (_, Some(diff)) => diff_panel::body(diff, cx.entity().downgrade(), a),
         (Some(file), None) => file_body(
             file,
