@@ -6,11 +6,13 @@
 //! Every call blocks. The router calls them on the thread that handles the frame.
 
 use super::connection::Connection;
+use super::inbox::InboxOutcome;
 use super::model::{
     BridgeViz, ChatMessage, ChatPage, Command, ModelChoice, PendingPrompt, PhoneOptions,
     PromptResponse, Session, TakeoverOutcome,
 };
 use super::wire::BridgeFailure;
+use crate::inbox::{ActionId, Item};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -124,6 +126,18 @@ pub trait BridgeBackend: Send + Sync {
     ) -> Result<(), BridgeFailure>;
 
     fn stop_phone(&self, connection: &Arc<Connection>);
+
+    fn inbox_items(&self) -> Vec<Item> {
+        Vec::new()
+    }
+
+    fn inbox_answer(
+        &self,
+        _item_id: &str,
+        _action: ActionId,
+    ) -> Result<InboxOutcome, BridgeFailure> {
+        Err(BridgeFailure::not_found("Không có hộp thư này."))
+    }
 }
 
 /// A paired phone.

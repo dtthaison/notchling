@@ -87,6 +87,7 @@ pub struct NotchModel {
     /// Prompts answered from here (a hook request's id, a question's tool use id), hidden until
     /// the session's files catch up.
     pub answered: HashSet<String>,
+    pub inbox_unread: usize,
     hovering: bool,
     pending: Option<Pending>,
     /// Each row's group at the last update; `None` before the first, which only sets the baseline.
@@ -110,6 +111,7 @@ impl Default for NotchModel {
             now_ms: 0,
             card_height: None,
             answered: HashSet::new(),
+            inbox_unread: 0,
             hovering: false,
             pending: None,
             last_groups: None,

@@ -29,6 +29,7 @@ use super::source::{now_ms, Source};
 use super::view::NotchView;
 use crate::actions::Actions;
 use crate::mac::capture::ns_window;
+use crate::mac::shell::AppInbox;
 use crate::session_source::{Link, SessionSource};
 use crate::tools::live::ToolLive;
 use crate::tools::requests::{agy_conversation, parse_conversation};
@@ -251,6 +252,10 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 view.model.daemon_note = note;
                 // What Chat answered is answered here too.
                 view.model.answered.extend(answered);
+                let unread = cx
+                    .try_global::<AppInbox>()
+                    .map_or(0, |inbox| inbox.0.unread());
+                view.model.set_inbox_unread(unread);
                 let now = now_ms();
                 view.model.now_ms = now;
                 if let Some(info) = MainThreadMarker::new().and_then(screen_info) {

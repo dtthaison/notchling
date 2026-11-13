@@ -4,6 +4,40 @@
   "tabSessions": "Session",
   "tabChat": "Chat",
   "tabVisualize": "Visualize",
+  "tabInbox": "Hộp thư",
+  "inboxNeedsYou": "Cần bạn",
+  "inboxDone": "Xong",
+  "inboxEmptyTitle": "Không có gì cần bạn",
+  "inboxEmptyBody": "Yêu cầu từ Mac sẽ hiện ở đây.",
+  "inboxUnsupported": "Notchling trên Mac này chưa có hộp thư.",
+  "inboxOpenOnMac": "Mở trên Mac",
+  "inboxAnsweredOnMac": "Đã trả lời trên Mac: {action}",
+  "@inboxAnsweredOnMac": {
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxAnsweredHere": "Bạn đã trả lời: {action}",
+  "@inboxAnsweredHere": {
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxDeclined": "Mac không nhận câu trả lời này. Thử lại trên Mac.",
+  "inboxExpired": "Đã hết hạn",
+  "inboxWithdrawn": "Đã rút lại",
+  "inboxOpenCount": "{count} chưa xử lý",
+  "@inboxOpenCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "connecting": "Đang kết nối",
   "connectionLostRetry": "Mất kết nối, thử lại sau {seconds}s",
   "@connectionLostRetry": {

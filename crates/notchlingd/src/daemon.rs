@@ -309,6 +309,7 @@ pub fn run(
         let _ = AuditLog::new(layout.audit_path()).append(&entry);
         eprintln!("notchling: {SETTINGS_NAME} says acting is on; ignored, acting starts off");
     }
+    wired.load();
     let (handle, thread) = server.spawn().map_err(DaemonError::Io)?;
     room.set(handle.clone());
     wired.start();

@@ -34,7 +34,7 @@ final Provider<void> subscriptionSyncProvider = Provider<void>((Ref ref) {
   final bool phone = ref.watch(phoneWantedProvider);
   ref.watch(connectedCountProvider);
   if (client == null) return;
-  unawaited(_apply(ref, client, SubscriptionSpec(sessions: true, sessionId: selected, phoneFps: phone && selected != null ? 8 : null, phoneWidth: 360)));
+  unawaited(_apply(ref, client, SubscriptionSpec(sessions: true, inbox: true, sessionId: selected, phoneFps: phone && selected != null ? 8 : null, phoneWidth: 360)));
 });
 
 /// The last spec sent, per container, so leaving the Phone tab can be told apart from the first subscribe.

@@ -15,8 +15,10 @@ use super::backend::BridgeBackend;
 use super::connection::{lock, Connection};
 use super::extras::{wire_image, Extras};
 use super::foreign::{self, AcpPermission, ForeignRow, Tool};
+use super::inbox::InboxOutcome;
 use super::model::*;
 use super::wire::BridgeFailure;
+use crate::inbox::{ActionId, Item};
 use crate::transcript::{chat, codex, conversation, model::Conversation, snapshot};
 use notchling_protocol::generated as wire;
 use std::collections::{HashMap, HashSet};
@@ -88,6 +90,16 @@ pub trait Sources: Send + Sync {
     /// Asks the person at the computer to approve a phone. No approver means no.
     fn request_approval(&self, _device_name: &str, _platform: &str, _address: &str) -> bool {
         false
+    }
+    fn inbox_items(&self) -> Vec<Item> {
+        Vec::new()
+    }
+    fn inbox_answer(
+        &self,
+        _item_id: &str,
+        _action: ActionId,
+    ) -> Result<InboxOutcome, BridgeFailure> {
+        Err(BridgeFailure::not_found("Không có hộp thư này."))
     }
     fn now_ms(&self) -> f64;
 }
@@ -427,6 +439,14 @@ impl<S: Sources, A: Acting> BridgeBackend for LiveBackend<S, A> {
 
     fn stop_phone(&self, connection: &Arc<Connection>) {
         self.extras.streamer.stop(connection);
+    }
+
+    fn inbox_items(&self) -> Vec<Item> {
+        self.sources.inbox_items()
+    }
+
+    fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
+        self.sources.inbox_answer(item_id, action)
     }
 }
 

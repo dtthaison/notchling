@@ -17,6 +17,7 @@ pub mod chat;
 pub mod cli;
 pub mod crash_log;
 pub mod dock;
+pub mod inbox;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod machines;

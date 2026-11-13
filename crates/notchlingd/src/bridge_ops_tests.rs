@@ -7,6 +7,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::NoTerminal;
 use crate::acting_ops_tests::{row, FakeRoom};
 use crate::bridge_backend::{Approvals, DaemonActing};
+use crate::inbox_ops::InboxOps;
 use notchling_engine::bridge::live::Acting as _;
 use notchling_engine::bridge::model::{Control, Session, SessionState};
 use notchling_engine::sessions::Roots;
@@ -121,7 +122,11 @@ fn bridge_ops(dir: &Path, lan: u16, tunnel: u16) -> (BridgeOps, Arc<FakeRoom>) {
         approval_wait: Duration::from_secs(5),
     };
     let acting = acting_ops(false, sessions.clone(), room.clone());
-    (BridgeOps::new(setup, sessions, acting, room.clone()), room)
+    let inbox = InboxOps::new(dir.join("data"), room.clone());
+    (
+        BridgeOps::new(setup, sessions, acting, room.clone(), inbox),
+        room,
+    )
 }
 
 #[test]
@@ -279,6 +284,7 @@ fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
         sessions.clone(),
         acting.clone(),
         room.clone(),
+        InboxOps::new(dir.0.join("data"), room.clone()),
     ));
     let handler = crate::daemon::Ops::with_acting(sessions, acting).with_bridge(bridge.clone());
     let server = Server::bind(

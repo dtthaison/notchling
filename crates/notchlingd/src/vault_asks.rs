@@ -4,6 +4,8 @@
 //! connects later.
 
 use super::*;
+use notchling_engine::inbox::{ActionId, State};
+use std::time::Instant;
 
 impl VaultOps {
     /// Asks the app and waits. With no app following the vault, a no at once.
@@ -30,13 +32,22 @@ impl VaultOps {
         let event = json!({"id": id, "names": names, "entries": entries, "command": command,
                            "folder": folder, "verified": verified});
         self.approvals.describe(&id, &event);
+        let raised = self.raise_approval(&id, &names, command, folder);
         self.room
             .publish(topics::VAULT, topics::VAULT_APPROVAL_PENDING, &event);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
-        let decision = self
-            .approvals
-            .wait(ticket, self.timing.approval_wait, self.timing.slice, &still)
-            .unwrap_or(Decision::Deny);
+        let started = Instant::now();
+        let decided =
+            self.approvals
+                .wait(ticket, self.timing.approval_wait, self.timing.slice, &still);
+        match decided {
+            Some(decision) => raised.close(State::Answered, Some(inbox::action_of(decision))),
+            None => {
+                let state = self.ended_without_answer(started, self.timing.approval_wait, &still);
+                raised.close(state, None);
+            }
+        }
+        let decision = decided.unwrap_or(Decision::Deny);
         self.room.publish(
             topics::VAULT,
             topics::VAULT_APPROVAL_RESOLVED,
@@ -117,13 +128,23 @@ impl VaultOps {
         let event = json!({"id": id, "request": request, "entry": entry_json(&entry),
                            "existing": existing.is_some(), "changes": changes});
         self.requests.describe(&id, &event);
+        let raised = self.raise_request(&id, &request);
         self.room
             .publish(topics::VAULT, topics::VAULT_REQUEST_PENDING, &event);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
-        let saved = self
-            .requests
-            .wait(ticket, self.timing.request_wait, self.timing.slice, &still)
-            .flatten();
+        let started = Instant::now();
+        let answered =
+            self.requests
+                .wait(ticket, self.timing.request_wait, self.timing.slice, &still);
+        match &answered {
+            Some(Some(_)) => raised.close(State::Answered, Some(ActionId::Open)),
+            Some(None) => raised.close(State::Answered, Some(ActionId::Cancel)),
+            None => {
+                let state = self.ended_without_answer(started, self.timing.request_wait, &still);
+                raised.close(state, None);
+            }
+        }
+        let saved = answered.flatten();
         self.room.publish(
             topics::VAULT,
             topics::VAULT_REQUEST_RESOLVED,

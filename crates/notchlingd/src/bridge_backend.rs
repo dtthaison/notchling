@@ -4,8 +4,10 @@
 
 use crate::acting_ops::{ActingOps, Room};
 use crate::catalog_ops::CatalogService;
+use crate::inbox_ops::InboxOps;
 use crate::prompts::{Kind, Prompt};
 use notchling_engine::bridge::agents;
+use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::bridge::live::{Acting, Sources};
 use notchling_engine::bridge::model::{
     Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session,
@@ -13,6 +15,7 @@ use notchling_engine::bridge::model::{
 };
 use notchling_engine::bridge::BridgeFailure;
 use notchling_engine::catalog::{Tier as ModelTier, Tool};
+use notchling_engine::inbox::{ActionId, Item};
 use notchling_engine::sessions::{Agent, AgentTarget};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
@@ -21,6 +24,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+const PHONE_ANSWERED_BY: &str = "phone";
 
 /// How long a phone that gave the right code waits for the person at the computer.
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(120);
@@ -89,6 +94,7 @@ pub struct DaemonSources {
     pub sessions: Arc<Mutex<Value>>,
     pub acting: Arc<ActingOps>,
     pub approvals: Arc<Approvals>,
+    pub inbox: Arc<InboxOps>,
     /// `~/.claude/projects`, for the recent folders of `session.new`.
     pub projects_dir: PathBuf,
 }
@@ -141,6 +147,20 @@ impl Sources for DaemonSources {
 
     fn request_approval(&self, device_name: &str, platform: &str, address: &str) -> bool {
         self.approvals.request(device_name, platform, address)
+    }
+
+    fn inbox_items(&self) -> Vec<Item> {
+        self.inbox.items()
+    }
+
+    fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
+        self.inbox
+            .decide(item_id, action, PHONE_ANSWERED_BY)
+            .map_err(|e| match e.code {
+                ErrorCode::Failed => BridgeFailure::not_found("Không có mục này trong hộp thư."),
+                ErrorCode::Internal => BridgeFailure::internal(e.message),
+                _ => BridgeFailure::invalid(e.message),
+            })
     }
 
     fn now_ms(&self) -> f64 {

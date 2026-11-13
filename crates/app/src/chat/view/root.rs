@@ -33,6 +33,7 @@ impl Render for ChatView {
             || self.row_menu.is_some()
             || self.copy_menu.is_some()
             || self.phone.is_some()
+            || self.inbox_panel.is_some()
             || self.tools.picker.is_some()
             || self.composer.is_open()
             || parts_on(cx);
@@ -52,11 +53,13 @@ impl Render for ChatView {
                 limit_card: self.limit_ring.card_open(),
                 drop_hint: self.drop_preview,
                 part_names: parts_on(cx),
+                inbox: self.inbox_panel.is_some(),
             }));
         self.page_covered =
             crate::chat::page_panel::page_covered(crate::chat::page_panel::Covers {
                 sheet: self.sheet.is_some(),
                 phone: self.phone.is_some(),
+                inbox: self.inbox_panel.is_some(),
                 parts: parts_on(cx),
             });
         // Files from Finder land anywhere on the middle column while the box can take them.
@@ -181,6 +184,7 @@ impl Render for ChatView {
             .children(copy_menu::render(self, a, cx))
             .children(sheets::render(self, a))
             .children(phone::render(self.phone.as_ref(), a, cx))
+            .children(inbox::render(self.inbox_panel.as_ref(), cx))
             .child(resize_edges(window, TopBorder::InContent))
             .child(self.chrome.clone())
     }

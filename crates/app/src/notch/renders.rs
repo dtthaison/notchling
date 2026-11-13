@@ -40,10 +40,13 @@ pub enum Shown {
     Pet,
     /// Nothing going on: the pet sits on the frontmost window, right of its traffic lights.
     Perch,
+    Inbox,
 }
 
+pub const INBOX_UNREAD: usize = 3;
+
 /// Width fits the canvas; heights fit each state's shape with a margin.
-pub const VIEWS: [ViewSpec; 10] = [
+pub const VIEWS: [ViewSpec; 11] = [
     ViewSpec {
         name: "notch-collapsed",
         size: (560.0, 96.0),
@@ -94,6 +97,11 @@ pub const VIEWS: [ViewSpec; 10] = [
         size: (560.0, 260.0),
         about: "Tab Perch: the idle pet on a stand-in window's top edge (fixture data)",
     },
+    ViewSpec {
+        name: "notch-inbox",
+        size: (560.0, 300.0),
+        about: "the open notch with the inbox badge, three unread (fixture data)",
+    },
 ];
 
 /// The render for a view name.
@@ -109,6 +117,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "notch-permission-actions" => Shown::PermissionActions,
         "notch-pet" => Shown::Pet,
         "notch-perch" => Shown::Perch,
+        "notch-inbox" => Shown::Inbox,
         _ => return None,
     })
 }
@@ -183,6 +192,10 @@ pub fn scene(shown: Shown) -> Scene {
     let state = match shown {
         Shown::Collapsed => Some(NotchState::Collapsed),
         Shown::List => Some(NotchState::List),
+        Shown::Inbox => {
+            model.inbox_unread = INBOX_UNREAD;
+            Some(NotchState::List)
+        }
         Shown::Peek => pick(&model, &|m, id| {
             m.agent(id)
                 .is_some_and(|a| a.group == AgentGroup::Completed)
@@ -272,7 +285,7 @@ mod tests {
                 Shown::Collapsed | Shown::Pet | Shown::Perch => {
                     matches!(m.state, NotchState::Collapsed)
                 }
-                Shown::List => m.state == NotchState::List,
+                Shown::List | Shown::Inbox => m.state == NotchState::List,
                 Shown::Peek
                 | Shown::Permission
                 | Shown::PermissionActions
@@ -319,6 +332,12 @@ mod tests {
         assert!(q.items[1].multi_select);
         assert_eq!(Some(q), s.question);
         assert_eq!((s.tab, s.acting), (1, Acting::On));
+    }
+
+    #[test]
+    fn only_the_inbox_render_has_unread_items() {
+        assert_eq!(model(Shown::Inbox).inbox_unread, INBOX_UNREAD);
+        assert_eq!(model(Shown::List).inbox_unread, 0);
     }
 
     #[test]

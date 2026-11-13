@@ -10,6 +10,8 @@ import '../core/net/ws_transport.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection.dart';
 import '../features/connection/subscription_sync.dart';
+import '../features/inbox/inbox_notifier.dart';
+import '../features/inbox/inbox_screen.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/macs_screen.dart';
 import '../features/pairing/pairing_screen.dart';
@@ -200,6 +202,29 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               ),
               title: Text(l10n.appName, style: kit.titleMd),
               actions: <Widget>[
+                if (wide)
+                  IconButton(
+                    tooltip: l10n.tabInbox,
+                    icon: Badge(
+                      isLabelVisible: ref.watch(inboxOpenCountProvider) > 0,
+                      label: Text('${ref.watch(inboxOpenCountProvider)}'),
+                      child: const Icon(Icons.inbox_outlined),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: Metric.minTarget,
+                      minHeight: Metric.minTarget,
+                    ),
+                    onPressed: () => unawaited(
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (BuildContext context) => Scaffold(
+                            appBar: AppBar(title: Text(l10n.tabInbox)),
+                            body: const InboxScreen(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 IconButton(
                   tooltip: l10n.openMacs,
                   icon: const Icon(Icons.laptop_mac),
@@ -289,6 +314,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                           inset(const VisualizeScreen(), bottom: true)
                         else
                           const SizedBox.shrink(),
+                        _TabSlot(
+                          active: tab == 3,
+                          child: inset(const InboxScreen(), bottom: true),
+                        ),
                       ],
                     ),
                   ),
@@ -452,6 +481,7 @@ class _BottomNav extends ConsumerWidget {
       selected: ref.watch(activeTabProvider),
       // Chat is the tab whose list moves under the bar with the keyboard: no blur there.
       solid: ref.watch(activeTabProvider) == 1,
+      inboxCount: ref.watch(inboxOpenCountProvider),
       onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
     );
   }

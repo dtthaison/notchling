@@ -21,6 +21,52 @@ class AppL10nEn extends AppL10n {
   String get tabVisualize => 'Visualize';
 
   @override
+  String get tabInbox => 'Inbox';
+
+  @override
+  String get inboxNeedsYou => 'Needs You';
+
+  @override
+  String get inboxDone => 'Done';
+
+  @override
+  String get inboxEmptyTitle => 'Nothing Needs You';
+
+  @override
+  String get inboxEmptyBody => 'Requests from your Mac show up here.';
+
+  @override
+  String get inboxUnsupported => 'Notchling on this Mac has no inbox yet.';
+
+  @override
+  String get inboxOpenOnMac => 'Open on Mac';
+
+  @override
+  String inboxAnsweredOnMac(String action) {
+    return 'Answered on the Mac: $action';
+  }
+
+  @override
+  String inboxAnsweredHere(String action) {
+    return 'You answered: $action';
+  }
+
+  @override
+  String get inboxDeclined =>
+      'The Mac didn\'t take that answer. Try again on the Mac.';
+
+  @override
+  String get inboxExpired => 'Expired';
+
+  @override
+  String get inboxWithdrawn => 'Withdrawn';
+
+  @override
+  String inboxOpenCount(int count) {
+    return '$count open';
+  }
+
+  @override
   String get connecting => 'Connecting';
 
   @override

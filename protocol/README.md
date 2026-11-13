@@ -46,7 +46,9 @@ The answer's `data` depends on the op, so the schema names it `<Op>Response`. Th
 | `chat.image` | `sessionId`, `imageId`, `maxWidth?` | `binary`, `bytes`, `format`, `imageId`; and `sent` |
 | `session.takeover` | `sessionId`, `stopOriginal?` | `sessionId`, `resumed`, `stoppedPid?` |
 | `projects.recent` | | `projects` |
-| `subscribe` | `sessions?`, `sessionId?`, `subagentId?`, `lastMessageId?`, `phone? {deviceWindowId?, fps?, width?}` | `subscribed: true` |
+| `inbox.list` | | `items`, `unread` |
+| `inbox.answer` | `itemId`, `action` | `answered`, `state`, `answer?` |
+| `subscribe` | `sessions?`, `inbox?`, `sessionId?`, `subagentId?`, `lastMessageId?`, `phone? {deviceWindowId?, fps?, width?}` | `subscribed: true` |
 | `unsubscribe` | | `subscribed: false` |
 
 A `?` marks an optional field. The schema has the types, limits and descriptions.
@@ -57,6 +59,7 @@ A `?` marks an optional field. The schema has the types, limits and descriptions
 - `subscribe` with `sessions: true` sends one `sessions` event **before** its answer, then pushes changes about every 300 ms. With `sessionId` it pushes the messages newer than `lastMessageId` (all current ones count as known when it is absent).
 - `web.snapshot` and `chat.image` answer twice with the same `id`: first the JSON that announces a binary frame, then the binary frame and `{"ok": true, "data": {"sent": true}}` (the Mac writes both without waiting for the first; they may arrive in either order). A client takes the first answer as the reply and the binary frame as the picture.
 - A photo goes up as `session.image.begin`, any number of `session.image.chunk` (`seq` 0, 1, 2, in order, at most `chunkBytes` of data each, base64), then `session.image.end`.
+- `subscribe` with `inbox: true` sends every inbox item as an `inbox` event with an `item` on the next tick, then one for each item that changes, and `{"event": "inbox", "removed": id}` for one that leaves. `inbox.answer` takes the first answer: `answered: false` says the Mac or another phone was first and gives its `state` and `answer`. `open` is never answered from a phone. A Mac without the inbox answers `invalid` to `inbox.list`, and a phone that never sends `inbox` gets no inbox event.
 - A `prompt` event with a `prompt` is new; one with `resolved: true` and a `requestId` withdraws it.
 
 ## Binary frames

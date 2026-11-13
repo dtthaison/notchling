@@ -21,6 +21,52 @@ class AppL10nVi extends AppL10n {
   String get tabVisualize => 'Visualize';
 
   @override
+  String get tabInbox => 'Hộp thư';
+
+  @override
+  String get inboxNeedsYou => 'Cần bạn';
+
+  @override
+  String get inboxDone => 'Xong';
+
+  @override
+  String get inboxEmptyTitle => 'Không có gì cần bạn';
+
+  @override
+  String get inboxEmptyBody => 'Yêu cầu từ Mac sẽ hiện ở đây.';
+
+  @override
+  String get inboxUnsupported => 'Notchling trên Mac này chưa có hộp thư.';
+
+  @override
+  String get inboxOpenOnMac => 'Mở trên Mac';
+
+  @override
+  String inboxAnsweredOnMac(String action) {
+    return 'Đã trả lời trên Mac: $action';
+  }
+
+  @override
+  String inboxAnsweredHere(String action) {
+    return 'Bạn đã trả lời: $action';
+  }
+
+  @override
+  String get inboxDeclined =>
+      'Mac không nhận câu trả lời này. Thử lại trên Mac.';
+
+  @override
+  String get inboxExpired => 'Đã hết hạn';
+
+  @override
+  String get inboxWithdrawn => 'Đã rút lại';
+
+  @override
+  String inboxOpenCount(int count) {
+    return '$count chưa xử lý';
+  }
+
+  @override
   String get connecting => 'Đang kết nối';
 
   @override

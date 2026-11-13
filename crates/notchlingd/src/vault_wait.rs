@@ -1,16 +1,3 @@
-//! What the vault service waits on: an approval (Deny / Allow Once / Always Allow) or a request's
-//! form, each answered by the app under an id.
-//!
-//! - Ids are 128 random bits from the OS ([`notchling_engine::vault::random_id`]): nobody can
-//!   answer one without having been sent it, and only the app follows the topic it is sent on.
-//!   No randomness, no id, and the wait is refused.
-//! - At most `max` wait at once, so agents can't pile them up.
-//! - Each keeps the event that announced it ([`Waiters::describe`]), so an app that connects
-//!   later still sees it ([`Waiters::pending`]).
-//! - A wait ends at its deadline, when `still` says stop (the app left, the vault went off), or
-//!   when [`Waiters::drain`] drops every answer channel (the daemon stops). All of those are a
-//!   "no": the caller gets `None`.
-
 use crate::vault_args::Decision;
 use notchling_engine::vault::{VaultEntry, VaultStore};
 use serde_json::Value;
@@ -154,7 +141,7 @@ impl<T> Waiters<T> {
             }
         };
         self.close(&ticket.id);
-        answer
+        answer.or_else(|| ticket.rx.try_recv().ok())
     }
 }
 
@@ -230,6 +217,22 @@ mod tests {
         );
         assert!(w.is_empty());
         assert!(!w.answer("x-guessed", true));
+    }
+
+    #[test]
+    fn an_answer_taken_as_the_wait_ends_is_returned() {
+        let w: Waiters<bool> = Waiters::new("x-", 2);
+        let ticket = w.open().unwrap();
+        let id = ticket.id.clone();
+        let still = || !w.answer(&id, true);
+        let got = w.wait(
+            ticket,
+            Duration::from_secs(60),
+            Duration::from_millis(10),
+            &still,
+        );
+        assert_eq!(got, Some(true));
+        assert!(w.is_empty());
     }
 
     #[test]

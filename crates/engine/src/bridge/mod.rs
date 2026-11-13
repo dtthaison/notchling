@@ -83,10 +83,12 @@ pub mod extras;
 pub mod foreign;
 pub mod hub;
 pub mod images;
+pub mod inbox;
 pub mod live;
 pub mod model;
 pub mod net;
 pub mod router;
+mod router_inbox;
 mod router_ops;
 pub mod snapshot;
 pub mod stream;
@@ -112,6 +114,8 @@ mod foreign_tests;
 mod hub_tests;
 #[cfg(test)]
 mod images_tests;
+#[cfg(test)]
+mod inbox_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]

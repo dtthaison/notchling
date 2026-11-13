@@ -3,7 +3,7 @@
 
 use super::backend::PairedDevice;
 use super::wire::frame;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// The transport's side of one client. Implementations queue the frame and return at once.
@@ -26,6 +26,8 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Debug, Default)]
 pub(crate) struct Subscription {
     pub wants_sessions: bool,
+    pub wants_inbox: bool,
+    pub known_inbox: HashMap<String, String>,
     pub chat_session_id: Option<String>,
     pub chat_subagent_id: Option<String>,
     pub last_sessions_json: Option<String>,
@@ -80,6 +82,10 @@ impl Connection {
 
     pub(crate) fn authenticate(&self, device: PairedDevice) {
         lock(&self.state).device = Some(device);
+    }
+
+    pub(crate) fn wants_inbox(&self) -> bool {
+        lock(&self.subscription).wants_inbox
     }
 
     /// Whether the client asked for `sessions` pushes.

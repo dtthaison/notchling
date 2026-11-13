@@ -193,6 +193,7 @@ pub struct Covers {
     pub sheet: bool,
     /// The phone popover, at the header's right end.
     pub phone: bool,
+    pub inbox: bool,
     /// The part names, drawn over every part.
     pub parts: bool,
 }
@@ -200,7 +201,7 @@ pub struct Covers {
 /// Whether the page hides. Menus and pickers that open in the conversation column don't count:
 /// they sit beside the panel, so the page stays in view while one is up.
 pub fn page_covered(covers: Covers) -> bool {
-    covers.sheet || covers.phone || covers.parts
+    covers.sheet || covers.phone || covers.inbox || covers.parts
 }
 
 /// Whether a link a live page wanted to open in a new window may go to the browser: http or https.
@@ -271,6 +272,10 @@ mod tests {
             },
             Covers {
                 phone: true,
+                ..Covers::default()
+            },
+            Covers {
+                inbox: true,
                 ..Covers::default()
             },
             Covers {

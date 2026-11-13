@@ -65,6 +65,19 @@ class PromptEvent extends BridgeEvent {
   final String? resolvedRequestId;
 }
 
+class InboxEvent extends BridgeEvent {
+  const InboxEvent({this.item, this.removedId});
+  final InboxItem? item;
+  final String? removedId;
+}
+
+class InboxAnswer {
+  const InboxAnswer({required this.answered, required this.state, this.answer});
+  final bool answered;
+  final String state;
+  final String? answer;
+}
+
 class OpenEvent extends BridgeEvent {
   const OpenEvent();
 }
@@ -78,8 +91,9 @@ class PhoneFrame {
 
 /// What this connection wants pushed. Re-sent after every reconnect.
 class SubscriptionSpec {
-  const SubscriptionSpec({this.sessions = false, this.sessionId, this.subagentId, this.phoneFps, this.phoneWidth, this.phoneWindowId});
+  const SubscriptionSpec({this.sessions = false, this.inbox = false, this.sessionId, this.subagentId, this.phoneFps, this.phoneWidth, this.phoneWindowId});
   final bool sessions;
+  final bool inbox;
   final String? sessionId;
   final String? subagentId;
   final int? phoneFps;
@@ -90,6 +104,7 @@ class SubscriptionSpec {
 
   Json toParams() => <String, Object?>{
         if (sessions) 'sessions': true,
+        if (inbox) 'inbox': true,
         'sessionId': ?sessionId,
         'subagentId': ?subagentId,
         if (wantsPhone)
@@ -331,6 +346,13 @@ class BridgeClient {
           } else {
             _eventController.add(PromptEvent(prompt: PendingPrompt.fromJson(json.object('prompt'))));
           }
+        case 'inbox':
+          final Object? removed = json['removed'];
+          if (removed is String) {
+            _eventController.add(InboxEvent(removedId: removed));
+          } else {
+            _eventController.add(InboxEvent(item: InboxItem.fromJson(json.object('item'))));
+          }
         case 'open':
           _eventController.add(const OpenEvent());
       }
@@ -513,6 +535,16 @@ class BridgeClient {
     final Json data = await request('session.takeover', <String, Object?>{'sessionId': sessionId, if (stopOriginal) 'stopOriginal': true},
         const Duration(seconds: 45));
     return data.str('sessionId');
+  }
+
+  Future<List<InboxItem>> inboxList() async {
+    final Json data = await request('inbox.list');
+    return data.objects('items').map(InboxItem.fromJson).toList();
+  }
+
+  Future<InboxAnswer> inboxAnswer(String itemId, String action) async {
+    final Json data = await request('inbox.answer', <String, Object?>{'itemId': itemId, 'action': action});
+    return InboxAnswer(answered: data.boolean('answered'), state: data.strOrNull('state') ?? 'answered', answer: data.strOrNull('answer'));
   }
 
   Future<List<String>> projectsRecent() async => (await request('projects.recent')).strings('projects');

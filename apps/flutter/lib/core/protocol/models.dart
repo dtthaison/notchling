@@ -111,6 +111,85 @@ class PendingPrompt {
   bool get hasMultiSelect => questions.any((PromptQuestion q) => q.multiSelect);
 }
 
+class InboxAction {
+  const InboxAction({required this.id, required this.label, required this.primary});
+
+  factory InboxAction.fromJson(Json json) => InboxAction(
+    id: json.str('id'),
+    label: json.strOrNull('label') ?? '',
+    primary: json.boolean('primary'),
+  );
+
+  final String id;
+  final String label;
+  final bool primary;
+}
+
+class InboxItem {
+  const InboxItem({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.detail,
+    required this.createdMs,
+    required this.actions,
+    required this.state,
+    this.session,
+    this.answer,
+    this.answeredBy,
+    this.seen = false,
+  });
+
+  factory InboxItem.fromJson(Json json) => InboxItem(
+    id: json.str('id'),
+    kind: json.strOrNull('kind') ?? 'notice',
+    title: json.strOrNull('title') ?? '',
+    detail: json.strOrNull('detail') ?? '',
+    createdMs: json.integer('createdMs', orElse: 0),
+    actions: json.objects('actions').map(InboxAction.fromJson).toList(),
+    state: json.strOrNull('state') ?? 'open',
+    session: json['source'] is Map<Object?, Object?> ? json.object('source').strOrNull('session') : null,
+    answer: json.strOrNull('answer'),
+    answeredBy: json.strOrNull('answeredBy'),
+    seen: json.boolean('seen'),
+  );
+
+  final String id;
+  final String kind;
+  final String title;
+  final String detail;
+  final int createdMs;
+  final List<InboxAction> actions;
+  final String state;
+  final String? session;
+  final String? answer;
+  final String? answeredBy;
+  final bool seen;
+
+  bool get isOpen => state == 'open';
+
+  InboxItem closed({required String state, String? answer, String? answeredBy}) => InboxItem(
+    id: id,
+    kind: kind,
+    title: title,
+    detail: detail,
+    createdMs: createdMs,
+    actions: actions,
+    state: state,
+    session: session,
+    answer: answer,
+    answeredBy: answeredBy,
+    seen: seen,
+  );
+
+  String? answerLabel() {
+    for (final InboxAction action in actions) {
+      if (action.id == answer) return action.label;
+    }
+    return null;
+  }
+}
+
 /// The Mac's answer to "can you take this session over": [reason] says why not.
 class TakeoverInfo {
   const TakeoverInfo({

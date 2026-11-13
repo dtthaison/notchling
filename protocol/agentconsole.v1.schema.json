@@ -997,6 +997,108 @@
       ],
       "additionalProperties": true
     },
+    "InboxAction": {
+      "type": "object",
+      "description": "One button an inbox item offers.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it."
+        },
+        "label": {
+          "type": "string"
+        },
+        "primary": {
+          "type": "boolean",
+          "description": "The main button of the item."
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "primary"
+      ],
+      "additionalProperties": true
+    },
+    "InboxItem": {
+      "type": "object",
+      "description": "One notification the Mac's inbox holds.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice."
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "source": {
+          "type": "object",
+          "description": "Where the item came from.",
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "job": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        },
+        "createdMs": {
+          "type": "integer"
+        },
+        "expiresMs": {
+          "type": "integer",
+          "description": "When an open item stops waiting."
+        },
+        "closedMs": {
+          "type": "integer",
+          "description": "When the item was answered, expired or withdrawn."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxAction"
+          }
+        },
+        "state": {
+          "type": "string",
+          "description": "open, answered, expired or withdrawn."
+        },
+        "answer": {
+          "type": "string",
+          "description": "The action id that answered it."
+        },
+        "answeredBy": {
+          "type": "string",
+          "description": "mac or phone."
+        },
+        "seen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "detail",
+        "createdMs",
+        "actions",
+        "state",
+        "seen"
+      ],
+      "additionalProperties": true
+    },
     "HelloRequest": {
       "type": "object",
       "description": "First message on a connection from a paired phone.",
@@ -1546,6 +1648,10 @@
           },
           "required": [],
           "additionalProperties": true
+        },
+        "inbox": {
+          "type": "boolean",
+          "description": "Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes."
         }
       },
       "required": [
@@ -1567,6 +1673,50 @@
       },
       "required": [
         "op"
+      ],
+      "additionalProperties": true
+    },
+    "InboxListRequest": {
+      "type": "object",
+      "description": "The Mac's notification inbox.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "inbox.list"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "InboxAnswerRequest": {
+      "type": "object",
+      "description": "Presses one action of an open inbox item. The first answer wins, from the Mac or a phone.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "inbox.answer"
+        },
+        "itemId": {
+          "type": "string",
+          "description": "The inbox item's id."
+        },
+        "action": {
+          "type": "string",
+          "description": "An action id the item offers; open is refused."
+        }
+      },
+      "required": [
+        "op",
+        "itemId",
+        "action"
       ],
       "additionalProperties": true
     },
@@ -2282,6 +2432,85 @@
       ],
       "additionalProperties": true
     },
+    "InboxListResponse": {
+      "type": "object",
+      "description": "The inbox as the Mac keeps it.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InboxItem"
+              }
+            },
+            "unread": {
+              "type": "integer",
+              "description": "Open items not seen yet."
+            }
+          },
+          "required": [
+            "items",
+            "unread"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "InboxAnswerResponse": {
+      "type": "object",
+      "description": "Whether this answer was the one taken.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "answered": {
+              "type": "boolean",
+              "description": "False when the item was already answered, expired or withdrawn."
+            },
+            "state": {
+              "type": "string"
+            },
+            "answer": {
+              "type": "string",
+              "description": "The action that answered the item, when one did."
+            }
+          },
+          "required": [
+            "answered",
+            "state"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
     "ErrorResponse": {
       "type": "object",
       "description": "The Mac refused a request, or could not read the frame (then there is no id).",
@@ -2423,6 +2652,43 @@
       ],
       "additionalProperties": true
     },
+    "InboxEvent": {
+      "type": "object",
+      "description": "An inbox item was raised or changed. Sent only to a connection that subscribed with inbox: true.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "inbox"
+        },
+        "item": {
+          "$ref": "#/$defs/InboxItem"
+        }
+      },
+      "required": [
+        "event",
+        "item"
+      ],
+      "additionalProperties": true
+    },
+    "InboxRemovedEvent": {
+      "type": "object",
+      "description": "An inbox item was removed from the Mac's inbox.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "const": "inbox"
+        },
+        "removed": {
+          "type": "string",
+          "description": "The removed item's id."
+        }
+      },
+      "required": [
+        "event",
+        "removed"
+      ],
+      "additionalProperties": true
+    },
     "Request": {
       "description": "A frame the phone sends; the op says which.",
       "oneOf": [
@@ -2485,6 +2751,12 @@
         },
         {
           "$ref": "#/$defs/UnsubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/InboxListRequest"
+        },
+        {
+          "$ref": "#/$defs/InboxAnswerRequest"
         }
       ]
     },
@@ -2505,6 +2777,12 @@
         },
         {
           "$ref": "#/$defs/OpenEvent"
+        },
+        {
+          "$ref": "#/$defs/InboxEvent"
+        },
+        {
+          "$ref": "#/$defs/InboxRemovedEvent"
         }
       ]
     }

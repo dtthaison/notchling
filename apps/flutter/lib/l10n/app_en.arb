@@ -4,6 +4,40 @@
   "tabSessions": "Sessions",
   "tabChat": "Chat",
   "tabVisualize": "Visualize",
+  "tabInbox": "Inbox",
+  "inboxNeedsYou": "Needs You",
+  "inboxDone": "Done",
+  "inboxEmptyTitle": "Nothing Needs You",
+  "inboxEmptyBody": "Requests from your Mac show up here.",
+  "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
+  "inboxOpenOnMac": "Open on Mac",
+  "inboxAnsweredOnMac": "Answered on the Mac: {action}",
+  "@inboxAnsweredOnMac": {
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxAnsweredHere": "You answered: {action}",
+  "@inboxAnsweredHere": {
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxDeclined": "The Mac didn't take that answer. Try again on the Mac.",
+  "inboxExpired": "Expired",
+  "inboxWithdrawn": "Withdrawn",
+  "inboxOpenCount": "{count} open",
+  "@inboxOpenCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "connecting": "Connecting",
   "connectionLostRetry": "Connection lost, retrying in {seconds}s",
   "@connectionLostRetry": {

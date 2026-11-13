@@ -75,6 +75,13 @@ Off by default. **Let phones connect** in the Phone panel turns it on.
   pictures of web pages the Mac renders. Those pages can only be `localhost` or `127.0.0.1`, and are
   loaded with no stored cookies.
 - The phone can send messages, answers, images and new sessions to the Mac.
+- A paired phone that asks for the inbox gets each item's title and detail. For a vault item that is
+  the secret's name, the command that wants it (cut to 120 characters) and its folder. The phone can
+  answer those items only while the bridge, **acting** and the vault are all on. It can allow a
+  secret's use (Allow Once or Always Allow), deny it, or cancel a request; the first answer, from the
+  Mac or a phone, wins. It never opens the form that takes a secret's value. Pairing is a file on the
+  Mac that an agent with a shell could write, so a forged device could answer too; the maintainer
+  accepted that risk until pairing has an anchor an agent can't write.
 - Every remote change is logged on the Mac (`bridge/remote-log.jsonl`), with the length of any text
   sent, never the text itself.
 
@@ -141,7 +148,9 @@ Links you click open in your browser.
 Transcripts, conversations and search are read from files on this Mac and stay there, except what a
 paired phone is shown. Cost tracking, the search index, the local copies of Artifacts and the vault
 list are local files. Vault values are in the Keychain, and agents reach them only through a socket
-on this Mac that answers only Notchling's own executable.
+on this Mac that answers only Notchling's own executable. A use of a secret is allowed from the
+Notchling app on the Mac, or from a paired phone through the inbox while the bridge, acting and the
+vault are on; the value itself never leaves the Mac.
 
 ## Planned
 

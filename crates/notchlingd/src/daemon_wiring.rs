@@ -16,6 +16,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
@@ -273,6 +274,7 @@ pub struct Wired {
     pub limits: Arc<LimitsOps>,
     /// The one catalog: `catalog.get`, and the prices cost reads.
     pub catalog: Arc<CatalogService>,
+    pub inbox: Arc<InboxOps>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
 }
@@ -312,6 +314,7 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         // No port is bound and nothing is written under `AgentConsole` until the app's
         // `bridge.set` in this run.
         let bridge = Arc::new(BridgeOps::new(
@@ -319,6 +322,7 @@ impl Wired {
             sessions,
             acting.clone(),
             room.clone(),
+            inbox.clone(),
         ));
         // `agy` starts only on an acting op, and the copy of its list is made only when the list
         // is read.
@@ -374,6 +378,7 @@ impl Wired {
             on.clone(),
             room.clone(),
             catalog.shared_catalog(),
+            inbox.clone(),
         ));
         limits.set_claude(
             Arc::new(ClaudeLimits::new(on.clone(), claude_store)),
@@ -404,6 +409,7 @@ impl Wired {
             layout,
             switches.vault.clone(),
             room.clone(),
+            inbox.clone(),
         ));
         let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
         let mut install = InstallOps::new(
@@ -423,6 +429,7 @@ impl Wired {
             providers,
             limits,
             catalog,
+            inbox,
             vault,
             install: Arc::new(install),
         }
@@ -452,6 +459,7 @@ impl Wired {
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
             .with_group(self.catalog.clone())
+            .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
             .with_first_scan(first_scan, first_wait)
     }
@@ -459,6 +467,11 @@ impl Wired {
     /// The server answers: the limits loop starts (a flag check per tick while `accounts` is off).
     pub fn start(&self) {
         self.limits.spawn_loop();
+        self.inbox.spawn_loop();
+    }
+
+    pub fn load(&self) {
+        self.inbox.load();
     }
 
     /// The daemon stops: held hooks pass, turns and waits end, the bridge's ports close.
@@ -470,6 +483,7 @@ impl Wired {
         self.vault.close();
         self.bridge.close();
         self.limits.close();
+        self.inbox.close();
     }
 
     /// The accounts switch (tests).

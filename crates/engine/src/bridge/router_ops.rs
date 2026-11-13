@@ -25,7 +25,7 @@ fn int(body: &Body, key: &str) -> Option<i64> {
     body.get(key).and_then(Value::as_i64)
 }
 
-fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
+pub(super) fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
     string(body, key)
         .filter(|v| !v.is_empty())
         .ok_or_else(|| BridgeFailure::invalid(format!("Thiếu \"{key}\".")))
@@ -458,6 +458,13 @@ impl Router {
                 .map(|m| m.id.clone())
                 .collect();
         }
+        if body.get("inbox").and_then(Value::as_bool) == Some(true) {
+            let mut sub = connection.subscription();
+            if !sub.wants_inbox {
+                sub.known_inbox.clear();
+            }
+            sub.wants_inbox = true;
+        }
         if let Some(options) = phone {
             self.backend.start_phone(connection, &options)?;
             connection.subscription().phone_active = true;
@@ -469,6 +476,8 @@ impl Router {
         let streaming = {
             let mut sub = connection.subscription();
             sub.wants_sessions = false;
+            sub.wants_inbox = false;
+            sub.known_inbox.clear();
             sub.chat_session_id = None;
             sub.chat_subagent_id = None;
             std::mem::take(&mut sub.phone_active)

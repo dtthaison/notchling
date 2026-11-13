@@ -111,8 +111,8 @@ impl ProviderSource for Untouchable {
 
 /// A Claude store with two accounts; the active one is at `me` percent.
 #[derive(Default)]
-struct Claude {
-    me: Mutex<f64>,
+pub(crate) struct Claude {
+    pub(crate) me: Mutex<f64>,
     syncs: AtomicU32,
     switched: Mutex<Vec<String>>,
 }
@@ -168,7 +168,7 @@ impl ClaudeSource for Claude {
     }
 }
 
-struct NoJobs;
+pub(crate) struct NoJobs;
 
 impl StoppedJobs for NoJobs {
     fn stopped(&self) -> Vec<StoppedJob> {

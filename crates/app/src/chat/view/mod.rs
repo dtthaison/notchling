@@ -16,6 +16,7 @@ mod copy;
 mod copy_menu;
 mod drop;
 mod header;
+mod inbox;
 mod inspector;
 mod limit_ring;
 pub mod list_probe;
@@ -70,6 +71,8 @@ use crate::chat::log::Change;
 use crate::chat::message_meta;
 use crate::chat::reload::{watch_config, ReloadGate};
 use crate::chat::sidebar::{row_for, Pending, PendingJob, PendingSession};
+use crate::inbox::feed::InboxFeed;
+use crate::inbox::view::InboxPanelView;
 use crate::phone::bridge::Bridge;
 use crate::phone::view::PhonePanelView;
 use crate::search::wire::SessionRef;
@@ -123,6 +126,7 @@ pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 /// Set to a page id, a render draws the page panel over it (`page_panel::PAGE_ENV`).
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
+pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 
 /// Whether a render switch is on.
 fn switch(name: &str) -> bool {
@@ -203,6 +207,9 @@ pub struct ChatView {
     phone: Option<Entity<PhonePanelView>>,
     /// Whether the Phone button's dot is lit, so a change redraws it.
     phone_dot: bool,
+    inbox: Arc<InboxFeed>,
+    inbox_panel: Option<Entity<InboxPanelView>>,
+    seen_inbox: u64,
     /// A session the search panel asked for that isn't listed yet: selected when it appears.
     pending_session: Option<PendingSession>,
     /// The job New Session just started: selected when the sidebar lists it.
@@ -323,6 +330,9 @@ impl ChatView {
                 enabled: how != "off",
             });
         }
+        if switch(INBOX_ENV) {
+            view.preview_inbox(cx);
+        }
         if let Ok(id) = std::env::var(PAGE_ENV) {
             view.page.preview(&id);
         }
@@ -402,6 +412,7 @@ impl ChatView {
                 menu: this.composer.is_open() || this.tools.picker.is_some(),
                 popup: this.sheet.is_some()
                     || this.phone.is_some()
+                    || this.inbox_panel.is_some()
                     || this.account_menu
                     || this.row_menu.is_some()
                     || this.copy_menu.is_some(),
@@ -418,6 +429,7 @@ impl ChatView {
                 Escape::ClosePopup => {
                     this.sheet = None;
                     this.phone = None;
+                    this.inbox_panel = None;
                     this.account_menu = false;
                     this.row_menu = None;
                     this.copy_menu = None;
@@ -484,6 +496,9 @@ impl ChatView {
             bridge: phone::app_bridge(cx),
             phone: None,
             phone_dot: false,
+            inbox: inbox::app_inbox(cx),
+            inbox_panel: None,
+            seen_inbox: 0,
             pending_session: None,
             pending_job: None,
             closed: std::collections::HashMap::new(),
