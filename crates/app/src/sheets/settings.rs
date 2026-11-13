@@ -2,7 +2,9 @@ use notchling_engine::settings::spec;
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
+use crate::appearance;
 use crate::chat::history;
+use crate::search::shortcut;
 use crate::switches::restart::Area;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,6 +30,7 @@ pub enum Field {
         area: Area,
         on: Option<bool>,
     },
+    Shortcut(shortcut::Setting),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +172,32 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
     }
     vec![
         Section {
+            title: "General",
+            rows: vec![choice(
+                read,
+                appearance::KEY,
+                "Appearance",
+                &appearance::CHOICES,
+            )],
+            footer: None,
+        },
+        Section {
+            title: "Search",
+            rows: vec![Row {
+                key: shortcut::KEY,
+                title: "Search Shortcut",
+                field: Field::Shortcut(
+                    value(read, shortcut::KEY)
+                        .map(|v| shortcut::Setting::from_value(&v))
+                        .unwrap_or(shortcut::Setting::DEFAULT),
+                ),
+            }],
+            footer: Some(
+                "Opens Search from any app, so no other app can use this key. Inside \
+                 Notchling, ⌘⇧P always opens Search.",
+            ),
+        },
+        Section {
             title: "Daemon",
             rows: DAEMON_ROWS
                 .iter()
@@ -268,7 +297,7 @@ pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
             };
             Some((row.key, json!((value + step).clamp(*min, *max))))
         }
-        Field::ReadOnly { .. } | Field::Daemon { .. } => None,
+        Field::ReadOnly { .. } | Field::Daemon { .. } | Field::Shortcut(_) => None,
     }
 }
 
@@ -361,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn the_daemons_switches_come_first_with_what_it_said() {
+    fn the_daemons_switches_follow_the_app_wide_sections_with_what_it_said() {
         let daemon = Daemon {
             acting: Acting::On,
             bridge: Some(false),
@@ -369,7 +398,7 @@ mod tests {
             vault: None,
             install: Some(false),
         };
-        let first = sections(&|_| None, &daemon).remove(0);
+        let first = sections(&|_| None, &daemon).remove(2);
         assert_eq!(first.title, "Daemon");
         let fields: Vec<Field> = first.rows.iter().map(|r| r.field.clone()).collect();
         assert_eq!(
@@ -398,7 +427,7 @@ mod tests {
             ]
         );
         assert_eq!(change(&first.rows[0], ""), None, "not a settings key");
-        let off = sections(&|_| None, &with(Acting::Off)).remove(0);
+        let off = sections(&|_| None, &with(Acting::Off)).remove(2);
         assert_eq!(
             off.rows[0].field,
             Field::Daemon {
@@ -406,7 +435,7 @@ mod tests {
                 on: Some(false)
             }
         );
-        let none = sections(&|_| None, &Daemon::detached()).remove(0);
+        let none = sections(&|_| None, &Daemon::detached()).remove(2);
         assert!(none
             .rows
             .iter()
@@ -414,7 +443,24 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_section_is_last_and_nothing_before_it_moves() {
+    fn the_general_section_offers_appearance_with_system_the_default() {
+        let general = sections(&|_| None, &with(Acting::Off)).remove(0);
+        assert_eq!(general.title, "General");
+        assert_eq!(general.rows.len(), 1);
+        let row = &general.rows[0];
+        assert_eq!(row.title, "Appearance");
+        let Field::Choice { selected, options } = row.field.clone() else {
+            panic!("a choice");
+        };
+        assert_eq!(selected, "system");
+        let names: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
+        assert_eq!(names, ["System", "Light", "Dark"]);
+        assert_eq!(change(row, "dark"), Some(("appearance", json!("dark"))));
+        assert_eq!(change(row, "sepia"), None);
+    }
+
+    #[test]
+    fn the_app_wide_sections_come_first_and_chat_is_last() {
         let titles: Vec<&str> = sections(&|_| None, &with(Acting::Off))
             .iter()
             .map(|s| s.title)
@@ -422,6 +468,8 @@ mod tests {
         assert_eq!(
             titles,
             [
+                "General",
+                "Search",
                 "Daemon",
                 "Keep Mac Awake",
                 "Notch",
@@ -445,6 +493,27 @@ mod tests {
             Some(("chatHistory", json!("16mb")))
         );
         assert_eq!(change(&history, "1gb"), None);
+    }
+
+    #[test]
+    fn the_search_shortcut_shows_control_option_p_until_chosen() {
+        let rows = rows_of(&|_| None, Acting::Off);
+        let shown = row(&rows, "searchShortcut");
+        assert_eq!(shown.title, "Search Shortcut");
+        assert_eq!(shown.field, Field::Shortcut(shortcut::Setting::DEFAULT));
+        assert_eq!(change(&shown, "alt+space"), None, "the recorder writes it");
+        let store: HashMap<&str, Value> = [("searchShortcut", json!("off"))].into_iter().collect();
+        let read = |k: &str| store.get(k).cloned();
+        let off = row(&rows_of(&read, Acting::Off), "searchShortcut");
+        assert_eq!(off.field, Field::Shortcut(shortcut::Setting::Off));
+        let store: HashMap<&str, Value> = [("searchShortcut", json!("alt+space"))]
+            .into_iter()
+            .collect();
+        let read = |k: &str| store.get(k).cloned();
+        let Field::Shortcut(set) = row(&rows_of(&read, Acting::Off), "searchShortcut").field else {
+            panic!()
+        };
+        assert_eq!(set.label(), "⌥Space");
     }
 
     #[test]

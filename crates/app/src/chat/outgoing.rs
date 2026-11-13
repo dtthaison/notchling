@@ -1,20 +1,23 @@
 use notchling_engine::transcript::model::{Conversation, ItemKind};
 
 pub const GRACE_MS: i64 = 30_000;
+const CLOCK_SLACK_MS: f64 = 2_000.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outgoing {
     pub text: String,
     pub seen: usize,
     pub delivered_at: Option<i64>,
+    pub sent_at: i64,
 }
 
 impl Outgoing {
-    pub fn new(text: &str, conversation: &Conversation) -> Outgoing {
+    pub fn new(text: &str, conversation: &Conversation, now_ms: i64) -> Outgoing {
         Outgoing {
             text: text.to_owned(),
             seen: copies(text, conversation),
             delivered_at: None,
+            sent_at: now_ms,
         }
     }
 
@@ -30,7 +33,16 @@ impl Outgoing {
     }
 
     pub fn arrived(&self, conversation: &Conversation) -> bool {
-        copies(&self.text, conversation) > self.seen
+        copies(&self.text, conversation) > self.seen || self.dated_copy(conversation)
+    }
+
+    fn dated_copy(&self, conversation: &Conversation) -> bool {
+        let text = comparable(&self.text);
+        let since = self.sent_at as f64 - CLOCK_SLACK_MS;
+        conversation.items.iter().any(|item| {
+            matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text)
+                && item.date.is_some_and(|d| d * 1000.0 >= since)
+        })
     }
 }
 
@@ -85,7 +97,7 @@ mod tests {
     #[test]
     fn a_sent_message_waits_until_the_transcript_has_it() {
         let before = with_user(&["first"]);
-        let out = Outgoing::new("Fix the build", &before);
+        let out = Outgoing::new("Fix the build", &before, 0);
         assert!(!out.arrived(&before));
         assert!(out.arrived(&with_user(&["first", "Fix the build\n"])));
     }
@@ -93,7 +105,7 @@ mod tests {
     #[test]
     fn the_same_words_twice_wait_for_the_second_copy() {
         let before = with_user(&["yes"]);
-        let out = Outgoing::new("yes", &before);
+        let out = Outgoing::new("yes", &before, 0);
         assert!(!out.arrived(&before), "the earlier yes is not this one");
         assert!(out.arrived(&with_user(&["yes", "yes"])));
     }
@@ -101,7 +113,7 @@ mod tests {
     #[test]
     fn a_delivered_message_the_transcript_never_shows_lets_go_after_a_while() {
         let c = with_user(&[]);
-        let mut out = Outgoing::new("words the transcript keeps differently", &c);
+        let mut out = Outgoing::new("words the transcript keeps differently", &c, 0);
         assert!(
             out.keep(&c, 1_000_000),
             "still being typed: no deadline yet"
@@ -113,14 +125,33 @@ mod tests {
 
     #[test]
     fn a_shell_command_arrives_as_the_transcript_writes_it() {
-        let out = Outgoing::new("!ls -la", &with_user(&[]));
+        let out = Outgoing::new("!ls -la", &with_user(&[]), 0);
         assert!(out.arrived(&with_user(&["! ls -la"])));
+    }
+
+    #[test]
+    fn a_clear_arrives_in_the_new_transcript_that_has_as_many_copies() {
+        let mut before = with_user(&["/clear", "fix it"]);
+        before.items[0].date = Some(1_000.0);
+        let out = Outgoing::new("/clear", &before, 2_000_000);
+        assert!(!out.arrived(&before));
+        let mut after = with_user(&["/clear"]);
+        after.items[0].date = Some(2_000.5);
+        assert!(out.arrived(&after), "the new file's /clear is this one");
+    }
+
+    #[test]
+    fn a_copy_dated_before_the_send_is_not_this_one() {
+        let mut before = with_user(&["yes"]);
+        before.items[0].date = Some(1_990.0);
+        let out = Outgoing::new("yes", &before, 2_000_000);
+        assert!(!out.arrived(&before));
     }
 
     #[test]
     fn a_queued_copy_counts_as_arrived() {
         let before = with_user(&[]);
-        let out = Outgoing::new("and bump the version", &before);
+        let out = Outgoing::new("and bump the version", &before, 0);
         let mut after = with_user(&[]);
         after.queued.push("and bump the version".into());
         assert!(out.arrived(&after));

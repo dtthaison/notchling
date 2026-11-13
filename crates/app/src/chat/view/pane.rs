@@ -10,6 +10,7 @@ use notchling_kit::ui::{
 };
 use notchling_kit::Appearance;
 
+use super::changes_panel::ChangesPanel;
 use super::conversation_view::ConversationView;
 use super::inspector::DetailsModel;
 use super::render_map::{self, Place};
@@ -113,6 +114,7 @@ pub struct Parts {
     pub conversation: Entity<ConversationView>,
     pub sidebar: Entity<ModelPart<SidebarModel>>,
     pub details: Entity<ModelPart<DetailsModel>>,
+    pub changes: Entity<ChangesPanel>,
     pub spins: Entity<SpinLayer>,
     pub root_spins: SpinSlots,
     pub native: SpinGate,
@@ -142,6 +144,7 @@ impl Parts {
                 cx,
             )
         });
+        let changes = cx.new(|cx| ChangesPanel::new(chat.downgrade(), cx));
         let root_spins = SpinSlots::only(super::native_spin::ROOT_SPINNERS);
         let root = cx.entity_id();
         host_spinners(cx, root, &root_spins);
@@ -163,6 +166,7 @@ impl Parts {
         };
         Parts {
             spins: cx.new(|_| layer),
+            changes,
             conversation,
             sidebar,
             details,
@@ -209,8 +213,8 @@ impl Parts {
         )
     }
 
-    pub fn sidebar(&self, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
-        let width = gpui::px(notchling_kit::metric::SIDEBAR_WIDTH);
+    pub fn sidebar(&self, width: f32, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
+        let width = gpui::px(width);
         framed(
             Region::Sidebar,
             Place::Bottom(SIDEBAR_BADGE_BOTTOM),
@@ -222,8 +226,8 @@ impl Parts {
         )
     }
 
-    pub fn details(&self, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
-        let width = gpui::px(inspector::WIDTH);
+    pub fn details(&self, width: f32, a: Appearance, cx: &Context<ChatView>) -> AnyElement {
+        let width = gpui::px(width);
         framed(
             Region::Details,
             Place::Bottom(DETAILS_BADGE_BOTTOM),
@@ -249,6 +253,7 @@ impl ChatView {
         self.parts.sidebar.update(cx, |part, pcx| part.redraw(pcx));
         self.parts.conversation.update(cx, |_, pcx| pcx.notify());
         self.parts.details.update(cx, |part, pcx| part.redraw(pcx));
+        self.parts.changes.update(cx, |_, pcx| pcx.notify());
     }
 
     pub(super) fn redraw_chrome(&self, cx: &mut Context<ChatView>) {

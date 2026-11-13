@@ -3,6 +3,8 @@ pub mod bench_fixture;
 pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
+pub mod branch;
+pub mod branch_rows;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
@@ -35,6 +37,7 @@ pub mod message_meta;
 pub mod outgoing;
 pub mod page_panel;
 pub mod paging;
+pub mod panels;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;

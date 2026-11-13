@@ -17,7 +17,7 @@ pub use menu::{
     menu_note, menu_panel, menu_panel_wide, menu_row, menu_rule, menu_section, MenuItem,
 };
 pub use parts::{parts_button, parts_on, parts_tip, set_parts, toggle_parts, KitPart, RegionScope};
-pub use resize::{resize_edges, TopBorder};
+pub use resize::{panel_edge, resize_edges, TopBorder};
 pub use scrollbar::{scrollable, scrollable_list, PinScrollbars, Scrollable, ThumbAt, ThumbRecord};
 pub use spin_layer::{drop_spinner_host, host_spinners, spin_host, SpinLayer, SpinSlot, SpinSlots};
 pub use spin_native::{
@@ -64,7 +64,7 @@ pub fn appearance_of(appearance: WindowAppearance) -> Appearance {
 }
 
 pub fn window_appearance(window: &Window) -> Appearance {
-    appearance_of(window.appearance())
+    crate::preference().resolve(appearance_of(window.appearance()))
 }
 
 pub trait KitStyled: Styled + Sized {

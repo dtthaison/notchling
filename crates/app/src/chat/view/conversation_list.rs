@@ -46,26 +46,36 @@ pub(super) struct ListRows {
     pub spliced: std::cell::RefCell<Vec<(Range<usize>, usize)>>,
 }
 
-pub(super) fn keys_of(shown: &Conversation, outgoing: &[String]) -> Vec<SharedString> {
+fn queued_len(shown: &Conversation, held: Option<&str>) -> usize {
+    shown.queued.len() + usize::from(held.is_some())
+}
+
+pub(super) fn keys_of(
+    shown: &Conversation,
+    held: Option<&str>,
+    outgoing: &[String],
+) -> Vec<SharedString> {
     let mut keys: Vec<SharedString> = shown
         .items
         .iter()
         .map(|item| SharedString::from(item.id.clone()))
         .collect();
-    let tail = shown.queued.len() + outgoing.len();
+    let queued = queued_len(shown, held);
+    let tail = queued + outgoing.len();
     keys.extend((0..tail).map(|k| {
-        let kind = if k < shown.queued.len() {
-            "queued"
-        } else {
-            "sending"
-        };
+        let kind = if k < queued { "queued" } else { "sending" };
         SharedString::from(format!("{kind}-{k}"))
     }));
     keys
 }
 
-fn tail_of(shown: &Conversation, outgoing: &[String]) -> Vec<(bool, String)> {
-    let queued = shown.queued.iter().map(|text| (false, text.clone()));
+fn tail_of(shown: &Conversation, held: Option<&str>, outgoing: &[String]) -> Vec<(bool, String)> {
+    let queued = shown
+        .queued
+        .iter()
+        .map(String::as_str)
+        .chain(held)
+        .map(|text| (false, text.to_owned()));
     let sending = outgoing.iter().map(|text| (true, text.clone()));
     queued.chain(sending).collect()
 }
@@ -82,13 +92,14 @@ pub(super) fn row_at(input: &ConversationInput, i: usize) -> Option<Row> {
         queued: true,
         sending,
     };
-    match shown.queued.get(k) {
-        Some(text) => Some(user(text, false)),
-        None => input
-            .outgoing
-            .get(k - shown.queued.len())
-            .map(|text| user(text, true)),
+    let queued = queued_len(shown, input.held.as_deref());
+    if k < shown.queued.len() {
+        return Some(user(&shown.queued[k], false));
     }
+    if k < queued {
+        return input.held.as_ref().map(|text| user(text, false));
+    }
+    input.outgoing.get(k - queued).map(|text| user(text, true))
 }
 
 pub(super) fn at_bottom(state: &ListState) -> bool {
@@ -184,8 +195,9 @@ impl ListRows {
         change: Option<&Pending>,
         force_follow: bool,
     ) -> Synced {
-        let keys = keys_of(&input.shown, &input.outgoing);
-        let tail = tail_of(&input.shown, &input.outgoing);
+        let held = input.held.as_deref();
+        let keys = keys_of(&input.shown, held, &input.outgoing);
+        let tail = tail_of(&input.shown, held, &input.outgoing);
         let live = live_group_of(input).and_then(|i| keys.get(i).cloned());
         let session = input.session.as_ref().map(|s| s.id.clone());
         let agent = input.subagent.as_ref().map(|s| s.agent_id.clone());
@@ -389,7 +401,9 @@ impl ConversationView {
         let Some(input) = self.input.as_ref() else {
             return div().into_any_element();
         };
-        let rows = input.shown.items.len() + input.shown.queued.len() + input.outgoing.len();
+        let rows = input.shown.items.len()
+            + queued_len(&input.shown, input.held.as_deref())
+            + input.outgoing.len();
         if ix == 0 {
             let inset = if input.tasks_inset {
                 super::tasks::INSET

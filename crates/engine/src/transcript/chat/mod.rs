@@ -10,6 +10,7 @@ use super::model::Timestamp;
 use super::tail::MAX_LINE_BYTES;
 use super::tally::ToolTally;
 use super::text::{collapse_pastes, prefix_chars};
+use super::typed::typed_prompt;
 use super::util::{date_field, parse_object, str_of};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -132,6 +133,7 @@ struct Waiting {
 struct State {
     drafts: Vec<Draft>,
     waiting: Vec<Waiting>,
+    dequeue_seen: bool,
     taken: Vec<(String, Timestamp)>,
     tally: ToolTally,
     tally_timestamp: Timestamp,
@@ -274,6 +276,7 @@ fn parse_source(
 
         if kind == Some("queue-operation") {
             let content = str_of(&object, "content").unwrap_or("").trim().to_string();
+            st.dequeue_seen = str_of(&object, "operation") == Some("dequeue");
             match str_of(&object, "operation") {
                 Some("enqueue") => {
                     if !content.is_empty() && !content.starts_with('<') {
@@ -459,6 +462,12 @@ fn parse_source(
             .extend(tool_pictures.into_iter().map(|(image, _)| image));
 
         if role == "user" {
+            if !text.is_empty() {
+                let after_dequeue = std::mem::take(&mut st.dequeue_seen);
+                if !after_dequeue && typed_prompt(&object, &text) {
+                    st.waiting.clear();
+                }
+            }
             if let Some(command) = tagged(&text, "bash-input") {
                 st.take_waiting(&command);
                 st.flush_tools();

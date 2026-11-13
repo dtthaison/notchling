@@ -1,10 +1,17 @@
 use std::sync::Arc;
 
 use gpui::Context;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{now_ms, ChatView};
+use crate::chat::branch::{self, BranchModel};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
+
+struct Answer {
+    base: Option<String>,
+    result: Result<Value, String>,
+    stat: Option<Result<Value, String>>,
+}
 
 #[derive(Default)]
 pub struct State {
@@ -14,6 +21,11 @@ pub struct State {
     preview: Option<Arc<GitModel>>,
     diff_last: Option<i64>,
     diff_inflight: bool,
+    branch: Option<std::sync::Arc<BranchModel>>,
+    preview_branch: Option<std::sync::Arc<BranchModel>>,
+    pub(super) base_choice: Option<String>,
+    pub(super) changes_shown: bool,
+    pub(super) diff_via: Option<(String, Option<String>)>,
 }
 
 impl State {
@@ -29,8 +41,25 @@ impl State {
         }
     }
 
+    pub fn branch_for(&self, folder: Option<&str>) -> Option<Arc<BranchModel>> {
+        if self.preview_branch.is_some() {
+            return self.preview_branch.clone();
+        }
+        let folder = folder?;
+        if self.folder.as_deref() == Some(folder) {
+            self.branch.clone()
+        } else {
+            None
+        }
+    }
+
     pub fn show_preview(&mut self) {
         self.preview = Some(git::preview_model());
+        self.preview_branch = Some(branch::preview_model());
+    }
+
+    pub fn gate_reset(&mut self) {
+        self.gate.reset();
     }
 
     pub fn previewing(&self) -> bool {
@@ -41,6 +70,7 @@ impl State {
 impl ChatView {
     pub(super) fn details_visible(&self) -> bool {
         !self.page.is_open()
+            && !self.repo.changes_shown
             && !self.terminal.shown()
             && !self.simulator.shown()
             && !self.details_hidden
@@ -61,7 +91,12 @@ impl ChatView {
             return;
         }
         let folder = self.selected_folder();
-        let visible = self.details_visible();
+        if self.repo.branch.is_some() && self.repo.folder != folder {
+            self.repo.branch = None;
+            self.repo.base_choice = None;
+            self.push_branch(cx);
+        }
+        let visible = self.details_visible() || self.changes_visible();
         if !self
             .repo
             .gate
@@ -74,42 +109,65 @@ impl ChatView {
         };
         let acts = self.acts(cx);
         let request = git::status_request(&folder);
+        let base = self.repo.base_choice.clone();
+        let stat_request = branch::stat_request(&folder, base.as_deref());
         cx.spawn(async move |this, cx| {
-            let result = cx
+            let (result, stat) = cx
                 .background_executor()
-                .spawn(async move { acts.actions.read(&request) })
+                .spawn(async move {
+                    let result = acts.actions.read(&request);
+                    let in_repo = result.as_ref().is_ok_and(|r| r["repo"] == json!(true));
+                    let stat = in_repo.then(|| acts.actions.read(&stat_request));
+                    (result, stat)
+                })
                 .await;
-            this.update(cx, |view, cx| view.git_status_in(folder, result, cx))
-                .ok();
+            this.update(cx, |view, cx| {
+                view.git_status_in(folder, Answer { base, result, stat }, cx)
+            })
+            .ok();
         })
         .detach();
     }
 
-    fn git_status_in(
-        &mut self,
-        folder: String,
-        result: Result<Value, String>,
-        cx: &mut Context<Self>,
-    ) {
+    fn git_status_in(&mut self, folder: String, answer: Answer, cx: &mut Context<Self>) {
         self.repo.gate.done();
         if self.selected_folder().as_deref() != Some(folder.as_str()) {
             self.git_ask(Why::Folder, cx);
             return;
         }
+        let Answer { base, result, stat } = answer;
         let Ok(reply) = result else {
             return;
         };
         let model = git::parse_status(&reply).map(Arc::new);
-        if self.repo.folder.as_deref() == Some(folder.as_str()) && self.repo.status == model {
-            return;
+        let same_folder = self.repo.folder.as_deref() == Some(folder.as_str());
+        let stale = base != self.repo.base_choice;
+        let rejected = base.is_some() && matches!(stat, Some(Err(_)));
+        let wanted = match stat {
+            Some(Ok(value)) if !stale => branch::parse_stat(&value).map(Arc::new),
+            _ if stale && same_folder => self.repo.branch.clone(),
+            _ => None,
+        };
+        if rejected && !stale {
+            self.repo.base_choice = None;
         }
-        self.repo.folder = Some(folder);
-        self.repo.status = model;
-        self.refresh_details(cx);
-        self.git_diff_again(cx);
+        let unchanged = same_folder && self.repo.status == model && self.repo.branch == wanted;
+        if !unchanged {
+            self.repo.folder = Some(folder);
+            self.repo.status = model;
+            self.repo.branch = wanted;
+            self.refresh_details(cx);
+            self.push_branch(cx);
+            self.git_diff_again(cx);
+        }
+        if stale || rejected {
+            self.repo.gate.reset();
+            self.git_ask(Why::Opened, cx);
+        }
     }
 
     pub(super) fn open_git_diff(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.repo.diff_via = None;
         let folder = self.selected_folder();
         let previewing = self.repo.previewing();
         if folder.is_none() && !previewing {
@@ -151,11 +209,20 @@ impl ChatView {
         self.fetch_git_diff(folder, path, asked, cx);
     }
 
-    fn fetch_git_diff(&mut self, folder: String, path: String, asked: u64, cx: &mut Context<Self>) {
+    pub(super) fn fetch_git_diff(
+        &mut self,
+        folder: String,
+        path: String,
+        asked: u64,
+        cx: &mut Context<Self>,
+    ) {
         self.repo.diff_last = Some(now_ms());
         self.repo.diff_inflight = true;
         let acts = self.acts(cx);
-        let request = git::diff_request(&folder, &path);
+        let request = match &self.repo.diff_via {
+            Some((base, from)) => branch::file_request(&folder, base, &path, from.as_deref()),
+            None => git::diff_request(&folder, &path),
+        };
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()

@@ -1,6 +1,7 @@
 use crate::accounts_ops::AccountsOps;
 use crate::acting::Acting;
 use crate::acting_ops::{ActingOps, Room};
+use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::bridge_backend::APPROVAL_WAIT;
@@ -18,6 +19,8 @@ use crate::op_group::OpGroup;
 use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
+use crate::quiet_ops;
+use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
 use crate::vault_ops::VaultOps;
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
@@ -158,8 +161,12 @@ impl Handler for Ops {
         (Ok(list), extras)
     }
 
+    fn loud(&self, op: &str, args: &Value) -> bool {
+        quiet_ops::loud(op, args)
+    }
+
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        match op {
+        let spec = match op {
             ops::SESSIONS_LIST => Some(OpSpec::AGENT),
             op => self
                 .pages
@@ -170,7 +177,8 @@ impl Handler for Ops {
                 .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
                 .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op)))
                 .or_else(|| self.group(op).and_then(|g| g.spec(op))),
-        }
+        };
+        quiet_ops::quiet(spec, op)
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
@@ -248,6 +256,7 @@ pub struct Wired {
     pub inbox: Arc<InboxOps>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
+    pub settings: Arc<SettingsOps>,
 }
 
 impl Wired {
@@ -373,6 +382,20 @@ impl Wired {
         if let Some(binary) = binary {
             install = install.with_skill(vault_skill_spec(&binary, vault.clone()));
         }
+        let states: SwitchStates = {
+            let (acting, bridge, switches) = (acting.clone(), bridge.clone(), switches.clone());
+            Arc::new(move |name: &str| match name {
+                "acting" => Some(acting.is_on()),
+                "bridge" => Some(bridge.is_on()),
+                other => switches.get(other).map(|s| s.is_on()),
+            })
+        };
+        let settings = Arc::new(
+            SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
+                .with_audit(AuditLog::new(layout.audit_path()))
+                .with_limits(limits.config().clone())
+                .with_inbox(inbox.clone()),
+        );
         Wired {
             acting,
             codex,
@@ -386,6 +409,7 @@ impl Wired {
             inbox,
             vault,
             install: Arc::new(install),
+            settings,
         }
     }
 
@@ -427,13 +451,16 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
+            .with_group(self.settings.clone())
             .with_group(Arc::new(git))
+            .with_group(Arc::new(ActivityOps::for_daemon(layout)))
             .with_first_scan(first_scan, first_wait)
     }
 
     pub fn start(&self) {
         self.limits.spawn_loop();
         self.inbox.spawn_loop();
+        self.acting.spawn_held_loop();
     }
 
     pub fn load(&self) {
@@ -441,6 +468,7 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        self.acting.stop_held_loop();
         self.acting.close();
         self.codex.close();
         self.agy.close();
@@ -448,6 +476,7 @@ impl Wired {
         self.vault.close();
         self.bridge.close();
         self.limits.close();
+        self.settings.close();
         self.inbox.close();
     }
 

@@ -188,7 +188,7 @@ mod tests {
     fn the_key_table_has_the_swift_migration_list_in_order() {
         let ours: Vec<&str> = super::super::keys::awake_keys().map(|k| k.name).collect();
         assert_eq!(ours, SWIFT_LIST);
-        assert_eq!(super::super::keys::KEYS.len(), 38);
+        assert_eq!(super::super::keys::KEYS.len(), 42);
     }
 
     #[test]

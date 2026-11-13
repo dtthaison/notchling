@@ -19,6 +19,7 @@ use crate::dock::Policy;
 const SETTLE: Duration = Duration::from_millis(900);
 
 pub const APPEARANCE_ENV: &str = "NOTCHLING_RENDER_APPEARANCE";
+pub const PREFERENCE_ENV: &str = "NOTCHLING_RENDER_APPEARANCE_SETTING";
 
 pub const SCROLLBARS_ENV: &str = "NOTCHLING_RENDER_SCROLLBARS";
 
@@ -121,6 +122,15 @@ pub fn run(view: &str, out: &Path, data_root: Option<&Path>) -> i32 {
         }
         if let Some(appearance) = forced {
             force_appearance(appearance);
+        }
+        if let Some(chosen) = std::env::var(PREFERENCE_ENV)
+            .ok()
+            .and_then(|v| notchling_kit::Preference::parse(&v))
+        {
+            notchling_kit::set_preference(chosen);
+            if chosen != notchling_kit::Preference::System {
+                super::appearance::set_native(chosen);
+            }
         }
         let origin = cx
             .primary_display()

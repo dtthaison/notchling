@@ -3,6 +3,7 @@ pub mod accounts_ops;
 mod accounts_signin;
 pub mod acting;
 pub mod acting_ops;
+pub mod activity_ops;
 pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_sink;
@@ -19,6 +20,7 @@ pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod git_ops;
+pub mod held_ops;
 pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
@@ -30,6 +32,7 @@ pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
 pub mod limits_usage;
+pub mod log_rotate;
 pub mod op_group;
 pub mod pages_cli;
 pub mod pages_ops;
@@ -37,7 +40,11 @@ pub mod prompts;
 pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
+pub mod quiet_ops;
 pub mod service;
+pub mod settings_asks;
+pub mod settings_cli;
+pub mod settings_ops;
 pub mod signals;
 pub mod switches;
 pub mod vault_args;
@@ -55,6 +62,8 @@ mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
 #[cfg(test)]
+mod activity_ops_tests;
+#[cfg(test)]
 mod bridge_models_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
@@ -65,7 +74,11 @@ mod cost_ops_tests;
 #[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
+mod git_ops_branch_tests;
+#[cfg(test)]
 mod git_ops_tests;
+#[cfg(test)]
+mod held_ops_tests;
 #[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
@@ -90,6 +103,8 @@ mod providers_add_tests;
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
+#[cfg(test)]
+mod quiet_ops_tests;
 #[cfg(test)]
 mod vault_ops_lock_tests;
 
@@ -140,6 +155,7 @@ pub fn run(command: Command) -> i32 {
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
+        Command::Settings { args } => settings_cli::run(&args),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {
             Some(l) => hook::run(&l),

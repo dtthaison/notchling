@@ -55,6 +55,7 @@ impl Render for ChatView {
                 inbox: self.inbox_panel.is_some(),
                 parts: parts_on(cx),
             });
+        let shown = self.lay_out_panels(window);
         let in_subagent = self.open_subagent.is_some();
         let takes_drops = !in_subagent && self.composer_control(cx).enabled;
         let conversation = div()
@@ -105,7 +106,7 @@ impl Render for ChatView {
             .when(takes_drops || self.drop_preview, |column| {
                 column.child(drop::hint(self.drop_preview, a))
             });
-        div()
+        Self::follow_panel_drags(div(), cx)
             .relative()
             .size_full()
             .flex()
@@ -120,7 +121,7 @@ impl Render for ChatView {
                 this.capture_slash_key(event, window, cx)
             }))
             .child(self.keys.anchor())
-            .children((!self.sidebar_hidden).then(|| self.parts.sidebar(a, cx)))
+            .children((!self.sidebar_hidden).then(|| self.parts.sidebar(shown.sidebar, a, cx)))
             .child(
                 div()
                     .flex_1()
@@ -136,6 +137,7 @@ impl Render for ChatView {
                             .flex()
                             .when(!terminal_expanded, |row| row.child(column))
                             .children(page_panel::render(self, a, window, cx))
+                            .children(changes::render(self, a, window, cx))
                             .children(terminal::render(self, a, window, cx))
                             .children(
                                 (!self.terminal.shown())
@@ -143,16 +145,14 @@ impl Render for ChatView {
                                     .flatten(),
                             )
                             .children(
-                                (!self.page.is_open()
-                                    && !self.terminal.shown()
-                                    && !self.simulator.shown()
-                                    && !self.details_hidden)
-                                    .then(|| self.parts.details(a, cx)),
+                                self.details_visible()
+                                    .then(|| self.parts.details(shown.details, a, cx)),
                             ),
                         cx,
                     )),
             )
             .child(self.parts.spins.clone())
+            .children(self.panel_edges(shown, window, a, cx))
             .child(sidebar::toggle_button(self, a, cx))
             .child(sidebar::new_session_button(self, a, cx))
             .children(accounts::render_menu(self, a, cx))

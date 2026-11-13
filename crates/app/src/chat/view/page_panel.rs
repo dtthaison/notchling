@@ -9,7 +9,7 @@ use gpui::{
     EmptyView, ImageFormat, ObjectFit, SharedString, WeakEntity, Window,
 };
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{RADIUS_MD, SIDEBAR_WIDTH};
+use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
@@ -136,6 +136,10 @@ impl State {
 
     pub fn shown_width(&self) -> f32 {
         self.drawn_width.get()
+    }
+
+    pub(super) fn set_shown_width(&self, width: f32) {
+        self.drawn_width.set(width);
     }
 }
 
@@ -345,6 +349,18 @@ impl ChatView {
     }
 }
 
+pub(super) fn resize_edge() -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("page-panel-edge")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(-8.0))
+        .w(px(9.0))
+        .cursor(CursorStyle::ResizeLeftRight)
+        .on_drag(PanelEdge, |_, _, _, cx| cx.new(|_| EmptyView))
+}
+
 pub fn follows_edge<E: InteractiveElement>(element: E, cx: &mut Context<ChatView>) -> E {
     element.on_drag_move::<PanelEdge>(cx.listener(|this, event, _, cx| this.drag_edge(event, cx)))
 }
@@ -524,11 +540,7 @@ pub fn render(
     cx: &mut Context<ChatView>,
 ) -> Option<AnyElement> {
     let shown = view.page.shown.as_ref()?;
-    let sidebar = if view.sidebar_hidden {
-        0.0
-    } else {
-        SIDEBAR_WIDTH
-    };
+    let sidebar = view.sidebar_width();
     let available = f32::from(window.viewport_size().width) - sidebar;
     let width = panel_width(view.page.width, available);
     view.page.drawn_width.set(width);
@@ -622,16 +634,6 @@ pub fn render(
         (None, None) => web_page(view, shown, a),
     };
 
-    let edge = div()
-        .id("page-panel-edge")
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .left(px(-8.0))
-        .w(px(9.0))
-        .cursor(CursorStyle::ResizeLeftRight)
-        .on_drag(PanelEdge, |_, _, _, cx| cx.new(|_| EmptyView));
-
     Some(
         div()
             .relative()
@@ -646,7 +648,7 @@ pub fn render(
             .child(header)
             .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
             .child(page)
-            .child(edge)
+            .child(resize_edge())
             .window_region(a, cx)
             .part_at(
                 if is_file { "File Panel" } else { "Page Panel" },

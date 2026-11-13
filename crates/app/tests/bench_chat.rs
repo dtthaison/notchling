@@ -323,6 +323,15 @@ fn bench_reload_draws_no_sidebar() {
 
 #[test]
 #[ignore = "opens a window; a Mac with a display"]
+fn bench_panels_draws_the_sidebar_and_conversation_never_the_details() {
+    let result = bench_for("panels", 3);
+    assert!(count(&result, "sidebar") > 0, "{result}");
+    assert!(count(&result, "conversation") > 0, "{result}");
+    assert!(count(&result, "details") <= 1, "{result}");
+}
+
+#[test]
+#[ignore = "opens a window; a Mac with a display"]
 fn bench_menu_draws_no_sidebar() {
     let result = bench_for("menu", 3);
     assert_eq!(count(&result, "sidebar"), 0, "{result}");

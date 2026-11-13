@@ -106,7 +106,7 @@ impl Launcher for NoLaunch {
 pub struct ActingOps {
     pub(crate) acting: Arc<Acting>,
     pub(crate) prompts: PromptStore,
-    sessions: Arc<Mutex<Value>>,
+    pub(crate) sessions: Arc<Mutex<Value>>,
     pub(crate) roots: Roots,
     pub(crate) room: Arc<dyn Room>,
     attacher: Box<dyn Attacher>,
@@ -121,6 +121,7 @@ pub struct ActingOps {
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
     screen_file: Option<PathBuf>,
+    pub(crate) held: crate::held_ops::HeldState,
 }
 
 impl ActingOps {
@@ -149,6 +150,7 @@ impl ActingOps {
             codex: OnceLock::new(),
             catalog: OnceLock::new(),
             screen_file: None,
+            held: crate::held_ops::HeldState::default(),
         }
     }
 
@@ -331,8 +333,7 @@ impl ActingOps {
             return Err(bad("the reply is empty"));
         }
         let agent = self.agent(args)?;
-        self.play(&agent, &plan::reply(text), &mut NoLog)?;
-        Ok(json!({"sent": true}))
+        self.reply_or_hold(&agent, text, crate::held_ops::now_ms())
     }
 
     fn interrupt(&self, args: &Value) -> Result<Value, ApiError> {

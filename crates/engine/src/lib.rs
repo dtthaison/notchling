@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod activity;
 pub mod bridge;
 pub mod catalog;
 pub mod control;

@@ -2,6 +2,7 @@ pub mod feed;
 pub mod restart;
 #[cfg(target_os = "macos")]
 pub mod restart_view;
+pub mod settings_changed;
 
 use notchling_local_api::ClientError;
 use serde_json::{json, Value};

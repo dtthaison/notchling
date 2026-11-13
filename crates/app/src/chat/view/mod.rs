@@ -1,4 +1,6 @@
 mod accounts;
+mod changes;
+mod changes_panel;
 mod composer;
 mod conversation;
 mod conversation_list;
@@ -21,6 +23,7 @@ mod opinions;
 mod page_panel;
 mod paged_rows;
 pub mod pane;
+mod panels;
 mod phone;
 mod prompts;
 mod render_map;
@@ -105,7 +108,7 @@ fn switch(name: &str) -> bool {
 }
 
 pub fn bench_point(size: gpui::Size<gpui::Pixels>) -> gpui::Point<gpui::Pixels> {
-    let sidebar = notchling_kit::metric::SIDEBAR_WIDTH;
+    let sidebar = crate::chat::panels::SIDEBAR_DEFAULT;
     let column = (f32::from(size.width) - sidebar - inspector::WIDTH).max(0.0);
     gpui::point(px(sidebar + column / 2.0), size.height / 2.0)
 }
@@ -169,6 +172,7 @@ pub struct ChatView {
     codex_installed: bool,
     sidebar_hidden: bool,
     details_hidden: bool,
+    panels: panels::State,
     shell_probe: shell_probe::Probe,
     page: page_panel::State,
     repo: repo::State,
@@ -220,6 +224,7 @@ impl ChatView {
         view.tools.sending = switch(SENDING_ENV);
         view.sidebar_hidden = switch(SIDEBAR_HIDDEN_ENV);
         view.details_hidden = switch(DETAILS_HIDDEN_ENV);
+        view.force_panel_widths();
         view.slash_preview = std::env::var(SLASH_ENV).ok();
         view.load_closed();
         if let Ok(how) = std::env::var(TERMINAL_ENV) {
@@ -261,6 +266,7 @@ impl ChatView {
 
     pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_hidden = !self.sidebar_hidden;
+        self.panels_changed(cx);
         cx.notify();
     }
 
@@ -269,7 +275,12 @@ impl ChatView {
             self.close_page(cx);
             return;
         }
+        if self.repo.changes_shown {
+            self.close_changes(cx);
+            return;
+        }
         self.details_hidden = !self.details_hidden;
+        self.panels_changed(cx);
         self.git_ask(crate::chat::git::Why::Opened, cx);
         cx.notify();
     }
@@ -390,6 +401,7 @@ impl ChatView {
             drop_preview: false,
             sidebar_hidden: false,
             details_hidden: false,
+            panels: Default::default(),
             shell_probe: shell_probe::Probe::default(),
             page: page_panel::State::default(),
             repo: repo::State::default(),
@@ -418,6 +430,13 @@ impl ChatView {
             _appearance_changes: changes,
             _parts_escape: parts_escape,
         };
+        view.restore_panels(window);
+        cx.on_app_quit(|this, _| {
+            this.save_panels_now();
+            async {}
+        })
+        .detach();
+        cx.on_release(|this, _| this.save_panels_now()).detach();
         view.restore_drafts(cx);
         view.start_load(cx);
         cx.spawn(async move |this, cx| loop {
@@ -449,6 +468,12 @@ impl ChatView {
         self.tools.sending = true;
         cx.notify();
         true
+    }
+
+    pub fn bench_panels(&mut self, n: u64, cx: &mut Context<Self>) {
+        let wiggle = if n.is_multiple_of(2) { 0.0 } else { 24.0 };
+        self.panels.preferred.sidebar = crate::chat::panels::SIDEBAR_DEFAULT + wiggle;
+        cx.notify();
     }
 
     pub fn bench_reload(&mut self, cx: &mut Context<Self>) {

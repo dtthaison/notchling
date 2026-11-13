@@ -8,6 +8,7 @@ pub mod panel;
 pub mod renders;
 #[cfg(target_os = "macos")]
 mod rows;
+pub mod shortcut;
 #[cfg(target_os = "macos")]
 pub mod view;
 pub mod wire;

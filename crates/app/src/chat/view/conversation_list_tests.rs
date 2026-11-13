@@ -33,6 +33,7 @@ fn input_for(session: &str, shown: Arc<Conversation>) -> ConversationInput {
             working: false,
         }),
         held_working: false,
+        held: None,
         outgoing: Vec::new(),
         loading: false,
         empty_note: None,
@@ -151,12 +152,42 @@ fn the_keys_are_the_ones_the_rows_were_selected_by() {
         .enumerate()
         .map(|(i, row)| crate::chat::view::row_select::key_of(&shown.items, i, row))
         .collect();
-    assert_eq!(keys_of(&shown, &outgoing), drawn);
+    assert_eq!(keys_of(&shown, None, &outgoing), drawn);
     for (i, row) in rows.iter().enumerate() {
         let mut input = input(Arc::new(shown.clone()));
         input.outgoing = outgoing.clone();
         assert_eq!(row_at(&input, i).as_ref(), Some(row), "row {i}");
     }
+}
+
+#[test]
+fn a_held_message_is_one_queued_row_between_the_queue_and_the_sending_ones() {
+    let mut shown = Conversation::clone(&conv(0..3));
+    shown.queued = vec!["a".into()];
+    let outgoing = vec!["c".to_string()];
+    let held = Some("b1\n\nb2");
+    let keys: Vec<String> = keys_of(&shown, held, &outgoing)
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    assert_eq!(
+        &keys[3..],
+        ["queued-0", "queued-1", "sending-2"],
+        "{keys:?}"
+    );
+    let mut input = input(Arc::new(shown));
+    input.held = held.map(String::from);
+    input.outgoing = outgoing;
+    let user = |text: &str, sending| Row::User {
+        text: text.into(),
+        images: 0,
+        queued: true,
+        sending,
+    };
+    assert_eq!(row_at(&input, 3), Some(user("a", false)));
+    assert_eq!(row_at(&input, 4), Some(user("b1\n\nb2", false)));
+    assert_eq!(row_at(&input, 5), Some(user("c", true)));
+    assert_eq!(row_at(&input, 6), None);
 }
 
 #[test]

@@ -34,6 +34,7 @@ pub enum Mode {
     Terminal,
     Reload,
     Menu,
+    Panels,
     Sending,
     Trace(Scenario),
 }
@@ -50,6 +51,7 @@ impl Mode {
             "terminal" => Mode::Terminal,
             "reload" => Mode::Reload,
             "menu" => Mode::Menu,
+            "panels" => Mode::Panels,
             "sending" => Mode::Sending,
             _ => return Scenario::parse(name).map(Mode::Trace),
         })
@@ -66,6 +68,7 @@ impl Mode {
             Mode::Terminal => "terminal",
             Mode::Reload => "reload",
             Mode::Menu => "menu",
+            Mode::Panels => "panels",
             Mode::Sending => "sending",
             Mode::Trace(scenario) => scenario.name(),
         }
@@ -75,7 +78,7 @@ impl Mode {
         match self {
             Mode::Idle | Mode::ScrollFade | Mode::Sending => None,
             Mode::Scroll | Mode::Trace(_) => Some(60),
-            Mode::Hover | Mode::Select | Mode::Terminal => Some(30),
+            Mode::Hover | Mode::Select | Mode::Terminal | Mode::Panels => Some(30),
             Mode::Typing => Some(10),
             Mode::Reload => Some(2),
             Mode::Menu => Some(5),
@@ -161,6 +164,7 @@ fn step(mode: Mode, n: u64, target: &mut Target, cx: &mut AsyncApp) {
         Mode::Terminal => target.chat(cx, |chat, _| chat.bench_terminal_feed()),
         Mode::Reload => target.chat(cx, |chat, cx| chat.bench_reload(cx)),
         Mode::Menu => target.chat(cx, |chat, cx| chat.bench_menu(cx)),
+        Mode::Panels => target.chat(cx, |chat, cx| chat.bench_panels(n, cx)),
     }
 }
 

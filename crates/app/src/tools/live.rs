@@ -17,6 +17,7 @@ pub struct ToolLive {
     pub errors: BTreeMap<String, String>,
     pub named: BTreeMap<String, String>,
     pub unstarted: BTreeMap<String, String>,
+    pub held: BTreeMap<String, String>,
     pub generation: u64,
 }
 
@@ -78,6 +79,15 @@ impl ToolLive {
                     }
                     _ => {}
                 }
+            }
+            topics::SESSION_HELD => {
+                let Some(id) = text(data, "id") else {
+                    return false;
+                };
+                match text(data, "text").filter(|t| !t.is_empty()) {
+                    Some(held) => self.held.insert(id.to_owned(), held.to_owned()),
+                    None => self.held.remove(id),
+                };
             }
             topics::SESSION_CHANGED => {
                 let Some(id) = text(data, "id") else {
@@ -222,6 +232,24 @@ mod tests {
             command: None,
             resume_session_id: None,
         }
+    }
+
+    #[test]
+    fn a_held_message_is_set_replaced_and_cleared_by_its_event() {
+        let mut live = ToolLive::default();
+        assert!(live.apply(&event(
+            "session.held",
+            json!({"id": "job-a", "text": "two"})
+        )));
+        assert_eq!(live.held["job-a"], "two");
+        live.apply(&event(
+            "session.held",
+            json!({"id": "job-a", "text": "two\n\nthree"}),
+        ));
+        assert_eq!(live.held["job-a"], "two\n\nthree");
+        live.apply(&event("session.held", json!({"id": "job-a", "text": null})));
+        assert!(live.held.is_empty());
+        assert!(!live.apply(&event("session.held", json!({"text": "x"}))));
     }
 
     #[test]

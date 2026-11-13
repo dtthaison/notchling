@@ -18,7 +18,7 @@ Most of the app now lives in one window, **Chat**. The menu bar keeps only the a
 - [Second Opinion](#second-opinion)
 - [Delegating a job to another tool](#delegating-a-job-to-another-tool)
 - [Secret Vault](#secret-vault)
-- [Search (⌘⇧P)](#search-p)
+- [Search](#search)
 - [Phone](#phone)
 - [Machines](#machines)
 - [Accounts, limits, and cost for every tool](#accounts-limits-and-cost-for-every-tool)
@@ -177,11 +177,11 @@ It runs a Codex `exec` turn or an `agy acp` session, blocks until it ends, print
 
 ---
 
-## Search (⌘⇧P)
+## Search
 
-**What it is.** A Spotlight-style search box from anywhere (⌘⇧P, no Accessibility permission needed). It finds **Artifacts** you published and **conversations**: Claude Code transcripts in every lane, Codex sessions, and Antigravity titles from the last 14 days. Results show the tool, folder, age and a snippet around the match.
+**What it is.** A Spotlight-style search box from anywhere (⌃⌥P by default, no Accessibility permission needed; ⌘⇧P also works inside Notchling). It finds **Artifacts** you published and **conversations**: Claude Code transcripts in every lane, Codex sessions, and Antigravity titles from the last 14 days. Results show the tool, folder, age and a snippet around the match.
 
-**How to use.** Type, use ↑↓ to pick, and press Return to open it in Chat. A session that isn't in the sidebar is added. Esc closes and returns you to the app you were in.
+**How to use.** Press the shortcut. Change it, or turn it off, in Settings under Search Shortcut: click the key, press the new one (Esc cancels). Notchling keeps ⌘⇧P for its own windows only, so other apps (VS Code's Command Palette) get it back. Then type, use ↑↓ to pick, and press Return to open it in Chat. A session that isn't in the sidebar is added. Esc closes and returns you to the app you were in.
 
 **Use it when** you remember a conversation ("the one where we fixed the login race") but not which session or tool it was.
 

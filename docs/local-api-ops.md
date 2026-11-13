@@ -47,7 +47,7 @@ hook's request. Built and switched off: while [`Acting`] is off every acting op 
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
-| `session.reply` | app | `{id, text}` | `{"sent": true}` |
+| `session.reply` | app | `{id, text}` | `{"sent": true}`, or `{"sent": true, "state": "queued", "waiting": 1, "held": <text>}` when the session is working or just got a message (below) |
 | `session.answer` | app | `{id, answers: [[n...] or "text"], question?: {items}}` | `{"answered": "hook" or "terminal", "promptId"?}` |
 | `session.permission` | app | `{id, decision: "allow"/"deny"/"always", message?}` | `{"decided": decision, "promptId"}` |
 | `session.permission` (no hook) | app | `{id: <row id>, decision, expect: {tool, summary}}` | `{"decided": decision, "answered": "terminal"}` |
@@ -74,6 +74,47 @@ option's digit only (Allow "Yes", Always the "don't ask again" one, Deny the "No
 waits for the dialog to go. Never Enter, Esc or Ctrl+C. A deny message isn't taken there.
 
 The hook is who its process is, never what it says: see [`crate::hook_ops`].
+
+## `activity_ops.rs`
+
+What Settings > Activity shows: `activity.list`, over `notchling_engine::activity`. App tier, read only,
+no switch, `OpSpec::APP_QUIET` (a success is not written to `audit.jsonl`; the page asks only on open
+and on Refresh). It reads the last 2 MB of `audit.jsonl` and of `audit.jsonl.1`, the last 1 MB of the
+bridge's `remote-log.jsonl` and `account-log.json`, and answers normalized rows, newest first.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `activity.list` | app | `{kinds?, since?, limit?}` | `{rows: [{time_ms, source, kind, op, who, result, detail?}], truncated}` |
+
+- `kinds` is a list of `refused`, `failed`, `acted`, `setting`, `inbox` and `account_switch` (none or
+  empty means all; any other name is `bad_request`). `since` is a time in milliseconds: only rows after it.
+  `limit` is 200 by default and 1 to 1000.
+- `source` is `audit` (the daemon's audit), `phone` (`remote-log.jsonl`) or `account` (`account-log.json`).
+  `kind`: a refusal (`forbidden`, `needs_approval`, `peer_changed`, `peer_unknown`, `other_user`,
+  `file_said_on_ignored`, a vault `denied`) is `refused`; any other result that is not `ok`, `on` or `off`
+  is `failed`; a success is `setting` (`settings.*`), `inbox` (`inbox.answer`, `inbox.seen`,
+  `vault.approval.answer`, `vault.request.cancel`), `account_switch` (`accounts.switch`, `accounts.move_all`,
+  `lanes.switch`, `providers.switch`, and every row of `account-log.json`) or else `acted`. A phone's
+  `inbox.answer:refused:<reason>` is `refused`, its `inbox.answer:<action>` is `inbox`, anything else it did
+  is `acted`.
+- `who` is `app` for an app-tier row, else the peer's executable name (`curl`, `claude`, `unknown`), or the
+  phone's device name. `result` is the audit's result up to its first `:` (so a vault use shows `ok` or
+  `denied`, never the secret's name) or, for a phone, `ok`, the inbox action or `refused: <reason>`.
+  `detail` is a failed or refused call's error message when the audit kept one (cut to 120 characters),
+  or the first 8 characters of an account id.
+- Never in a row: message text, a phone's session id, address or message length, an inbox item id, a
+  secret's name or value. The reply stays under 900 KB: rows are dropped from the old end and
+  `truncated` says so.
+
+### Quiet ops
+
+An app-tier call is written to `audit.jsonl` unless its spec is `OpSpec::APP_QUIET` and it succeeded.
+These read-only polls are quiet: `bridge.status`, `bridge.devices`, `bridge.tunnel.status`,
+`accounts.list`, `lanes.list`, `providers.list`, `providers.usage`, `limits.status`, `limits.usage`,
+`git.status`, `git.diff` and `activity.list`. A call to `accounts.list` or `providers.list` with
+`sync: true`, or to `providers.usage` or `limits.usage` with `refresh: true`, reads Keychain and the network,
+so it is logged. Failures and refusals of a quiet op are logged too. No op that acts, writes or touches the
+vault is quiet.
 
 ## `agy_ops.rs`
 
@@ -187,6 +228,15 @@ signal.
 | `codex.stop` | `{id}` | `{"stopped": bool}`: SIGINT to the running turn; false when none runs |
 | `codex.delete` | `{id}` | `{"deleted": true}`: stops the turn, drops what waits, runs `codex delete --force`; `{"deleted": false, "state": "deleting"}` when that takes over 4.5 s |
 
+A reply to a Claude Code job that is working, or that got a message less than 20 s ago and
+hasn't shown work yet, is held by the daemon and not typed (`held_ops.rs`, engine `reply::held`).
+There is one held entry per session: every message sent meanwhile joins it, separated by a blank
+line, and the reply carries the whole held text (`held`). When the row is `completed` and can take
+replies, the daemon types the held text as one message (a 1 s tick, only while `acting` is on).
+Each change is an event on topic `tools`: `session.held {id, text}`, with `text: null` when
+nothing is held any more. The held text lives in the daemon's memory only, so a daemon restart
+drops it; it is never in Claude Code's own queue.
+
 `id` is a row id (`codex:<session>`). `draft_folder` starts a new session in that folder and
 the reply comes once `thread.started` names it, or `starting` if that takes over 4.5 s (a call
 is given up at 5 s); `draft` (`codex-new:<uuid>`) is the app's row for it, echoed in the late
@@ -279,7 +329,7 @@ account), and writes only the daemon's own cache.
 
 ## `git_ops.rs`
 
-What Chat's Details Panel shows of a session's folder: `git.status` and `git.diff`, over
+What Chat's Details Panel and Changes panel show of a session's folder: `git.status`, `git.diff` and the three branch ops, over
 `notchling_engine::git` and the engine's `control::Launcher`. App tier, read only, no switch:
 the app never runs a process, so the daemon runs `git` for it (decision 0004). Every call is
 refused (`forbidden`) unless `cwd` is absolute, has no `..`, and (after symlinks) is a known
@@ -290,7 +340,7 @@ checked. A `path` is refused if it is empty, absolute, has a `..` or a NUL, goes
 that leaves the repository, or is not exactly one of the current changed files (no `.`, no
 directory, not a file that is clean).
 
-Both ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
+All five ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
 5 s, which would fill the log and rotate out the refusals and the vault's entries); a refusal or
 failure still is.
 
@@ -298,12 +348,40 @@ failure still is.
 | --- | --- | --- | --- |
 | `git.status` | app | `{cwd}` | `{repo: false}` when `cwd` is in no repository; else `{repo: true, branch, head, detached, initial, upstream, ahead, behind, changes: [{path, status, from, added, removed}], truncated}` |
 | `git.diff` | app | `{cwd, path}` | `{path, text, truncated, untracked}` |
+| `git.branch_diff_stat` | app | `{cwd, base?}` | `{repo: false}` when `cwd` is in no repository; else `{repo: true, includes_uncommitted: true, branch, head, detached, base, merge_base, files: [{path, status, from, added, removed, uncommitted}], added, removed, file_count, uncommitted_files, truncated}` |
+| `git.branch_diff_file` | app | `{cwd, base, path, from?}` | `{path, text, truncated, untracked}` |
+| `git.branches` | app | `{cwd}` | `{repo: false}`, or `{repo: true, current, default, remote_default, local: [name], truncated}` |
 
 - `status` is one of `M`, `A`, `D`, `R`, `U` (unmerged) or `?` (untracked). `path` is relative to the
   repository's root, as `git` prints it, not to `cwd`; `from` is a rename's old path. `added` and
   `removed` are `null` for an untracked or binary file. `branch` is `null` while `detached`
   (then `head` is the short commit); `upstream`, `ahead` and `behind` are only set with an upstream.
   `initial` is a repository with no commit yet.
+- `git.branch_diff_stat` compares the working tree with the merge base of `base` and `HEAD`, so it
+  covers the branch's commits (`merge-base..HEAD`) plus uncommitted work: staged and unstaged
+  changes to tracked files and untracked files (`includes_uncommitted` is always `true`; each file's
+  `uncommitted` says whether it differs from `HEAD` or is untracked, and `uncommitted_files` counts
+  them). `base` is optional: without it the base is `origin/HEAD`'s target, else `main`, else
+  `master`, the first that shares history with `HEAD`; `base` and `merge_base` (7 characters) are
+  `null`, with no files, for a repository with no commit or none of those. A given `base` must be a
+  plain branch name (letters, digits and `._/+@-`, no leading `-`, no `..`, at most 200 characters)
+  or the call is `forbidden`; one that is not a branch or has no common history is `failed` (`no
+  such branch`, `no common history with that branch`). `status` is `M`, `A`, `D`, `R`, `U` or `?`
+  (untracked); `from` is a rename's old path; `added` and `removed` are `null` for a binary file or
+  an untracked one over 2 MB (untracked files are counted by reading them, at most 8 MB in all).
+  Files are sorted by path, cut at 2,000 (`truncated`); `added`, `removed`, `file_count` and
+  `uncommitted_files` count every file, cut or not. Renames are found (`-M`), so a renamed file is
+  one `R` row.
+- `git.branch_diff_file` is that file's patch against the merge base, with the `git.diff` limits
+  (400 lines or 128 KB, `truncated`; an untracked file's patch is the whole file as added lines). A
+  rename needs `from` (the row's old path) to show as a rename; without it the file shows as new.
+  `base` is required and checked as above; `path` and `from` follow `git.diff`'s rules, and a
+  `path` with no change against the base (and not untracked) is `forbidden` (`not a changed
+  file`).
+- `git.branches` lists the local branches (newest commit first, at most 200, `truncated`), the one
+  checked out (`current`), `remote_default` (`origin/HEAD`'s target, only if it resolves) and
+  `default`, the base the stat uses without a `base` (`remote_default`, else `main`, else
+  `master`, only among the local branches).
 - `changes` is cut at 500 files and `truncated` says so. `diff.text` is cut at 400 lines or
   128 KB (a single line is cut on a character boundary), and an untracked file over 2 MB gives
   an empty `text` with `truncated: true`. An untracked file's diff is the whole file as added
@@ -322,7 +400,9 @@ failure still is.
   driver `git config -z --get-regexp '^filter\.'` names (a read that runs nothing), `-c
   filter.<name>.clean=`, `smudge=`, `process=` and `required=false`. Then `status
   --porcelain=v2 --branch -z --untracked-files=all --ignore-submodules=all`, then `diff
-  --numstat -z HEAD` (or `--cached` with no commit); a diff is `diff --no-color --no-ext-diff
+  --numstat -z HEAD` (or `--cached` with no commit); the branch ops add `merge-base`, `symbolic-ref
+  --quiet --short refs/remotes/origin/HEAD`, `for-each-ref`, `rev-parse --verify` and `diff
+  --name-status|--numstat -z -M <merge base> --`, all of them reads; a diff is `diff --no-color --no-ext-diff
   --no-textconv --ignore-submodules=all HEAD -- :(literal)<path>`. Each command has a 3 s
   timeout, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, `GIT_PAGER=cat`, and every other `GIT_*`
   variable of the daemon's environment is cleared. The launcher stops a command that writes
@@ -358,7 +438,7 @@ start, and until the maintainer turns it on the Swift app owns both (decision 00
 `what` names the parts to act on; left out it is all of them. The names are `prompt_hooks`
 (`PreToolUse` `AskUserQuestion` and `PermissionRequest` `*`), `page_hooks` (`PreToolUse`,
 `PostToolUse` and `PostToolUseFailure` matching `Artifact`) and the skills' folder names
-(`notchling-delegate`, `notchling-pages`, and `notchling-vault` once the vault supplies it).
+(`notchling-delegate`, `notchling-pages`, `notchling-settings` (Claude Code and Codex), and `notchling-vault` once the vault supplies it).
 
 The envelope:
 
@@ -521,6 +601,25 @@ One switch or add flow per provider at a time. A flow that waits for the user st
 polled the moment the switch turns off and is abandoned (`AccountProvider::abandon_add`: Codex's
 `codex login` stopped and its scratch home removed; nothing written or restored, the event's
 `note` says where a provider was left), and is cancelled when the daemon stops while it is on.
+
+## `settings_ops.rs`
+
+Agents read and change Notchling's settings ([decision 0020](decisions/0020-agents-change-settings-by-class.md)). Every key in `crates/engine/src/settings/keys.rs` carries a class for agents: `free` (an agent sets it at once), `ask` (the user allows or denies the change in the Inbox) or `never` (only the user, in Notchling). The five switches are listed as `switch.acting`, `switch.bridge`, `switch.accounts`, `switch.vault` and `switch.install` (a bare `acting`, `bridge`, `vault` or `install` finds them too; `accounts` is the saved-logins key), always `never`: `settings.set_acting`, `bridge.set` and `settings.set_switch` stay app tier.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `settings.list` | agent | `{}` | `{settings: [Entry]}`: the five switches first, then every key in `keys.rs` order |
+| `settings.get` | agent | `{key}` | `Entry`, plus `pending: [{id, value}]` while asks for the key wait |
+| `settings.set` | agent | `{key, value, wait?: seconds}` | `{key, value, state: "applied", changed}` for a `free` key, or any `free` or `ask` key from the app tier; `Ask` for an `ask` key from the agent tier |
+| `settings.asked` | agent | `{id, wait?: seconds}` | `Ask` |
+
+`Entry` is `{key, title, description, kind, class, why, allowed?, range?: [low, high], value?, default?, switch?: true}`, `kind` one of `bool`, `int`, `number`, `string`, `list`, `object`, `json`, and `class` one of `free`, `ask`, `never`. An agent-tier caller gets `value` and `default` only for `free` and `ask` keys and the switches (a switch's `value` is its state in this run, `null` when unknown); the app tier gets every value.
+
+`value` is JSON of the key's type, or text: `"true"`, `"off"`, `"90"` and `"8MB"` become `true`, `false`, `90` and `"8mb"` (`KeySpec::read_value`). It is then checked against the key's type, `allowed` list and range (`KeySpec::check`); a bad one is `bad_request` saying what the key takes ("chatHistory takes one of 2mb, 4mb, 8mb, 16mb."). An unknown key is `bad_request`, naming up to three agent-settable keys whose name or title holds the word. A switch or a `never` key is `forbidden`, for the app tier too: the app writes its own records itself.
+
+`Ask` is `{id, key, value, state, message}`, `state` one of `waiting`, `applying`, `applied`, `denied`, `expired`, `withdrawn` (the daemon stopped first) or `failed`. An ask raises an inbox item (`setting:<id>`, kind `setting_change`, actions `allow` and `deny`, expiring with the ask after [`ASK_WAIT`], 300 s) that the Mac or a paired phone answers; the first answer wins. Allow writes the value; Deny, no answer or a stop leave it as it was. The item's responder only marks the ask (it runs under the inbox lock); the ask thread in `settings_asks.rs` writes the value, closes expired asks and their items, and withdraws the asks still waiting at `close`. `wait` (0 to 60 s, default 0) holds the call until the ask ends; `settings.asked` polls it, and an ended ask is kept 10 minutes. An allowed ask is written even when nothing polls it any more. With no app following `inbox` an ask is refused at once with `needs_approval`; at most 8 wait at a time (`failed` beyond that).
+
+A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set`, from either tier, is in the audit log as op `settings.set` with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and `reason` `<key>=<value as JSON>` (cut at 64 and 120 characters). Reads are not audited.
 
 ## `vault_ops.rs`
 

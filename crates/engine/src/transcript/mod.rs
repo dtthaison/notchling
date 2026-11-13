@@ -15,4 +15,5 @@ pub mod subagents;
 pub mod tail;
 pub mod tally;
 pub mod text;
+pub mod typed;
 pub mod util;

@@ -377,9 +377,7 @@ impl Parser {
     }
 
     fn user(&mut self, obj: &Value, date: Option<Timestamp>) {
-        if let Some(message) = obj.get("message") {
-            self.queue.user_line(message);
-        }
+        self.queue.user_line(obj);
         if obj.get("isMeta").and_then(Value::as_bool) == Some(true) {
             return;
         }

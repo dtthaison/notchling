@@ -52,6 +52,9 @@ pub enum Command {
     SecretRequest {
         args: Vec<String>,
     },
+    Settings {
+        args: Vec<String>,
+    },
     Version,
     Help,
 }
@@ -75,6 +78,10 @@ pub fn usage() -> &'static str {
      \u{20}                                           run a command with secrets, its output hidden\n  \
      notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason]\n  \
      \u{20}                                           ask the user to add or update a secret, and wait\n  \
+     notchling settings list [--json]      every setting: its key, value, and whether an agent may change it\n  \
+     notchling settings get <key> [--json]  one setting\n  \
+     notchling settings set <key> <value> [--json]\n  \
+     \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -122,6 +129,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "secret-request" => {
             return Ok(Command::SecretRequest {
+                args: args.collect(),
+            })
+        }
+        "settings" => {
+            return Ok(Command::Settings {
                 args: args.collect(),
             })
         }

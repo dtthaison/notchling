@@ -53,6 +53,9 @@ pub struct Caller {
 pub trait Handler: Send + Sync + 'static {
     fn spec(&self, op: &str) -> Option<OpSpec>;
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError>;
+    fn loud(&self, _op: &str, _args: &Value) -> bool {
+        false
+    }
     fn call_with_extras(
         &self,
         caller: &Caller,

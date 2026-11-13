@@ -398,6 +398,92 @@ fn move_stops_then_resumes_in_the_target_folder() {
     assert_eq!(fake.commands().len(), 4);
 }
 
+fn control_in(tag: &str, cwd: &str) -> (Dir, Setup, Arc<FakeLauncher>) {
+    let (dir, roots) = roots(tag);
+    let mut list = sessions();
+    list[0]["cwd"] = json!(cwd);
+    let fake = Arc::new(FakeLauncher::new());
+    let launcher: Arc<dyn Launcher> = fake.clone();
+    let s = setup_in(true, PROMPT, list, roots, Some(launcher));
+    (dir, s, fake)
+}
+
+fn work_folder(tag: &str) -> (Dir, PathBuf, String) {
+    let base = std::env::temp_dir().join(format!("nl-ctl-work-{tag}-{}", std::process::id()));
+    let folder = base.join("api");
+    std::fs::create_dir_all(&folder).unwrap();
+    let real = std::fs::canonicalize(&folder).unwrap();
+    let parent = real.parent().unwrap().to_path_buf();
+    (Dir(base), parent, real.to_string_lossy().into_owned())
+}
+
+#[test]
+fn move_trusts_the_folder_for_an_account_that_never_did_then_moves() {
+    let (_w, _, folder) = work_folder("move-trust");
+    let (_d, s, fake) = control_in("move-trust", &folder);
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok("backgrounded · 9f8e7d6c (idle)\n")));
+    assert_eq!(
+        call(
+            &s,
+            ops::SESSION_MOVE,
+            json!({"id": "job-a", "to_config_dir": "/lanes/b"})
+        ),
+        Ok(json!({"jobId": "9f8e7d6c"}))
+    );
+    assert_eq!(
+        fake.calls()[0],
+        Call::Pty(plan_trust_folder(&folder, Some("/lanes/b")))
+    );
+    assert_eq!(
+        fake.commands()[0],
+        main_login(&["claude", "stop", "abcd1234"])
+    );
+}
+
+#[test]
+fn move_to_an_account_that_trusts_a_parent_folder_asks_nothing() {
+    let (_w, parent, folder) = work_folder("move-trusted");
+    let (d, s, fake) = control_in("move-trusted", &folder);
+    let mut projects = serde_json::Map::new();
+    projects.insert(
+        parent.to_string_lossy().into_owned(),
+        json!({"hasTrustDialogAccepted": true}),
+    );
+    std::fs::write(
+        d.0.join(".claude.json"),
+        json!({ "projects": projects }).to_string(),
+    )
+    .unwrap();
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok("backgrounded · 9f8e7d6c (idle)\n")));
+    let main = d.0.join("claude");
+    assert!(call(
+        &s,
+        ops::SESSION_MOVE,
+        json!({"id": "job-a", "to_config_dir": main}),
+    )
+    .is_ok());
+    assert!(
+        !fake.calls().iter().any(|c| matches!(c, Call::Pty(_))),
+        "the main login trusts it already"
+    );
+}
+
+#[test]
+fn a_refused_trust_stops_nothing() {
+    let (_w, _, folder) = work_folder("move-refused");
+    let (_d, s, fake) = control_in("move-refused", &folder);
+    fake.push_pty(Ok(false));
+    assert!(call(
+        &s,
+        ops::SESSION_MOVE,
+        json!({"id": "job-a", "to_config_dir": "/lanes/b"})
+    )
+    .is_err());
+    assert!(fake.commands().is_empty(), "the session keeps running");
+}
+
 #[test]
 fn a_command_is_typed_like_a_reply_unless_it_opens_a_menu() {
     let (_d, s, fake) = control("cmd", true);

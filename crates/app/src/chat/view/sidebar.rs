@@ -1,6 +1,6 @@
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Div, ExternalPaths, SharedString};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::{SIDEBAR_WIDTH, TITLE_BAR};
+use notchling_kit::metric::TITLE_BAR;
 use notchling_kit::metric::{SPACE, TOOL_ICON};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
@@ -184,7 +184,7 @@ pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatV
     let left = if view.sidebar_hidden {
         TOGGLE_LEFT + TOGGLE_WIDTH + 4.0
     } else {
-        SIDEBAR_WIDTH - 12.0 - TOGGLE_WIDTH
+        view.sidebar_width() - 12.0 - TOGGLE_WIDTH
     };
     let button = icon_button(
         "new-session",
@@ -333,9 +333,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
         }
     }
     div()
-        .w(px(SIDEBAR_WIDTH))
-        .h_full()
-        .flex_shrink_0()
+        .size_full()
         .fill(Ink::Sidebar, a)
         .border_r(px(1.0))
         .border_color(hsla(Ink::Hairline.color(a)))

@@ -39,6 +39,9 @@ pub fn build(
                         let diff =
                             std::env::var_os("NOTCHLING_RENDER_GIT_DIFF").is_some_and(|v| v == "1");
                         view.preview_git(diff, cx);
+                        if let Ok(how) = std::env::var("NOTCHLING_RENDER_CHANGES") {
+                            view.preview_changes(&how, cx);
+                        }
                     }
                     view
                 })
@@ -56,6 +59,7 @@ pub fn build(
             .or_else(|| crate::accounts::window::build_render(other, cx))
             .or_else(|| crate::vault::view::build_render(other, cx))
             .or_else(|| crate::inbox::view::build_render(other, cx))
+            .or_else(|| crate::activity::view::build_render(other, cx))
             .or_else(|| crate::welcome::view::build_render(other, cx))
             .or_else(|| crate::switches::restart_view::build_render(other, cx))
             .or_else(|| crate::machines::view::build_render(other, cx)),

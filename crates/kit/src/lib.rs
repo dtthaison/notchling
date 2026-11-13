@@ -17,7 +17,7 @@ pub mod typescale;
 #[cfg(target_os = "macos")]
 pub mod ui;
 
-pub use appearance::Appearance;
+pub use appearance::{preference, set_preference, Appearance, Preference};
 pub use color::Color;
 pub use icon::{Icon, IconSize};
 pub use ink::{Ink, Status};

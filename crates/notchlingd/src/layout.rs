@@ -111,6 +111,23 @@ impl Layout {
         self.state_dir().join(AUDIT_NAME)
     }
 
+    pub fn remote_log_path(&self) -> PathBuf {
+        self.data_dir
+            .parent()
+            .unwrap_or(&self.data_dir)
+            .join("AgentConsole")
+            .join("bridge")
+            .join(notchling_engine::bridge::net::audit::FILE_NAME)
+    }
+
+    pub fn account_log_path(&self) -> PathBuf {
+        self.data_dir.join("account-log.json")
+    }
+
+    pub fn log_path(&self) -> PathBuf {
+        self.state_dir().join(crate::LOG_NAME)
+    }
+
     pub fn vault_index(&self) -> VaultIndex {
         VaultIndex::in_data(&self.data_dir)
     }

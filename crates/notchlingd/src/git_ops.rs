@@ -2,7 +2,9 @@ use crate::op_group::OpGroup;
 use crate::pages_ops::Titles;
 use notchling_engine::control::Launcher;
 use notchling_engine::git::guard::allowed_folder;
-use notchling_engine::git::{read_diff, read_status, Failure};
+use notchling_engine::git::{
+    read_branch_diff, read_branch_stat, read_branches, read_diff, read_status, Failure,
+};
 use notchling_engine::tools::codex::list as codex_list;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
 use serde_json::{json, Value};
@@ -10,7 +12,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const GIT_OPS: [&str; 2] = [ops::GIT_STATUS, ops::GIT_DIFF];
+pub const GIT_OPS: [&str; 5] = [
+    ops::GIT_STATUS,
+    ops::GIT_DIFF,
+    ops::GIT_BRANCH_DIFF_STAT,
+    ops::GIT_BRANCH_DIFF_FILE,
+    ops::GIT_BRANCHES,
+];
 
 const KNOWN_FOR: Duration = Duration::from_secs(5);
 const CODEX_ROLLOUTS: usize = 30;
@@ -88,6 +96,12 @@ fn text_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ApiError> {
         .ok_or_else(|| ApiError::bad_request(format!("{key} is required")))
 }
 
+fn optional_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+}
+
 impl GitOps {
     pub fn new(launcher: Arc<dyn Launcher>, folders: Folders) -> GitOps {
         GitOps {
@@ -131,6 +145,45 @@ impl GitOps {
         let diff = read_diff(cwd, path, self.launcher.as_ref()).map_err(failed)?;
         serde_json::to_value(diff).map_err(|e| ApiError::internal(format!("diff: {e}")))
     }
+
+    fn branch_diff_stat(&self, cwd: &str, base: Option<&str>) -> Result<Value, ApiError> {
+        match read_branch_stat(cwd, base, self.launcher.as_ref()) {
+            Ok(stat) => {
+                let mut value = serde_json::to_value(stat)
+                    .map_err(|e| ApiError::internal(format!("branch stat: {e}")))?;
+                value["repo"] = json!(true);
+                value["includes_uncommitted"] = json!(true);
+                Ok(value)
+            }
+            Err(Failure::NotRepo) => Ok(json!({"repo": false})),
+            Err(other) => Err(failed(other)),
+        }
+    }
+
+    fn branch_diff_file(
+        &self,
+        cwd: &str,
+        base: &str,
+        path: &str,
+        from: Option<&str>,
+    ) -> Result<Value, ApiError> {
+        let diff =
+            read_branch_diff(cwd, base, path, from, self.launcher.as_ref()).map_err(failed)?;
+        serde_json::to_value(diff).map_err(|e| ApiError::internal(format!("diff: {e}")))
+    }
+
+    fn branches(&self, cwd: &str) -> Result<Value, ApiError> {
+        match read_branches(cwd, self.launcher.as_ref()) {
+            Ok(list) => {
+                let mut value = serde_json::to_value(list)
+                    .map_err(|e| ApiError::internal(format!("branches: {e}")))?;
+                value["repo"] = json!(true);
+                Ok(value)
+            }
+            Err(Failure::NotRepo) => Ok(json!({"repo": false})),
+            Err(other) => Err(failed(other)),
+        }
+    }
 }
 
 impl OpGroup for GitOps {
@@ -149,6 +202,14 @@ impl OpGroup for GitOps {
         match op {
             ops::GIT_STATUS => self.status(&real),
             ops::GIT_DIFF => self.diff(&real, text_arg(args, "path")?),
+            ops::GIT_BRANCH_DIFF_STAT => self.branch_diff_stat(&real, optional_arg(args, "base")),
+            ops::GIT_BRANCH_DIFF_FILE => self.branch_diff_file(
+                &real,
+                text_arg(args, "base")?,
+                text_arg(args, "path")?,
+                optional_arg(args, "from"),
+            ),
+            ops::GIT_BRANCHES => self.branches(&real),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

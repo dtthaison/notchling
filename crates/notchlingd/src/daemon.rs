@@ -2,6 +2,7 @@ use crate::acting::{file_says_on, FILE_SAID_ON, SETTINGS_NAME};
 use crate::acting_ops::Room;
 pub use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
+use crate::log_rotate::{StderrLog, CHECK_EVERY};
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_local_api::lock::InstanceLock;
@@ -265,12 +266,24 @@ pub fn run(
         layout.socket.display()
     );
 
+    let log = StderrLog::adopt(&layout.log_path());
+    let mut last_log_check = Instant::now();
+    if let Some(log) = &log {
+        rotate_log(log);
+    }
     let mut watched = lister.watched();
     let mut watch = start_watch(&watched, options.watch);
     scan(&mut lister, &options, &sessions, &handle);
     first_scan.finish();
     let mut last_poll = Instant::now();
     while !stop() {
+        if let Some(log) = log
+            .as_ref()
+            .filter(|_| last_log_check.elapsed() >= CHECK_EVERY)
+        {
+            last_log_check = Instant::now();
+            rotate_log(log);
+        }
         let changed = match &watch {
             Some((_, rx)) => wait_batch(rx, Duration::from_millis(100)),
             None => {
@@ -299,6 +312,14 @@ pub fn run(
         Err(_) => Err(DaemonError::Io(io::Error::other(
             "the server thread panicked",
         ))),
+    }
+}
+
+fn rotate_log(log: &StderrLog) {
+    match log.check() {
+        Ok(true) => eprintln!("notchling: the log passed 5 MB; the old one is notchlingd.log.1"),
+        Ok(false) => {}
+        Err(e) => eprintln!("notchling: rotating the log failed ({e})"),
     }
 }
 

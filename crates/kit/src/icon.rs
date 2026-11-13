@@ -76,6 +76,7 @@ pub enum Icon {
     Camera,
     Video,
     Simulator,
+    Diff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -96,7 +97,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 73] = [
+    pub const ALL: [Icon; 74] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -170,6 +171,7 @@ impl Icon {
         Icon::Camera,
         Icon::Video,
         Icon::Simulator,
+        Icon::Diff,
     ];
 
     pub fn symbol(self) -> &'static str {
@@ -247,6 +249,7 @@ impl Icon {
             Icon::Camera => "camera",
             Icon::Video => "video",
             Icon::Simulator => "ipad.and.iphone",
+            Icon::Diff => "plusminus",
         }
     }
 
@@ -325,6 +328,7 @@ impl Icon {
             Icon::Camera => "◉",
             Icon::Video => "▶",
             Icon::Simulator => "⌷",
+            Icon::Diff => "±",
         }
     }
 
@@ -393,6 +397,7 @@ impl Icon {
             Icon::Camera => "icons/camera.svg",
             Icon::Video => "icons/video.svg",
             Icon::Simulator => "icons/tablet-smartphone.svg",
+            Icon::Diff => "icons/diff.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -434,7 +439,7 @@ macro_rules! icons {
     };
 }
 
-const SVGS: [(&str, &[u8]); 70] = icons![
+const SVGS: [(&str, &[u8]); 71] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -461,6 +466,7 @@ const SVGS: [(&str, &[u8]); 70] = icons![
     "copy",
     "corner-down-left",
     "cpu",
+    "diff",
     "ellipsis",
     "file-plus",
     "file-text",

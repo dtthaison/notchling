@@ -2,22 +2,25 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, Context, Div, EventEmitter, Render, SharedString, Stateful, Window,
+    div, prelude::*, px, Context, Div, Entity, EventEmitter, Render, SharedString, Stateful, Window,
 };
 use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitStyled,
+    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart, KitStyled,
 };
 use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::{Map, Value};
 
+use super::agents::{Page, Tool};
+use super::agents_view::agents_page;
 use super::banner::Banners;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
-use super::settings_hooks_view::hooks_section;
 use super::view::{sheet_header, Acts, Dismiss};
+use crate::activity::view::ActivityView;
+mod shortcut;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
@@ -30,6 +33,10 @@ pub struct SettingsView {
     error: Option<String>,
     busy: Option<Area>,
     hooks: HooksShown,
+    page: Page,
+    tool: Tool,
+    activity: Option<Entity<ActivityView>>,
+    shortcut: shortcut::ShortcutState,
 }
 
 pub struct SettingChanged {
@@ -55,12 +62,47 @@ impl SettingsView {
             error: None,
             busy: None,
             hooks: HooksShown::Checking,
+            page: Page::General,
+            tool: Tool::ClaudeCode,
+            activity: None,
+            shortcut: shortcut::ShortcutState::default(),
+        }
+    }
+
+    pub fn show_value(&mut self, key: &str, value: Value, cx: &mut Context<Self>) {
+        if self.values.get(key) != Some(&value) {
+            self.values.insert(key.to_owned(), value);
+            cx.notify();
         }
     }
 
     pub fn with_hooks(mut self, hooks: HooksShown) -> SettingsView {
         self.hooks = hooks;
         self
+    }
+
+    pub fn with_page(mut self, page: Page) -> SettingsView {
+        self.page = page;
+        self
+    }
+
+    pub fn with_activity(mut self, activity: Entity<ActivityView>) -> SettingsView {
+        self.activity = Some(activity);
+        self
+    }
+
+    fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        if page == Page::Activity {
+            match &self.activity {
+                Some(view) => view.update(cx, |view, cx| view.refresh(cx)),
+                None => {
+                    let actions = self.acts.actions.clone();
+                    self.activity = Some(cx.new(|cx| ActivityView::live(actions, cx)));
+                }
+            }
+        }
+        cx.notify();
     }
 
     pub fn ask_hooks(&mut self, hooks: Arc<Hooks>, cx: &mut Context<Self>) {
@@ -162,6 +204,32 @@ impl SettingsView {
         cx.notify();
     }
 
+    fn page_tabs(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .p(px(2.0))
+            .gap(px(2.0))
+            .rounded(px(RADIUS_SM))
+            .fill(Ink::Raised, a)
+            .part("Settings Pages", a, cx)
+            .children(Page::ALL.iter().map(|&page| {
+                let kind = if self.page == page {
+                    ButtonKind::Secondary
+                } else {
+                    ButtonKind::Ghost
+                };
+                button(
+                    SharedString::from(format!("settings-page-{}", page.title())),
+                    page.title(),
+                    kind,
+                    PartState::Rest,
+                    a,
+                )
+                .flex_1()
+                .on_click(cx.listener(move |this, _, _, cx| this.show_page(page, cx)))
+            }))
+    }
+
     fn field(&self, row: &Row, i: usize, a: Appearance, cx: &mut Context<Self>) -> Div {
         let id = |part: &str| SharedString::from(format!("setting-{i}-{part}"));
         match &row.field {
@@ -231,6 +299,7 @@ impl SettingsView {
                     None => div().opacity(0.4).child(switch(id("daemon"), false, a)),
                 }
             }
+            Field::Shortcut(setting) => self.shortcut_field(*setting, a, cx),
             Field::ReadOnly { value, .. } => div()
                 .px(px(8.0))
                 .h(px(20.0))
@@ -281,7 +350,15 @@ impl Render for SettingsView {
             .flex_col()
             .gap(px(14.0));
         let mut n = 0;
-        for section in sections(&read, &daemon) {
+        if self.page != Page::Activity {
+            list = list.child(self.page_tabs(a, cx));
+        }
+        let general = if self.page == Page::General {
+            sections(&read, &daemon)
+        } else {
+            Vec::new()
+        };
+        for section in general {
             let mut rows = card(a).flex().flex_col();
             for (k, row) in section.rows.iter().enumerate() {
                 n += 1;
@@ -289,6 +366,7 @@ impl Render for SettingsView {
                     Field::ReadOnly {
                         note: Some(note), ..
                     } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
+                    Field::Shortcut(_) => self.shortcut_note(a, cx),
                     _ => None,
                 };
                 rows = rows.child(
@@ -328,7 +406,30 @@ impl Render for SettingsView {
                     ),
             );
         }
-        list = list.child(hooks_section(&self.hooks, a));
+        if self.page == Page::Agents {
+            list = list.child(agents_page(self.tool, &self.hooks, a, cx));
+        }
+        let body = if self.page == Page::Activity {
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .px(px(SIDE_PADDING))
+                        .pt(px(SIDE_PADDING))
+                        .child(self.page_tabs(a, cx)),
+                )
+                .children(
+                    self.activity
+                        .clone()
+                        .map(|view| div().flex_1().min_h(px(0.0)).child(view)),
+                )
+                .into_any_element()
+        } else {
+            scrollable(list).into_any_element()
+        };
         div()
             .size_full()
             .flex()
@@ -337,7 +438,7 @@ impl Render for SettingsView {
             .overflow_hidden()
             .fill(Ink::Window, a)
             .child(sheet_header(Icon::Settings, "Settings", done, a))
-            .child(scrollable(list))
+            .child(body)
             .children(self.error.as_deref().map(|e| {
                 label(e, TypeRole::Meta, Ink::Needs, a)
                     .px(px(SIDE_PADDING))
