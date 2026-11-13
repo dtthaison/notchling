@@ -771,6 +771,7 @@ impl ChatView {
                             shown.facts.context_tokens = context.unwrap_or(0);
                         }
                         view.conversation = Arc::new(shown);
+                        view.refresh_shells(0);
                         view.loading = false;
                         view.tools.agy = Some(c);
                     }

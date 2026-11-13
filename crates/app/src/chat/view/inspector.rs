@@ -16,8 +16,9 @@ use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::inspector::{
-    fact_icon, fact_text, inspector, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
+    fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
+use crate::chat::shell_list::Listing;
 use notchling_engine::transcript::model::Conversation;
 
 pub(super) const WIDTH: f32 = 260.0;
@@ -53,11 +54,12 @@ pub struct DetailsModel {
 fn model_of(
     conversation: &Conversation,
     subagents: &[SubagentRow],
+    shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
 ) -> DetailsModel {
     DetailsModel {
-        i: inspector(conversation, subagents, writers),
+        i: inspector_listed(conversation, subagents, shells, writers),
         folder,
     }
 }
@@ -70,6 +72,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     let mut model = model_of(
         &view.conversation,
         &view.subagent_rows,
+        Some(&view.shells),
         &|p: &str| view.shell_probe.writers(p),
         folder,
     );
@@ -140,7 +143,7 @@ impl RenderOnce for Panel {
             let next = i.subagent_counts.next_page();
             if next > 0 {
                 list = list.child(more_row(
-                    "subagents-more",
+                    More::Subagents,
                     &format!("Load {next} More"),
                     &self.chat,
                     a,
@@ -152,12 +155,22 @@ impl RenderOnce for Panel {
         let shells = if i.shells.is_empty() {
             empty("None running", a)
         } else {
-            div().flex().flex_col().gap(px(6.0)).children(
+            let mut list = div().flex().flex_col().gap(px(6.0)).children(
                 i.shells
                     .iter()
                     .enumerate()
                     .map(|(n, s)| shell_row(n, s, a, &self.chat)),
-            )
+            );
+            let next = i.shell_counts.next_page();
+            if next > 0 {
+                list = list.child(more_row(
+                    More::Shells,
+                    &format!("Load {next} More"),
+                    &self.chat,
+                    a,
+                ));
+            }
+            list
         };
 
         let sections = [
@@ -434,16 +447,29 @@ fn output_link(
         })
 }
 
-fn more_row(key: &'static str, text: &str, chat: &WeakEntity<ChatView>, a: Appearance) -> Div {
+#[derive(Clone, Copy)]
+enum More {
+    Subagents,
+    Shells,
+}
+
+fn more_row(which: More, text: &str, chat: &WeakEntity<ChatView>, a: Appearance) -> Div {
     let chat = chat.clone();
+    let key = match which {
+        More::Subagents => "subagents-more",
+        More::Shells => "shells-more",
+    };
     div().child(
         div()
             .id(key)
             .cursor_pointer()
             .child(label(text, TypeRole::Meta, Ink::AccentText, a))
             .on_click(move |_, _, cx| {
-                chat.update(cx, |this, cx| this.load_more_subagents(cx))
-                    .ok();
+                chat.update(cx, |this, cx| match which {
+                    More::Subagents => this.load_more_subagents(cx),
+                    More::Shells => this.load_more_shells(cx),
+                })
+                .ok();
             }),
     )
 }
@@ -473,25 +499,29 @@ mod tests {
     #[test]
     fn the_details_model_is_equal_for_the_same_inputs() {
         let c = with_task("Port");
-        let a = model_of(&c, &[], &no_writers, folder());
-        let b = model_of(&with_task("Port"), &[], &no_writers, folder());
+        let a = model_of(&c, &[], None, &no_writers, folder());
+        let b = model_of(&with_task("Port"), &[], None, &no_writers, folder());
         assert_eq!(a, b);
-        assert_ne!(a, model_of(&c, &[], &no_writers, None), "the folder line");
+        assert_ne!(
+            a,
+            model_of(&c, &[], None, &no_writers, None),
+            "the folder line"
+        );
     }
 
     #[test]
     fn a_new_task_changes_the_details_model() {
-        let before = model_of(&with_task("Port"), &[], &no_writers, folder());
+        let before = model_of(&with_task("Port"), &[], None, &no_writers, folder());
         let mut more = with_task("Port");
         more.tasks.push(TaskEntry {
             id: "2".into(),
             subject: "Test".into(),
             status: TaskStatus::Pending,
         });
-        assert_ne!(before, model_of(&more, &[], &no_writers, folder()));
+        assert_ne!(before, model_of(&more, &[], None, &no_writers, folder()));
         assert_ne!(
             before,
-            model_of(&with_task("Port it"), &[], &no_writers, folder())
+            model_of(&with_task("Port it"), &[], None, &no_writers, folder())
         );
     }
 
@@ -507,10 +537,11 @@ mod tests {
             }],
             ..Conversation::default()
         };
-        let idle = model_of(&c, &[], &no_writers, None);
+        let idle = model_of(&c, &[], None, &no_writers, None);
         let writing = model_of(
             &c,
             &[],
+            None,
             &|p: &str| {
                 if p == "/tmp/b1.output" {
                     vec![4242]

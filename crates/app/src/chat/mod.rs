@@ -52,6 +52,8 @@ pub mod run_command;
 mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
+pub mod shell_list;
+pub mod shell_rows;
 pub mod sidebar;
 pub mod simulator;
 pub mod slash_menu;

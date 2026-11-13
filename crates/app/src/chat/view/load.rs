@@ -172,6 +172,7 @@ impl ChatView {
             self.subagents = loaded.subagents;
             self.subagent_rows = loaded.subagent_rows;
             self.subagent_counts = loaded.subagent_counts;
+            self.refresh_shells(0);
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply_shared(&self.subagents, loaded.subagent);
             }
@@ -214,6 +215,7 @@ impl ChatView {
         self.subagent_rows.clear();
         self.subagent_counts = Default::default();
         self.more_subagents = 0;
+        self.shells = Default::default();
         self.open_subagent = None;
         self.prompt.transcript = None;
         self.loading = true;
