@@ -13,6 +13,16 @@ pub const LONG_LINE_SCAN: u64 = 64_000_000;
 
 pub static PARSED_BYTES: AtomicU64 = AtomicU64::new(0);
 
+static CHAT_TAIL: AtomicU64 = AtomicU64::new(CHAT_TAIL_BYTES);
+
+pub fn chat_tail_bytes() -> u64 {
+    CHAT_TAIL.load(Ordering::Relaxed)
+}
+
+pub fn set_chat_tail_bytes(bytes: u64) {
+    CHAT_TAIL.store(bytes, Ordering::Relaxed);
+}
+
 pub fn read_chunk(
     path: &str,
     start: u64,
@@ -130,6 +140,7 @@ struct Cursor<P, O> {
     parser: P,
     output: O,
     used: u64,
+    budget: u64,
 }
 
 struct State<P, O> {
@@ -139,6 +150,7 @@ struct State<P, O> {
 
 pub struct Cursors<P: LineParser, O: Clone> {
     tail_bytes: u64,
+    follows_chat: bool,
     limit: usize,
     long_line_scan: u64,
     line_cap: Option<usize>,
@@ -165,6 +177,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
     ) -> Self {
         Cursors {
             tail_bytes,
+            follows_chat: false,
             limit,
             long_line_scan: 0,
             line_cap: None,
@@ -186,6 +199,20 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         PARSED_BYTES.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    pub fn chat(limit: usize, render: impl Fn(&P) -> O + Send + Sync + 'static) -> Self {
+        let mut cursors = Cursors::new(CHAT_TAIL_BYTES, limit, render);
+        cursors.follows_chat = true;
+        cursors
+    }
+
+    fn budget(&self) -> u64 {
+        if self.follows_chat {
+            chat_tail_bytes()
+        } else {
+            self.tail_bytes
+        }
+    }
+
     pub fn long_lines_free(mut self, scan_limit: u64) -> Self {
         self.long_line_scan = scan_limit;
         self
@@ -197,12 +224,12 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         self
     }
 
-    fn fits_the_budget(&self, path: &str, size: u64, offset: u64) -> bool {
+    fn fits_the_budget(&self, path: &str, size: u64, offset: u64, budget: u64) -> bool {
         self.long_line_scan > 0
             && tail_start_with(
                 path,
                 size,
-                self.tail_bytes,
+                budget,
                 self.long_line_scan,
                 self.line_cap.unwrap_or(MAX_LINE_BYTES),
             )
@@ -231,6 +258,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         let modified = meta.modified().ok()?;
         let size = meta.len();
         let inode = inode_of(&meta);
+        let budget = self.budget();
 
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let state = &mut *guard;
@@ -239,10 +267,11 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
 
         let reusable = match state.cursors.get(path) {
             Some(c)
-                if c.inode == inode
+                if c.budget == budget
+                    && c.inode == inode
                     && c.offset <= size
-                    && (size - c.offset <= self.tail_bytes
-                        || self.fits_the_budget(path, size, c.offset)) =>
+                    && (size - c.offset <= budget
+                        || self.fits_the_budget(path, size, c.offset, budget)) =>
             {
                 if c.modified == modified && c.size == size {
                     let output = c.output.clone();
@@ -278,13 +307,13 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         let aligned = (self.long_line_scan > 0)
             .then(|| {
                 let cap = self.line_cap.unwrap_or(MAX_LINE_BYTES);
-                tail_start_with(path, size, self.tail_bytes, self.long_line_scan, cap).ok()
+                tail_start_with(path, size, budget, self.long_line_scan, cap).ok()
             })
             .flatten();
         let (start, cut) = match aligned {
             Some(start) => (start, false),
             None => {
-                let start = size.saturating_sub(self.tail_bytes);
+                let start = size.saturating_sub(budget);
                 (start, start > 0)
             }
         };
@@ -311,6 +340,7 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
                 parser,
                 output: output.clone(),
                 used: clock,
+                budget,
             },
         );
         Some(output)

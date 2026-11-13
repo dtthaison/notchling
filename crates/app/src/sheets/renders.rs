@@ -25,7 +25,7 @@ pub const VIEWS: [ViewSpec; 4] = [
     },
     ViewSpec {
         name: "settings",
-        size: (620.0, 1200.0),
+        size: (620.0, 1460.0),
         about: "the Settings sheet with acting shown read-only (defaults)",
     },
 ];

@@ -11,7 +11,7 @@ pub use tools::{diff_lines, make_call, pretty, result_text};
 pub use user::{model_id_in_confirmation, user_item};
 
 use super::model::Conversation;
-use super::tail::{Cursors, LineParser, CHAT_TAIL_BYTES, LONG_LINE_SCAN};
+use super::tail::{Cursors, LineParser, LONG_LINE_SCAN};
 use std::sync::{Arc, OnceLock};
 
 pub struct SubagentParser(Parser);
@@ -35,7 +35,7 @@ impl LineParser for SubagentParser {
 fn session_cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
     static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
     CURSORS.get_or_init(|| {
-        Cursors::new(CHAT_TAIL_BYTES, 60, |p: &Parser| Arc::new(p.conversation()))
+        Cursors::chat(60, |p: &Parser| Arc::new(p.conversation()))
             .skipping_lines_over(MAX_LINE, LONG_LINE_SCAN)
     })
 }
@@ -43,10 +43,8 @@ fn session_cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
 fn subagent_cursors() -> &'static Cursors<SubagentParser, Arc<Conversation>> {
     static CURSORS: OnceLock<Cursors<SubagentParser, Arc<Conversation>>> = OnceLock::new();
     CURSORS.get_or_init(|| {
-        Cursors::new(CHAT_TAIL_BYTES, 30, |p: &SubagentParser| {
-            Arc::new(p.0.conversation())
-        })
-        .skipping_lines_over(MAX_LINE, LONG_LINE_SCAN)
+        Cursors::chat(30, |p: &SubagentParser| Arc::new(p.0.conversation()))
+            .skipping_lines_over(MAX_LINE, LONG_LINE_SCAN)
     })
 }
 
