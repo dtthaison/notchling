@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, Context, Div, EventEmitter, Render, SharedString, Stateful, Window,
@@ -13,11 +14,14 @@ use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::{Map, Value};
 
 use super::banner::Banners;
+use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
+use super::settings_hooks_view::hooks_section;
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
+use crate::welcome::hooks::Hooks;
 
 pub struct SettingsView {
     store: Option<Settings>,
@@ -25,6 +29,7 @@ pub struct SettingsView {
     acts: Acts,
     error: Option<String>,
     busy: Option<Area>,
+    hooks: HooksShown,
 }
 
 impl EventEmitter<Dismiss> for SettingsView {}
@@ -42,7 +47,28 @@ impl SettingsView {
             acts,
             error: None,
             busy: None,
+            hooks: HooksShown::Checking,
         }
+    }
+
+    pub fn with_hooks(mut self, hooks: HooksShown) -> SettingsView {
+        self.hooks = hooks;
+        self
+    }
+
+    pub fn ask_hooks(&mut self, hooks: Arc<Hooks>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let shown = cx
+                .background_executor()
+                .spawn(async move { HooksShown::from_plan(hooks.plan()) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.hooks = shown;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn daemon(&self, cx: &Context<Self>) -> Daemon {
@@ -291,6 +317,7 @@ impl Render for SettingsView {
                     ),
             );
         }
+        list = list.child(hooks_section(&self.hooks, a));
         div()
             .size_full()
             .flex()
