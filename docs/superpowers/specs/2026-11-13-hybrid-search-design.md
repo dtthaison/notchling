@@ -1,6 +1,6 @@
 # Hybrid search for Notchling
 
-Design, revision 4, 2026-11-14: revision 3 with the user's answers after review. Revision 3 added the calls the coordinator settled after a builder's review. Read against `agent/move-auto-trust` (8e73a97) and the open branches named below. Labels: **[M]** measured on this Mac (Apple M5, 32 GB, macOS 26; see `embedding-research.md`), **[S]** from a source, **[E]** estimate.
+Design, revision 4, 2026-11-14: revision 3 with the user's answers after review. Revision 3 added the calls the coordinator settled after a builder's review. A coordinator's call of 2026-11-14, made while the plans were written, moves the Settings search registry into the app and its words into `locales/en/mac/settings.ftl` with no attributes (call 1, item 9, section 8, section 12's P1 row). Read against `agent/move-auto-trust` (8e73a97) and the open branches named below. Labels: **[M]** measured on this Mac (Apple M5, 32 GB, macOS 26; see `embedding-research.md`), **[S]** from a source, **[E]** estimate.
 
 ## The user's answers after review
 
@@ -40,8 +40,7 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 
 1. **Base and strings** (coordinator's call).
    - **Base.** P1 builds on the integration branch `merge/settings-batch`. It merges `agent-settings-cli` (decision 0020), appearance, the search hotkey, logs-activity, panel sizes, the hooks list and branch changes.
-   - **Strings.** User-facing strings go through Fluent. The locale design (`agent/locale-design`, being written) has its own phase 1, which sets up `locales/en` and moves Settings there. Search P1 lands after it.
-   - **If that slips.** P1 takes each key's title and about from its 0020 key line. It writes the rest in English into `crates/engine/src/search/settings_text.rs`: keywords, and the text of places with no key. That is a temporary table keyed by the future Fluent message ids; the locale migration moves it into `locales/en/shared.ftl` and deletes the file. P1's pull request says which of the two it used.
+   - **Strings** (coordinator's call, 2026-11-14, superseding the earlier text here). User-facing strings go through Fluent, as the approved localization design (`agent/locale-design`) lays it out. Search P1 depends on its step L1 (`locales/en/`, `tools/locale/gen.py`, `crates/locale`) being merged, and prefers L3 (Settings' words) merged too. There is no fallback table: the earlier `settings_text.rs` plan is dropped.
    - *Sections 1, 2, 8, 12.*
 2. **Where corpora live** (coordinator's call).
    - **In the app.** The app keeps a pure matcher for the small corpora it owns: Settings, Actions, and Inbox (from its inbox feed). ⌘⇧P answers those at once, with no daemon, and in fixture renders.
@@ -96,8 +95,8 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 6. **Facets.** Each document carries facets (tool, project, account and time for sessions; section for settings; owner for pages). `search.query` takes a `filter` that applies inside the FTS query and masks the vector scan before it runs. Filters, prefixes, `when:` bounds and RRF are one pure engine module that the app and the daemon share.
 7. **⌘⇧P works like Spotlight.** Results are grouped by category in the user's order. Sessions, Settings, Pages, Inbox and Actions are on by default; Activity, Vault Names and Machines are off. An unchecked category is neither shown nor indexed. Prefixes such as `s:` and `p:` become chips. The app answers Settings, Actions and Inbox itself, at once; the daemon answers the rest.
 8. **Actions** (Toggle Keep Awake, New Session, Switch Account, Open Settings…) run straight from search through the same app code as the menu. The daemon only ranks their titles, and `search.query` can't run anything.
-9. **Settings registry.** Each entry names a settings key, whose title and description decision 0020 puts on the key line and the locale design moves to `locales/en/shared.ftl`, plus a place to jump to and Vietnamese search aliases. Every Ask key also has a plain-words effect text, which an agent's Ask item shows. A search field in the sheet jumps to the row and flashes it.
-10. **Phases.** P1, Tier 0 and Settings search (auto zone, on `merge/settings-batch`, after the locale design's phase 1); then range, categories and Actions; facets; the helper and an eval tool (P4a), with a maintainer-run gate (P4b); store and pipeline; hybrid; the download UI; and more corpora.
+9. **Settings registry.** It lives in the app (coordinator's call, 2026-11-14). Each entry holds generated `Text` constants for its title, about and keywords (`settings-<kebab key>`, `-about`, `-words` in `locales/en/mac/settings.ftl`), plus a place to jump to and Vietnamese search aliases. Every Ask key also has a plain-words effect text, which an agent's Ask item shows. A search field in the sheet jumps to the row and flashes it.
+10. **Phases.** P1, Tier 0 and Settings search (auto zone, on `merge/settings-batch`, after locale L1, preferably L3); then range, categories and Actions; facets; the helper and an eval tool (P4a), with a maintainer-run gate (P4b); store and pipeline; hybrid; the download UI; and more corpora.
 
 ## 1. What exists today
 
@@ -112,7 +111,7 @@ A builder read revision 2, and the coordinator settled these six points. Each is
   - `agent/search-hotkey-setting`: key `searchShortcut` (default `ctrl+alt+p`, shown as ⌃⌥P; ⌘⇧P always works inside Notchling) in a new last section, Search.
   - `origin/agent/agent-settings-cli`: decision 0020. Every key gets an agent class (Free, Ask or Never) with a `title`, an `about` and a `why` on its line in `keys.rs`. A key with no class is Never, and a test fails until it gets one.
   - `agent/logs-activity`: Settings > Activity, `activity.list`, app tier.
-  - `agent/locale-design`: Fluent, `locales/en/shared.ftl`. Not written yet, so this design states only what it needs from it. Its phase 1 sets up `locales/en` and moves Settings; search P1 lands after it.
+  - `agent/locale-design`: Fluent, `locales/en/mac/<area>.ftl`, `crates/locale` (approved). Search P1 needs its L1 merged and prefers L3, which moves Settings' words (coordinator's call, 2026-11-14).
   - `agent/account-log-fix`: fixes `account-log.json`, which the `account` facet reads.
 - **Out of scope:** the phone's session search (`chat::read_window` and the bridge).
 - **On this Mac** (counts only): `search.db` holds 650 sessions and 3.78M characters. 317 Claude Code and 146 Codex transcripts changed in the last 14 days, and 677 Claude Code transcripts are on disk in all. 42 saved pages. The app is 45 MB.
@@ -124,7 +123,7 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 - **Rules.** A download trips CAP-NETWORK. Model files and `vectors.db` trip CAP-FILEWRITE, and the helper CAP-PROCESS. The auto zone covers `crates/app/**` and `crates/engine/src/search/**`, but not `Cargo.toml`, `notchlingd`, `local-api`, `platform` or `engine/src/settings`.
 - **crates/AGENTS.md.** No file I/O in a model compute or draw, daemon calls off the UI thread, 1 MiB per local API line, no lock across I/O, slow work answers at once and reports by event.
 - **0020.** Agents read every setting and change one by its class. Every new key here gets a class by the user's rule: cosmetic Free, sensitive Ask with an effect text (answer 2, section 10).
-- **Locale.** All UI text is English. Every user-facing string goes through Fluent, so search P1 lands after the locale design's phase 1; the fallback if that slips is in call 1. Search aliases in other languages are data, not UI text.
+- **Locale.** All UI text is English. Every user-facing string goes through Fluent, so search P1 lands after locale L1 and preferably L3, with no fallback (call 1, coordinator's call). Search aliases in other languages are data, not UI text.
 - **Platforms.** The engine builds on macOS, Linux and Windows. Accelerate is macOS-only; other systems use candle's plain CPU path.
 
 ## 3. Where embeddings come from
@@ -412,25 +411,28 @@ Each group shows up to 8 sessions or 4 of anything else, then a "N more" row tha
 3. **Index Sessions**: Last 14 Days, Last 30 Days or Everything on Disk (default).
 4. **Categories**: one row per category with a checkbox and a drag handle (⌥↑ and ⌥↓ move a focused row); the defaults are in section 7. The checkboxes write `searchCategories` and the order writes `searchCategoryOrder` (answer 2).
 
-**The registry** (`crates/engine/src/search/settings_entries.rs`, auto zone):
+**The registry** (`crates/app/src/sheets/settings_entries.rs`, auto zone; coordinator's call, 2026-11-14: it lives in the app, since the engine never depends on `notchling-locale`):
 
 ```rust
 pub struct Entry {
     pub id: &'static str,                    // stable, never reused: "appearance", "daemon.accounts", "window.accounts"
-    pub key: Option<&'static str>,           // a settings::KEYS name: its title and about come from it
-    pub message: Option<&'static str>,       // Fluent id for entries without a key (windows, switches, hooks)
+    pub key: Option<&'static str>,           // a settings::KEYS name, for entries that set one
+    pub title: Text,                         // generated constant, e.g. t::settings::APPEARANCE
+    pub about: Option<Text>,
+    pub words: Option<Text>,                 // search keywords in the UI's locale
+    pub choices: &'static [(&'static str, Text)],
     pub aliases: &'static [&'static str],    // search-only, any language: ["giao diện", "chế độ tối", "tối"]
     pub place: Place,                        // Section("General") | Daemon(Area) | Window(Accounts) | Hooks
 }
 ```
 
-- **One source of text.**
-  - **Today:** decision 0020 puts `title` and `about` on every key line.
-  - **When the locale work lands:** they become `locales/en/shared.ftl` messages, `setting-<key>` with `.about` and `.keywords` attributes, plus `.label` where the sheet's row label is shorter ("Width" under Notch).
-  - **Neither way does the registry copy text.** It names the key, or its own message id for places with no key.
-  - **If the locale phase 1 slips** (call 1): P1 takes keys' titles and about from their 0020 key lines and writes the rest (keywords, and the text of places with no key) in English into `crates/engine/src/search/settings_text.rs`. That is a temporary table keyed by the future message ids, which the locale migration moves into `shared.ftl` and deletes. P1's pull request says which it used.
+- **One source of text** (coordinator's call, 2026-11-14, superseding `shared.ftl` with attributes and the `settings_text.rs` fallback).
+  - **Messages.** In `locales/en/mac/settings.ftl`, with no attributes: `settings-<kebab key>` (title), `settings-<kebab key>-about`, `settings-<kebab key>-words` (keywords) and `settings-<kebab key>-<value>` for each choice (`searchShortcut` becomes `settings-search-shortcut`, `daemon.accounts` becomes `settings-daemon-accounts`; a value that starts with a digit takes a word, since a Fluent key word starts with a letter). Places with no key take an id of their own under `settings-`.
+  - **Who writes them.** Locale L3 moves only the words the sheet shows today (titles, choices). Settings search writes the `-about` and `-words` messages, and the titles and choices too if L3 has not merged.
+  - **The registry copies no text.** It holds the generated `Text` constants. If a part ever has to stay in the engine, it names message ids as strings and an app test proves each one resolves.
+  - **0020's key lines** keep their `title` and `about` for the daemon and the command line, which can't read Fluent. A test fails if a registry title differs from the row title the sheet shows.
 - **Effect text for every Ask key** (answer 2).
-  - **What it is.** Each key 0020 classes Ask has a one-line "what this does" in plain words. It is a Fluent `.effect` attribute (`setting-<key>.effect`), or an `effect` on the key line until the locale work lands.
+  - **What it is.** Each key 0020 classes Ask has a one-line "what this does" in plain words. It is an `effect` on the key line (`KeySpec::effect`), not a Fluent message: the daemon raises the Ask item and never links `crates/locale` (coordinator's call, 2026-11-14).
   - **Where it shows.** An agent's Ask change raises an Inbox item showing the setting's title, the old and the new value, and that line, so the user knows what Allow does.
   - **Feeds back into decision 0020's table.** Its Ask keys (`continueAfterSleep`, `answerFromNotch`, `keepPages`, the limit modes, `limitSwitchAt`, `searchShortcut`) need effect texts, and its Ask item takes this shape.
 - **Search text.** It is the title, about and keywords in the UI's locale, plus the aliases, which are searched under every locale. Vietnamese stays as aliases, since all UI text is English.
@@ -438,7 +440,7 @@ pub struct Entry {
   - Every row the sheet can show (all conditional rows forced on) names an entry.
   - Every entry placed in a section is shown there.
   - Every key that 0020 classes Free or Ask is either in the registry or listed in `NOT_SHOWN` with a reason, so a new user-facing key fails until it has an entry. 0020's own test already fails for a key with no class, title or about.
-  - Every entry's messages exist and are non-empty in `locales/en/shared.ftl`, or in `settings_text.rs` while that table exists.
+  - Every entry's messages exist and are non-empty in `locales/en/mac/settings.ftl` (`t::lookup`).
   - Every Ask key has a non-empty effect text.
   - Ids match a committed list.
   - "dark" finds Appearance, "phím tắt" and "phim tat" find Search Shortcut, and "login" and "đăng nhập" find Logins and Lanes and the Accounts window.
@@ -500,7 +502,7 @@ pub struct Entry {
 
 | Phase | What | Tests | Zone |
 | --- | --- | --- | --- |
-| **P1** (ships first; on `merge/settings-batch`, after the locale design's phase 1) | **Tier 0:** the `đ`→`d` fold in the FTS index, query and highlights, with a `search.db` schema bump (one rebuild). **Settings search:** the registry (keys' titles and about from 0020, Fluent messages, aliases, places), the field, jump and flash. **Effect texts** for every Ask key, 0020's included (answer 2). **Shared module, first files:** `query::fold`, `query::matcher`. If the locale phase 1 slips, the temporary `settings_text.rs` (call 1) | Fold matches SQLite's; a stored "Sửa lỗi đăng nhập" is found by "dang nhap"; registry coverage and `NOT_SHOWN`; every Ask key has an effect text; id list; the three example queries; model tests for keys and jump; `--render settings-search` | **auto** (`crates/engine/src/search/**`, `crates/app/**`, new test files); the effect texts on 0020's keys wait for the maintainer |
+| **P1** (ships first; on `merge/settings-batch`, after locale L1, preferably L3) | **Tier 0:** the `đ`→`d` fold in the FTS index, query and highlights, with a `search.db` schema bump (one rebuild). **Settings search:** the registry in the app (generated `Text` constants for `settings-<kebab key>`, `-about`, `-words`, choices; aliases, places; coordinator's call), the field, jump and flash. **Effect texts** for every Ask key, 0020's included (answer 2). **Shared module, first files:** `query::fold`, `query::matcher`. | Fold matches SQLite's; a stored "Sửa lỗi đăng nhập" is found by "dang nhap"; registry coverage and `NOT_SHOWN`; every Ask key has an effect text; id list; the three example queries; model tests for keys and jump; `--render settings-search` | **auto** (`crates/engine/src/search/**`, `crates/app/**`, `locales/en/mac/settings.ftl`, new test files); the effect texts on 0020's keys wait for the maintainer |
 | P2 | Index Sessions (`searchIndexRange`) and Categories (`searchCategories`, `searchCategoryOrder`) rows, with their classes and effect texts. The FTS index follows the range; unchecked categories are dropped and skipped. ⌘⇧P grouped by category order. `query::parse` with category chips. Actions (app registry and handlers); Inbox, Actions and Settings matched in the app | Range down deletes rows, up queues older files; an unchecked category is in no reply and no table; with Sessions unchecked an agent gets no sessions; every action has a handler; `search.query` returns `actions` and `inbox` in `dropped`; parser goldens | maintainer (`keys.rs`, `pages_ops.rs`, `local-api`) |
 | P3 | Facets on both sides through `query::filter` and `query::when`: the `facets` table in `search.db`, `filter`, `search.facets`, facet chips; `section`, `kind` and `state` on the app's corpora. Account from lanes and `account-log.json`, after `agent/account-log-fix` | A doc outside the filter never appears, in the app or the daemon; filter goldens; `when:` bounds from a fixed `now`; Tab completion model | maintainer (`notchlingd`) |
 | **P4a** (an agent can build it) | `crates/embed`: candle 0.11.1 with `accelerate` on macOS, our own `modernbert` with the mask fix, kitoken; `--bench`. The granite-r2 tokenizer's license is checked on the model and base encoder cards (answer 3). The static reader (engine feature): kitoken WordPiece, else `tokenizers` after a deny review (call 4). **The eval tool,** `crates/embed/examples/eval.rs`. It takes `--queries <file>`: JSON lines `{q, want: [doc ids], lang?}`, written by the maintainer and never committed, for example under the git-ignored `docs/local/`. It runs over `--data-root` and prints R@1 and R@5 for text-only against hybrid: overall, per language, and for exact-looking queries (the text-only shapes, through `engine::search::query`). The research harness stays in `tools/embed-eval/` | kitoken parity and the eval tool's own tests read model files from a local folder (`NOTCHLING_EMBED_MODELS`) and are ignored by default: tests never download (call 3). Automatic gates on a Mac: query p50 ≤ 5 ms; ≥ 12 chunks/s at the budget; helper RSS ≤ 350 MB; `cargo deny check` clean; the eval tool over `tools/embed-eval/data/` reproduces the research numbers within 0.05 | maintainer (new crate, `Cargo.toml`, `Cargo.lock`) |
