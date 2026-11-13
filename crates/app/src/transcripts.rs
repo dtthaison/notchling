@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use notchling_engine::sessions::Agent;
+use notchling_engine::transcript::continued::find_earlier;
 use notchling_engine::transcript::locate::{find_transcript, successor};
 
 pub const MISS_RETRY: i64 = 30_000;
@@ -33,27 +34,40 @@ impl Locator {
             let text = path.to_string_lossy();
             return Some(successor(&text, &agent.name).map_or_else(|| path.clone(), PathBuf::from));
         }
-        if self
-            .missed
-            .get(&agent.id)
-            .is_some_and(|at| now_ms - at < MISS_RETRY)
-        {
-            return None;
-        }
-        let moved = agent
+        let stem = agent
             .transcript_path
             .as_deref()
             .map(Path::new)
             .filter(|p| p.is_absolute())
             .and_then(Path::file_stem)
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .and_then(|stem| find_transcript(&projects.to_string_lossy(), &stem, &agent.cwd));
+            .map(|stem| stem.to_string_lossy().into_owned());
+        if self
+            .missed
+            .get(&agent.id)
+            .is_some_and(|at| now_ms - at < MISS_RETRY)
+        {
+            return self.earlier(agent, stem.as_deref(), projects);
+        }
+        let moved = stem
+            .as_deref()
+            .and_then(|stem| find_transcript(&projects.to_string_lossy(), stem, &agent.cwd));
         let found =
             moved.or_else(|| find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd));
-        if found.is_none() {
-            self.missed.insert(agent.id.clone(), now_ms);
+        match found {
+            Some(path) => Some(PathBuf::from(path)),
+            None => {
+                self.missed.insert(agent.id.clone(), now_ms);
+                self.earlier(agent, stem.as_deref(), projects)
+            }
         }
-        found.map(PathBuf::from)
+    }
+
+    fn earlier(&self, agent: &Agent, stem: Option<&str>, projects: &Path) -> Option<PathBuf> {
+        let projects = projects.to_string_lossy();
+        stem.into_iter()
+            .chain(Some(agent.id.as_str()))
+            .find_map(|id| find_earlier(&projects, id, &agent.cwd))
+            .map(PathBuf::from)
     }
 
     pub fn retain(&mut self, agents: &[Agent]) {
@@ -162,3 +176,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+#[path = "transcripts_continued_tests.rs"]
+mod continued_tests;

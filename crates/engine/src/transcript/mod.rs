@@ -2,6 +2,7 @@ pub mod acp;
 pub mod bounded;
 pub mod chat;
 pub mod codex;
+pub mod continued;
 pub mod conversation;
 pub mod errors;
 pub mod locate;
