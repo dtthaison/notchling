@@ -120,10 +120,10 @@ struct Panel {
 
 impl RenderOnce for Panel {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let _region = super::render_map::scope(notchling_kit::render_map::Region::Details, cx);
         let a = self.a;
         let id = window.window_handle().window_id();
         let i = &self.i;
-
         let tasks = if i.tasks.is_empty() {
             empty("No tasks", a)
         } else {

@@ -21,7 +21,7 @@ use gpui::{
 };
 use notchling_kit::labels::{BADGE_HEIGHT, BADGE_PADDING, BADGE_TEXT, OUTLINE_RADIUS};
 use notchling_kit::render_map::{badge_text, Reading, Region, Track};
-use notchling_kit::ui::{hsla, parts_on as labels_on, SYSTEM_FONT};
+use notchling_kit::ui::{hsla, parts_on as labels_on, RegionScope, SYSTEM_FONT};
 use notchling_kit::{Appearance, Ink};
 
 use super::pane;
@@ -33,6 +33,10 @@ pub const MAP_ENV: &str = "NOTCHLING_RENDER_MAP";
 pub fn map_on(cx: &App) -> bool {
     static OFF: OnceLock<bool> = OnceLock::new();
     labels_on(cx) && !*OFF.get_or_init(|| std::env::var_os(MAP_ENV).is_some_and(|v| v == "0"))
+}
+
+pub fn scope(region: Region, cx: &App) -> RegionScope {
+    RegionScope::enter(map_on(cx).then_some(region))
 }
 
 /// The outline's stroke, and how far in from the region's edge it sits, clear of the part

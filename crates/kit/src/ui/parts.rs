@@ -1,9 +1,11 @@
 //! Part labels over GPUI: the names of the parts on screen while the ? button is on, so a change
 //! can be asked for by name ("the Context Meter"). The state is one [`Global`] ([`Labels`]) every
 //! window reads, so Chat and the notch show their names together; a tagged element gets a dashed
-//! guide outline and a name badge on its edge, drawn over it without taking layout space or
+//! outline and a name badge on its edge, in the color of the region being drawn (the guide ink outside any, `RegionScope`), drawn over it without taking layout space or
 //! clicks (neither has a hitbox). The pure half (where the badge sits, the button's state) is
 //! `crate::labels`. Ported from `KitPartLabel` and `KitPartsButton` in `ChatKit.swift`.
+
+use std::cell::Cell;
 
 use gpui::{div, prelude::*, px, App, Div, ElementId, FontWeight, Global, Position, Stateful};
 
@@ -15,9 +17,33 @@ use crate::labels::{
     OUTLINE_ALPHA, OUTLINE_RADIUS, OUTLINE_WIDTH,
 };
 use crate::part::ButtonKind;
+use crate::render_map::{label_inks, Region};
 use crate::{Appearance, Icon, Ink};
 
 impl Global for Labels {}
+
+thread_local! {
+    static REGION: Cell<Option<Region>> = const { Cell::new(None) };
+}
+
+#[must_use]
+pub struct RegionScope(Option<Region>);
+
+impl RegionScope {
+    pub fn enter(region: Option<Region>) -> RegionScope {
+        RegionScope(REGION.with(|r| r.replace(region)))
+    }
+}
+
+impl Drop for RegionScope {
+    fn drop(&mut self) {
+        REGION.with(|r| r.set(self.0));
+    }
+}
+
+fn current_inks() -> (Ink, Ink) {
+    label_inks(REGION.with(Cell::get))
+}
 
 /// Whether the part names show.
 pub fn parts_on(cx: &App) -> bool {
@@ -63,13 +89,14 @@ pub fn parts_button(id: impl Into<ElementId>, appearance: Appearance, cx: &App) 
 /// The name badge: a guide capsule with the name in onGuide, placed by `badge_place`. Its wrapper
 /// spans the outline's width so a centred badge can centre, and is positioned on the edge.
 fn badge(name: &str, corner: Corner, inside: bool, appearance: Appearance) -> Div {
+    let (fill, on) = current_inks();
     let place = badge_place(corner, inside);
     let pill = div()
         .h(px(BADGE_HEIGHT))
         .px(px(BADGE_PADDING))
         .rounded_full()
-        .fill(Ink::Guide, appearance)
-        .ink(Ink::OnGuide, appearance)
+        .fill(fill, appearance)
+        .ink(on, appearance)
         .font_family(SYSTEM_FONT)
         .text_size(px(BADGE_TEXT))
         .font_weight(FontWeight::SEMIBOLD)
@@ -127,13 +154,14 @@ pub trait KitPart: Styled + ParentElement + Sized {
         if self.style().position.is_none() {
             self.style().position = Some(Position::Relative);
         }
+        let (line, _) = current_inks();
         let outline = div()
             .absolute()
             .inset_0()
             .rounded(px(OUTLINE_RADIUS))
             .border(px(OUTLINE_WIDTH))
             .border_dashed()
-            .border_color(hsla(Ink::Guide.color(appearance).with_alpha(OUTLINE_ALPHA)))
+            .border_color(hsla(line.color(appearance).with_alpha(OUTLINE_ALPHA)))
             .child(badge(name, corner, inside, appearance));
         self.child(outline)
     }

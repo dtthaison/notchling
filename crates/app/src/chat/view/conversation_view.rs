@@ -19,6 +19,7 @@ use gpui::{
     WeakEntity, Window,
 };
 use notchling_engine::transcript::model::Conversation;
+use notchling_kit::render_map::Region;
 use notchling_kit::ui::{drop_spinner_host, host_spinners, window_appearance, SpinSlots};
 
 use super::conversation_list::{at_bottom, scroll_to_end, ListRows, Pending, OVERDRAW};
@@ -337,6 +338,7 @@ impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         RENDERS.fetch_add(1, Ordering::Relaxed);
         self.spins.clear();
+        let _region = super::render_map::scope(Region::Conversation, cx);
         let a = window_appearance(window);
         let input = match self.input.take() {
             Some(input) => input,

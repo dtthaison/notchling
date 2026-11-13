@@ -54,6 +54,7 @@ pub struct ModelPart<M: PartialEq + 'static> {
     /// The model drawn last; `None` asks for a fresh one at the next draw.
     model: Option<M>,
     renders: &'static AtomicU64,
+    region: Region,
     spins: SpinSlots,
     _changes: Subscription,
     _release: Subscription,
@@ -65,6 +66,7 @@ impl<M: PartialEq + 'static> ModelPart<M> {
         select: Select<M>,
         draw: DrawFrom<M>,
         renders: &'static AtomicU64,
+        region: Region,
         cx: &mut Context<Self>,
     ) -> Self {
         let spins = SpinSlots::default();
@@ -76,6 +78,7 @@ impl<M: PartialEq + 'static> ModelPart<M> {
             draw,
             model: None,
             renders,
+            region,
             spins,
             _changes: cx.observe(chat, |this, chat, cx| {
                 let app: &App = cx;
@@ -124,6 +127,7 @@ impl<M: PartialEq + 'static> Render for ModelPart<M> {
             }
         };
         let draw = self.draw;
+        let _region = render_map::scope(self.region, cx);
         let element = chat.update(cx, |_, ccx| draw(&model, a, ccx));
         self.model = Some(model);
         element
@@ -148,14 +152,23 @@ pub struct Parts {
 impl Parts {
     pub fn new(chat: &Entity<ChatView>, cx: &mut Context<ChatView>) -> Parts {
         let conversation = cx.new(|cx| ConversationView::new(chat, cx));
-        let sidebar = cx
-            .new(|cx| ModelPart::new(chat, sidebar::model, sidebar::render, &SIDEBAR_RENDERS, cx));
+        let sidebar = cx.new(|cx| {
+            ModelPart::new(
+                chat,
+                sidebar::model,
+                sidebar::render,
+                &SIDEBAR_RENDERS,
+                Region::Sidebar,
+                cx,
+            )
+        });
         let details = cx.new(|cx| {
             ModelPart::new(
                 chat,
                 inspector::model,
                 inspector::render,
                 &DETAILS_RENDERS,
+                Region::Details,
                 cx,
             )
         });
