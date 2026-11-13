@@ -73,6 +73,14 @@ pub struct SkillChange {
     pub action: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PresentHook {
+    pub event: String,
+    pub matcher: String,
+    pub swift: bool,
+    pub managed: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HookFacts {
     pub install_on: bool,
@@ -82,6 +90,7 @@ pub struct HookFacts {
     pub refused: Option<String>,
     pub swift_entries: Vec<String>,
     pub our_entries: usize,
+    pub entries: Vec<PresentHook>,
     pub changes: Vec<String>,
     pub notes: Vec<String>,
     pub blocked: Option<String>,
@@ -114,6 +123,27 @@ impl HookFacts {
                 .flatten()
                 .filter(move |f| f.get("origin").and_then(Value::as_str) == Some(o))
         }
+        let entries = present
+            .into_iter()
+            .flatten()
+            .filter_map(|f| {
+                let swift = match f.get("origin").and_then(Value::as_str)? {
+                    "swift" => true,
+                    "notchling" => false,
+                    _ => return None,
+                };
+                Some(PresentHook {
+                    event: f.get("event")?.as_str()?.to_owned(),
+                    matcher: f
+                        .get("matcher")
+                        .and_then(Value::as_str)
+                        .unwrap_or("*")
+                        .to_owned(),
+                    swift,
+                    managed: f.get("managed").and_then(Value::as_bool).unwrap_or(false),
+                })
+            })
+            .collect();
         let skills = plan
             .get("skills")
             .and_then(Value::as_array)
@@ -151,6 +181,7 @@ impl HookFacts {
                 .map(str::to_owned)
                 .collect(),
             our_entries: origin(present, "notchling").count(),
+            entries,
             changes: strings(hooks.get("changes").unwrap_or(&Value::Null)),
             notes: strings(hooks.get("notes").unwrap_or(&Value::Null)),
             blocked: plan
@@ -203,6 +234,15 @@ mod tests {
         .unwrap();
         assert!(facts.swift_owns_hook() && !facts.we_own_hook());
         assert_eq!(facts.swift_entries.len(), 1);
+        assert_eq!(
+            facts.entries,
+            [PresentHook {
+                event: "PermissionRequest".into(),
+                matcher: "*".into(),
+                swift: true,
+                managed: false
+            }]
+        );
         assert!(!facts.install_on && !facts.applied);
         assert!(facts
             .message
