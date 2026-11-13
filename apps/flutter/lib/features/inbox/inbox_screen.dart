@@ -112,9 +112,7 @@ class InboxCard extends ConsumerWidget {
               Wrap(
                 spacing: Space.sm,
                 runSpacing: Space.sm,
-                children: <Widget>[
-                  for (final InboxAction action in item.actions) _button(context, ref, l10n, action),
-                ],
+                children: _buttons(context, ref, l10n),
               )
             else
               Text(_result(l10n), style: kit.bodySm),
@@ -130,6 +128,25 @@ class InboxCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  static bool _allows(InboxAction action) => action.id.startsWith('allow');
+
+  List<Widget> _buttons(BuildContext context, WidgetRef ref, AppL10n l10n) {
+    final bool secret = item.kind == 'secret_approval';
+    final List<Widget> out = <Widget>[];
+    bool hinted = false;
+    for (final InboxAction action in item.actions) {
+      if (secret && _allows(action)) {
+        if (!hinted) {
+          out.add(SecondaryButton(label: l10n.inboxAllowOnMac, icon: Icons.laptop_mac, onPressed: null));
+          hinted = true;
+        }
+        continue;
+      }
+      out.add(_button(context, ref, l10n, action));
+    }
+    return out;
   }
 
   Widget _button(BuildContext context, WidgetRef ref, AppL10n l10n, InboxAction action) {

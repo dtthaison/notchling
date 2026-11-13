@@ -42,6 +42,9 @@ class AppL10nEn extends AppL10n {
   String get inboxOpenOnMac => 'Open on Mac';
 
   @override
+  String get inboxAllowOnMac => 'Allow on Mac';
+
+  @override
   String inboxAnsweredOnMac(String action) {
     return 'Answered on the Mac: $action';
   }

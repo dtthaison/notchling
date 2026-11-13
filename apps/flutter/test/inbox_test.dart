@@ -190,8 +190,7 @@ void main() {
       expect(find.text('NEEDS YOU'), findsOneWidget);
       expect(find.text('DONE'), findsOneWidget);
       expect(tester.getTopLeft(find.text('NEEDS YOU')).dy, lessThan(tester.getTopLeft(find.text('DONE')).dy));
-      expect(find.text('Allow Once'), findsOneWidget);
-      expect(find.text('Always Allow'), findsOneWidget);
+      expect(find.text('Allow on Mac'), findsOneWidget);
       expect(find.text('Deny'), findsOneWidget);
       expect(find.text('Old One'), findsOneWidget);
       expect(find.textContaining('Answered on the Mac'), findsOneWidget);
@@ -203,30 +202,58 @@ void main() {
       await tester.pumpWidget(UncontrolledProviderScope(container: container, child: host(const Scaffold(body: InboxScreen()), locale: const Locale('en'), screen: true)));
       await tester.pump();
 
-      await tester.tap(find.text('Allow Once'));
+      await tester.tap(find.text('Deny'));
       await tester.runAsync(() => until(() => container.read(inboxProvider).openCount == 0));
       await tester.pump();
       final Map<String, Object?> sent = socket.sent.lastWhere((Map<String, Object?> m) => m['op'] == 'inbox.answer');
       expect(sent['itemId'], 'a');
-      expect(sent['action'], 'allow_once');
-      expect(container.read(inboxProvider).done.single.answer, 'allow_once');
+      expect(sent['action'], 'deny');
+      expect(container.read(inboxProvider).done.single.answer, 'deny');
       expect(container.read(inboxProvider).done.single.answeredBy, 'phone');
+    });
+
+    testWidgets('a secret approval shows Allow on Mac as one disabled hint and Deny works', (WidgetTester tester) async {
+      final FakeWs socket = mac(items: <Map<String, Object?>>[item('a')]);
+      final ProviderContainer container = await open(tester, socket);
+      await tester.pumpWidget(UncontrolledProviderScope(container: container, child: host(const Scaffold(body: InboxScreen()), locale: const Locale('en'), screen: true)));
+      await tester.pump();
+
+      expect(find.text('Allow Once'), findsNothing);
+      expect(find.text('Always Allow'), findsNothing);
+      expect(find.text('Allow on Mac'), findsOneWidget);
+      await tester.tap(find.text('Allow on Mac'));
+      await tester.pump();
+      expect(socket.sent.where((Map<String, Object?> m) => m['op'] == 'inbox.answer'), isEmpty);
+
+      await tester.tap(find.text('Deny'));
+      await tester.runAsync(() => until(() => socket.sent.any((Map<String, Object?> m) => m['op'] == 'inbox.answer')));
+      expect(socket.sent.lastWhere((Map<String, Object?> m) => m['op'] == 'inbox.answer')['action'], 'deny');
+    });
+
+    testWidgets('an item that is not a secret keeps its Allow buttons', (WidgetTester tester) async {
+      final FakeWs socket = mac(items: <Map<String, Object?>>[item('n', kind: 'notice')]);
+      final ProviderContainer container = await open(tester, socket);
+      await tester.pumpWidget(UncontrolledProviderScope(container: container, child: host(const Scaffold(body: InboxScreen()), locale: const Locale('en'), screen: true)));
+      await tester.pump();
+
+      expect(find.text('Allow Once'), findsOneWidget);
+      expect(find.text('Allow on Mac'), findsNothing);
     });
 
     testWidgets('when the Mac answered first the phone shows it as done on the Mac', (WidgetTester tester) async {
       final FakeWs socket = mac(
         items: <Map<String, Object?>>[item('a')],
-        answer: (Map<String, Object?> m) => <String, Object?>{'answered': false, 'state': 'answered', 'answer': 'deny'},
+        answer: (Map<String, Object?> m) => <String, Object?>{'answered': false, 'state': 'answered', 'answer': 'allow_once'},
       );
       final ProviderContainer container = await open(tester, socket);
       await tester.pumpWidget(UncontrolledProviderScope(container: container, child: host(const Scaffold(body: InboxScreen()), locale: const Locale('en'), screen: true)));
       await tester.pump();
 
-      await tester.tap(find.text('Allow Once'));
+      await tester.tap(find.text('Deny'));
       await tester.runAsync(() => until(() => container.read(inboxProvider).openCount == 0));
       await tester.pump();
       final InboxItem shown = container.read(inboxProvider).done.single;
-      expect(shown.answer, 'deny');
+      expect(shown.answer, 'allow_once');
       expect(shown.answeredBy, isNot('phone'));
       expect(find.textContaining('Answered on the Mac'), findsOneWidget);
     });
@@ -260,13 +287,13 @@ void main() {
       );
       final ProviderContainer container = await open(tester, socket);
       await show(tester, container);
-      await tester.tap(find.text('Allow Once'));
+      await tester.tap(find.text('Deny'));
       await tester.runAsync(() => until(() => socket.sent.any((Map<String, Object?> m) => m['op'] == 'inbox.answer')));
       await tester.runAsync(() => until(() => container.read(inboxProvider).busy.isEmpty));
       await tester.pump();
       expect(container.read(inboxProvider).openCount, 1);
       expect(find.textContaining("didn't take"), findsOneWidget);
-      expect(find.text('Allow Once'), findsOneWidget);
+      expect(find.text('Deny'), findsOneWidget);
     });
 
     testWidgets('an error from the Mac, such as acting being off, is shown on the item', (WidgetTester tester) async {
@@ -279,7 +306,7 @@ void main() {
       await tester.pump();
       expect(find.text(off), findsOneWidget);
       expect(container.read(inboxProvider).openCount, 1);
-      expect(find.text('Allow Once'), findsOneWidget);
+      expect(find.text('Deny'), findsOneWidget);
     });
 
     testWidgets('a reload keeps the items on screen', (WidgetTester tester) async {
@@ -295,7 +322,7 @@ void main() {
     });
 
     testWidgets('only the first open item has the orange primary button', (WidgetTester tester) async {
-      final ProviderContainer container = await open(tester, mac(items: <Map<String, Object?>>[item('a'), item('b', createdMs: 1793541465001)]));
+      final ProviderContainer container = await open(tester, mac(items: <Map<String, Object?>>[item('a', kind: 'notice'), item('b', kind: 'notice', createdMs: 1793541465001)]));
       await show(tester, container);
       expect(find.byType(PrimaryButton), findsOneWidget);
       expect(find.text('Allow Once'), findsNWidgets(2));

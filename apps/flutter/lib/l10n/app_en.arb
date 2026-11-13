@@ -11,6 +11,7 @@
   "inboxEmptyBody": "Requests from your Mac show up here.",
   "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
   "inboxOpenOnMac": "Open on Mac",
+  "inboxAllowOnMac": "Allow on Mac",
   "inboxAnsweredOnMac": "Answered on the Mac: {action}",
   "@inboxAnsweredOnMac": {
     "placeholders": {

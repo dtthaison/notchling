@@ -11,6 +11,7 @@
   "inboxEmptyBody": "Yêu cầu từ Mac sẽ hiện ở đây.",
   "inboxUnsupported": "Notchling trên Mac này chưa có hộp thư.",
   "inboxOpenOnMac": "Mở trên Mac",
+  "inboxAllowOnMac": "Cho phép trên Mac",
   "inboxAnsweredOnMac": "Đã trả lời trên Mac: {action}",
   "@inboxAnsweredOnMac": {
     "placeholders": {
