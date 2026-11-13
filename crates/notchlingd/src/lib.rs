@@ -50,6 +50,8 @@ pub mod vault_wait;
 #[cfg(test)]
 mod accounts_late_tests;
 #[cfg(test)]
+mod accounts_ops_log_tests;
+#[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]
 mod acting_ops_tests;
