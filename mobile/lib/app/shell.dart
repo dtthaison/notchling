@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/net/bridge_client.dart';
@@ -466,62 +465,59 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
   /// How long the inset must hold still before the list's layout is updated.
   static const Duration settleAfter = Duration(milliseconds: 90);
 
-  /// Android draws the keyboard window itself, a frame or two before Flutter has drawn the inset it was told about,
-  /// so a composer that follows the reported inset trails the keyboard and is covered by it while it rises (iOS keeps
-  /// the two in step). On Android the composer is drawn this far ahead along the inset's current speed, every vsync
-  /// rather than at the ~80 Hz the insets arrive at. Measured on a 120 Hz Redmi: insets every 10-13 ms.
-  static const double leadMs = 22;
+  /// On Android the keyboard window and Flutter's frames are not in step: insets arrive at ~80 Hz and are drawn a
+  /// frame or two after the keyboard has moved, so a composer that follows them stutters and gets covered while the
+  /// keyboard rises (iOS keeps the two in step, so there it follows the inset as before). On Android the page moves
+  /// on its own instead: the keyboard rises first, and once it has stopped the page slides up on a vsync-driven curve;
+  /// when the keyboard starts going down, the page slides down at once on the same curve.
+  static final bool _decoupled = defaultTargetPlatform == TargetPlatform.android;
 
-  /// A step that stops for this long has ended; prediction stops and the reported inset is drawn as is.
-  static const int quietMs = 40;
-
-  static final bool _predict = defaultTargetPlatform == TargetPlatform.android;
+  /// How long the inset must stay put before the keyboard counts as fully up.
+  static const Duration keyboardStill = Duration(milliseconds: 60);
+  static const Duration slide = Duration(milliseconds: 220);
 
   double _below = 0;
   double _lastLift = 0;
   Timer? _settle;
 
-  /// What the composer is drawn at: the reported lift, or on Android the predicted one.
+  /// What the page is drawn at: the reported lift, or on Android this slide's value.
   final ValueNotifier<double> _shown = ValueNotifier<double>(0);
-  late final Ticker _ticker = createTicker(_tick);
-  double _sampleInset = 0;
-  double _velocity = 0; // inset px per ms
-  int _sampleAt = 0;
-  double _reserved = 0;
+  late final AnimationController _slide = AnimationController(vsync: this, duration: slide)
+    ..addListener(() => _shown.value = _slideFrom + (_slideTo - _slideFrom) * Curves.easeOutCubic.transform(_slide.value))
+    ..addStatusListener((AnimationStatus status) {
+      if (status == AnimationStatus.completed && _slideTo > 0 && _slideTo == _lastLift) {
+        widget.controller.settled.value = _slideTo;
+      }
+    });
+  double _slideFrom = 0;
+  double _slideTo = 0;
+  Timer? _still;
 
-  /// The tallest keyboard seen, so a prediction never draws the composer above where the keyboard will stop.
-  double _tallest = 0;
+  void _slideTowards(double target) {
+    if (_slideTo == target && (_slide.isAnimating || _shown.value == target)) return;
+    _slideFrom = _shown.value;
+    _slideTo = target;
+    unawaited(_slide.forward(from: 0));
+  }
+
+  /// Android only: follow [lift] on the page's own schedule (see [_decoupled]).
+  void _follow(double lift) {
+    _still?.cancel();
+    // Both ways the page holds still while the keyboard moves and slides once it has: while the keyboard animates,
+    // Android paces the app's frames to the window's (about 30 fps on a 120 Hz Redmi; 8 ms frames before and after),
+    // so anything the page moves then stutters. Measured: sliding down with the keyboard ran at 30-40 ms per frame.
+    // Xiaomi's keyboard ends on a long tail of 1-2 px steps; waiting for it to stop held the page back for most of a
+    // second, so once the steps are that small the keyboard counts as done.
+    // Going down the keyboard starts slowly too, so small steps mean nothing then: the page waits for it to be gone.
+    final bool opening = lift > _lastLift;
+    if ((opening && lift - _lastLift < 3) || lift == 0) _slideTowards(lift);
+    _still = Timer(keyboardStill, () => _slideTowards(_lastLift));
+  }
 
   @override
   void initState() {
     super.initState();
     widget.controller.settled.addListener(_onSettled);
-  }
-
-  void _sample(double inset) {
-    final int now = DateTime.now().microsecondsSinceEpoch;
-    if (inset == _sampleInset) return;
-    final double elapsedMs = (now - _sampleAt) / 1000;
-    final bool fresh = elapsedMs > 0 && elapsedMs < 60;
-    _velocity = fresh ? (inset - _sampleInset) / elapsedMs : 0;
-    _sampleInset = inset;
-    _sampleAt = now;
-    if (inset > _tallest && _velocity <= 0) _tallest = inset;
-    if (!_ticker.isActive) unawaited(_ticker.start());
-  }
-
-  void _tick(Duration _) {
-    final double sinceMs = (DateTime.now().microsecondsSinceEpoch - _sampleAt) / 1000;
-    double inset = _sampleInset;
-    if (sinceMs < quietMs && _velocity != 0) {
-      inset += _velocity * (sinceMs + leadMs);
-      // Never past where this movement can end: the keyboard's full height going up, its rest going down.
-      final double ceiling = _tallest > 0 ? math.max(_tallest, _sampleInset) : _sampleInset + 120;
-      inset = _velocity > 0 ? inset.clamp(_sampleInset, ceiling) : inset.clamp(0, _sampleInset);
-    } else {
-      _ticker.stop();
-    }
-    _shown.value = math.max(0, inset - _reserved);
   }
 
   @override
@@ -536,7 +532,8 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
   @override
   void dispose() {
     _settle?.cancel();
-    _ticker.dispose();
+    _still?.cancel();
+    _slide.dispose();
     _shown.dispose();
     widget.controller.settled.removeListener(_onSettled);
     super.dispose();
@@ -566,12 +563,10 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
     // was that padding.
     final double reserved = _below + MediaQuery.paddingOf(context).bottom;
     final double lift = math.max(0, inset - reserved);
-    _reserved = reserved;
-    if (_predict) {
-      _sample(inset);
-      if (!_ticker.isActive) _shown.value = lift;
-    } else {
+    if (!_decoupled) {
       _shown.value = lift;
+    } else if (lift != _lastLift) {
+      _follow(lift);
     }
     if (inset == 0) {
       WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
@@ -592,12 +587,14 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
         WidgetsBinding.instance.addPostFrameCallback((Duration _) {
           if (_lastLift == 0) widget.controller.settled.value = 0;
         });
-      } else {
+      } else if (!_decoupled) {
         _settle = Timer(
           settleAfter,
           () => widget.controller.settled.value = _lastLift,
         );
       }
+      // On Android the list makes room once the page's own slide has finished (see the slide's status listener):
+      // making it while the slide was starting moved the list a frame before the composer.
     }
     final double settled = widget.controller.settled.value;
     return Column(
