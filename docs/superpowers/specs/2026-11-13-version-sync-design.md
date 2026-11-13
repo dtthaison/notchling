@@ -1,7 +1,7 @@
 # Version sync: every machine on the Mac's versions
 
 - **Date:** 2026-11-13
-- **Status:** Draft, for the maintainer. Nothing here is built. Revised on 2026-11-14 with the coordinator's calls after a builder's review ([Calls settled after review](#calls-settled-after-review)).
+- **Status:** Draft, for the maintainer. Nothing here is built. Revised on 2026-11-14 with the coordinator's calls after a builder's review ([Calls settled after review](#calls-settled-after-review)) and the user's answers to every open question ([Decided by the user](#decided-by-the-user)). No question is open.
 - **Approach:** A, the Mac is the reference, chosen by the maintainer on 2026-11-13.
 - **Base:** branch `agent/move-auto-trust` (8e73a97).
 - **Touches:** decisions 0004 (Machines is a separate tool), 0007 (tiers), 0010 (releases and updates), 0011 (one owner per resource), 0012 and the [cluster design](2026-11-13-notchling-cluster-design.md) (review issue 10, version skew), 0019 on `agent/agents-setup-decision` (Settings > Agents), 0020 on `agent/agent-settings-cli` (setting classes), and the [logging design](https://github.com/dtthaison/notchling/blob/agent/logging-design/docs/superpowers/specs/2026-11-13-logging-design.md) on `agent/logging-design` (event kinds). It needs a decision record of its own and one line changed in `docs/goals.md` (Phase 0).
@@ -11,7 +11,7 @@
 1. Each provider CLI (Claude Code, Codex, Antigravity's `agy`) and Notchling itself runs the **same version on the Mac and on every worker** Machines manages.
 2. **The Mac is the reference.** The user updates there, with an Update button per tool in Settings > Agents or through the CLI's own auto-update, which stays on on the Mac.
 3. Notchling **notices** the Mac's version changed by reading files (a symlink, a `package.json`), never by starting the tool. Machines asks the daemon for it, and uses it only while its check matches the binary the Mac has installed now.
-4. It runs a **smoke check** on the Mac. The free part needs no model turn: version, a scratch session's trust prompt and idle screen, Codex's `exec` flags, agy's ACP handshake. One cheap turn (ask dialog, permission dialog, queue lines, transcript) runs only if the user turned it on. How much of this runs by default is the user's call ([question 2](#27-open-questions)).
+4. It runs a **smoke check** on the Mac that starts no session and writes nothing *(user's decision 2)*: each tool's `--version`, `claude doctor`, Codex's `exec` flags, and Notchling's readers in strict mode over the transcripts already there. It can't see screen or dialog changes, so every result is **Partly Checked**: enough for a Roll Out click, never for Automatic. A scratch-session check and a paid turn are possible later additions.
 5. On a pass, Notchling **rolls the exact version out**, one worker at a time, through Machines' runner. One **Roll Out click in Machines** approves a version for every worker. Automatic arrives only when the daemon runs rollouts (Phase 6), and never for agy or npm installs. No agent can change that setting (class Never).
 6. On a worker it **waits until none of that tool's processes run** (Claude Code's supervised background sessions are moved, not waited for), checks that the worker's plan is still the one shown, installs, checks the exact version, and moves idle sessions over. It never stops a running turn.
 7. A worker that fails is **rolled back** to its previous version, best effort, else marked Needs You. The rollout **halts**, the rest keep the old version, and a notice says what happened. Offline workers **catch up** when they come back. A worker ahead of the Mac is shown as drift and moved down only by its own click.
@@ -21,7 +21,7 @@
 
 ## Calls settled after review
 
-A builder read the first draft, and the coordinator settled the points below on 2026-11-14. Each is marked *coordinator's call* here and in the sections it changes. The review's question 5, how the smoke check is set up, is the user's to answer: it is [question 2](#27-open-questions), with options.
+A builder read the first draft, and the coordinator settled the points below on 2026-11-14. Each is marked *coordinator's call* here and in the sections it changes. The review's question 5, how the smoke check is set up, went to the user with the other open questions; the user's answers are in [Decided by the user](#decided-by-the-user).
 
 - **1. Machines reads the reference from the daemon** *(coordinator's call)*. In Phases 1 to 4, Machines asks the daemon with `versions.get` (read only, agent tier). If the daemon is down or doesn't answer, Machines shows "Notchling isn't running" and starts no rollout. A reference is usable only when its check ran against the version the Mac has installed now: the same version string and the same binary (its SHA-256). Otherwise it is stale and is checked again before any rollout. Sections [7](#7-reading-a-version), [11.4](#114-results), [18](#18-where-the-code-goes).
 - **2. One Roll Out click approves** *(coordinator's call)*. The Roll Out click in the Machines window approves that version for every worker. Before each worker's install, Machines rebuilds that worker's plan and compares it with the plan it showed; any difference halts the rollout at that worker as Needs You, and workers already done stay done. In Phases 1 to 4 Inbox items are notices with Open Machines; Automatic exists only from Phase 6, when the daemon runs rollouts. Sections [12](#12-the-rollout), [17.3](#173-inbox), [20](#20-settings-keys).
@@ -32,6 +32,17 @@ A builder read the first draft, and the coordinator settled the points below on 
 - **8. Rollback is best effort** *(coordinator's call)*, then Needs You. agy and npm installs are never Automatic. Sections [15](#15-failure-and-rollback), [20](#20-settings-keys).
 - **9. One rollout at a time, by a lock** *(coordinator's call)*. A lock row in the rollout journal in `notchling.db` holds the owner's pid and a heartbeat; a stale lock is taken over. A rollout stopped by closing the window resumes from the journal the next time Machines opens, through a Resume Rollout prompt, never silently. Section [12](#12-the-rollout).
 - **10. A mismatch check in Phase 1** *(coordinator's call)*. Phase 1 ships a read-only version-mismatch check. The cluster's step-1 version handshake and `delegate --machine` use it to warn; refusing dispatch stays in Phase 6. Sections [17.5](#175-dispatch), [23](#23-phases).
+
+## Decided by the user
+
+The user answered every open question on 2026-11-14, each as recommended. Each answer is marked *user's decision* here and in the sections it changes. No question is open ([27](#27-open-questions)).
+
+- **1. Vendor installers on workers** *(user's decision)*. Notchling manages only the vendors' own installers on workers: Claude Code's native installer, and Codex's and agy's standalone ones. A worker whose tool came from Homebrew gets a Fix that switches it. npm stays allowed for Claude Code and Codex, installed only while no process of that tool runs, and never Automatic. Sections [8](#8-installing-an-exact-version), [17.2](#172-machines).
+- **2. The smoke check is files and flags only** *(user's decision)*: each tool's `--version`, `claude doctor`, `codex exec --help`, and Notchling's readers in strict mode over the transcripts already on the Mac. Nothing is started and nothing is written to the user's config, and every result is labelled Partly Checked. A scratch pty session and a paid turn are not built now; they stay described as possible later additions, each behind its own setting. Sections [11](#11-the-smoke-check), [12](#12-the-rollout).
+- **3. The soak is shown, never gating** *(user's decision)*: in Settings > Agents and on the rollout item. Section [11.3](#113-strict-mode-and-the-soak).
+- **4. Sparkle for the Rust app** *(user's decision)*, with the existing appcast and EdDSA key. The same key signs the worker manifest: one key, one offline backup. A new decision record amends 0010, and it waits for the Developer ID. Section [16](#16-notchling-itself).
+
+**What decision 2 means for approval.** The built check never gives a full pass, so every reference is Partly Checked. Ask, the setting once the feature is on, works with that: the Roll Out sheet says Partly Checked, with what wasn't checked, and one click rolls out. Automatic (Phase 6) stays unavailable while the check is partial, per call 3: Settings shows it off with "Needs a full check" until a later addition ([11.2](#112-possible-later-additions)) makes full checks possible.
 
 ## Contents
 
@@ -80,7 +91,7 @@ Today nothing keeps versions together. The Mac's Claude Code updates itself when
 
 1. Every machine in Machines runs the Mac's version of each provider CLI and of Notchling, except during a rollout and while a worker is offline.
 2. The user updates once, on the Mac. Workers follow without the user running anything on them.
-3. A version that breaks Notchling on the Mac never reaches a worker.
+3. A version that fails the Mac's check never reaches a worker.
 4. An update never stops a running turn, a waiting question or an attached terminal.
 5. One failed worker stops the rollout. The others keep a working version, and the failed one goes back to its previous version, or is marked Needs You when it can't.
 6. The user can see, per tool and per machine: installed, latest, the Mac's version, drift, the last check and the rollout's progress.
@@ -108,7 +119,7 @@ Today nothing keeps versions together. The Mac's Claude Code updates itself when
 
 ## 3. Constraints
 
-- **Switches** (0007, `crates/notchlingd/src/switches.rs`). `acting`, the bridge, `accounts`, `vault` and `install` are off at every daemon start, and only an app-tier call in that run turns one on. Updating a tool on the Mac sits behind `install`, and the scratch-session check behind `acting`.
+- **Switches** (0007, `crates/notchlingd/src/switches.rs`). `acting`, the bridge, `accounts`, `vault` and `install` are off at every daemon start, and only an app-tier call in that run turns one on. Updating a tool on the Mac sits behind `install`. The smoke check as built only reads and needs no switch; the scratch-session addition would need `acting`.
 - **App tier for anything that acts** (0007). Reading versions is agent tier. Updating, checking, rolling out and rolling back are app tier, and approvals fail closed without an app attached.
 - **Machines' `--live` gate** (`crates/app/src/machines/cli.rs`, `data.rs`). Without `--live`, every process goes to the `Refusing` runner. Machines is a separate binary, `notchling-machines`, apart from the daemon (0004's designer's call), and not handed over yet.
 - **Plan, confirm, run** (`machines/engine_plan.rs`). Every machine change shows its plan, takes one click, then rebuilds the plan from the machine as it is and refuses unless every displayed line still matches.
@@ -128,7 +139,7 @@ Today nothing keeps versions together. The Mac's Claude Code updates itself when
 | Who picks a version | The user, on the Mac, or the CLI's auto-update there | The maintainer, by listing tested versions in each Notchling release | The vendor: Claude Code's `stable` channel, Homebrew's cask, each tool's updater |
 | Workers | Follow the Mac, after a check | Follow the list; the Mac too | Update on their own |
 | Same version everywhere | Yes, except during a rollout | Yes | No: machines update at different times, and agy has no channel |
-| A breaking CLI release | Caught by the Mac's check before any worker gets it; the Mac itself is exposed | Never installed until a release lists it | Reaches every machine within a day |
+| A breaking CLI release | Version, flag and transcript breaks are caught by the Mac's check before any worker gets it; screen and dialog breaks show on the Mac first, where the user works; the Mac itself is exposed | Never installed until a release lists it | Reaches every machine within a day |
 | New features and models | As soon as the user updates the Mac | When Notchling ships a release that lists the version | When the channel has them (stable is about a week behind) |
 | Cost | Detection, a check, a rollout engine | All of A, plus a list kept current and the Mac held to it (its config written, against goals.md) | Smallest: drift detection and a dispatch handshake only |
 
@@ -224,6 +235,8 @@ The rollout always names a version, and only updates a tool the worker already h
 
 One suggestion beside call 4: Machines' existing Claude Code step installs the vendor's latest (`CLAUDE_INSTALL`). Once a usable reference exists, that Fix should pass it (`bash -s <v>`), so a worker set up later starts on the Mac's version instead of drifting on its first refresh.
 
+**Which installers Notchling manages** *(user's decision 1)*. On workers, only the vendors' own: Claude Code's native installer, and Codex's and agy's standalone installers. A tool installed with Homebrew shows Can't Pin, with a Fix, **Switch to the Native Installer** (for Codex and agy, the Standalone Installer). It is its own click with its own plan, runs only while no process of that tool runs, installs the reference with the vendor's installer, removes the Homebrew cask (`brew uninstall --cask <cask>`) so the vendor's launcher is the one on `PATH`, and checks `command -v` and `--version`. npm stays allowed for Claude Code and Codex: an npm install runs only while no process of that tool runs (call 7) and never under Automatic (call 8). apt, dnf and apk stay out.
+
 | Tool | Method | Exact version | Keeps the previous one | Source |
 | --- | --- | --- | --- | --- |
 | Claude Code | native | `claude install <v>` on a machine that has it; else `curl -fsSL https://claude.ai/install.sh \| bash -s <v>` | Yes: `~/.local/share/claude/versions/` keeps the launcher's version, any version a session on that machine runs, and the two newest | Verified: setup page, CLI reference, `bootstrap.sh` |
@@ -300,49 +313,51 @@ Two changes close together: the newest wins. A rollout under way for the older o
 
 ## 11. The smoke check
 
-What it must answer: does Notchling still read this version? It runs on the Mac, in the daemon, against the newly installed binary, with no model turn unless the user allowed one. It takes under a minute.
+What it must answer: does Notchling still read this version? It runs on the Mac, in the daemon, against the newly installed binary. As built it is **files and flags only** *(user's decision 2)*: it starts no session, opens no pty, sends no turn and writes nothing to the user's config. Its only processes are each tool's own one-shot commands, which print and exit. It needs no switch, since nothing in it acts, and it takes seconds.
 
-**Scratch folders.** Every scratch session runs in `<data>/versions/scratch/<tool>-<v>-<random>/`, made fresh, holding a `.notchling-scratch` file and a `git init`, the way the recorder's scratch rule works (`docs/recording.md`). It is removed afterwards. Nothing runs in a project folder. Outputs are never logged; a screen can show the account's email in its banner.
+### 11.1 What the check runs
 
-### 11.1 Free checks (no turn)
+| Tool | Check | Proves |
+| --- | --- | --- |
+| all | `<tool> --version` prints exactly the installed version | the binary runs, and it is the one the watcher saw |
+| Claude Code | `claude doctor` exits 0 and has an auto-updates line (read only, per the CLI reference) | the binary starts and reads its settings |
+| Codex | `codex exec --help` lists every flag Notchling's turn builder passes (`tools/codex/plan.rs`: `--json`, `resume`, the sandbox and model flags) | Notchling's argv still runs |
+| all | Notchling's readers in strict mode ([11.3](#113-strict-mode-and-the-soak)) over the transcripts already on the Mac, read only: the newest Claude Code transcripts, Codex rollouts and the agy logs Notchling reads | the readers still read what is there, including any lines the new version has written |
+| Notchling | `hello` with the new daemon, `sessions.list` answers, the readers run over the fixtures compiled into the build | the build works |
 
-| Tool | Check | Proves | Needs |
-| --- | --- | --- | --- |
-| all | `<tool> --version` prints exactly the installed version | the binary runs | `install` switch |
-| Claude Code | Start `claude` on a pty (50 by 200, Notchling's reply size) in a never-trusted scratch folder; the screen must show the **trust prompt** with the option text `control::trust` looks for (`TRUST_PROMPT`); answer "No, exit" (writes nothing) | Trust Folder's script (`control/trust.rs`) | `acting` switch, ptyhost |
-| Claude Code | Start `claude` in a subfolder of a scratch root trusted once (the one trust entry Claude Code writes in `~/.claude.json`, made on the first check after the user allowed checks); wait for the **idle input box** to draw and go quiet within 15 s; check that `ask_dialog` and `permission_dialog` find no dialog there | attach timing and the dialog check before typing | same |
-| Claude Code | Type `/`; the command menu draws and is not mistaken for a dialog; Esc; Ctrl+C twice | the menu screens (`plugin-*` fixtures' kind) | same |
-| Claude Code | `claude doctor` exits 0 and has an `Auto-updates` line | the binary reads its settings | `install` switch |
-| Codex | `codex exec --help` lists every flag Notchling's turn builder passes (`tools/codex/plan.rs`: `--json`, `resume`, the sandbox and model flags) | Notchling's argv still runs | `install` switch |
-| agy | Start `agy acp`, send `initialize`, read `protocolVersion` and the agent's info, open a session in the scratch folder if that costs no turn (to verify), read its Model and Thinking Level options with `ConfigOption::parse`, close | the ACP handshake and the options Chat's pickers read | `acting` switch |
-| Notchling | `hello` with the new daemon, `sessions.list` answers, the transcript readers run over the fixtures compiled into the build | the build works | none |
+**What it can't see.** Screen and dialog changes (the trust prompt, the idle screen Notchling types into, the ask and permission dialogs), and lines a new version writes only during a turn, such as queue lines, until a transcript holds them. Right after an update the new version has usually written little, so the transcript part mostly confirms the readers on what is there. That is why every result is **Partly Checked** ([11.4](#114-results)), and why the soak keeps reading as new turns arrive ([11.3](#113-strict-mode-and-the-soak)).
 
-**Screens are compared as classifications, not pixels.** For each screen the check records what Notchling's readers concluded (trust prompt, idle, menu, no dialog) and compares that with what the same readers conclude on the repo's recordings of the previous version. The new screens are saved under `<data>/versions/recordings/claude/<v>/` (`.bin` and `.json`, the recorder's format) and never leave the Mac; the maintainer can review one and add it to the fixtures.
+### 11.2 Possible later additions
 
-### 11.2 The paid turn (opt-in)
+Not built now and in no phase *(user's decision 2)*. Each would ship behind its own setting, off by default, with its own decision record. With both built and passing, a check could be fully **Passed**, which is what Automatic needs.
 
-Off unless the user turns on **Spend One Turn to Check New Versions** (`versionCheckTurn`). Then, once per new Claude Code version:
+**Scratch screens** (`versionCheckScreens`). Claude Code on a pty (50 by 200, Notchling's reply size) in scratch folders under `<data>/versions/scratch/<tool>-<v>-<random>/`, each made fresh with a `.notchling-scratch` file and a `git init`, the way the recorder's scratch rule works (`docs/recording.md`), and removed afterwards. It would need the `acting` switch and the ptyhost, and Claude Code would write one trust entry for the scratch root in the Mac's `~/.claude.json`, the way Trust Folder does.
 
-- A Claude Code session on a pty in a trusted scratch folder, on the catalog's cheapest current Claude model, with a fixed prompt that asks one question with AskUserQuestion, then asks to run `echo notchling-check` with Bash.
-- While it works, the check queues a second message.
+- In a never-trusted scratch folder, the screen must show the **trust prompt** with the option text `control::trust` looks for (`TRUST_PROMPT`); the check answers "No, exit".
+- In a subfolder of the trusted scratch root, the **idle input box** must draw and go quiet within 15 s, and `ask_dialog` and `permission_dialog` must find no dialog there.
+- Typing `/` draws the command menu, which must not be mistaken for a dialog; then Esc, and Ctrl+C twice.
+- For agy: start `agy acp`, send `initialize`, read `protocolVersion` and the agent's info, read the Model and Thinking Level options with `ConfigOption::parse`, close.
+- Screens are compared as classifications, not pixels: what Notchling's readers concluded (trust prompt, idle, menu, no dialog) against what they conclude on the repo's recordings of the previous version. New screens would be saved under `<data>/versions/recordings/claude/<v>/` and never leave the Mac; a banner can show the account's email, so outputs are never logged.
+
+**One paid turn** (`versionCheckTurn`), once per new version, on top of the scratch screens:
+
+- A Claude Code session on a pty in a trusted scratch folder, on the catalog's cheapest current Claude model, with a fixed prompt that asks one question with AskUserQuestion, then asks to run `echo notchling-check` with Bash. While it works, the check queues a second message.
 - It then checks, against the new version's own output: the transcript parses with no unknown line or block type; `pending_question` finds the question and the ask dialog reader reads its first page; the queue's `enqueue` and `dequeue` (or `remove`) lines resolve the queued message (the 2.1.322 case); the permission dialog reader reads the Bash dialog's tool, command and options; the `PermissionRequest` hook event reaches the daemon and parses.
-- The check answers its own question with the first option and its own permission dialog with **No**. It is Notchling's own session in a scratch folder, so this is not answering the user's prompt; the decision record states it.
-- It ends the session (Ctrl+C twice, then the pty is closed) and removes the folder.
+- The check answers its own question with the first option and its own permission dialog with **No**. It is Notchling's own session in a scratch folder, so this is not answering the user's prompt; the decision record for the addition would state it. It ends the session (Ctrl+C twice, then the pty is closed) and removes the folder.
+- Codex's and agy's would be one turn each with the cheapest model ("Reply with OK"), parsing every event through the strict readers. Cost: a few cents a version, on the account in use, shown in Activity.
 
-Codex's and agy's paid checks are one turn each with the cheapest model ("Reply with OK"), parsing every event through the strict readers. Cost: a few cents a version, on the account in use. The Activity row shows the cost.
+### 11.3 Strict mode and the soak
 
-### 11.3 Strict mode
+The readers are lenient by design (unknown lines are skipped). The check runs them in a **strict mode** that counts what they skipped: unknown line types, unknown content blocks, unknown queue operations, lines that failed to parse, ACP updates with an unknown `sessionUpdate`. A count above zero on a line the new version wrote (Claude Code's per-line `version`, a Codex rollout's `cli_version`) fails the check, with the kind of thing skipped, never its text. Counts on older lines are shown, not failing.
 
-The readers are lenient by design (unknown lines are skipped). The check runs them in a **strict mode** that counts what they skipped: unknown line types, unknown content blocks, unknown queue operations, lines that failed to parse, ACP updates with an unknown `sessionUpdate`. Any count above zero fails the check, with the kind of thing skipped (never its text).
-
-The same counters run on the Mac's **real sessions** after an update, as a free, passive signal: Settings > Agents shows "Since 2.1.324: 14 turns read, nothing unknown". Whether it gates the rollout is open ([27](#27-open-questions), question 2).
+The same counters keep running on the Mac's **real sessions** after an update: the **soak**. Settings > Agents shows "Since 2.1.324: 14 turns read, nothing unknown", and the Roll Out sheet and the rollout's Inbox item carry the same line. The soak never gates a rollout *(user's decision 3)*: a count above zero shows in red there, and the user decides.
 
 ### 11.4 Results
 
 | Result | Means | Then |
 | --- | --- | --- |
-| Passed | Every check that could run passed | The version becomes the reference |
-| Passed, partly | Some checks couldn't run (acting off, no ptyhost, the Mac's CLI not signed in) | Same, but labelled **Partly Checked** wherever it shows, with which checks didn't run. A Roll Out click may use it; Automatic never does *(coordinator's call 3)* |
+| Passed | Every check ran and passed, which needs the later additions ([11.2](#112-possible-later-additions)) | The version becomes the reference; Automatic may use it (Phase 6) |
+| Partly Checked | What the built check always gives: everything it ran passed, and screens, dialogs and turns weren't checked | The version becomes the reference, labelled **Partly Checked** wherever it shows, with what wasn't checked. A Roll Out click may use it, so Ask works; Automatic never does *(coordinator's call 3)*, so Automatic stays unavailable while the check is partial |
 | Failed | A check failed | The version is marked failed on this Mac; it is never rolled out; Inbox item |
 | Can't tell | The binary didn't start, or a timeout | Tried again once after 2 minutes, then Failed |
 
@@ -398,8 +413,8 @@ Each worker, one at a time:
 **Approval** *(coordinator's call 2)*. `versionRollout` decides what happens after a passed check:
 
 - **Off** (the default until the user turns the feature on): nothing rolls out; Machines shows drift and offers Match the Mac per worker.
-- **Ask**: Machines shows a **Roll Out** sheet: the version, whether it was Partly Checked, and one plan per worker with the tool, its method, the exact lines it will run and the order. One **Roll Out** click approves that version for every worker on the sheet. The daemon raises a notice in the Inbox ("Claude Code 2.1.324 passed on the Mac. 3 workers are behind.") whose only action is **Open Machines**; no Inbox answer starts anything in Phases 1 to 4.
-- **Automatic** (Phase 6 on, once the daemon runs rollouts): the rollout starts after a check with no click, and the Inbox gets one item when it finishes or halts. Never for the first rollout after the feature is turned on, a Partly Checked version, an npm install or agy *(coordinator's calls 3 and 8)*; those wait for a click.
+- **Ask**: Machines shows a **Roll Out** sheet: the version, **Partly Checked** with what wasn't checked (the built check always is, *user's decision 2*), the soak's line, and one plan per worker with the tool, its method, the exact lines it will run and the order. One **Roll Out** click approves that version for every worker on the sheet. The daemon raises a notice in the Inbox ("Claude Code 2.1.324 passed on the Mac. 3 workers are behind.") whose only action is **Open Machines**; no Inbox answer starts anything in Phases 1 to 4.
+- **Automatic** (Phase 6 on, once the daemon runs rollouts): the rollout starts after a check with no click, and the Inbox gets one item when it finishes or halts. Never for the first rollout after the feature is turned on, a Partly Checked version, an npm install or agy *(coordinator's calls 3 and 8)*; those wait for a click. As built every check is Partly Checked *(user's decision 2)*, so Automatic stays unavailable, shown off with "Needs a full check", until a later addition ([11.2](#112-possible-later-additions)) makes a full check possible.
 
 **Each worker's plan is checked again** *(coordinator's call 2)*. Right before Saving, Machines rebuilds that worker's plan from the machine as it is now and compares it, line by line, with the plan the sheet showed. Any difference (the worker's version moved, its method changed, its disk filled) halts the rollout at that worker as **Needs You**; the workers already done stay done, and the rest keep their version. A worker offline at the click is on the sheet with the plan its last probe gives ("when back: native installer, 2.1.323 to 2.1.324"); when it comes back, its rebuilt plan is compared with that one, so a catch-up never runs a plan nobody saw.
 
@@ -461,7 +476,7 @@ The native Claude Code installer would be safe beside running processes (the lau
 
 Notchling is the fourth tool in the same machinery, with its own adapter. Two parts are not built and belong to the maintainer: the release path, and Notchling running on workers at all (cluster v1, step 1).
 
-**On the Mac.** The app's update check exists and is off (`welcome/updates.rs`, `NOTCHLING_RELEASES`). When releases are on, the app installs an update when it's idle (0010). After it restarts, the new build is the Mac's Notchling version, checked by its own smoke check ([11.1](#111-free-checks-no-turn)), and becomes the reference. The updater itself is open: 0010 chose Sparkle for the Swift app and a signed manifest for the Rust app, and the Swift app is retired ([27](#27-open-questions), question 3).
+**On the Mac.** The app's update check exists and is off (`welcome/updates.rs`, `NOTCHLING_RELEASES`). The updater is **Sparkle** *(user's decision 4)*, with the existing appcast (`tools/release/appcast.py`) and its EdDSA key, and it installs an update only when the app is idle (0010). A new decision record amends 0010, whose plan for the Rust app was a separate ed25519 manifest, and Sparkle waits for the Developer ID, as releases already do. After the restart, the new build is the Mac's Notchling version, checked by its own smoke check ([11.1](#111-what-the-check-runs)), and becomes the reference.
 
 **What a worker needs.** A worker runs no app, only `notchling` (the daemon and its command line) and `notchling-ptyhost`. So each release also carries, per target:
 
@@ -472,7 +487,7 @@ Notchling is the fourth tool in the same machinery, with its own adapter. Two pa
 | `notchling-manifest.json.sig` | an ed25519 signature over the manifest |
 
 - **The version is the build's own string.** A promoted Stable keeps its Beta's version (`1.3.0-beta.2`, automation.md), so the rollout matches the Mac's build string, never the release tag. The manifest maps one to the other.
-- **Signing.** The manifest is signed in the `sign` job, which runs no repository code (0010). Reusing Sparkle's EdDSA key (ed25519, `sign_update`) gives one key and one offline backup; the public key is compiled into `notchling`.
+- **Signing.** The manifest is signed in the `sign` job, which runs no repository code (0010). It uses Sparkle's EdDSA (ed25519) key *(user's decision 4)*: one key and one offline backup for the appcast and the worker manifest; the public key is compiled into `notchling`.
 - **Checking.** The Mac downloads the manifest, checks the signature with the compiled-in key, and sends the worker the asset's URL and SHA-256. The worker downloads it itself (`curl --proto =https`, GitHub only) and checks the hash before unpacking. The worker trusts only what the Mac sent.
 - **Layout on a worker,** like Claude Code's: `~/.local/share/notchling/versions/<v>/` with both binaries, `~/.local/bin/notchling` a symlink to the current one, the service file pointing at the symlink. Install is unpack, verify, move the link; rollback moves it back. Two versions kept.
 - **Restart.** `launchctl kickstart -k` or `systemctl --user restart` for the daemon, between ops. The worker's daemon starts with every switch off, so it needs the cluster's node tier and headless switch policy (cluster review issue 3) before Phase 5 can restart one unattended.
@@ -489,33 +504,32 @@ Claude Code
 --------------------------------------------------------------------------------
 Client      Found at ~/.local/bin/claude · 2.1.324 · native installer
             Latest 2.1.325                                         [ Update ]
-            Check       Passed 14:03 · 3 checks, no turn          [ Check Again ]
+            Check       Partly checked 14:03 · version, doctor, transcripts  [ Check Again ]
             Since 2.1.324: 14 turns read, nothing unknown
 Workers     m1          2.1.324                                    Done
             vps-sing-1  2.1.323 → 2.1.324                          Waiting for 2 processes
             ub-2        2.1.323                                    Offline, will catch up
             ub-3        Not installed
             Keep workers on the Mac's versions  [ Ask Me        v ]
-            Spend one turn to check new versions                   [ ]
                                                        [ Go Back to 2.1.323 ]
 ```
 
 - **Update** shows only when Latest is newer and the method can update. With the `install` switch off it says so and does nothing.
 - The Workers lines are read only here; rollouts start in Machines in Phases 1 to 4.
-- A Partly Checked result says so on the Check line, with which checks didn't run.
-- A failed check turns the Check line red: "Failed 14:03: the permission dialog wasn't read. Workers stay on 2.1.323." with **Details** (which check, never the screen).
+- The Check line says Partly Checked, as the built check always does, and what it didn't check: screens, dialogs and turns *(user's decision 2)*. The soak line under it never holds a rollout *(user's decision 3)*.
+- A failed check turns the Check line red: "Failed 14:03: `codex exec` no longer takes `--json`. Workers stay on 0.166.0." with **Details** (which check, never the screen).
 - Notchling's own row is on the General page beside About and Check for Updates, with the same Workers lines.
 
 ### 17.2 Machines
 
 - Each machine card gets a **Tool Versions** step: one row per tool with its version and method, and a mark against the Mac's version (same, behind, ahead, Held, Can't Pin, Not Installed). Its Fix is **Match the Mac**: the plan lists each tool's install line and the order; Run takes one click. A row that would move a tool down carries the `minimumVersion` warning.
 - With no answer from the daemon, the banner says **Notchling isn't running** and nothing starts; with a stale reference it says **The Mac's check is out of date** *(coordinator's call 1)*.
-- The **Roll Out** sheet lists every worker's plan, says Partly Checked when it was, and takes one click *(coordinator's call 2)*.
+- The **Roll Out** sheet lists every worker's plan, says Partly Checked (as the built check always does) with the soak's line, and takes one click *(coordinator's call 2)*.
 - **Resume Rollout** and **Cancel Rollout** when the journal holds a rollout that stopped *(coordinator's call 9)*.
 - **Self-Update Off** is a step per tool with a Fix ([9](#9-self-update-off-on-workers)).
 - **Roll Back to <previous>** is on each tool row, its own click.
 - A **rollout banner** at the top while one runs: "Rolling out Claude Code 2.1.324: m1 done · vps-sing-1 waiting for 2 processes · ub-2 offline". Cancel finishes the step in progress first; a worker in Waiting has its own Cancel that skips it *(coordinator's call 7)*.
-- A method that can't pin shows "Homebrew can't install an exact version" with a Fix to move the tool to the native or standalone installer ([27](#27-open-questions), question 1).
+- A Homebrew install shows "Homebrew can't install an exact version" with **Switch to the Native Installer** (or the Standalone Installer), its own click with its own plan *(user's decision 1)*.
 
 ### 17.3 Inbox
 
@@ -555,7 +569,7 @@ While the rollout runs in the Machines window (Phases 1 to 4), the daemon can't 
 | The B gate | `versions/gate.rs`: `trait Gate { fn check(&self, tool, v) -> GateResult }`, `OpenGate` in A | maintainer |
 | Strict counters for the readers | `crates/engine/src/transcript/` (a `Strict` mode beside the lenient one) | auto (`transcript/**`) |
 | Mac detection and watch | `crates/notchlingd/src/versions_ops.rs`, an `OpGroup` | maintainer |
-| Smoke check | `notchlingd/src/versions_check.rs` over `engine::terminal`, `reply`, `tools::acp`, `tools::codex` | maintainer, `CAP-PROCESS`, `CAP-PTY` |
+| Smoke check | `notchlingd/src/versions_check.rs` over the tools' one-shot commands and the strict readers; the later additions would add `engine::terminal`, `reply` and `tools::acp` | maintainer, `CAP-PROCESS` |
 | Machines steps: Tool Versions, Self-Update Off, Match the Mac, Roll Back | `crates/engine/src/machines/steps_versions.rs` | maintainer |
 | Remote settings edit | `machines/remote_edit.rs` over `install::{jsonc,edit}` and a new `install::toml_edit` | maintainer, `CAP-FILEWRITE` |
 | Settings > Agents Client part, Machines rows and banner, Inbox rows | `crates/app/src/sheets/`, `crates/app/src/machines/`, `crates/app/src/inbox/` | auto |
@@ -590,7 +604,7 @@ Kinds for the logging design's registry, group **Versions**. Every field is a ty
 | --- | --- | --- | --- | --- |
 | `tool.version_seen` | Tool Versions | Toggle, on | Ac D | Already in the logging design: the first sighting of a version |
 | `version.changed` | Tool Versions Changed | Toggle, on | Ac D | `tool`, `machine`, `from`, `to`, `method` (`native`, `standalone`, `npm`, `brew`, `release`, `unknown`), `cause` (`user_update`, `self_update`, `rollout`, `rollback`, `outside`) |
-| `version.checked` | New Version Checks | Toggle, on | Ac D | `tool`, `version`, `tier` (`free`, `turn`), `result` (`passed`, `partly`, `failed`, `cant_tell`), `failed_part` (`version`, `trust_prompt`, `idle_screen`, `menu`, `doctor`, `exec_flags`, `acp_init`, `transcript`, `ask_dialog`, `permission_dialog`, `queue`, `hook`), `unknown_count`, `duration_ms`, `cost` |
+| `version.checked` | New Version Checks | Toggle, on | Ac D | `tool`, `version`, `tier` (`files_flags`; later `screens`, `turn`), `result` (`passed`, `partly`, `failed`, `cant_tell`), `failed_part` (`version`, `doctor`, `exec_flags`, `transcript`, `self_test`; later additions add their own), `unknown_count`, `duration_ms`, `cost` |
 | `rollout.started` | Rollouts Started | Always | A Ac D | `tool`, `to`, `workers`, `approved_by` (`machines`, `inbox_mac`, `inbox_phone`, `automatic`), `partly` (Flag), `first_run` (Flag), `gate` (`open`, `known_good`, `unknown`, `known_bad`) |
 | `rollout.step` | Rollout Steps | Always | A Ac D | `tool`, `machine`, `from`, `to`, `step` (`precheck`, `wait`, `plan_check`, `save`, `install`, `verify`, `move`), `result` (`ok`, `failed`, `offline`, `skipped`, `needs_you`), `why` (the list in [15](#15-failure-and-rollback)), `waiting_for` (Count), `duration_ms` |
 | `rollout.lock` | Rollout Lock | Always | A Ac | `action` (`taken`, `taken_over`, `released`, `refused`), `resumed` (Flag) |
@@ -607,8 +621,9 @@ Classes from decision 0020 (Free: set at once; Ask: an Inbox item; Never: refuse
 
 | Key | Type, default | Class | Why the class |
 | --- | --- | --- | --- |
-| `versionRollout` | `off`, `ask`; `automatic` added in Phase 6; `off` | **Never** | It decides whether software installs on other machines without the user. An agent misled by a prompt must not turn on Automatic, and turning it Off would let drift in quietly. Off to Ask is the first run *(coordinator's call 3)* |
-| `versionCheckTurn` | bool; false | **Ask** | It spends money on the account in use, a few cents a version. |
+| `versionRollout` | `off`, `ask`; `automatic` added in Phase 6 and offered only for a full check; `off` | **Never** | It decides whether software installs on other machines without the user. An agent misled by a prompt must not turn on Automatic, and turning it Off would let drift in quietly. Off to Ask is the first run *(coordinator's call 3)* |
+| `versionCheckScreens` | bool; false | **Ask** | A later addition, not built now *(user's decision 2)*. It would start scratch Claude Code sessions on a pty and add one trust entry to the Mac's `~/.claude.json`. |
+| `versionCheckTurn` | bool; false | **Ask** | A later addition, not built now *(user's decision 2)*. It would spend money on the account in use, a few cents a version. |
 | `versionWaitIdleMinutes` | 5 to 1440; 60 | **Free** | It only changes when a notice says a worker is still waiting for processes. Nothing is ever killed, and the wait itself has no end but Cancel. |
 | `versionHeld` | list of machine names; empty | **Ask** | A held worker drifts on purpose; the item says which. |
 | `versionGate` | `off`, `warn`, `block`; `off` | **Never** | The B slot. Loosening it is loosening a guard rail. |
@@ -628,13 +643,13 @@ Keys are named in `crates/engine/src/settings/keys.rs` with their title, descrip
 
 ## 22. Tests
 
-With fakes only: `ScriptedRunner` for every ssh call, `FakeLauncher` for the Mac's commands, `FakeSpawner` for `agy acp`, the reply tests' fake pty for scratch sessions, a `FeedFetcher`-style fake for Latest and manifests, a fake clock. No test runs ssh, an installer, a real CLI or the network, or reads `~/.claude`.
+With fakes only: `ScriptedRunner` for every ssh call, `FakeLauncher` for the Mac's commands, a `FeedFetcher`-style fake for Latest and manifests, a fake clock. No test runs ssh, an installer, a real CLI or the network, or reads `~/.claude`.
 
 | Area | Tests |
 | --- | --- |
 | Parsing | Each tool's `--version` output, today's and older forms (`2.1.89 (Claude Code)` from the setup page; Codex's and agy's forms taken from real runs when the parsers are written); hostile outputs (a version with `;`, a 10 KB line, a vault value) never become a version; paths from links map to methods |
 | Mac detection | A temp home with a native layout, an npm layout, a brew layout, two installs at once; a symlink moved makes `versions.changed`; nothing is started (the launcher fake records no call) |
-| Smoke check | Recorded screens (the trust prompt, idle, the `/` menu, from today's fixtures) classify as before; a made-up screen with a changed marker fails with `trust_prompt`; a `codex exec --help` text missing `--json` fails with `exec_flags`; an ACP `initialize` reply with an unknown field passes; strict mode over a transcript with an unknown block type fails with a count; the paid tier never runs while `versionCheckTurn` is off |
+| Smoke check | Over `FakeLauncher`: only one-shot commands run (`--version`, `claude doctor`, `codex exec --help`), never a pty, a session or a turn, and no path under `~/.claude`, `~/.codex` or `~/.gemini`, nor `~/.claude.json`, is written (a recording file system); a `codex exec --help` text missing `--json` fails with `exec_flags`; strict mode over a temp copy of transcripts fails on an unknown block type in a new-version line and only counts one in an older line; every result is Partly Checked; a Partly Checked reference allows a Roll Out click and never Automatic; the soak never changes a rollout's state |
 | Rollout engine | Every transition of [12](#12-the-rollout); one click approves every worker on the sheet; a catch-up whose rebuilt plan equals the shown one runs, any other is Needs You; superseded mid-step finishes the step; the journal resumes from each state only after a Resume event, never on open |
 | Reference | `versions.get` failing or timing out starts nothing and shows Notchling isn't running; a reference whose SHA-256 or version differs from the installed one is stale and starts nothing; Partly Checked never starts Automatic; the first rollout after Off to Ask is never Automatic; npm and agy never Automatic |
 | Lock | Two owners can't both hold it; a lock with an old heartbeat or a dead pid is taken over; a live one is refused; a closed window leaves the journal resumable |
@@ -656,16 +671,16 @@ Each ships alone and leaves the app working. Docs (`crates/AGENTS.md`, the engin
 
 | Phase | Ships | Tests | Zone |
 | --- | --- | --- | --- |
-| **0. Decisions** | A decision record "Tool versions follow the Mac" (next free number); the goals.md amendment ([21](#21-security-and-privacy)); privacy.md's Planned list gains the version reads | none | Maintainer: `docs/decisions/`, `docs/goals.md`, `docs/policies/` |
+| **0. Decisions** | A decision record "Tool versions follow the Mac" (next free number); a decision record amending 0010: Sparkle for the Rust app, one EdDSA key for the appcast and the worker manifest *(user's decision 4)*; the goals.md amendment ([21](#21-security-and-privacy)); privacy.md's Planned list gains the version reads | none | Maintainer: `docs/decisions/`, `docs/goals.md`, `docs/policies/` |
 | **1. See versions** | `engine::versions` (types, parsers, methods, binary identity); Mac detection in the daemon, `versions.get`, the `versions` topic; Machines' Tool Versions step (read only, per-worker tool list) reading the Mac's side from `versions.get`; Settings > Agents' Client lines and Machines' rows with drift marks; the read-only mismatch check, used by the cluster's step-1 handshake and `delegate --machine` to warn *(coordinator's call 10)*; no Latest yet | Parsing, Mac detection, the probe's safety, mismatch | Maintainer (engine, daemon, Machines steps); the views are auto |
-| **2. Check on the Mac** | The free smoke check; strict counters; `versions.check`; failed versions; the Inbox item on a failure; Latest and the Update button (`versions.update_local`, `install` switch); then the paid turn behind `versionCheckTurn` | Smoke check, strict mode, update over `FakeLauncher` | Maintainer: `CAP-PROCESS`, `CAP-PTY`, `CAP-NETWORK`; the transcript part is auto |
+| **2. Check on the Mac** | The files-and-flags smoke check *(user's decision 2)*; strict counters and the soak, shown and never gating *(user's decision 3)*; `versions.check`; failed versions; the notice on a failure; Latest and the Update button (`versions.update_local`, `install` switch) | Smoke check, strict mode, update over `FakeLauncher` | Maintainer: `CAP-PROCESS`, `CAP-NETWORK`; the transcript part is auto |
 | **3. Workers stay put** | Self-Update Off per tool in every known place and the sd service files; the remote edit and `install::toml_edit`; drift detection and its notice | Remote edit, TOML edit, safety | Maintainer: `CAP-FILEWRITE`, Machines |
 | **4. Roll out** | The rollout engine, journal, lock and Resume Rollout; the Roll Out sheet and the per-worker plan check; first run; adapters for Claude Code (native, npm) and Codex (standalone, npm); busy probe and Waiting with Cancel; Match the Mac (downward with its warning); Roll Back; the banner; `versionRollout` (Off, Ask), `versionWaitIdleMinutes`, `versionHeld`; then agy (vendor latest, then the cache) | Engine, fleet simulation, lock, safety | Maintainer: Machines, `CAP-PROCESS`, `CAP-NETWORK` (the agy cache) |
-| **5. Notchling on workers** | Release assets per target and the signed manifest (beta.yml, promote.yml, appcast.py's neighbor); the worker layout, install, rollback and restart | Manifest and signature, layout, the Beta-to-Stable mapping | Maintainer only: the release path. Waits for cluster v1 step 1 (a daemon on each worker, the node tier) |
-| **6. The daemon coordinates** | The rollout moves to the leader's daemon on the node link; Inbox answers from the Mac and the phone; Automatic (never for the first rollout, Partly Checked, npm or agy); dispatch refuses a mismatch | Same engine tests over `NodeHost`; Automatic's exclusions; dispatch handshake | Maintainer: daemon, cluster |
+| **5. Notchling on workers** | Release assets per target and the manifest signed with the Sparkle EdDSA key (beta.yml, promote.yml, appcast.py's neighbor); Sparkle for the Mac app, once the Developer ID exists *(user's decision 4)*; the worker layout, install, rollback and restart | Manifest and signature, layout, the Beta-to-Stable mapping | Maintainer only: the release path. Waits for cluster v1 step 1 (a daemon on each worker, the node tier) |
+| **6. The daemon coordinates** | The rollout moves to the leader's daemon on the node link; Inbox answers from the Mac and the phone; Automatic (never for the first rollout, Partly Checked, npm or agy, so not offered while the check is files and flags only); dispatch refuses a mismatch | Same engine tests over `NodeHost`; Automatic's exclusions; dispatch handshake | Maintainer: daemon, cluster |
 | **7. Approach B** | Known-good lists in Notchling's release manifest; the `Gate`; `versionGate` | Gate results; a known-bad version blocks before the Mac step | Maintainer: release path, engine |
 
-Phases 2 and 3 can run side by side once 1 is in. Phase 4 needs both.
+Phases 2 and 3 can run side by side once 1 is in. Phase 4 needs both. The later additions of [11.2](#112-possible-later-additions) are in no phase; each would get its own decision record and setting.
 
 ## 24. The slot for approach B
 
@@ -684,6 +699,7 @@ pub trait Gate: Send + Sync { fn check(&self, tool: Tool, version: &Version) -> 
 
 - Verify before building on them: agy's self-update knob, and whether `agy --version` triggers an update; Codex's `daemon_auto_start` key; whether a manual `claude install` makes the background supervisor restart; whether Codex's standalone packages keep old versions; Claude Code's per-line transcript `version` field on a fresh recording; ACP's `agentInfo` in agy's `initialize`; whether an agy `session/new` costs a turn; the `stable` file beside Claude Code's `latest`.
 - The exact strict-mode counters per reader, and the threshold (zero, or zero of each kind that matters).
+- Which existing transcripts the check's strict pass reads (how many, how far back), and how it tells a line's version (Claude Code's per-line `version`, Codex's `cli_version`; agy's logs may carry none).
 - Timeouts, the disk floor, how many versions the agy cache keeps, the lock's heartbeat and stale age.
 - How the busy probe tells the supervisor's background sessions from other `claude` processes (the supervisor's command line and process tree, checked on a real worker), and what `claude agents --json` prints for each.
 - Where Claude Code's managed settings file sits on macOS and Linux, for the `requiredMinimumVersion` warning, from Claude Code's settings docs.
@@ -718,8 +734,4 @@ Checked on 2026-11-13.
 
 ## 27. Open questions
 
-Only these need an answer: questions 1 and 3 from the maintainer, question 2 (the review's question 5) from the user. Each has a recommendation.
-
-1. **Workers installed with Homebrew.** Homebrew can't install an exact Claude Code or Codex version, and npm's in-place upgrade breaks running sessions. *Recommendation:* manage only the vendor's own installers on workers (Claude Code's native installer, Codex's and agy's standalone ones). A worker on Homebrew gets a Fix that moves it, shown with its plan. npm stays allowed for Claude Code and Codex, installed only while no process of that tool runs.
-2. **How the smoke check is set up** (the review's question 5, for the user). What the check on the Mac runs, and so what it may touch. **Option A, files and flags only:** `--version`, `claude doctor`, `codex exec --help`, agy's ACP `initialize`, Notchling's self-test, the strict readers over the built-in fixtures; no pty, no scratch session, nothing written; it catches flag and protocol changes, not screen or dialog changes, so every result is Partly Checked. **Option B, A plus scratch screens:** also the trust prompt, the idle screen and the `/` menu on a pty in a scratch folder ([11.1](#111-free-checks-no-turn)); needs `acting` on and the ptyhost, and Claude Code writes one trust entry for the scratch root in the Mac's `~/.claude.json`, the way Trust Folder does today; no model turn, no cost. **Option C, B plus one paid turn per new version:** the ask dialog, the permission dialog, queue lines and the hook on the version's own output ([11.2](#112-the-paid-turn-opt-in)); a few cents a version on the Mac's current account, behind a setting. And with any of them: whether a short soak (the Mac's next real turns read with nothing unknown) must pass too, or is only shown. *My recommendation:* B by default, C as an opt-in that starts off, and the soak shown but not gating, so rollouts stay quick. With `acting` off, B falls back to A and says Partly Checked.
-3. **Notchling's own updater on the Mac, and its key.** 0010 chose Sparkle for the Swift app and a separate signed manifest for the Rust app; the Swift app is retired. *Recommendation:* Sparkle for the Rust app bundle on the Mac, since the appcast pipeline and its EdDSA signing exist, and the same ed25519 key signs the worker manifest ([16](#16-notchling-itself)): one key, one offline backup. It changes 0010 by a new record, and waits for the Developer ID, as releases already do.
+None. The user decided the four that were open on 2026-11-14, each as recommended; they are recorded in [Decided by the user](#decided-by-the-user) and marked in the sections they change.
