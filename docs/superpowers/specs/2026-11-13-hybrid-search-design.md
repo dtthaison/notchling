@@ -1,6 +1,38 @@
 # Hybrid search for Notchling
 
-Design, revision 3, 2026-11-13: revision 2 with the calls the coordinator settled after a builder's review. Read against `agent/move-auto-trust` (8e73a97) and the open branches named below. Labels: **[M]** measured on this Mac (Apple M5, 32 GB, macOS 26; see `embedding-research.md`), **[S]** from a source, **[E]** estimate.
+Design, revision 4, 2026-11-14: revision 3 with the user's answers after review. Revision 3 added the calls the coordinator settled after a builder's review. Read against `agent/move-auto-trust` (8e73a97) and the open branches named below. Labels: **[M]** measured on this Mac (Apple M5, 32 GB, macOS 26; see `embedding-research.md`), **[S]** from a source, **[E]** estimate.
+
+## The user's answers after review
+
+The user answered every question revision 3 left open. Each answer below is the user's decision and is worked into the sections named; no question is open any more.
+
+1. **Eval pass criterion** (user's decision).
+   - **Who.** The maintainer writes about 40 queries over his own sessions, kept local and never committed, and runs P4b.
+   - **Pass.** Three conditions:
+     - hybrid beats text-only by at least 0.15 R@5 overall;
+     - no language is worse than with text-only;
+     - exact-looking queries (the text-only shapes of section 6) are no worse.
+   - *Sections 12, 13.*
+2. **Agent classes follow one rule for all settings** (user's decision).
+   - **The rule.** A cosmetic change (look, order, display) is Free: an agent makes it with no confirmation. A sensitive change is Ask. Its Inbox item says in plain words what the change does before the user allows it: the setting's title, the old and the new value, and a one-line "what this does" from the registry.
+   - **Applied here:**
+     - Ask: `searchIndexRange`, turning a category on or off, and `semanticSearch`.
+     - Free: reordering categories.
+     - Never: `semanticModel` (only the app's Download fetches).
+   - **The split.** Categories become two keys, because 0020 classes a key, not a change: `searchCategories` (which are on; Ask) and `searchCategoryOrder` (their order; Free).
+   - **Registry requirement.** Every Ask key has an effect text, and a test fails until it does.
+   - **Feeds back into decision 0020's table.** Its Ask keys get effect texts, and its Ask item shows the title, the old value, the new value and the effect text.
+   - *Sections 2, 8, 10, 12.*
+3. **Granite-r2's tokenizer license** (user's decision). Go ahead with granite-97m-r2.
+   - **Checking it.** P4a checks the cards of the model and its base encoder, and P4b confirms before the decision record.
+   - **Fallback.** granite-embedding-107m-multilingual.
+   - *Sections 3, 12.*
+4. **Semantic Search stays Off by default, and nothing loads until it's on** (user's decision).
+   - **Off.** Nothing is downloaded or loaded, the static model included, until the user turns it on.
+   - **On.** The user picks models by purpose from a list, then downloads them. Each model has a short note saying what it is good for, its size and its speed. For example, "Standard: good for English and Vietnamese, 195 MB", and the static helper as "finds Vietnamese typed without accents".
+   - **The static model** lives in the daemon only while Semantic Search is on.
+   - *Sections 3, 8, 9, 10, 12.*
+5. **Unchecking Sessions turns session indexing off entirely** (user's decision, option a). Neither ⌘⇧P nor agents get sessions, and `search.query` reports Sessions as disabled. *Sections 5, 9.*
 
 ## Calls settled after review
 
@@ -26,10 +58,10 @@ A builder read revision 2, and the coordinator settled these six points. Each is
      - `data/*.json`: the hand-written eval sets and the per-model results.
      - Paths are relative to the folder. The two candle files are used under Apache-2.0 (`THIRD-PARTY.md`). The models are not committed; `py/download.py` fetches them into the git-ignored `models/`.
    - **Downloads.** Fetching models from Hugging Face is fine during development, never in tests.
-   - **Pending.** The pass criterion, and who writes the queries, are the user's to answer; the coordinator asks.
+   - **Decided since.** The pass criterion and the query author are the user's answer 1.
    - *Sections 3, 12, 13.*
 4. **Tokenizer for the static model** (coordinator's call). Try kitoken first, with a parity test. If parity fails, `tokenizers` in the daemon for that one model (about 36 MB) is acceptable, after a `cargo deny` review. *Sections 3, 12.*
-5. **Agent classes for `searchIndexRange` and `searchCategories`** (coordinator's call, pending the user's answer). They stay Free, with a note that they may become Ask. *Sections 10, 13.*
+5. **Agent classes for `searchIndexRange` and `searchCategories`** (coordinator's call, superseded). Revision 3 kept them Free pending the user. The user's answer 2 makes them Ask and splits the category order off as Free. *Section 10.*
 6. **Helper lifetime and scope** (coordinator's call).
    - **Lifetime.** The helper stays resident while a backlog exists. New chunks wait in a batch: the daemon wakes the helper when 16 are pending or the oldest has waited 5 minutes. The helper exits 5 minutes after its queue is empty.
    - **Fixture roots.** Under a fixture root (`NOTCHLING_DATA_ROOT`), the daemon uses `HashEmbedder` and never starts the real helper, unless `NOTCHLING_EMBED_REAL=1`.
@@ -57,14 +89,14 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 ## In ten lines
 
 1. **Tier 0, on by default:** today's FTS5 index with our own `đ`→`d` fold, over the sessions in the chosen range (default Everything on Disk), settings, pages and the other checked categories.
-2. **Tier 1, opt-in:** Settings > Search > Semantic Search, off by default. The user picks a model from a list and downloads it once: about 630 MB fetched, about 250 MB kept, pinned and checked against SHA-256. Full text works until it's ready.
-3. **The Tier 1 models.** Granite-r2 runs in a helper, `notchling-embed` (candle with Accelerate, kitoken). It stays up while there is a backlog; after that, the daemon wakes it when 16 chunks are waiting or the oldest has waited 5 minutes, and it exits 5 minutes after its queue empties. The static model runs in the daemon, at 0.01 ms per query.
+2. **Tier 1, opt-in:** Settings > Search > Semantic Search, off by default. Nothing is downloaded or loaded, the static model included, until the user turns it on. Then the user picks models by purpose from a list, each with what it is good for, its size and its speed, and downloads them once: about 630 MB fetched, about 250 MB kept, pinned and checked against SHA-256. Full text works until they're ready.
+3. **The Tier 1 models.** Granite-r2 runs in a helper, `notchling-embed` (candle with Accelerate, kitoken). It stays up while there is a backlog; after that, the daemon wakes it when 16 chunks are waiting or the oldest has waited 5 minutes, and it exits 5 minutes after its queue empties. The static model runs in the daemon, at 0.01 ms per query, and only while Semantic Search is on.
 4. **Ranking.** RRF (k = 60) over FTS5 AND, granite and static, then today's recency bonus. This was the best measured: chat R@1 0.97, settings 0.81, unaccented Vietnamese chat 1.00 [M]. Exact-looking queries use text only.
 5. **Store.** A flat int8 matrix per model in a new `daemon/vectors.db`, searched by brute force: 0.3 ms for 50k vectors [M]. No sqlite-vec, no HNSW.
 6. **Facets.** Each document carries facets (tool, project, account and time for sessions; section for settings; owner for pages). `search.query` takes a `filter` that applies inside the FTS query and masks the vector scan before it runs. Filters, prefixes, `when:` bounds and RRF are one pure engine module that the app and the daemon share.
 7. **⌘⇧P works like Spotlight.** Results are grouped by category in the user's order. Sessions, Settings, Pages, Inbox and Actions are on by default; Activity, Vault Names and Machines are off. An unchecked category is neither shown nor indexed. Prefixes such as `s:` and `p:` become chips. The app answers Settings, Actions and Inbox itself, at once; the daemon answers the rest.
 8. **Actions** (Toggle Keep Awake, New Session, Switch Account, Open Settings…) run straight from search through the same app code as the menu. The daemon only ranks their titles, and `search.query` can't run anything.
-9. **Settings registry.** Each entry names a settings key, whose title and description decision 0020 puts on the key line and the locale design moves to `locales/en/shared.ftl`, plus a place to jump to and Vietnamese search aliases. A search field in the sheet jumps to the row and flashes it.
+9. **Settings registry.** Each entry names a settings key, whose title and description decision 0020 puts on the key line and the locale design moves to `locales/en/shared.ftl`, plus a place to jump to and Vietnamese search aliases. Every Ask key also has a plain-words effect text, which an agent's Ask item shows. A search field in the sheet jumps to the row and flashes it.
 10. **Phases.** P1, Tier 0 and Settings search (auto zone, on `merge/settings-batch`, after the locale design's phase 1); then range, categories and Actions; facets; the helper and an eval tool (P4a), with a maintainer-run gate (P4b); store and pipeline; hybrid; the download UI; and more corpora.
 
 ## 1. What exists today
@@ -91,7 +123,7 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 - **Licenses.** 0008 and `deny.toml` allow only permissive licenses, and so does every model we ship; a test checks the model manifest against `deny.toml`'s allow list.
 - **Rules.** A download trips CAP-NETWORK. Model files and `vectors.db` trip CAP-FILEWRITE, and the helper CAP-PROCESS. The auto zone covers `crates/app/**` and `crates/engine/src/search/**`, but not `Cargo.toml`, `notchlingd`, `local-api`, `platform` or `engine/src/settings`.
 - **crates/AGENTS.md.** No file I/O in a model compute or draw, daemon calls off the UI thread, 1 MiB per local API line, no lock across I/O, slow work answers at once and reports by event.
-- **0020.** Agents read every setting and change one by its class. Every new key here gets a class (section 10).
+- **0020.** Agents read every setting and change one by its class. Every new key here gets a class by the user's rule: cosmetic Free, sensitive Ask with an effect text (answer 2, section 10).
 - **Locale.** All UI text is English. Every user-facing string goes through Fluent, so search P1 lands after the locale design's phase 1; the fallback if that slips is in call 1. Search aliases in other languages are data, not UI text.
 - **Platforms.** The engine builds on macOS, Linux and Windows. Accelerate is macOS-only; other systems use candle's plain CPU path.
 
@@ -116,6 +148,10 @@ A builder read revision 2, and the coordinator settled these six points. Each is
 
 - **Why not e5-small.** Its Vietnamese chat queries landed on other Vietnamese turns, by language rather than meaning: R@1 0.27 against granite's 0.91. It is also 471 MB against 195 MB, and slower.
 - **Caveat.** The research sets are small: 80 hand-written queries over 62 documents. Models within about 0.05 are a tie; e5-small's gap is not. P4b repeats the eval on real local data before the decision record.
+- **Tokenizer license** (answer 3).
+  - **The doubt.** Granite-r2 uses OpenAI-style special tokens (`<|startoftext|>`). Its bigger sibling's card names Gemma terms for its tokenizer; the 97m-r2 card doesn't.
+  - **Decided.** We go ahead. P4a checks the cards of the model and its base encoder, and P4b confirms before the decision record.
+  - **Fallback.** granite-embedding-107m-multilingual: Apache-2.0, XLM-R tokenizer, chat R@1 0.81, 2.0 ms per query [M].
 - **Upgrade path, only if that eval shows a gap.** **F2LLM-v2-330M** (Apache-2.0, 669 MB, a Qwen3 architecture candle already runs). Qwen3-Embedding-0.6B is too slow on CPU: 56 ms per query and 2.2 chunks/s [M]. bge-m3 is the quality ceiling, but it is 2.27 GB and ships only as a pickle `.bin`.
 
 **candle patch.** candle's `modernbert` hardcodes GeGLU, while granite-r2 uses SiLU. Its keys expect a `model.` prefix the files lack, and its attention mask is f32, which breaks f16 and bf16 weights [M]. We carry our own copy of the file, about 500 lines, MIT/Apache from candle, with candle's license beside it in `crates/embed/THIRD-PARTY.md` (the code takes no comments), and offer the fix upstream.
@@ -130,6 +166,7 @@ The research harness's copy, `tools/embed-eval/rs/src/modernbert.rs`, already ha
   - **Queries** start it too. The first one after a cold start answers with T and S (`warming`) while it loads, in about 0.8 s.
   - **Fixture roots.** Under a fixture root (`NOTCHLING_DATA_ROOT`), the daemon embeds with `HashEmbedder` and never starts the real helper, unless `NOTCHLING_EMBED_REAL=1`. Renders, e2e tests and dev runs over fixtures then need no model.
 - **The static model, in the daemon itself.** It sits behind an engine cargo feature that only `notchlingd` turns on, so the app and ptyhost don't link it, using kitoken over a memory-mapped int8 table. If kitoken's WordPiece doesn't match `tokenizers`, it uses `tokenizers` instead (call 4).
+  - **Only while Semantic Search is on** (answer 4). With the switch off, the daemon maps no model file and starts no helper. Turning it off unmaps the table and frees both vector sets in memory; their rows in `vectors.db` stay for next time, and Remove Model deletes them.
   - It ranks even while the helper is cold, so unaccented Vietnamese works from the first keystroke.
   - It indexes everything in seconds.
 
@@ -139,14 +176,15 @@ The research harness's copy, `tools/embed-eval/rs/src/modernbert.rs`, already ha
 | --- | --- | --- |
 | Helper | Measured with `tokenizers` and an f32 word table | 685 MB after load, 1,047 MB peak [M] |
 | Helper | With kitoken and the f16 word table kept in the memory map, gathering rows per batch | 200–300 MB while working [E]; P4a gate ≤ 350 MB; **0 when idle** |
-| Daemon | Static model, kitoken and the 512-d int8 table (54 MB file, touched pages only) | +40–60 MB while Semantic Search is on [E]; 36 MB measured for the 1024-d f32 table [M] |
+| Daemon | Static model, kitoken and the 512-d int8 table (54 MB file, touched pages only) | +40–60 MB while Semantic Search is on, 0 while it's off [E]; 36 MB measured for the 1024-d f32 table [M] |
 | Daemon | Vectors in memory, granite and static | about 0.9 KB per chunk: 13.5 MB at 15k chunks, 45 MB at 50k |
 
 **Cost.** Indexing is about 12 chunks/s at the half-core budget [E from M]. 15k chunks (everything on disk here) take about 20 minutes, once; after that a busy session adds a chunk or two a minute. The static model indexes the same 15k in about 10 s.
 
 **The download.**
 
-- **The manifest.** `crates/engine/data/models.json` is compiled in, like `catalog.json`. Each tier lists its files with a pinned Hugging Face revision, size, SHA-256 and license.
+- **When.** Only after the user turns Semantic Search on and presses Download on a model (answer 4). A stored setting never starts one.
+- **The manifest.** `crates/engine/data/models.json` is compiled in, like `catalog.json`. Each model lists its purpose note, size, speed and files, each file with a pinned Hugging Face revision, size, SHA-256 and license.
 - **The fetch.** `GET https://huggingface.co/<repo>/resolve/<revision>/<file>` with `User-Agent: Notchling`, following redirects only to the CDN hosts the manifest names. It streams through the engine's rustls client into `<data>/models/<tier>/<file>.part` (folder 0700, files 0600, no-follow writes), hashing as it goes. The size and hash must both match before the rename. Range resume. A mismatch deletes the file.
 - **The static table.** After its hash checks, the helper cuts the 434 MB f32 table to 512 dims, quantizes it to int8 (54 MB), records the new file's hash locally and deletes the f32 file.
 - **Tier 1:** about **630 MB fetched once** (granite 195 MB and static 434 MB), about **250 MB kept**.
@@ -255,6 +293,7 @@ pub trait Embedder: Send + Sync {
 
 - **Categories.** The pipeline reads `searchCategories` and `searchIndexRange` at each pass and on `settings.changed`.
   - An **unchecked category** is not scanned. Its `search.db` rows, chunks and vectors are deleted, and `search.query` answers `"disabled": ["activity"]` for it, to agents too. The app's matcher skips its own unchecked categories the same way.
+  - **Sessions too** (answer 5). Unchecking Sessions turns session indexing off entirely. Neither ⌘⇧P nor agents get sessions, and `search.query` answers `"disabled": ["sessions"]` to every caller.
 - **Range.** It applies to sessions in both indexes. Lowering it deletes the FTS rows and chunks past it, and a sweep removes their vectors. Raising it queues the older files, newest first. The full-text index follows the same range, so "Everything on Disk" also ends today's 14-day limit for full text. That first refresh reads about 1,000 transcripts once, in the background.
 - **Who sees what.** Activity, Vault Names and Machines are app-tier corpora in the daemon. Their hits go only to the app, and an agent-tier `search.query` that asks for them gets `"dropped": [...]`. Actions and Inbox never go through `search.query` at all: they live in the app (call 2).
 - **Vault Names** holds names and kinds, never values, never through the Keychain, and only while the `vault` switch is on. When the switch goes off its rows are deleted.
@@ -363,12 +402,15 @@ Each group shows up to 8 sessions or 4 of anything else, then a "N more" row tha
 **Settings > Search** (decision 1). It is the section `agent/search-hotkey-setting` adds:
 
 1. **Search Shortcut**: from that branch.
-2. **Semantic Search**: Off or On, default Off. Turning it on shows the model list, one row per tier in the manifest:
-   - **Standard (recommended).** Granite 97M multilingual with the static helper. 630 MB download, 250 MB on disk. Fast, strong on Vietnamese and English, finds Vietnamese typed without accents.
-   - **Large**, listed only after P4b's real-data eval shows Standard missing what it finds. F2LLM-v2-330M with the static helper. About 1.1 GB download, about 720 MB on disk. Better on hard queries, several times slower to index [E].
-   - Picking one shows **Download**. Then a progress bar with Cancel, then "Indexing 1,240 of 15,000 passages" with **Pause**, then **Remove Model**. Full text answers until vectors are ready.
+2. **Semantic Search**: Off or On, default Off. Off means nothing is downloaded or loaded, the static model included (answer 4). Turning it on shows the model list: one row per model in the manifest, each with what it is good for, its size and its speed. The wording is the English source for Fluent messages.
+   - **Standard** (recommended): "Good for English and Vietnamese. 195 MB. About 4 ms a search; the first index takes about 20 minutes." Granite 97M multilingual r2.
+   - **Accent Helper** (recommended): "Finds Vietnamese typed without accents. 434 MB download, 54 MB kept. Instant." The static model. It runs in the daemon only while Semantic Search is on.
+   - **Large**, listed only after P4b shows Standard missing what it finds: "Better on hard questions. 669 MB. Slower to search and index [E]." F2LLM-v2-330M.
+   - **Per row:** Download, then a progress bar with Cancel, then **Remove Model**.
+   - **While it works:** once a model is in, "Indexing 1,240 of 15,000 passages" with **Pause**.
+   - **Until then:** full text answers until vectors are ready, and a model not downloaded sits out of the fusion.
 3. **Index Sessions**: Last 14 Days, Last 30 Days or Everything on Disk (default).
-4. **Categories**: one row per category with a checkbox and a drag handle (⌥↑ and ⌥↓ move a focused row); the defaults are in section 7.
+4. **Categories**: one row per category with a checkbox and a drag handle (⌥↑ and ⌥↓ move a focused row); the defaults are in section 7. The checkboxes write `searchCategories` and the order writes `searchCategoryOrder` (answer 2).
 
 **The registry** (`crates/engine/src/search/settings_entries.rs`, auto zone):
 
@@ -387,12 +429,17 @@ pub struct Entry {
   - **When the locale work lands:** they become `locales/en/shared.ftl` messages, `setting-<key>` with `.about` and `.keywords` attributes, plus `.label` where the sheet's row label is shorter ("Width" under Notch).
   - **Neither way does the registry copy text.** It names the key, or its own message id for places with no key.
   - **If the locale phase 1 slips** (call 1): P1 takes keys' titles and about from their 0020 key lines and writes the rest (keywords, and the text of places with no key) in English into `crates/engine/src/search/settings_text.rs`. That is a temporary table keyed by the future message ids, which the locale migration moves into `shared.ftl` and deletes. P1's pull request says which it used.
+- **Effect text for every Ask key** (answer 2).
+  - **What it is.** Each key 0020 classes Ask has a one-line "what this does" in plain words. It is a Fluent `.effect` attribute (`setting-<key>.effect`), or an `effect` on the key line until the locale work lands.
+  - **Where it shows.** An agent's Ask change raises an Inbox item showing the setting's title, the old and the new value, and that line, so the user knows what Allow does.
+  - **Feeds back into decision 0020's table.** Its Ask keys (`continueAfterSleep`, `answerFromNotch`, `keepPages`, the limit modes, `limitSwitchAt`, `searchShortcut`) need effect texts, and its Ask item takes this shape.
 - **Search text.** It is the title, about and keywords in the UI's locale, plus the aliases, which are searched under every locale. Vietnamese stays as aliases, since all UI text is English.
 - **Tests** (new file):
   - Every row the sheet can show (all conditional rows forced on) names an entry.
   - Every entry placed in a section is shown there.
   - Every key that 0020 classes Free or Ask is either in the registry or listed in `NOT_SHOWN` with a reason, so a new user-facing key fails until it has an entry. 0020's own test already fails for a key with no class, title or about.
   - Every entry's messages exist and are non-empty in `locales/en/shared.ftl`, or in `settings_text.rs` while that table exists.
+  - Every Ask key has a non-empty effect text.
   - Ids match a committed list.
   - "dark" finds Appearance, "phím tắt" and "phim tat" find Search Shortcut, and "login" and "đăng nhập" find Logins and Lanes and the Accounts window.
 - **Places outside the sheet:** the Accounts, Secret Vault and Phone windows, and Machines.
@@ -409,11 +456,11 @@ pub struct Entry {
 
 | Op | Tier | Args → reply |
 | --- | --- | --- |
-| `search.query` | agent (app-tier corpora app only) | Args add `mode?: "text" \| "hybrid" \| "semantic"` (default `"text"`: old clients see no change) and `corpora?` (default `["pages","sessions"]`; new: `settings` (vector lists only; the text half is the app's), `activity`, `vault`, `machines`; Actions and Inbox are not daemon corpora and come back in `dropped`). Also `filter?: {tool?, project?, account?, section?, owner?, kind?, state?: [..], after?, before?}`: AND across names, OR within a list. The reply adds one array per corpus asked, every hit gaining `match: "text" \| "semantic" \| "both"` and `facets`, plus `semantic: {state: "off" \| "no_model" \| "warming" \| "indexing" \| "ready" \| "paused", coverage}`, `disabled: [..]` (unchecked) and `dropped: [..]` (tier) |
+| `search.query` | agent (app-tier corpora app only) | Args add `mode?: "text" \| "hybrid" \| "semantic"` (default `"text"`: old clients see no change) and `corpora?` (default `["pages","sessions"]`; new: `settings` (vector lists only; the text half is the app's), `activity`, `vault`, `machines`; Actions and Inbox are not daemon corpora and come back in `dropped`). Also `filter?: {tool?, project?, account?, section?, owner?, kind?, state?: [..], after?, before?}`: AND across names, OR within a list. The reply adds one array per corpus asked, every hit gaining `match: "text" \| "semantic" \| "both"` and `facets`, plus `semantic: {state: "off" \| "no_model" \| "warming" \| "indexing" \| "ready" \| "paused", coverage}`, `disabled: [..]` (unchecked, for every caller: with Sessions off, agents get no sessions either) and `dropped: [..]` (tier) |
 | `search.facets` | as its corpus | `{corpus, name, prefix?, limit?}` → `{values: [{value, label, count}]}` |
 | `embed.status` | agent | `{}` → state, tier and model ids, files present and verified, per-corpus `{docs, chunks, embedded}`, paused, budget, last error |
-| `embed.fetch` | app | `{tier}` → `{state: "downloading"}` at once, progress by event. Only the app's Download button calls it |
-| `embed.fetch.cancel`, `embed.remove` | app | `{tier}` |
+| `embed.fetch` | app | `{model}` → `{state: "downloading"}` at once, progress by event. Only the app's Download button calls it, and only while Semantic Search is on |
+| `embed.fetch.cancel`, `embed.remove` | app | `{model}` |
 | `embed.refresh` | app | `{}`: re-read the search settings now (the sheet writes the store itself, and those writes don't reach the `settings` topic) |
 | topic `embed` | app | `embed.changed {state, coverage, fetch: {bytes, total}}`, at most once a second |
 
@@ -424,15 +471,23 @@ pub struct Entry {
 
 ## 10. New setting keys and their agent class (decision 0020)
 
-| Key | Type, default | Class | Why |
-| --- | --- | --- | --- |
-| `semanticSearch` | bool, `false` | **Ask** | Turning it on starts background indexing (CPU, about 20 minutes once). It never downloads by itself |
-| `semanticModel` | choice of manifest tiers, none | **Never** | It picks what the app downloads (about 630 MB or more); only the app's Download button fetches |
-| `semanticPaused` | bool, `false` | Free | Pausing only lowers CPU use |
-| `searchIndexRange` | `14d` \| `30d` \| `all`, `all` | Free, may become Ask | A preference; lowering it only drops index rows. Pending the user's answer (call 5): raising it costs a background index |
-| `searchCategories` | ordered list of `{id, on}`, the defaults above | Free, may become Ask | A preference. App-tier categories stay app-tier whatever is checked, and Vault Names still needs the `vault` switch. Pending the user's answer (call 5): unchecking Sessions also stops agents' session search |
+**The rule, for all settings** (answer 2):
 
-Registry entries also cover `appearance` (0020 expects Free) and `searchShortcut` (expected Ask).
+- **Free.** A cosmetic change (look, order, display), with no confirmation.
+- **Ask.** A sensitive change. The Inbox item shows the setting's title, the old and the new value, and the key's effect text, and the agent waits for Allow.
+- **Never** for agents. A change that fetches or deletes models.
+
+| Key | Type, default | Class | Effect text (Ask) or why |
+| --- | --- | --- | --- |
+| `semanticSearch` | bool, `false` | **Ask** | "Turns on search by meaning: indexes your sessions in the background (about 20 minutes the first time) and keeps the accent helper in memory (about 50 MB)." It never downloads by itself |
+| `semanticModel` | list of manifest model ids, none | **Never** | Only the app's Download button fetches: 195 MB to about 1.1 GB |
+| `semanticPaused` | bool, `false` | **Ask** | "Pauses or resumes indexing by meaning. While paused, new sessions are found by words only." Not cosmetic: it changes what search finds |
+| `searchIndexRange` | `14d` \| `30d` \| `all`, `all` | **Ask** | "Changes how far back sessions are searched. A shorter range removes older sessions from search; a longer one indexes them in the background." |
+| `searchCategories` | set of category ids that are on; the defaults in section 7 | **Ask** | "Turns a search category on or off. Off removes it from search and from the index, for agents too." App-tier categories stay app-tier, and Vault Names still needs the `vault` switch |
+| `searchCategoryOrder` | ordered list of category ids; the defaults in section 7 | Free | Cosmetic: the order results are grouped in. An id it lacks takes its default place; an unknown id is ignored |
+
+- **Why two keys.** Decision 0020 classes a key, not a change, so turning categories on and off and ordering them are separate keys rather than one key classed by the kind of change.
+- **Registry entries** also cover `appearance` (Free: cosmetic) and `searchShortcut` (Ask in 0020). `searchShortcut` needs an effect text: "Changes the key that opens Search from any app. No other app can use that key."
 
 ## 11. Performance rules, checked
 
@@ -445,14 +500,14 @@ Registry entries also cover `appearance` (0020 expects Free) and `searchShortcut
 
 | Phase | What | Tests | Zone |
 | --- | --- | --- | --- |
-| **P1** (ships first; on `merge/settings-batch`, after the locale design's phase 1) | **Tier 0:** the `đ`→`d` fold in the FTS index, query and highlights, with a `search.db` schema bump (one rebuild). **Settings search:** the registry (keys' titles and about from 0020, Fluent messages, aliases, places), the field, jump and flash. **Shared module, first files:** `query::fold`, `query::matcher`. If the locale phase 1 slips, the temporary `settings_text.rs` (call 1) | Fold matches SQLite's; a stored "Sửa lỗi đăng nhập" is found by "dang nhap"; registry coverage and `NOT_SHOWN`; id list; the three example queries; model tests for keys and jump; `--render settings-search` | **auto** (`crates/engine/src/search/**`, `crates/app/**`, new test files) |
-| P2 | Index Sessions (`searchIndexRange`) and Categories (`searchCategories`) rows. The FTS index follows the range; unchecked categories are dropped and skipped. ⌘⇧P grouped by category order. `query::parse` with category chips. Actions (app registry and handlers); Inbox, Actions and Settings matched in the app | Range down deletes rows, up queues older files; an unchecked category is in no reply and no table; every action has a handler; `search.query` returns `actions` and `inbox` in `dropped`; parser goldens | maintainer (`keys.rs`, `pages_ops.rs`, `local-api`) |
+| **P1** (ships first; on `merge/settings-batch`, after the locale design's phase 1) | **Tier 0:** the `đ`→`d` fold in the FTS index, query and highlights, with a `search.db` schema bump (one rebuild). **Settings search:** the registry (keys' titles and about from 0020, Fluent messages, aliases, places), the field, jump and flash. **Effect texts** for every Ask key, 0020's included (answer 2). **Shared module, first files:** `query::fold`, `query::matcher`. If the locale phase 1 slips, the temporary `settings_text.rs` (call 1) | Fold matches SQLite's; a stored "Sửa lỗi đăng nhập" is found by "dang nhap"; registry coverage and `NOT_SHOWN`; every Ask key has an effect text; id list; the three example queries; model tests for keys and jump; `--render settings-search` | **auto** (`crates/engine/src/search/**`, `crates/app/**`, new test files); the effect texts on 0020's keys wait for the maintainer |
+| P2 | Index Sessions (`searchIndexRange`) and Categories (`searchCategories`, `searchCategoryOrder`) rows, with their classes and effect texts. The FTS index follows the range; unchecked categories are dropped and skipped. ⌘⇧P grouped by category order. `query::parse` with category chips. Actions (app registry and handlers); Inbox, Actions and Settings matched in the app | Range down deletes rows, up queues older files; an unchecked category is in no reply and no table; with Sessions unchecked an agent gets no sessions; every action has a handler; `search.query` returns `actions` and `inbox` in `dropped`; parser goldens | maintainer (`keys.rs`, `pages_ops.rs`, `local-api`) |
 | P3 | Facets on both sides through `query::filter` and `query::when`: the `facets` table in `search.db`, `filter`, `search.facets`, facet chips; `section`, `kind` and `state` on the app's corpora. Account from lanes and `account-log.json`, after `agent/account-log-fix` | A doc outside the filter never appears, in the app or the daemon; filter goldens; `when:` bounds from a fixed `now`; Tab completion model | maintainer (`notchlingd`) |
-| **P4a** (an agent can build it) | `crates/embed`: candle 0.11.1 with `accelerate` on macOS, our own `modernbert` with the mask fix, kitoken; `--bench`. The static reader (engine feature): kitoken WordPiece, else `tokenizers` after a deny review (call 4). **The eval tool,** `crates/embed/examples/eval.rs`. It takes `--queries <file>`: JSON lines `{q, want: [doc ids], lang?}`, written by the maintainer and never committed, for example under the git-ignored `docs/local/`. It runs over `--data-root` and prints R@1 and R@5 for text-only against hybrid, overall and per language. The research harness stays in `tools/embed-eval/` | kitoken parity and the eval tool's own tests read model files from a local folder (`NOTCHLING_EMBED_MODELS`) and are ignored by default: tests never download (call 3). Automatic gates on a Mac: query p50 ≤ 5 ms; ≥ 12 chunks/s at the budget; helper RSS ≤ 350 MB; `cargo deny check` clean; the eval tool over `tools/embed-eval/data/` reproduces the research numbers within 0.05 | maintainer (new crate, `Cargo.toml`, `Cargo.lock`) |
-| **P4b** (the maintainer runs it) | The real-data gate: the query file over real sessions, the eval tool run for FTS alone, FTS + granite + static, and F2LLM-v2-330M. It calibrates the floors τG and τS and decides whether a Large tier is listed. The granite-r2 tokenizer's provenance gets checked (question 1). Writes `docs/perf/embedding-spike.md` and decision record 0021 (0019 and 0020 are taken) | The pass criterion and who writes the queries: pending the user's answer (question 2) | maintainer |
+| **P4a** (an agent can build it) | `crates/embed`: candle 0.11.1 with `accelerate` on macOS, our own `modernbert` with the mask fix, kitoken; `--bench`. The granite-r2 tokenizer's license is checked on the model and base encoder cards (answer 3). The static reader (engine feature): kitoken WordPiece, else `tokenizers` after a deny review (call 4). **The eval tool,** `crates/embed/examples/eval.rs`. It takes `--queries <file>`: JSON lines `{q, want: [doc ids], lang?}`, written by the maintainer and never committed, for example under the git-ignored `docs/local/`. It runs over `--data-root` and prints R@1 and R@5 for text-only against hybrid: overall, per language, and for exact-looking queries (the text-only shapes, through `engine::search::query`). The research harness stays in `tools/embed-eval/` | kitoken parity and the eval tool's own tests read model files from a local folder (`NOTCHLING_EMBED_MODELS`) and are ignored by default: tests never download (call 3). Automatic gates on a Mac: query p50 ≤ 5 ms; ≥ 12 chunks/s at the budget; helper RSS ≤ 350 MB; `cargo deny check` clean; the eval tool over `tools/embed-eval/data/` reproduces the research numbers within 0.05 | maintainer (new crate, `Cargo.toml`, `Cargo.lock`) |
+| **P4b** (the maintainer runs it) | The real-data gate (answer 1). The maintainer writes about 40 queries over his own sessions (local, never committed) and runs the eval tool for FTS alone, FTS + granite + static, and F2LLM-v2-330M. It calibrates the floors τG and τS and decides whether a Large tier is listed. The granite-r2 tokenizer's license is confirmed (answer 3), else granite-107m replaces it. Writes `docs/perf/embedding-spike.md` and decision record 0021 (0019 and 0020 are taken) | **Pass:** hybrid beats text-only by at least 0.15 R@5 overall, no language is worse, and exact-looking queries are no worse | maintainer |
 | P5 | Store and pipeline with fakes: `vectors.db` (two vector sets, facets), `Corpus`, chunkers, hashes, stamps, deletes, model-id switch, budget logic, the batch queue (16 chunks or 5 minutes), `HashEmbedder`, `TableEmbedder` | An unchanged stamp reads nothing; growth embeds only new chunks; deletes sweep; a model change refills from stored text; the CPU meter keeps ≤ 50%; masks are exact; the queue releases at 16 or at 5 minutes on a fake clock | auto by path; the new database likely trips CAP-FILEWRITE |
-| P6 | Hybrid: three-list RRF through `query::fuse`, `embed.status`, the helper client (spawn, lines, resident while a backlog exists, exit 5 minutes after the queue empties), the static model in the daemon, Settings vector lists for the app; panel Related tag and progress | RRF golden; `search.query` without `mode` answers exactly as today; text-only shapes; floors; `warming` fuses T + S; helper lifetime on a fake clock with `FakeSpawner`; under a fixture root nothing spawns the helper unless `NOTCHLING_EMBED_REAL=1`; 1 MiB check; `bench_search.rs` | maintainer (`notchlingd`, CAP-PROCESS) |
-| P7 | Semantic Search UI and download: the switch, model list, Download / Cancel / Pause / Remove, `models.json` with SHA-256, host allowlist, static conversion, `platform::power`, the helper in `tools/bundle-next.sh`, privacy.md | With `FakeHttp`: wrong hash deleted, too many bytes aborts, an unlisted redirect refused, Range resume, no `.part` through a symlink; `embed.fetch` refused at agent tier; manifest licenses within `deny.toml`'s allow list; 0020 classes of the new keys | maintainer (CAP-NETWORK, CAP-FILEWRITE, policy) |
+| P6 | Hybrid: three-list RRF through `query::fuse`, `embed.status`, the helper client (spawn, lines, resident while a backlog exists, exit 5 minutes after the queue empties), the static model in the daemon, Settings vector lists for the app; panel Related tag and progress | RRF golden; `search.query` without `mode` answers exactly as today; text-only shapes; floors; `warming` fuses T + S; helper lifetime on a fake clock with `FakeSpawner`; under a fixture root nothing spawns the helper unless `NOTCHLING_EMBED_REAL=1`; with Semantic Search off the daemon maps no model file and starts no helper; 1 MiB check; `bench_search.rs` | maintainer (`notchlingd`, CAP-PROCESS) |
+| P7 | Semantic Search UI and download: the switch, the model list by purpose (each row's note, size and speed), per-model Download / Cancel / Remove, Pause, `models.json` with SHA-256, host allowlist, static conversion, `platform::power`, the helper in `tools/bundle-next.sh`, privacy.md | With `FakeHttp`: wrong hash deleted, too many bytes aborts, an unlisted redirect refused, Range resume, no `.part` through a symlink; `embed.fetch` refused at agent tier and while the switch is off; manifest licenses within `deny.toml`'s allow list; 0020 classes of the new keys | maintainer (CAP-NETWORK, CAP-FILEWRITE, policy) |
 | P8 | More corpora by meaning in the daemon: Activity, Vault Names (names only, vault switch), Machines; pages' content in full text | One `Corpus` test file each; the vault corpus never touches the Keychain (`PanicKeychain`) and empties when the switch goes off | maintainer (`notchlingd`, vault and Machines) |
 
 **Ordering.**
@@ -464,18 +519,13 @@ Registry entries also cover `appearance` (0020 expects Free) and `searchShortcut
 
 ## 13. Open questions
 
-1. **Granite-r2's tokenizer provenance is unverified.** It uses OpenAI-style special tokens (`<|startoftext|>`). Its bigger sibling's card says Gemma terms apply to its tokenizer; the 97m-r2 card doesn't.
-   - **Recommended:** go ahead with granite-97m-r2, and have P4b check the base encoder's card and ask IBM.
-   - **If anything is unclear,** fall back to granite-embedding-107m-multilingual: Apache-2.0, XLM-R tokenizer, chat R@1 0.81, 2.0 ms per query [M].
-2. **Asked of the user by the coordinator:**
-   - **The eval's pass criterion and who writes the queries** (P4b).
-     - Suggested criterion: hybrid beats text-only by at least 0.15 R@5 overall, with no language worse than text-only.
-     - Suggested author: the maintainer, about 40 queries (half Vietnamese, some typed without accents) over his own sessions, since only he can judge what a query should find.
-   - **Whether `searchIndexRange` and `searchCategories` become Ask** (call 5). Suggested: keep them Free. Raising the range costs CPU within the budget, and unchecking only removes rows.
-   - Revision 2's question 2 is settled: the static model stays in the daemon (calls 4 and 6).
-3. **Unchecking Sessions also stops agents' session search** (`notchling` clients, skills), since an unchecked category isn't indexed.
-   - **Recommended:** accept it, as decided. The reply says `disabled: ["sessions"]`, so an agent knows why it found nothing.
-   - **The alternative** keeps the session index for agents and only hides Sessions in ⌘⇧P.
+None. The user answered the last ones after review:
+
+- **Granite-r2's tokenizer license.** Go ahead, verify in P4a and P4b, with granite-107m as the fallback (answer 3).
+- **The eval's pass criterion and who writes the queries** (answer 1).
+- **Unchecking Sessions.** It stops session search for agents too (answer 5).
+- **The classes of the new keys** (answer 2).
+- **Where the static model runs:** in the daemon, only while Semantic Search is on (calls 4 and 6, answer 4).
 
 ## Sources
 
