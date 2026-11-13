@@ -119,6 +119,12 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   StreamSubscription<BridgeEvent>? _events;
 
+  /// Built once: the shell rebuilds on every keyboard frame, and a new closure each time made the hidden Sessions
+  /// tab rebuild its whole list per frame while the keyboard closed in Chat (dropped frames at 120 Hz).
+  late final Widget _sessionsTab = SessionsScreen(
+    onOpenChat: () => ref.read(activeTabProvider.notifier).show(1),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -267,10 +273,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       children: <Widget>[
                         _TabSlot(
                           active: tab == 0,
-                          child: SessionsScreen(
-                            onOpenChat: () =>
-                                ref.read(activeTabProvider.notifier).show(1),
-                          ),
+                          child: _sessionsTab,
                         ),
                         _TabSlot(
                           active: tab == 1,
