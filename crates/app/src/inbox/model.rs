@@ -9,6 +9,7 @@ pub struct Row {
     pub id: String,
     pub title: String,
     pub detail: String,
+    pub result: Option<String>,
     pub ago: String,
     pub actions: Vec<(ActionId, String, bool)>,
     pub enabled: bool,
@@ -25,14 +26,47 @@ fn item_of(value: &Value) -> Option<Item> {
     serde_json::from_value(value.clone()).ok()
 }
 
+fn decided(answer: Option<ActionId>) -> &'static str {
+    match answer {
+        Some(ActionId::Allow) => "Allowed",
+        Some(ActionId::AllowOnce) => "Allowed Once",
+        Some(ActionId::AllowAlways) => "Always Allowed",
+        Some(ActionId::Deny) => "Denied",
+        Some(ActionId::Continue) => "Continued",
+        Some(ActionId::Cancel) => "Cancelled",
+        Some(ActionId::Done) => "Done",
+        Some(ActionId::Open) => "Saved",
+        None => "Answered",
+    }
+}
+
+fn place(by: &str) -> String {
+    match by {
+        "mac" => "Mac".to_owned(),
+        "phone" => "Phone".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+fn result_of(item: &Item) -> Option<String> {
+    match item.state {
+        State::Open => None,
+        State::Expired => Some("Expired".to_owned()),
+        State::Withdrawn => Some("Withdrawn".to_owned()),
+        State::Answered => {
+            let word = decided(item.answer);
+            Some(match item.answered_by.as_deref() {
+                Some(by) if !by.is_empty() => format!("{word} · {}", place(by)),
+                _ => word.to_owned(),
+            })
+        }
+    }
+}
+
 fn row_of(item: &Item, now_ms: i64) -> Row {
-    let suffix = match item.state {
-        State::Expired => Some("Expired"),
-        State::Withdrawn => Some("Withdrawn"),
-        State::Open | State::Answered => None,
-    };
-    let detail = match suffix {
-        Some(word) if item.detail.is_empty() => word.to_owned(),
+    let result = result_of(item);
+    let detail = match &result {
+        Some(word) if item.detail.is_empty() => word.clone(),
         Some(word) => format!("{} · {word}", item.detail),
         None => item.detail.clone(),
     };
@@ -40,6 +74,7 @@ fn row_of(item: &Item, now_ms: i64) -> Row {
         id: item.id.clone(),
         title: item.title.clone(),
         detail,
+        result,
         ago: age(now_ms, item.created_ms),
         actions: item
             .actions

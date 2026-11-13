@@ -116,6 +116,7 @@ impl Book {
         id: &str,
         state: State,
         answer: Option<ActionId>,
+        by: Option<&str>,
         now_ms: i64,
     ) -> Option<Change> {
         let item = self.items.iter_mut().find(|item| item.id == id)?;
@@ -124,14 +125,22 @@ impl Book {
         }
         item.state = state;
         item.answer = answer;
+        item.answered_by = by.map(str::to_string);
         item.closed_ms = Some(now_ms);
         Some(Change::Updated(item.clone()))
     }
 
     pub fn expire(&mut self, now_ms: i64) -> Vec<Change> {
+        self.expire_except(now_ms, &|_| false)
+    }
+
+    pub fn expire_except(&mut self, now_ms: i64, held: &dyn Fn(&str) -> bool) -> Vec<Change> {
         let mut changes = Vec::new();
         for item in &mut self.items {
-            if item.state == State::Open && item.expires_ms.is_some_and(|at| at <= now_ms) {
+            if item.state == State::Open
+                && item.expires_ms.is_some_and(|at| at <= now_ms)
+                && !held(&item.id)
+            {
                 item.state = State::Expired;
                 item.closed_ms = Some(now_ms);
                 changes.push(Change::Updated(item.clone()));

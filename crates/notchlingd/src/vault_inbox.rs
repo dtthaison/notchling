@@ -5,6 +5,7 @@ use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, 
 use std::time::Instant;
 
 const COMMAND_CUT: usize = 120;
+const ANSWERED_BY_MAC: &str = "mac";
 
 struct ApprovalResponder {
     approvals: Arc<Waiters<Decision>>,
@@ -133,7 +134,8 @@ impl VaultOps {
 
     pub(super) fn close_item(&self, id: &str, state: State, answer: Option<ActionId>) {
         if let Some(inbox) = &self.inbox {
-            inbox.resolve(id, state, answer);
+            let by = (state == State::Answered).then_some(ANSWERED_BY_MAC);
+            inbox.resolve(id, state, answer, by);
         }
     }
 

@@ -171,12 +171,12 @@ impl InboxOps {
         id
     }
 
-    pub fn resolve(&self, id: &str, state: State, answer: Option<ActionId>) {
+    pub fn resolve(&self, id: &str, state: State, answer: Option<ActionId>, by: Option<&str>) {
         let now = (self.clock)();
         let mut inner = lock(&self.inner);
         let changes: Vec<Change> = inner
             .book
-            .resolve(id, state, answer, now)
+            .resolve(id, state, answer, by, now)
             .into_iter()
             .collect();
         inner.responders.remove(id);
@@ -185,7 +185,10 @@ impl InboxOps {
 
     pub fn tick(&self, now_ms: i64) {
         let mut inner = lock(&self.inner);
-        let mut changes = inner.book.expire(now_ms);
+        let Inner {
+            book, responders, ..
+        } = &mut *inner;
+        let mut changes = book.expire_except(now_ms, &|id| responders.contains_key(id));
         let before: Vec<String> = inner.book.items().into_iter().map(|i| i.id).collect();
         inner.book.prune(now_ms);
         let after: HashSet<String> = inner.book.items().into_iter().map(|i| i.id).collect();

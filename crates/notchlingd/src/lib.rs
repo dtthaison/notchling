@@ -101,6 +101,8 @@ mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
 #[cfg(test)]
+mod inbox_ops_more_tests;
+#[cfg(test)]
 mod inbox_ops_tests;
 #[cfg(test)]
 mod install_ops_tests;

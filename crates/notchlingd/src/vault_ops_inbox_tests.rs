@@ -378,3 +378,42 @@ fn the_item_exists_before_the_pending_event_is_published() {
     r.answer(&id, "deny");
     let _ = user.join().unwrap();
 }
+
+#[test]
+fn a_clock_past_expiry_never_expires_a_wait_still_open() {
+    let tmp = TempDir::new("inbox-clock");
+    let inbox_room = Arc::new(InboxRoom::default());
+    let later = Arc::new(std::sync::atomic::AtomicI64::new(0));
+    let clock = later.clone();
+    let inbox = InboxOps::with_clock(
+        tmp.path("inbox"),
+        inbox_room.clone(),
+        Arc::new(move || clock.load(Ordering::SeqCst)),
+    );
+    let r = Rig {
+        s: setup_with("inbox-clock", true, Some(inbox.clone()), None),
+        _tmp: tmp,
+        inbox,
+        inbox_room,
+    };
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    let expires = r.item(&id)["expires_ms"].as_i64().unwrap();
+    later.store(expires + 60_000, Ordering::SeqCst);
+    r.inbox.tick(expires + 60_000);
+    assert_eq!(r.item(&id)["state"], "open");
+    r.s.ops
+        .call(
+            &app(),
+            ops::VAULT_APPROVAL_ANSWER,
+            &json!({"id": event["id"], "decision": "once"}),
+        )
+        .unwrap();
+    assert!(user.join().unwrap().is_ok());
+    let item = r.item(&id);
+    assert_eq!(item["state"], "answered");
+    assert_eq!(item["answer"], "allow_once");
+    assert_eq!(item["answered_by"], "mac");
+    assert_eq!(item["closed_ms"], expires + 60_000);
+}

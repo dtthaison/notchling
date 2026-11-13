@@ -221,12 +221,14 @@ fn items_are_newest_first_with_ties_newest_inserted_first() {
 fn resolve_changes_open_items_only() {
     let mut book = Book::new();
     book.raise(item("a", Kind::Notice, 1, &[ActionId::Done]));
-    let change = book.resolve("a", State::Withdrawn, None, 77).unwrap();
+    let change = book.resolve("a", State::Withdrawn, None, None, 77).unwrap();
     assert!(
         matches!(&change, Change::Updated(item) if item.state == State::Withdrawn && item.closed_ms == Some(77))
     );
-    assert!(book.resolve("a", State::Expired, None, 78).is_none());
-    assert!(book.resolve("zzz", State::Expired, None, 78).is_none());
+    assert!(book.resolve("a", State::Expired, None, None, 78).is_none());
+    assert!(book
+        .resolve("zzz", State::Expired, None, None, 78)
+        .is_none());
 }
 
 const DAY: i64 = 86_400_000;

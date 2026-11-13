@@ -74,7 +74,51 @@ fn answered_rows_move_to_done_with_buttons_disabled() {
     assert_eq!(ids(&done), ["a"]);
     assert!(!done[0].enabled);
     assert_eq!(done[0].actions.len(), 2);
-    assert_eq!(done[0].detail, "/work/app");
+    assert_eq!(done[0].result.as_deref(), Some("Allowed Once"));
+    assert_eq!(done[0].detail, "/work/app · Allowed Once");
+}
+
+#[test]
+fn a_done_row_says_what_was_decided_and_where() {
+    let row = |state: &str, answer: Value, by: Value| {
+        let mut model = InboxModel::default();
+        let mut done = item("a", 1_000, state, true);
+        done["answer"] = answer;
+        done["answered_by"] = by;
+        done["detail"] = json!("");
+        model.apply(&changed(done));
+        model.sections().1[0].clone()
+    };
+    for (state, answer, by, said) in [
+        (
+            "answered",
+            json!("allow_once"),
+            json!("phone"),
+            "Allowed Once · Phone",
+        ),
+        (
+            "answered",
+            json!("allow_always"),
+            json!("mac"),
+            "Always Allowed · Mac",
+        ),
+        ("answered", json!("allow"), json!("mac"), "Allowed · Mac"),
+        ("answered", json!("deny"), json!("phone"), "Denied · Phone"),
+        ("answered", json!("cancel"), Value::Null, "Cancelled"),
+        ("answered", json!("done"), Value::Null, "Done"),
+        ("answered", json!("continue"), Value::Null, "Continued"),
+        ("answered", json!("open"), json!("mac"), "Saved · Mac"),
+        ("answered", Value::Null, Value::Null, "Answered"),
+        ("expired", Value::Null, Value::Null, "Expired"),
+        ("withdrawn", Value::Null, Value::Null, "Withdrawn"),
+    ] {
+        let row = row(state, answer, by);
+        assert_eq!(row.result.as_deref(), Some(said), "{state}");
+        assert_eq!(row.detail, said, "{state}");
+    }
+    let mut model = InboxModel::default();
+    model.apply(&changed(item("o", 1_000, "open", false)));
+    assert_eq!(model.sections().0[0].result, None);
 }
 
 #[test]

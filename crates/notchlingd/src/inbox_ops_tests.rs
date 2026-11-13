@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const NOW: i64 = 1_800_000_000_000;
+pub(crate) const NOW: i64 = 1_800_000_000_000;
 
 #[derive(Default)]
-struct Calls(Mutex<Vec<(String, ActionId)>>);
+pub(crate) struct Calls(pub(crate) Mutex<Vec<(String, ActionId)>>);
 
 impl Responder for Calls {
     fn answered(&self, item: &Item, action: ActionId) -> bool {
@@ -29,7 +29,7 @@ impl Responder for Refuses {
     }
 }
 
-fn caller(tier: Tier, client: ClientKind) -> Caller {
+pub(crate) fn caller(tier: Tier, client: ClientKind) -> Caller {
     Caller {
         tier,
         client,
@@ -38,7 +38,7 @@ fn caller(tier: Tier, client: ClientKind) -> Caller {
     }
 }
 
-fn app() -> Caller {
+pub(crate) fn app() -> Caller {
     caller(Tier::App, ClientKind::App)
 }
 
@@ -46,7 +46,7 @@ fn agent() -> Caller {
     caller(Tier::Agent, ClientKind::Cli)
 }
 
-fn item(id: &str) -> Item {
+pub(crate) fn item(id: &str) -> Item {
     Item {
         id: id.to_string(),
         kind: Kind::SecretApproval,
@@ -76,15 +76,15 @@ fn item(id: &str) -> Item {
     }
 }
 
-struct Rig {
-    _tmp: TempDir,
-    dir: std::path::PathBuf,
-    room: Arc<FakeRoom>,
-    clock: Arc<AtomicI64>,
-    ops: Arc<InboxOps>,
+pub(crate) struct Rig {
+    pub(crate) _tmp: TempDir,
+    pub(crate) dir: std::path::PathBuf,
+    pub(crate) room: Arc<FakeRoom>,
+    pub(crate) clock: Arc<AtomicI64>,
+    pub(crate) ops: Arc<InboxOps>,
 }
 
-fn rig() -> Rig {
+pub(crate) fn rig() -> Rig {
     let tmp = TempDir::new("inbox-ops");
     let dir = tmp.path("data");
     let room = Arc::new(FakeRoom::default());
@@ -102,7 +102,7 @@ fn rig() -> Rig {
     }
 }
 
-fn answer(ops: &InboxOps, id: &str, action: &str) -> Value {
+pub(crate) fn answer(ops: &InboxOps, id: &str, action: &str) -> Value {
     ops.call(
         &app(),
         ops::INBOX_ANSWER,
@@ -111,7 +111,7 @@ fn answer(ops: &InboxOps, id: &str, action: &str) -> Value {
     .unwrap()
 }
 
-fn changed(room: &FakeRoom) -> Vec<Value> {
+pub(crate) fn changed(room: &FakeRoom) -> Vec<Value> {
     room.named("inbox.changed")
 }
 
@@ -247,7 +247,8 @@ fn resolve_closes_without_the_responder() {
     let r = rig();
     let calls = Arc::new(Calls::default());
     r.ops.raise(item("a"), Some(calls.clone()));
-    r.ops.resolve("a", State::Answered, Some(ActionId::Allow));
+    r.ops
+        .resolve("a", State::Answered, Some(ActionId::Allow), None);
     r.ops.flush();
     let events = changed(&r.room);
     assert_eq!(events.last().unwrap()["item"]["state"], "answered");
@@ -260,10 +261,9 @@ fn resolve_closes_without_the_responder() {
 #[test]
 fn tick_expires_and_publishes() {
     let r = rig();
-    let calls = Arc::new(Calls::default());
     let mut i = item("a");
     i.expires_ms = Some(NOW + 1_000);
-    r.ops.raise(i, Some(calls.clone()));
+    r.ops.raise(i, None);
     r.ops.tick(NOW + 999);
     r.ops.flush();
     assert_eq!(changed(&r.room).len(), 1);
@@ -275,14 +275,14 @@ fn tick_expires_and_publishes() {
     let late = answer(&r.ops, "a", "allow");
     assert_eq!(late["answered"], false);
     assert_eq!(late["state"], "expired");
-    assert!(calls.0.lock().unwrap().is_empty());
 }
 
 #[test]
 fn tick_prunes_old_closed_items_and_publishes_removed() {
     let r = rig();
     r.ops.raise(item("a"), None);
-    r.ops.resolve("a", State::Answered, Some(ActionId::Allow));
+    r.ops
+        .resolve("a", State::Answered, Some(ActionId::Allow), None);
     r.ops.tick(NOW + inbox::DONE_KEEP_MS);
     r.ops.flush();
     assert!(r.room.named("inbox.removed").is_empty());
@@ -517,7 +517,8 @@ fn a_refusing_responder_leaves_the_item_open() {
     let list = r.ops.call(&app(), ops::INBOX_LIST, &json!({})).unwrap();
     assert_eq!(list["items"][0]["state"], "open");
     assert_eq!(list["items"][0]["answer"], Value::Null);
-    r.ops.resolve("a", State::Answered, Some(ActionId::Deny));
+    r.ops
+        .resolve("a", State::Answered, Some(ActionId::Deny), None);
     let out = answer(&r.ops, "a", "allow");
     assert_eq!(out["answered"], false);
     assert_eq!(out["state"], "answered");
