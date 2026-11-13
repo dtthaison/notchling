@@ -289,6 +289,7 @@ fn parse_source(
                         st.waiting.remove(0);
                     }
                 }
+                Some("popAll") => st.take_waiting(&content),
                 Some("remove") if !content.is_empty() && !content.starts_with('<') => {
                     st.take_waiting(&content);
                     if !st.was_taken(&content, timestamp) {
@@ -459,6 +460,7 @@ fn parse_source(
 
         if role == "user" {
             if let Some(command) = tagged(&text, "bash-input") {
+                st.take_waiting(&command);
                 st.flush_tools();
                 let mut d = Draft::new(
                     ChatRole::User,
