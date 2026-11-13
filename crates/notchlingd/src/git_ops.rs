@@ -73,6 +73,10 @@ fn failed(failure: Failure) -> ApiError {
     match failure {
         Failure::Refused(why) => ApiError::new(ErrorCode::Forbidden, why),
         Failure::NotRepo => ApiError::new(ErrorCode::Failed, "not a git repository"),
+        Failure::Unsupported => ApiError::new(
+            ErrorCode::Unimplemented,
+            "reading a repository is not supported on this system",
+        ),
         Failure::Failed(why) => ApiError::new(ErrorCode::Failed, why),
     }
 }

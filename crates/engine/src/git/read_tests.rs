@@ -320,7 +320,7 @@ fn the_cap_cuts_on_lines_bytes_and_characters() {
 #[cfg(unix)]
 mod real {
     use super::*;
-    use crate::control::RealLauncher;
+    use crate::control::{Launcher, RealLauncher};
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -337,8 +337,14 @@ mod real {
             .unwrap_or(false)
     }
 
-    fn launcher() -> RealLauncher {
-        RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"))
+    fn launcher() -> Box<dyn Launcher> {
+        let real = RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"));
+        #[cfg(target_os = "macos")]
+        return Box::new(crate::git::SandboxedLauncher::new(std::sync::Arc::new(
+            real,
+        )));
+        #[cfg(not(target_os = "macos"))]
+        Box::new(real)
     }
 
     fn repo(tag: &str) -> TempDir {
@@ -363,7 +369,7 @@ mod real {
         std::fs::remove_file(t.path("gone.txt")).unwrap();
         assert!(git(t.root(), &["add", "c.txt"]));
         let cwd = t.root().to_string_lossy().into_owned();
-        let status = read_status(&cwd, &launcher()).unwrap();
+        let status = read_status(&cwd, &*launcher()).unwrap();
         assert_eq!(status.branch.as_deref(), Some("main"));
         assert_eq!(status.upstream, None);
         let rows: Vec<(&str, &str)> = status
@@ -384,25 +390,25 @@ mod real {
         assert_eq!((a.added, a.removed), (Some(2), Some(1)));
         assert_eq!(status.changes[1].added, Some(1));
 
-        let diff = read_diff(&cwd, "a.txt", &launcher()).unwrap();
+        let diff = read_diff(&cwd, "a.txt", &*launcher()).unwrap();
         assert!(
             diff.text.contains("-two") && diff.text.contains("+three"),
             "{}",
             diff.text
         );
         assert!(!diff.untracked);
-        let fresh = read_diff(&cwd, "b.txt", &launcher()).unwrap();
+        let fresh = read_diff(&cwd, "b.txt", &*launcher()).unwrap();
         assert!(
             fresh.untracked && fresh.text.contains("+hello"),
             "{}",
             fresh.text
         );
-        let removed = read_diff(&cwd, "gone.txt", &launcher()).unwrap();
+        let removed = read_diff(&cwd, "gone.txt", &*launcher()).unwrap();
         assert!(removed.text.contains("-bye"));
 
         t.write("sub/deep.txt", "x\n");
         let below = t.path("sub").to_string_lossy().into_owned();
-        let diff = read_diff(&below, "sub/deep.txt", &launcher()).unwrap();
+        let diff = read_diff(&below, "sub/deep.txt", &*launcher()).unwrap();
         assert!(diff.untracked && diff.text.contains("+x"));
     }
 
@@ -412,10 +418,10 @@ mod real {
         t.write("a.txt", "one\n");
         assert!(git(t.root(), &["add", "a.txt"]));
         let cwd = t.root().to_string_lossy().into_owned();
-        let status = read_status(&cwd, &launcher()).unwrap();
+        let status = read_status(&cwd, &*launcher()).unwrap();
         assert!(status.initial);
         assert_eq!(status.changes[0].added, Some(1));
-        let diff = read_diff(&cwd, "a.txt", &launcher()).unwrap();
+        let diff = read_diff(&cwd, "a.txt", &*launcher()).unwrap();
         assert!(diff.text.contains("+one"));
     }
 
@@ -423,7 +429,7 @@ mod real {
     fn a_folder_outside_any_repository_is_not_one() {
         let t = TempDir::new("git-real-none");
         let cwd = t.root().to_string_lossy().into_owned();
-        assert_eq!(read_status(&cwd, &launcher()), Err(Failure::NotRepo));
+        assert_eq!(read_status(&cwd, &*launcher()), Err(Failure::NotRepo));
     }
 
     #[test]
@@ -435,7 +441,7 @@ mod real {
         assert!(git(&repo_dir, &["init", "-q", "-b", "main"]));
         std::os::unix::fs::symlink(t.path("outside"), repo_dir.join("dir")).unwrap();
         let cwd = repo_dir.to_string_lossy().into_owned();
-        let got = read_diff(&cwd, "dir/secret.txt", &launcher());
+        let got = read_diff(&cwd, "dir/secret.txt", &*launcher());
         assert!(matches!(got, Err(Failure::Refused(_))), "{got:?}");
     }
 }

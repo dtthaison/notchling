@@ -2,7 +2,11 @@ use crate::git_ops::{live_folders, Folders, GitOps};
 use crate::inbox_ops_tests::app;
 use crate::limits_ops_tests::TempDir;
 use crate::op_group::OpGroup;
-use notchling_engine::control::launcher::{FakeLauncher, LaunchOutput};
+#[cfg(unix)]
+use notchling_engine::control::launcher::Launcher;
+use notchling_engine::control::launcher::{FakeLauncher, LaunchError, LaunchOutput};
+#[cfg(target_os = "macos")]
+use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::search::index::TitledSession;
 use notchling_local_api::{ops, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -114,6 +118,27 @@ fn a_folder_below_a_session_folder_is_served_and_others_are_forbidden_without_ru
         }
     }
     assert_eq!(fake.commands().len(), before);
+}
+
+#[test]
+fn a_system_that_cannot_sandbox_git_answers_unimplemented_and_a_refused_sandbox_fails() {
+    let t = TempDir::new("gitops-unsupported");
+    t.write("proj/a.rs", "x");
+    let cwd = t.path("proj").to_string_lossy().into_owned();
+    let fake = Arc::new(FakeLauncher::new());
+    fake.push_output(Err(LaunchError::Unsupported));
+    let git = GitOps::new(fake, folders_of(vec![t.path("proj")]));
+    let err = call(&git, ops::GIT_STATUS, json!({"cwd": cwd})).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unimplemented);
+
+    let fake = Arc::new(FakeLauncher::new());
+    fake.push_output(Err(LaunchError::Spawn(
+        "can't read this repo safely: sandbox-exec is missing".into(),
+    )));
+    let git = GitOps::new(fake, folders_of(vec![t.path("proj")]));
+    let err = call(&git, ops::GIT_STATUS, json!({"cwd": cwd})).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Failed);
+    assert!(err.message.starts_with("can't read this repo safely"));
 }
 
 #[test]
@@ -276,10 +301,12 @@ fn a_real_repository_in_a_session_folder_reads_through_the_ops() {
     assert!(git_in(&["commit", "-q", "-m", "first"]));
     t.write("proj/a.txt", "one\ntwo\n");
     t.write("proj/new.txt", "fresh\n");
-    let ops_ = GitOps::new(
-        Arc::new(RealLauncher::with_claude(PathBuf::from("/nonexistent"))),
-        folders_of(vec![proj.clone()]),
-    );
+    let real = RealLauncher::with_claude(PathBuf::from("/nonexistent"));
+    #[cfg(target_os = "macos")]
+    let launcher: Arc<dyn Launcher> = Arc::new(SandboxedLauncher::new(Arc::new(real)));
+    #[cfg(not(target_os = "macos"))]
+    let launcher: Arc<dyn Launcher> = Arc::new(real);
+    let ops_ = GitOps::new(launcher, folders_of(vec![proj.clone()]));
     let cwd = proj.to_string_lossy().into_owned();
     let status = call(&ops_, ops::GIT_STATUS, json!({"cwd": cwd})).unwrap();
     assert_eq!(status["branch"], "main");

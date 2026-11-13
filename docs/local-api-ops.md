@@ -308,6 +308,13 @@ failure still is.
   128 KB (a single line is cut on a character boundary), and an untracked file over 2 MB gives
   an empty `text` with `truncated: true`. An untracked file's diff is the whole file as added
   lines (`git diff --no-index /dev/null <path>`).
+- Every read runs under `/usr/bin/sandbox-exec` with a profile that allows all but `process-exec*`
+  and then allows exec of git's own binaries (`/usr/bin/git`, `xcrun --find git`, the Command Line
+  Tools' git, their `libexec/git-core`, a Homebrew git on `PATH`). A filter, hook, fsmonitor or
+  textconv program therefore cannot start whatever the repository's config says. Without
+  `sandbox-exec` (or if it refuses the profile) a call fails with `can't read this repo safely`
+  and never runs unsandboxed; off macOS both ops answer `unimplemented`. An LFS file whose
+  filter can't start may show as modified with a binary diff.
 - Reads run no program of the repository: every command is `git --no-optional-locks -c
   core.fsmonitor=false -c core.hooksPath=/dev/null -c diff.external=` plus, for each filter
   driver `git config -z --get-regexp '^filter\.'` names (a read that runs nothing), `-c

@@ -1,6 +1,7 @@
 use super::guard::{clean_path, stays_inside};
 use super::porcelain::{parse_status, Status};
-use crate::control::{Command, LaunchOutput, Launcher};
+use super::sandbox::SAFE_ERROR;
+use crate::control::{Command, LaunchError, LaunchOutput, Launcher};
 use serde::Serialize;
 use std::path::Path;
 use std::time::Duration;
@@ -29,6 +30,7 @@ const ALWAYS_CLEARED: [&str; 12] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
     NotRepo,
+    Unsupported,
     Refused(String),
     Failed(String),
 }
@@ -80,10 +82,16 @@ fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
         .with_env("LC_ALL", Some("C"))
 }
 
+fn launch_failure(error: LaunchError) -> Failure {
+    match error {
+        LaunchError::Unsupported => Failure::Unsupported,
+        LaunchError::Spawn(why) if why.starts_with(SAFE_ERROR) => Failure::Failed(why),
+        other => Failure::Failed(other.to_string()),
+    }
+}
+
 fn run(launcher: &dyn Launcher, command: &Command) -> Result<LaunchOutput, Failure> {
-    launcher
-        .run(command, TIMEOUT)
-        .map_err(|e| Failure::Failed(e.to_string()))
+    launcher.run(command, TIMEOUT).map_err(launch_failure)
 }
 
 fn run_capped(
@@ -93,7 +101,7 @@ fn run_capped(
 ) -> Result<(LaunchOutput, bool), Failure> {
     launcher
         .run_capped(command, TIMEOUT, max_bytes)
-        .map_err(|e| Failure::Failed(e.to_string()))
+        .map_err(launch_failure)
 }
 
 fn driver_names(config: &str) -> Vec<String> {

@@ -1,6 +1,6 @@
 use super::read::{read_diff, read_status, Diff};
 use super::Status;
-use crate::control::RealLauncher;
+use crate::control::{Launcher, RealLauncher};
 use crate::sessions::testutil::TempDir;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -71,15 +71,21 @@ fn bump_mtime(path: &Path) {
         .unwrap();
 }
 
-fn launcher() -> RealLauncher {
-    RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"))
+fn launcher() -> Box<dyn Launcher> {
+    let real = RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"));
+    #[cfg(target_os = "macos")]
+    return Box::new(crate::git::SandboxedLauncher::new(std::sync::Arc::new(
+        real,
+    )));
+    #[cfg(not(target_os = "macos"))]
+    Box::new(real)
 }
 
 fn reads(rig: &Rig) -> (Status, Diff, Diff) {
     let cwd = rig.repo.to_string_lossy().into_owned();
-    let status = read_status(&cwd, &launcher()).unwrap();
-    let tracked = read_diff(&cwd, "c.txt", &launcher()).unwrap();
-    let fresh = read_diff(&cwd, "b.txt", &launcher()).unwrap();
+    let status = read_status(&cwd, &*launcher()).unwrap();
+    let tracked = read_diff(&cwd, "c.txt", &*launcher()).unwrap();
+    let fresh = read_diff(&cwd, "b.txt", &*launcher()).unwrap();
     (status, tracked, fresh)
 }
 

@@ -26,6 +26,7 @@ use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
 use notchling_engine::delegate::skill::SkillTool;
+use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::vault::skill as vault_skill;
 use notchling_local_api::{ops, topics, ApiError, AuditLog, Caller, Handler, OpSpec, Tier};
@@ -402,7 +403,12 @@ impl Wired {
             layout.fixture,
         );
         let claude = claude_path(Path::new(&home_of(&layout.roots())));
-        let git = GitOps::new(Arc::new(RealLauncher::with_claude(claude)), folders);
+        let git = GitOps::new(
+            Arc::new(SandboxedLauncher::new(Arc::new(RealLauncher::with_claude(
+                claude,
+            )))),
+            folders,
+        );
         Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
