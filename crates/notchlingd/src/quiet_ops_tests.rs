@@ -32,9 +32,16 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 3] = [ops::GIT_STATUS, ops::GIT_DIFF, ops::ACTIVITY_LIST];
+const OWN_QUIET: [&str; 6] = [
+    ops::GIT_STATUS,
+    ops::GIT_DIFF,
+    ops::GIT_BRANCH_DIFF_STAT,
+    ops::GIT_BRANCH_DIFF_FILE,
+    ops::GIT_BRANCHES,
+    ops::ACTIVITY_LIST,
+];
 
-const NEVER_QUIET: [&str; 69] = [
+const NEVER_QUIET: [&str; 73] = [
     ops::HELLO,
     ops::DAEMON_STATUS,
     ops::SESSIONS_LIST,
@@ -104,6 +111,10 @@ const NEVER_QUIET: [&str; 69] = [
     ops::INBOX_LIST,
     ops::INBOX_ANSWER,
     ops::INBOX_SEEN,
+    ops::SETTINGS_LIST,
+    ops::SETTINGS_GET,
+    ops::SETTINGS_SET,
+    ops::SETTINGS_ASKED,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];
