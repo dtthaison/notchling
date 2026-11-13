@@ -38,16 +38,28 @@ impl Queue {
         let Some((at, guessed)) = self.dequeued.take() else {
             return;
         };
-        if guessed == text {
+        if names(&guessed, &text) {
             return;
         }
-        let Some(taken) = self.items.iter().position(|q| *q == text) else {
+        let Some(taken) = self.items.iter().position(|q| names(q, &text)) else {
             self.dequeued = Some((at, guessed));
             return;
         };
         self.items.remove(taken);
         self.items.insert(at.min(self.items.len()), guessed);
     }
+}
+
+fn names(entry: &str, line: &str) -> bool {
+    entry == line || bash_command(line).is_some_and(|command| entry.trim() == command)
+}
+
+fn bash_command(line: &str) -> Option<&str> {
+    let inner = line
+        .trim()
+        .strip_prefix("<bash-input>")?
+        .strip_suffix("</bash-input>")?;
+    Some(inner.trim())
 }
 
 fn prompt_text(message: &Value) -> Option<String> {
