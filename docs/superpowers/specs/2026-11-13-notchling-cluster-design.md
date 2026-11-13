@@ -168,3 +168,13 @@ Write a new record superseding 0012's "Nothing is replicated" paragraph and ARCH
 ## Left to the builder
 
 Lease and timing values, the election algorithm's details (Raft or a simpler lease protocol, as long as the majority and freshest rules hold), the wire format between nodes, the replication engine (own or Mutagen), the path rule for transcripts, how outward steps are recognised, UI layout of the cluster view and Run on column, and the order of work inside each step.
+
+## Calls made by the design author (after the builder check)
+
+These were open after an independent read; each is the author's call, for the maintainer to check.
+
+- **Main session** means a session the maintainer marks as main (default: none; a session started from the phone on the leader is marked main). Only main sessions are replicated and resumed on failover. Other sessions on the leader behave like sessions on a Worker: when the leader dies they are reported interrupted. A main session's replicated folder is the git repository of its working folder; other repos it touches are not replicated.
+- **Identity across failover:** main sessions get a cluster-level host id (from a cluster key made when the cluster is created), not the node certificate's, so their `<host>/<id>` stays the same on any leader. Sessions on a node keep that node's host id. The phone learns which node leads through one additive `agentconsole.v1` field; older phones keep working against whichever node they paired with. Paired-device tokens replicate to Standbys so a phone paired once is accepted by every leader.
+- **Replicas are encrypted at rest** on Standbys: transcripts, worktrees, `notchling.db` and the login store are under the vault key, like the vault. Consequence: a Standby that rebooted cannot lead until someone unlocks it (Face ID or Touch ID). The cluster view warns when no unlocked Standby is reachable.
+- **OS user on a node:** cluster work runs as a dedicated, non-admin account (`notchling`), beside the sd worker's account, never root and never the maintainer's own login on a shared machine. On the maintainer's own Macs it is the maintainer's user. Its tools' configs and logins live in that account.
+- **Moving a live session:** a session can be moved from the leader to a Worker and back with the journalled move (copy, quiet point, stop, final sync, resume on the target), using the same transcript path rule as failover. In step 1 a session is only started on a node; moving is step 3, with Standby replication.
