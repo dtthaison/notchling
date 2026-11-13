@@ -14,11 +14,10 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, icon_button, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 
-use super::diff_panel::{self, DiffBody, DiffState};
+use super::diff_panel::{self, DiffState};
 use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::file_panel::{self, Body, Loaded, Pic};
-use crate::chat::git::DiffText;
 use crate::chat::markdown_cache::Cache as MarkdownCache;
 use crate::chat::page_panel::{
     artifact_link, decide, dragged_width, panel_width, subtitle, ArtifactLink, Frame, Opens,
@@ -83,9 +82,9 @@ impl FileState {
 pub struct State {
     pub shown: Option<Shown>,
     pub width: f32,
-    web: Rc<RefCell<Option<PanelWeb>>>,
+    pub(super) web: Rc<RefCell<Option<PanelWeb>>>,
     pub render_only: bool,
-    asked: u64,
+    pub(super) asked: u64,
     drawn_width: Cell<f32>,
 }
 
@@ -127,44 +126,6 @@ impl State {
 
     pub fn asked(&self) -> u64 {
         self.asked
-    }
-
-    pub fn show_diff(&mut self, path: &str) -> u64 {
-        self.web.borrow_mut().take();
-        self.asked += 1;
-        self.shown = Some(diff_panel::shown(path));
-        self.asked
-    }
-
-    pub fn diff_path(&self) -> Option<String> {
-        self.shown
-            .as_ref()?
-            .diff
-            .as_ref()
-            .map(|diff| diff.path.clone())
-    }
-
-    pub fn set_diff(&mut self, asked: u64, path: &str, result: Result<DiffText, String>) -> bool {
-        if self.asked != asked {
-            return false;
-        }
-        let Some(Shown {
-            diff: Some(diff),
-            subtitle,
-            ..
-        }) = self.shown.as_mut()
-        else {
-            return false;
-        };
-        if diff.path != path {
-            return false;
-        }
-        *subtitle = diff_panel::subtitle(path, result.as_ref().ok());
-        diff.body = match result {
-            Ok(text) => DiffBody::Ready(text),
-            Err(why) => DiffBody::Failed(why),
-        };
-        true
     }
 
     pub fn take_keys_back(&self) {

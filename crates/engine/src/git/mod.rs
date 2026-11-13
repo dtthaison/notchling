@@ -9,5 +9,7 @@ pub use read::{read_diff, read_status, Diff, Failure, MAX_DIFF_BYTES, MAX_DIFF_L
 mod guard_tests;
 #[cfg(test)]
 mod porcelain_tests;
+#[cfg(all(test, unix))]
+mod read_hardening_tests;
 #[cfg(test)]
 mod read_tests;

@@ -8,7 +8,23 @@ use std::time::Duration;
 pub const MAX_DIFF_LINES: usize = 400;
 pub const MAX_DIFF_BYTES: usize = 128 * 1024;
 const MAX_UNTRACKED_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_LIST_BYTES: usize = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(3);
+
+const ALWAYS_CLEARED: [&str; 12] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_CONFIG",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_EXTERNAL_DIFF",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -25,19 +41,43 @@ pub struct Diff {
     pub untracked: bool,
 }
 
-fn command(cwd: &str, args: &[&str]) -> Command {
-    let mut argv = vec![
-        "git",
+fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
+    let mut argv: Vec<String> = [
         "--no-optional-locks",
         "-c",
         "core.fsmonitor=false",
-        "-C",
-        cwd,
-    ];
-    argv.extend(args);
-    Command::new(&argv)
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "diff.external=",
+    ]
+    .iter()
+    .map(|a| (*a).to_owned())
+    .collect();
+    for name in drivers {
+        for key in ["clean", "smudge", "process"] {
+            argv.push("-c".to_owned());
+            argv.push(format!("filter.{name}.{key}="));
+        }
+        argv.push("-c".to_owned());
+        argv.push(format!("filter.{name}.required=false"));
+    }
+    argv.push("-C".to_owned());
+    argv.push(cwd.to_owned());
+    argv.extend(args.iter().map(|a| (*a).to_owned()));
+    let mut command = Command::from_args("git", &argv);
+    for (key, _) in std::env::vars_os() {
+        if let Some(key) = key.to_str().filter(|k| k.starts_with("GIT_")) {
+            command = command.with_env(key, None);
+        }
+    }
+    for key in ALWAYS_CLEARED {
+        command = command.with_env(key, None);
+    }
+    command
         .with_env("GIT_TERMINAL_PROMPT", Some("0"))
         .with_env("GIT_PAGER", Some("cat"))
+        .with_env("LC_ALL", Some("C"))
 }
 
 fn run(launcher: &dyn Launcher, command: &Command) -> Result<LaunchOutput, Failure> {
@@ -46,10 +86,56 @@ fn run(launcher: &dyn Launcher, command: &Command) -> Result<LaunchOutput, Failu
         .map_err(|e| Failure::Failed(e.to_string()))
 }
 
-fn refusal(out: &LaunchOutput) -> Failure {
-    let text = out.combined();
-    if out.code == 128 && text.contains("not a git repository") {
-        return Failure::NotRepo;
+fn run_capped(
+    launcher: &dyn Launcher,
+    command: &Command,
+    max_bytes: usize,
+) -> Result<(LaunchOutput, bool), Failure> {
+    launcher
+        .run_capped(command, TIMEOUT, max_bytes)
+        .map_err(|e| Failure::Failed(e.to_string()))
+}
+
+fn driver_names(config: &str) -> Vec<String> {
+    let mut names: Vec<String> = config
+        .split('\0')
+        .filter_map(|entry| {
+            let key = entry.split('\n').next().unwrap_or("");
+            let rest = key.strip_prefix("filter.")?;
+            let (name, _) = rest.rsplit_once('.')?;
+            Some(name.to_owned())
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn drivers(cwd: &str, launcher: &dyn Launcher) -> Result<Vec<String>, Failure> {
+    let out = run(
+        launcher,
+        &command(cwd, &[], &["config", "-z", "--get-regexp", "^filter\\."]),
+    )?;
+    if out.code != 0 && out.code != 1 {
+        return Err(Failure::Failed(format!("git config exited {}", out.code)));
+    }
+    let names = driver_names(&out.output);
+    if names.iter().any(|n| n.contains('=') || n.contains('\n')) {
+        return Err(Failure::Refused(
+            "a filter name git can't be told to skip".to_owned(),
+        ));
+    }
+    Ok(names)
+}
+
+fn refusal(launcher: &dyn Launcher, cwd: &str, out: &LaunchOutput) -> Failure {
+    if out.code == 128 {
+        let probe = command(cwd, &[], &["rev-parse", "--is-inside-work-tree"]);
+        if let Ok(inside) = run(launcher, &probe) {
+            if inside.code == 128 || inside.output.trim() == "false" {
+                return Failure::NotRepo;
+            }
+        }
     }
     let line = out.stderr.lines().next().unwrap_or("").trim();
     Failure::Failed(format!("git exited {}: {line}", out.code))
@@ -73,28 +159,42 @@ pub fn cap(text: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
     (text.to_owned(), false)
 }
 
+fn whole_records(text: &str, cut: bool) -> &str {
+    if !cut {
+        return text;
+    }
+    match text.rfind('\0') {
+        Some(at) => &text[..=at],
+        None => "",
+    }
+}
+
+const STATUS_ARGS: [&str; 6] = [
+    "status",
+    "--porcelain=v2",
+    "--branch",
+    "-z",
+    "--untracked-files=all",
+    "--ignore-submodules=all",
+];
+
 pub fn read_status(cwd: &str, launcher: &dyn Launcher) -> Result<Status, Failure> {
-    let out = run(
+    let drivers = drivers(cwd, launcher)?;
+    let (out, cut) = run_capped(
         launcher,
-        &command(
-            cwd,
-            &[
-                "status",
-                "--porcelain=v2",
-                "--branch",
-                "-z",
-                "--untracked-files=all",
-            ],
-        ),
+        &command(cwd, &drivers, &STATUS_ARGS),
+        MAX_LIST_BYTES,
     )?;
     if out.code != 0 {
-        return Err(refusal(&out));
+        return Err(refusal(launcher, cwd, &out));
     }
-    let mut status = parse_status(&out.output);
+    let mut status = parse_status(whole_records(&out.output, cut));
+    status.truncated |= cut;
     if !status.changes.is_empty() {
         let base = if status.initial { "--cached" } else { "HEAD" };
         let numstat = command(
             cwd,
+            &drivers,
             &[
                 "diff",
                 "--numstat",
@@ -102,13 +202,14 @@ pub fn read_status(cwd: &str, launcher: &dyn Launcher) -> Result<Status, Failure
                 "--no-color",
                 "--no-ext-diff",
                 "--no-textconv",
+                "--ignore-submodules=all",
                 base,
                 "--",
             ],
         );
-        if let Ok(counts) = run(launcher, &numstat) {
+        if let Ok((counts, cut)) = run_capped(launcher, &numstat, MAX_LIST_BYTES) {
             if counts.code == 0 {
-                status.apply_numstat(&counts.output);
+                status.apply_numstat(whole_records(&counts.output, cut));
             }
         }
     }
@@ -117,9 +218,13 @@ pub fn read_status(cwd: &str, launcher: &dyn Launcher) -> Result<Status, Failure
 
 pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff, Failure> {
     let path = clean_path(path).map_err(|why| Failure::Refused(why.to_owned()))?;
-    let top = run(launcher, &command(cwd, &["rev-parse", "--show-toplevel"]))?;
+    let drivers = drivers(cwd, launcher)?;
+    let top = run(
+        launcher,
+        &command(cwd, &drivers, &["rev-parse", "--show-toplevel"]),
+    )?;
     if top.code != 0 {
-        return Err(refusal(&top));
+        return Err(refusal(launcher, cwd, &top));
     }
     let root = top.output.trim_end_matches(['\n', '\r']).to_owned();
     if root.is_empty() {
@@ -129,32 +234,24 @@ pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff,
         return Err(Failure::Refused("path leaves the repository".to_owned()));
     }
     let spec = format!(":(literal){path}");
-    let one = run(
-        launcher,
-        &command(
-            &root,
-            &[
-                "status",
-                "--porcelain=v2",
-                "--branch",
-                "-z",
-                "--untracked-files=all",
-                "--",
-                &spec,
-            ],
-        ),
-    )?;
+    let mut one_args = STATUS_ARGS.to_vec();
+    one_args.push("--");
+    one_args.push(&spec);
+    let one = run(launcher, &command(&root, &drivers, &one_args))?;
     if one.code != 0 {
-        return Err(refusal(&one));
+        return Err(refusal(launcher, &root, &one));
     }
     let status = parse_status(&one.output);
-    let untracked = status.changes.first().is_some_and(|c| c.status == "?");
+    let Some(entry) = status.changes.iter().find(|c| c.path == path) else {
+        return Err(Failure::Refused("not a changed file".to_owned()));
+    };
+    let untracked = entry.status == "?";
     let mut diff = Diff {
         path: path.clone(),
         untracked,
         ..Diff::default()
     };
-    let out = if untracked {
+    let (out, cut) = if untracked {
         let too_big = std::fs::symlink_metadata(Path::new(&root).join(&path))
             .map(|m| m.len() > MAX_UNTRACKED_BYTES)
             .unwrap_or(false);
@@ -162,10 +259,11 @@ pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff,
             diff.truncated = true;
             return Ok(diff);
         }
-        run(
+        run_capped(
             launcher,
             &command(
                 &root,
+                &drivers,
                 &[
                     "diff",
                     "--no-index",
@@ -177,31 +275,35 @@ pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff,
                     &path,
                 ],
             ),
+            MAX_DIFF_BYTES + 1,
         )?
     } else {
         let base = if status.initial { "--cached" } else { "HEAD" };
-        run(
+        run_capped(
             launcher,
             &command(
                 &root,
+                &drivers,
                 &[
                     "diff",
                     "--no-color",
                     "--no-ext-diff",
                     "--no-textconv",
+                    "--ignore-submodules=all",
                     base,
                     "--",
                     &spec,
                 ],
             ),
+            MAX_DIFF_BYTES + 1,
         )?
     };
     let ok = out.code == 0 || (untracked && out.code == 1);
     if !ok {
-        return Err(refusal(&out));
+        return Err(refusal(launcher, &root, &out));
     }
     let (text, truncated) = cap(&out.output, MAX_DIFF_LINES, MAX_DIFF_BYTES);
     diff.text = text;
-    diff.truncated = truncated;
+    diff.truncated = truncated || cut;
     Ok(diff)
 }

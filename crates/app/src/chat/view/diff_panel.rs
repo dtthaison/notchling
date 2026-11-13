@@ -2,7 +2,7 @@ use gpui::{div, prelude::*, px, AnyElement, SharedString, WeakEntity};
 use notchling_kit::ui::{label, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
-use super::page_panel::Shown;
+use super::page_panel::{self, Shown};
 use super::ChatView;
 use crate::chat::git::DiffText;
 use crate::chat::page_panel::Opens;
@@ -10,10 +10,79 @@ use crate::chat::page_panel::Opens;
 const PAD: f32 = 16.0;
 const CHUNK_LINES: usize = 80;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ready {
+    pub chunks: Vec<(Ink, String)>,
+    pub truncated: bool,
+}
+
 pub enum DiffBody {
     Loading,
-    Ready(DiffText),
+    Ready(Ready),
     Failed(String),
+}
+
+pub fn ready(diff: &DiffText) -> Ready {
+    let mut chunks: Vec<(Ink, String)> = Vec::new();
+    for (kind, text) in &diff.runs {
+        let lines: Vec<&str> = text.split('\n').collect();
+        for chunk in lines.chunks(CHUNK_LINES) {
+            chunks.push((kind.ink(), chunk.join("\n")));
+        }
+    }
+    Ready {
+        chunks,
+        truncated: diff.truncated,
+    }
+}
+
+impl page_panel::State {
+    pub fn show_diff(&mut self, path: &str) -> u64 {
+        self.web.borrow_mut().take();
+        self.asked += 1;
+        self.shown = Some(shown(path));
+        self.asked
+    }
+
+    pub fn diff_path(&self) -> Option<String> {
+        self.shown
+            .as_ref()?
+            .diff
+            .as_ref()
+            .map(|diff| diff.path.clone())
+    }
+
+    pub fn set_diff(&mut self, asked: u64, path: &str, result: Result<DiffText, String>) -> bool {
+        if self.asked != asked {
+            return false;
+        }
+        let Some(Shown {
+            diff: Some(diff),
+            subtitle,
+            ..
+        }) = self.shown.as_mut()
+        else {
+            return false;
+        };
+        if diff.path != path {
+            return false;
+        }
+        let body = match &result {
+            Ok(text) => DiffBody::Ready(ready(text)),
+            Err(why) => DiffBody::Failed(why.clone()),
+        };
+        let same = match (&diff.body, &body) {
+            (DiffBody::Ready(old), DiffBody::Ready(new)) => old == new,
+            (DiffBody::Failed(old), DiffBody::Failed(new)) => old == new,
+            _ => false,
+        };
+        if same {
+            return false;
+        }
+        *subtitle = subtitle_of(path, result.as_ref().ok());
+        diff.body = body;
+        true
+    }
 }
 
 pub struct DiffState {
@@ -25,7 +94,7 @@ pub fn name_of(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-pub fn subtitle(path: &str, diff: Option<&DiffText>) -> String {
+pub fn subtitle_of(path: &str, diff: Option<&DiffText>) -> String {
     let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
     let what = match diff {
         Some(d) if d.untracked => "Untracked",
@@ -42,7 +111,7 @@ pub fn shown(path: &str) -> Shown {
     Shown {
         opens: Opens::Diff(path.to_owned()),
         title: name_of(path).to_owned(),
-        subtitle: subtitle(path, None),
+        subtitle: subtitle_of(path, None),
         link: String::new(),
         error: None,
         file: None,
@@ -60,28 +129,21 @@ pub fn body(state: &DiffState, chat: WeakEntity<ChatView>, a: Appearance) -> Any
     let content: AnyElement = match &state.body {
         DiffBody::Loading => note("Reading the changes\u{2026}", Ink::TextMuted),
         DiffBody::Failed(why) => note(why, Ink::Expired),
-        DiffBody::Ready(diff) if diff.runs.is_empty() => {
+        DiffBody::Ready(diff) if diff.chunks.is_empty() => {
             note("There are no changes to show.", Ink::TextMuted)
         }
         DiffBody::Ready(diff) => {
             cut = diff.truncated;
-            let mut chunks: Vec<(Ink, String)> = Vec::new();
-            for (kind, text) in &diff.runs {
-                let lines: Vec<&str> = text.split('\n').collect();
-                for chunk in lines.chunks(CHUNK_LINES) {
-                    chunks.push((kind.ink(), chunk.join("\n")));
-                }
-            }
             div()
                 .w_full()
                 .kit_type(TypeRole::Mono)
                 .flex()
                 .flex_col()
-                .children(chunks.into_iter().enumerate().map(|(i, (ink, text))| {
-                    div().ink(ink, a).child(super::markdown::plain(
+                .children(diff.chunks.iter().enumerate().map(|(i, (ink, text))| {
+                    div().ink(*ink, a).child(super::markdown::plain(
                         &format!("{key}-r{i}"),
                         &super::markdown::Sel::File,
-                        &text,
+                        text,
                         a,
                     ))
                 }))

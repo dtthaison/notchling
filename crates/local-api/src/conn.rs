@@ -344,7 +344,7 @@ impl Session {
         };
         let (result, more) = handler.call_with_extras(&caller, op, args);
         *extras = more;
-        if spec.tier == Tier::App {
+        if spec.tier == Tier::App && !(spec.quiet_ok && result.is_ok()) {
             let (outcome, reason) = match &result {
                 Ok(_) => ("ok", None),
                 Err(e) => (e.code.as_str(), audit_reason(op, &e.message)),

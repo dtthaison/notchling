@@ -21,6 +21,7 @@ fn folders_of(list: Vec<PathBuf>) -> Folders {
 
 fn rig(known: Vec<PathBuf>) -> (GitOps, Arc<FakeLauncher>) {
     let fake = Arc::new(FakeLauncher::new());
+    fake.push_output(Ok(LaunchOutput::failed(1, "")));
     (GitOps::new(fake.clone(), folders_of(known)), fake)
 }
 
@@ -31,10 +32,11 @@ fn call(ops: &GitOps, op: &str, args: Value) -> Result<Value, notchling_local_ap
 #[test]
 fn both_ops_are_app_tier_reads_and_nothing_else_is_served() {
     let (git, _) = rig(vec![]);
-    assert_eq!(git.spec(ops::GIT_STATUS), Some(OpSpec::APP));
-    assert_eq!(git.spec(ops::GIT_DIFF), Some(OpSpec::APP));
+    assert_eq!(git.spec(ops::GIT_STATUS), Some(OpSpec::APP_QUIET));
+    assert_eq!(git.spec(ops::GIT_DIFF), Some(OpSpec::APP_QUIET));
+    assert_ne!(git.spec(ops::GIT_STATUS), Some(OpSpec::APP));
     assert_eq!(git.spec(ops::SESSIONS_LIST), None);
-    assert_eq!(OpSpec::APP.tier, Tier::App);
+    assert_eq!(OpSpec::APP_QUIET.tier, Tier::App);
 }
 
 #[test]
@@ -52,6 +54,15 @@ fn status_of_a_session_folder_answers_the_branch_and_the_files() {
     fake.push_output(Ok(LaunchOutput::ok(&z(&["2\t1\ta.rs"]))));
     let cwd = t.path("proj").to_string_lossy().into_owned();
     let got = call(&git, ops::GIT_STATUS, json!({"cwd": cwd})).unwrap();
+    let real = std::fs::canonicalize(t.path("proj")).unwrap();
+    for argv in fake.commands().iter().map(|c| &c.argv) {
+        let at = argv.iter().position(|a| a == "-C").unwrap();
+        assert_eq!(
+            argv[at + 1],
+            real.to_string_lossy(),
+            "runs where it checked"
+        );
+    }
     assert_eq!(got["repo"], true);
     assert_eq!(got["branch"], "main");
     assert_eq!(got["upstream"], "origin/main");
@@ -73,6 +84,7 @@ fn a_folder_that_is_not_a_repository_says_so_in_one_reply() {
         output: String::new(),
         stderr: "fatal: not a git repository\n".into(),
     }));
+    fake.push_output(Ok(LaunchOutput::failed(128, "")));
     let cwd = t.path("proj").to_string_lossy().into_owned();
     let got = call(&git, ops::GIT_STATUS, json!({"cwd": cwd})).unwrap();
     assert_eq!(got, json!({"repo": false}));
@@ -135,6 +147,29 @@ fn a_diff_path_that_escapes_the_repository_is_forbidden() {
     assert!(fake.commands().is_empty());
 }
 
+#[test]
+fn a_refused_folder_does_not_rescan_the_known_ones_until_they_are_stale() {
+    let t = TempDir::new("gitops-rescan");
+    t.write("proj/a.rs", "x");
+    t.write("other/b.rs", "x");
+    let scans = Arc::new(Mutex::new(0usize));
+    let counted: Folders = {
+        let (scans, known) = (scans.clone(), vec![t.path("proj")]);
+        Arc::new(move || {
+            *scans.lock().unwrap() += 1;
+            known.clone()
+        })
+    };
+    let git = GitOps::new(Arc::new(FakeLauncher::new()), counted);
+    let other = t.path("other").to_string_lossy().into_owned();
+    for _ in 0..5 {
+        assert!(call(&git, ops::GIT_STATUS, json!({"cwd": other})).is_err());
+    }
+    let mine = t.path("proj").to_string_lossy().into_owned();
+    assert!(call(&git, ops::GIT_STATUS, json!({"cwd": mine})).is_ok());
+    assert_eq!(*scans.lock().unwrap(), 1);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_diff_path_through_a_link_out_is_forbidden() {
@@ -144,7 +179,8 @@ fn a_diff_path_through_a_link_out_is_forbidden() {
     std::os::unix::fs::symlink(t.path("outside"), t.path("proj/out")).unwrap();
     let (git, fake) = rig(vec![t.path("proj")]);
     let root = t.path("proj").to_string_lossy().into_owned();
-    fake.push_output(Ok(LaunchOutput::ok(&root)));
+    let real = std::fs::canonicalize(t.path("proj")).unwrap();
+    fake.push_output(Ok(LaunchOutput::ok(&real.to_string_lossy())));
     let err = call(
         &git,
         ops::GIT_DIFF,
@@ -234,9 +270,7 @@ fn a_real_repository_in_a_session_folder_reads_through_the_ops() {
             .map(|s| s.success())
             .unwrap_or(false)
     };
-    if !git_in(&["init", "-q", "-b", "main"]) {
-        return;
-    }
+    assert!(git_in(&["init", "-q", "-b", "main"]), "git init failed");
     t.write("proj/a.txt", "one\n");
     assert!(git_in(&["add", "."]));
     assert!(git_in(&["commit", "-q", "-m", "first"]));

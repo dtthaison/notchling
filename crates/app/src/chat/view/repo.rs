@@ -12,6 +12,8 @@ pub struct State {
     folder: Option<String>,
     status: Option<Arc<GitModel>>,
     preview: Option<Arc<GitModel>>,
+    diff_last: Option<i64>,
+    diff_inflight: bool,
 }
 
 impl State {
@@ -90,6 +92,10 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) {
         self.repo.gate.done();
+        if self.selected_folder().as_deref() != Some(folder.as_str()) {
+            self.git_ask(Why::Folder, cx);
+            return;
+        }
         let Ok(reply) = result else {
             return;
         };
@@ -121,6 +127,22 @@ impl ChatView {
         cx.notify();
     }
 
+    pub(super) fn git_diff_tick(&mut self, cx: &mut Context<Self>) {
+        if self.root.fixture.is_some()
+            || self.repo.diff_inflight
+            || !git::diff_due(self.repo.diff_last, now_ms())
+        {
+            return;
+        }
+        self.git_diff_again(cx);
+    }
+
+    pub(super) fn close_git_diff(&mut self, cx: &mut Context<Self>) {
+        if self.page.diff_path().is_some() {
+            self.close_page(cx);
+        }
+    }
+
     fn git_diff_again(&mut self, cx: &mut Context<Self>) {
         let (Some(path), Some(folder)) = (self.page.diff_path(), self.selected_folder()) else {
             return;
@@ -130,6 +152,8 @@ impl ChatView {
     }
 
     fn fetch_git_diff(&mut self, folder: String, path: String, asked: u64, cx: &mut Context<Self>) {
+        self.repo.diff_last = Some(now_ms());
+        self.repo.diff_inflight = true;
         let acts = self.acts(cx);
         let request = git::diff_request(&folder, &path);
         cx.spawn(async move |this, cx| {
@@ -141,6 +165,7 @@ impl ChatView {
                 git::parse_diff(&reply).ok_or_else(|| "The diff came back unreadable.".to_owned())
             });
             this.update(cx, |view, cx| {
+                view.repo.diff_inflight = false;
                 if view.page.set_diff(asked, &path, parsed) {
                     cx.notify();
                 }

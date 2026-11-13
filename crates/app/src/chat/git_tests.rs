@@ -164,6 +164,13 @@ fn opening_a_panel_or_a_turn_ending_asks_sooner_but_not_in_a_burst() {
 }
 
 #[test]
+fn an_open_diff_is_read_again_every_five_seconds() {
+    assert!(diff_due(None, 0));
+    assert!(!diff_due(Some(1_000), 5_999));
+    assert!(diff_due(Some(1_000), 6_000));
+}
+
+#[test]
 fn a_diff_is_told_apart_line_by_line_only_after_its_first_hunk() {
     let text = concat!(
         "diff --git a/x b/x\n",

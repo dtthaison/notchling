@@ -16,20 +16,29 @@ use std::time::{Duration, Instant};
 pub struct OpSpec {
     pub tier: Tier,
     pub approval: bool,
+    pub quiet_ok: bool,
 }
 
 impl OpSpec {
     pub const AGENT: OpSpec = OpSpec {
         tier: Tier::Agent,
         approval: false,
+        quiet_ok: false,
     };
     pub const APP: OpSpec = OpSpec {
         tier: Tier::App,
         approval: false,
+        quiet_ok: false,
+    };
+    pub const APP_QUIET: OpSpec = OpSpec {
+        tier: Tier::App,
+        approval: false,
+        quiet_ok: true,
     };
     pub const APPROVAL: OpSpec = OpSpec {
         tier: Tier::Agent,
         approval: true,
+        quiet_ok: false,
     };
 }
 

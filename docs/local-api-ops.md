@@ -284,9 +284,15 @@ What Chat's Details Panel shows of a session's folder: `git.status` and `git.dif
 the app never runs a process, so the daemon runs `git` for it (decision 0004). Every call is
 refused (`forbidden`) unless `cwd` is absolute, has no `..`, and (after symlinks) is a known
 session's folder or below one; the known folders are the session list's `cwd`s, Antigravity's
-rows and the last 14 days' (30 newest) Codex rollouts, read again at most every 5 s. A `path`
-is refused if it is empty, absolute, has a `..` or a NUL, or goes through a link that leaves
-the repository.
+rows and the last 14 days' (30 newest) Codex rollouts, read again only once the last read is 5 s
+old (a refused `cwd` does not read them again). `git` runs in the canonical path that was
+checked. A `path` is refused if it is empty, absolute, has a `..` or a NUL, goes through a link
+that leaves the repository, or is not exactly one of the current changed files (no `.`, no
+directory, not a file that is clean).
+
+Both ops are `OpSpec::APP_QUIET`: a success is not written to `audit.jsonl` (the app asks every
+5 s, which would fill the log and rotate out the refusals and the vault's entries); a refusal or
+failure still is.
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
@@ -302,11 +308,18 @@ the repository.
   128 KB (a single line is cut on a character boundary), and an untracked file over 2 MB gives
   an empty `text` with `truncated: true`. An untracked file's diff is the whole file as added
   lines (`git diff --no-index /dev/null <path>`).
-- Reads: `git --no-optional-locks -c core.fsmonitor=false -C <dir> status --porcelain=v2
-  --branch -z --untracked-files=all`, then `diff --numstat -z HEAD` (or `--cached` with no
-  commit); a diff is `diff --no-color --no-ext-diff --no-textconv HEAD -- :(literal)<path>`. Each
-  command has a 3 s timeout, `GIT_TERMINAL_PROMPT=0` and `GIT_PAGER=cat`. A timeout or any other
-  failure answers `failed`.
+- Reads run no program of the repository: every command is `git --no-optional-locks -c
+  core.fsmonitor=false -c core.hooksPath=/dev/null -c diff.external=` plus, for each filter
+  driver `git config -z --get-regexp '^filter\.'` names (a read that runs nothing), `-c
+  filter.<name>.clean=`, `smudge=`, `process=` and `required=false`. Then `status
+  --porcelain=v2 --branch -z --untracked-files=all --ignore-submodules=all`, then `diff
+  --numstat -z HEAD` (or `--cached` with no commit); a diff is `diff --no-color --no-ext-diff
+  --no-textconv --ignore-submodules=all HEAD -- :(literal)<path>`. Each command has a 3 s
+  timeout, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, `GIT_PAGER=cat`, and every other `GIT_*`
+  variable of the daemon's environment is cleared. The launcher stops a command that writes
+  more than 4 MB (a list) or 128 KB + 1 (a diff). Not a repository is told by `rev-parse
+  --is-inside-work-tree` after a 128, never by the message. A timeout or any other failure
+  answers `failed`.
 
 ## `hook_ops.rs`
 

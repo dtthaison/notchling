@@ -1,7 +1,7 @@
 use crate::op_group::OpGroup;
 use crate::pages_ops::Titles;
 use notchling_engine::control::Launcher;
-use notchling_engine::git::guard::folder_allowed;
+use notchling_engine::git::guard::allowed_folder;
 use notchling_engine::git::{read_diff, read_status, Failure};
 use notchling_engine::tools::codex::list as codex_list;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
@@ -93,21 +93,21 @@ impl GitOps {
         }
     }
 
-    fn allowed(&self, cwd: &str) -> bool {
-        let path = Path::new(cwd);
+    fn known(&self) -> Vec<PathBuf> {
         let cached = lock(&self.known)
             .as_ref()
             .filter(|(at, _)| at.elapsed() < KNOWN_FOR)
             .map(|(_, list)| list.clone());
-        if let Some(list) = &cached {
-            if folder_allowed(path, list) {
-                return true;
-            }
+        if let Some(list) = cached {
+            return list;
         }
         let fresh = (self.folders)();
-        let ok = folder_allowed(path, &fresh);
-        *lock(&self.known) = Some((Instant::now(), fresh));
-        ok
+        *lock(&self.known) = Some((Instant::now(), fresh.clone()));
+        fresh
+    }
+
+    fn allowed(&self, cwd: &str) -> Option<String> {
+        allowed_folder(Path::new(cwd), &self.known()).map(|p| p.to_string_lossy().into_owned())
     }
 
     fn status(&self, cwd: &str) -> Result<Value, ApiError> {
@@ -131,20 +131,20 @@ impl GitOps {
 
 impl OpGroup for GitOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        GIT_OPS.contains(&op).then_some(OpSpec::APP)
+        GIT_OPS.contains(&op).then_some(OpSpec::APP_QUIET)
     }
 
     fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         let cwd = text_arg(args, "cwd")?;
-        if !self.allowed(cwd) {
+        let Some(real) = self.allowed(cwd) else {
             return Err(ApiError::new(
                 ErrorCode::Forbidden,
                 "cwd is not a session folder",
             ));
-        }
+        };
         match op {
-            ops::GIT_STATUS => self.status(cwd),
-            ops::GIT_DIFF => self.diff(cwd, text_arg(args, "path")?),
+            ops::GIT_STATUS => self.status(&real),
+            ops::GIT_DIFF => self.diff(&real, text_arg(args, "path")?),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

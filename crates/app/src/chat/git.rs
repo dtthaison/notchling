@@ -183,6 +183,10 @@ impl Gate {
     }
 }
 
+pub fn diff_due(last_ms: Option<i64>, now_ms: i64) -> bool {
+    last_ms.is_none_or(|last| now_ms - last >= EVERY_MS)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffKind {
     Added,

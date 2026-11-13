@@ -203,6 +203,7 @@ impl ChatView {
             return;
         }
         self.selected = Some(id.to_owned());
+        self.close_git_diff(cx);
         select::clear();
         self.conversation_state(cx, |s| {
             s.sel.borrow_mut().selection.clear();
@@ -284,6 +285,7 @@ impl ChatView {
         }
         self.refresh_file(cx);
         self.git_ask(crate::chat::git::Why::Tick, cx);
+        self.git_diff_tick(cx);
         if self.gate.due(now_ms()) {
             self.start_load(cx);
         }

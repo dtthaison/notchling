@@ -20,18 +20,23 @@ pub fn clean_path(path: &str) -> Result<String, &'static str> {
     Ok(path.to_owned())
 }
 
-pub fn folder_allowed(cwd: &Path, known: &[PathBuf]) -> bool {
+pub fn allowed_folder(cwd: &Path, known: &[PathBuf]) -> Option<PathBuf> {
     if !cwd.is_absolute() || cwd.components().any(|c| c == Component::ParentDir) {
-        return false;
+        return None;
     }
-    let Ok(real) = std::fs::canonicalize(cwd) else {
-        return false;
-    };
-    known.iter().any(|folder| {
-        std::fs::canonicalize(folder)
-            .map(|k| real.starts_with(&k))
-            .unwrap_or(false)
-    })
+    let real = std::fs::canonicalize(cwd).ok()?;
+    known
+        .iter()
+        .any(|folder| {
+            std::fs::canonicalize(folder)
+                .map(|k| real.starts_with(&k))
+                .unwrap_or(false)
+        })
+        .then_some(real)
+}
+
+pub fn folder_allowed(cwd: &Path, known: &[PathBuf]) -> bool {
+    allowed_folder(cwd, known).is_some()
 }
 
 pub fn stays_inside(root: &Path, path: &str) -> bool {

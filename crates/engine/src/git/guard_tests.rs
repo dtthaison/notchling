@@ -1,4 +1,4 @@
-use super::guard::{clean_path, folder_allowed, stays_inside};
+use super::guard::{allowed_folder, clean_path, folder_allowed, stays_inside};
 use crate::sessions::testutil::TempDir;
 use std::path::PathBuf;
 
@@ -66,4 +66,16 @@ fn links_that_leave_the_repository_are_refused_and_inner_ones_are_not() {
     assert!(!stays_inside(&repo, "dangling"));
     assert!(stays_inside(&repo, "inner/real.txt"));
     assert!(stays_inside(&repo, "in/real.txt"));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_allowed_folder_comes_back_as_its_canonical_path() {
+    let t = TempDir::new("guard-canonical");
+    t.write("proj/src/a.rs", "x");
+    std::os::unix::fs::symlink(t.path("proj"), t.path("alias")).unwrap();
+    let real = std::fs::canonicalize(t.path("proj/src")).unwrap();
+    let got = allowed_folder(&t.path("alias/src"), &[t.path("proj")]);
+    assert_eq!(got, Some(real));
+    assert_eq!(allowed_folder(&t.path("alias/src"), &[]), None);
 }
