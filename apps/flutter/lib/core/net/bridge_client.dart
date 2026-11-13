@@ -254,7 +254,7 @@ class BridgeClient {
         _connection = null;
         try {
           await connection?.close();
-        } on Object {
+        } on Object catch (_) {
         }
         if (error is BridgeException && error.isUnauthorized) return null;
       }
@@ -267,7 +267,7 @@ class BridgeClient {
     if (spec == null) return;
     try {
       await request('subscribe', _subscribeParams(spec));
-    } on BridgeException {
+    } on BridgeException catch (_) {
     }
   }
 
@@ -312,7 +312,7 @@ class BridgeClient {
         case 'open':
           _eventController.add(const OpenEvent());
       }
-    } on FormatException {
+    } on FormatException catch (_) {
     }
   }
 

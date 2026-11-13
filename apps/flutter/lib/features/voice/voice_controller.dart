@@ -134,7 +134,7 @@ class VoiceController extends Notifier<VoiceState> {
     if (recording) {
       try {
         await ref.read(voiceRecorderProvider).cancel();
-      } on Object {
+      } on Object catch (_) {
       }
     }
     if (ref.mounted) state = const VoiceIdle();

@@ -116,7 +116,7 @@ class AndroidBackgroundKeeper implements BackgroundKeeper {
   Future<void> start(String text) async {
     try {
       await _channel.invokeMethod<void>('start', <String, Object?>{'text': text});
-    } on PlatformException {
+    } on PlatformException catch (_) {
     }
   }
 
@@ -124,7 +124,7 @@ class AndroidBackgroundKeeper implements BackgroundKeeper {
   Future<void> stop() async {
     try {
       await _channel.invokeMethod<void>('stop');
-    } on PlatformException {
+    } on PlatformException catch (_) {
     }
   }
 }

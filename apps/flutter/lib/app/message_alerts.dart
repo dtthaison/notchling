@@ -129,7 +129,7 @@ class PlatformAlertSounds implements AlertSounds {
       await _channel.invokeMethod<void>('play', <String, Object?>{'name': kind == AlertKind.needsInput ? 'needs_you' : 'new_message'});
     } on MissingPluginException {
       await SystemSound.play(SystemSoundType.alert);
-    } on PlatformException {
+    } on PlatformException catch (_) {
     }
   }
 }
