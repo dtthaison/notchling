@@ -88,7 +88,12 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         open_chat(cx);
         cx.activate(true);
     });
+    let preference = root
+        .as_ref()
+        .and_then(|r| crate::appearance::read(&r.data_dir))
+        .unwrap_or_default();
     app.run(move |cx: &mut App| {
+        crate::appearance::apply(preference);
         crate::mac::app_icons::install();
         dock::register(cx);
         dock::apply(policy_for(0));

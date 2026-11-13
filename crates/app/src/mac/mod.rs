@@ -1,4 +1,5 @@
 pub mod app_icons;
+pub mod appearance;
 pub mod bench;
 pub mod bench_events;
 pub mod bench_scroll;

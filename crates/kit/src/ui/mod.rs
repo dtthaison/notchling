@@ -64,7 +64,7 @@ pub fn appearance_of(appearance: WindowAppearance) -> Appearance {
 }
 
 pub fn window_appearance(window: &Window) -> Appearance {
-    appearance_of(window.appearance())
+    crate::preference().resolve(appearance_of(window.appearance()))
 }
 
 pub trait KitStyled: Styled + Sized {

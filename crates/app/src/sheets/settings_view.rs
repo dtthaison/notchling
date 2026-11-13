@@ -165,6 +165,7 @@ impl SettingsView {
                 .detach();
         }
         self.values.insert(key.to_owned(), value.clone());
+        crate::mac::appearance::on_change(key, &value, cx);
         cx.emit(SettingChanged {
             key: key.to_owned(),
             value,
