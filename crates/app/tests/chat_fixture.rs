@@ -164,7 +164,10 @@ fn header_and_inspector_read_the_facts() {
     assert_eq!(i.tasks.len(), 3);
     assert_eq!(i.tasks[0].status, Status::Done);
     assert!(i.facts.contains(&("Branch", "m1-chat".to_owned())));
-    assert!(i.facts.contains(&("Effort", "high".to_owned())));
+    assert!(!i
+        .facts
+        .iter()
+        .any(|(name, _)| *name == "Model" || *name == "Effort"));
     assert_eq!(i.subagents[0].description, "Second opinion on the ranking");
     assert_eq!(i.subagents[0].status, Status::Done);
     assert_eq!(i.shells[0].title, "Run the Rust search tests");
