@@ -314,6 +314,7 @@ impl Wired {
             &claude,
         ));
         acting.attach_codex(codex.clone());
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         // No port is bound and nothing is written under `AgentConsole` until the app's
         // `bridge.set` in this run.
         let bridge = Arc::new(BridgeOps::new(
@@ -321,6 +322,7 @@ impl Wired {
             sessions,
             acting.clone(),
             room.clone(),
+            inbox.clone(),
         ));
         // `agy` starts only on an acting op, and the copy of its list is made only when the list
         // is read.
@@ -371,7 +373,6 @@ impl Wired {
         acting.attach_catalog(catalog.clone());
         // The limit watchers, over the same stores. The loop calls them only while `accounts` is
         // on; `cost.summary` only reads transcripts and needs no switch.
-        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         let limits = Arc::new(LimitsOps::for_daemon(
             layout,
             on.clone(),

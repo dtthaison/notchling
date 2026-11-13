@@ -4,6 +4,7 @@
 
 use super::backend::AuditEntry;
 use super::connection::Connection;
+use super::inbox::{action_from, answer_json, wire_item};
 use super::model::{
     Control, PendingPrompt, PhoneOptions, PromptKind, PromptQuestion, PromptResponse, Session,
     ALREADY_CONTROLLABLE,
@@ -11,6 +12,7 @@ use super::model::{
 use super::router::{validated_folder, Router, MAX_TEXT_CHARACTERS, MODELS};
 use super::uploads::{ImageStore, UploadError, CHUNK_BYTES, MAX_BYTES};
 use super::wire::{self, BridgeFailure};
+use crate::inbox::{ActionId, State};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -458,6 +460,11 @@ impl Router {
                 .map(|m| m.id.clone())
                 .collect();
         }
+        if body.get("inbox").and_then(Value::as_bool) == Some(true) {
+            let mut sub = connection.subscription();
+            sub.wants_inbox = true;
+            sub.known_inbox.clear();
+        }
         if let Some(options) = phone {
             self.backend.start_phone(connection, &options)?;
             connection.subscription().phone_active = true;
@@ -465,10 +472,40 @@ impl Router {
         Ok(json!({"subscribed": true}))
     }
 
+    pub(crate) fn inbox_list(&self) -> Value {
+        let items = self.backend.inbox_items();
+        let unread = items
+            .iter()
+            .filter(|item| item.state == State::Open && !item.seen)
+            .count();
+        let wire: Vec<_> = items.iter().map(wire_item).collect();
+        json!({"items": wire::object(&wire), "unread": unread})
+    }
+
+    pub(crate) fn inbox_answer(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let item_id = require(body, "itemId")?;
+        let action = action_from(require(body, "action")?)
+            .ok_or_else(|| BridgeFailure::invalid("Hành động không hợp lệ."))?;
+        if action == ActionId::Open {
+            return Err(BridgeFailure::invalid("Mở form trên Mac."));
+        }
+        let outcome = self.backend.inbox_answer(item_id, action)?;
+        if outcome.answered {
+            self.audit(connection, "inbox.answer", None, None);
+        }
+        Ok(answer_json(&outcome))
+    }
+
     pub(crate) fn unsubscribe(&self, connection: &Arc<Connection>) {
         let streaming = {
             let mut sub = connection.subscription();
             sub.wants_sessions = false;
+            sub.wants_inbox = false;
+            sub.known_inbox.clear();
             sub.chat_session_id = None;
             sub.chat_subagent_id = None;
             std::mem::take(&mut sub.phone_active)

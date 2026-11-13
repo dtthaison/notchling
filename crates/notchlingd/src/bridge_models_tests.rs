@@ -6,9 +6,11 @@ use crate::acting_ops::ActingOps;
 use crate::acting_ops_tests::{setup_in, PROMPT};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
 use crate::catalog_ops_tests::seeded;
+use crate::inbox_ops::InboxOps;
 use notchling_engine::bridge::live::{Acting as _, Sources as _};
 use notchling_engine::catalog::{LiveModel, Tier, Tool};
 use notchling_engine::control::{Command, FakeLauncher, LaunchOutput, Launcher};
+use notchling_engine::inbox::{Action, ActionId, Item, Kind, Source, State};
 use notchling_engine::sessions::Roots;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -43,6 +45,10 @@ fn sources(ops: &Arc<ActingOps>) -> DaemonSources {
             Arc::new(crate::acting_ops_tests::FakeRoom::default()),
             Duration::from_secs(1),
         )),
+        inbox: InboxOps::new(
+            std::env::temp_dir().join(format!("nl-bm-inbox-{}", std::process::id())),
+            Arc::new(crate::acting_ops_tests::FakeRoom::default()),
+        ),
         projects_dir: PathBuf::from("/nonexistent/projects"),
     }
 }
@@ -146,4 +152,47 @@ fn a_model_id_starts_a_session_on_exactly_that_model() {
         .unwrap_err();
     assert!(refused.message.contains("claude-opus-5-5"), "{refused:?}");
     assert_eq!(fake.commands().len(), 1);
+}
+
+fn inbox_item(id: &str) -> Item {
+    Item {
+        id: id.into(),
+        kind: Kind::Notice,
+        title: "Heads Up".into(),
+        detail: String::new(),
+        source: Source::default(),
+        created_ms: 1,
+        expires_ms: None,
+        actions: vec![Action {
+            id: ActionId::Done,
+            label: "Done".into(),
+            primary: true,
+        }],
+        state: State::Open,
+        answer: None,
+        answered_by: None,
+        seen: false,
+        open: None,
+        closed_ms: None,
+    }
+}
+
+#[test]
+fn the_phone_answers_the_inbox_as_the_phone() {
+    let (ops, _fake, _tmp) = ops(&[], "inbox-phone");
+    let sources = sources(&ops);
+    sources.inbox.raise(inbox_item("n1"), None);
+    assert_eq!(sources.inbox_items().len(), 1);
+    let won = sources
+        .inbox_answer("n1", ActionId::Done)
+        .expect("answered");
+    assert!(won.answered);
+    assert_eq!(
+        sources.inbox_items()[0].answered_by.as_deref(),
+        Some("phone")
+    );
+    let lost = sources.inbox_answer("n1", ActionId::Done).expect("refused");
+    assert!(!lost.answered);
+    let missing = sources.inbox_answer("nope", ActionId::Done).unwrap_err();
+    assert!(missing.to_string().starts_with("not_found"), "{missing}");
 }

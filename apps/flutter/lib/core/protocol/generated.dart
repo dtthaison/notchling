@@ -1245,6 +1245,138 @@ class VizSpec {
   final ChartSpec? chart;
 }
 
+/// One button an inbox item offers.
+class InboxAction {
+  const InboxAction({
+    required this.id,
+    required this.label,
+    required this.primary,
+  });
+
+  factory InboxAction.fromJson(JsonMap json) => InboxAction(
+    id: _need(json, 'id', _asString),
+    label: _need(json, 'label', _asString),
+    primary: _need(json, 'primary', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'label': label,
+    'primary': primary,
+  };
+
+  /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it.
+  final String id;
+  final String label;
+
+  /// The main button of the item.
+  final bool primary;
+}
+
+/// One notification the Mac's inbox holds.
+class InboxItem {
+  const InboxItem({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.detail,
+    this.source,
+    required this.createdMs,
+    this.expiresMs,
+    this.closedMs,
+    required this.actions,
+    required this.state,
+    this.answer,
+    this.answeredBy,
+    required this.seen,
+  });
+
+  factory InboxItem.fromJson(JsonMap json) => InboxItem(
+    id: _need(json, 'id', _asString),
+    kind: _need(json, 'kind', _asString),
+    title: _need(json, 'title', _asString),
+    detail: _need(json, 'detail', _asString),
+    source: _maybe(json, 'source', (Object? v) => InboxItemSource.fromJson(_asMap(v))),
+    createdMs: _need(json, 'createdMs', _asInt),
+    expiresMs: _maybe(json, 'expiresMs', _asInt),
+    closedMs: _maybe(json, 'closedMs', _asInt),
+    actions: _need(json, 'actions', (Object? v) => _asList<InboxAction>(v, (Object? e) => InboxAction.fromJson(_asMap(e)))),
+    state: _need(json, 'state', _asString),
+    answer: _maybe(json, 'answer', _asString),
+    answeredBy: _maybe(json, 'answeredBy', _asString),
+    seen: _need(json, 'seen', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'kind': kind,
+    'title': title,
+    'detail': detail,
+    if (source != null) 'source': source!.toJson(),
+    'createdMs': createdMs,
+    if (expiresMs != null) 'expiresMs': expiresMs,
+    if (closedMs != null) 'closedMs': closedMs,
+    'actions': <Object?>[for (final InboxAction e in actions) e.toJson()],
+    'state': state,
+    if (answer != null) 'answer': answer,
+    if (answeredBy != null) 'answeredBy': answeredBy,
+    'seen': seen,
+  };
+
+  final String id;
+
+  /// secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice.
+  final String kind;
+  final String title;
+  final String detail;
+
+  /// Where the item came from.
+  final InboxItemSource? source;
+  final int createdMs;
+
+  /// When an open item stops waiting.
+  final int? expiresMs;
+
+  /// When the item was answered, expired or withdrawn.
+  final int? closedMs;
+  final List<InboxAction> actions;
+
+  /// open, answered, expired or withdrawn.
+  final String state;
+
+  /// The action id that answered it.
+  final String? answer;
+
+  /// mac or phone.
+  final String? answeredBy;
+  final bool seen;
+}
+
+/// Where the item came from.
+class InboxItemSource {
+  const InboxItemSource({
+    this.node,
+    this.session,
+    this.job,
+  });
+
+  factory InboxItemSource.fromJson(JsonMap json) => InboxItemSource(
+    node: _maybe(json, 'node', _asString),
+    session: _maybe(json, 'session', _asString),
+    job: _maybe(json, 'job', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (node != null) 'node': node,
+    if (session != null) 'session': session,
+    if (job != null) 'job': job,
+  };
+
+  final String? node;
+  final String? session;
+  final String? job;
+}
+
 /// First message on a connection from a paired phone.
 class HelloRequest {
   const HelloRequest({
@@ -1862,6 +1994,7 @@ class SubscribeRequest {
     this.subagentId,
     this.lastMessageId,
     this.phone,
+    this.inbox,
   });
 
   factory SubscribeRequest.fromJson(JsonMap json) => SubscribeRequest(
@@ -1872,6 +2005,7 @@ class SubscribeRequest {
     subagentId: _maybe(json, 'subagentId', _asString),
     lastMessageId: _maybe(json, 'lastMessageId', _asString),
     phone: _maybe(json, 'phone', (Object? v) => SubscribeRequestPhone.fromJson(_asMap(v))),
+    inbox: _maybe(json, 'inbox', _asBool),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1882,6 +2016,7 @@ class SubscribeRequest {
     if (subagentId != null) 'subagentId': subagentId,
     if (lastMessageId != null) 'lastMessageId': lastMessageId,
     if (phone != null) 'phone': phone!.toJson(),
+    if (inbox != null) 'inbox': inbox,
   };
 
   final Object? id;
@@ -1899,6 +2034,9 @@ class SubscribeRequest {
 
   /// Stream the Mac's device window as PHN1 frames.
   final SubscribeRequestPhone? phone;
+
+  /// Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes.
+  final bool? inbox;
 }
 
 /// Stream the Mac's device window as PHN1 frames.
@@ -1949,6 +2087,60 @@ class UnsubscribeRequest {
 
   final Object? id;
   final String op;
+}
+
+/// The Mac's notification inbox.
+class InboxListRequest {
+  const InboxListRequest({
+    this.id,
+    this.op = 'inbox.list',
+  });
+
+  factory InboxListRequest.fromJson(JsonMap json) => InboxListRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+  };
+
+  final Object? id;
+  final String op;
+}
+
+/// Presses one action of an open inbox item. The first answer wins, from the Mac or a phone.
+class InboxAnswerRequest {
+  const InboxAnswerRequest({
+    this.id,
+    this.op = 'inbox.answer',
+    required this.itemId,
+    required this.action,
+  });
+
+  factory InboxAnswerRequest.fromJson(JsonMap json) => InboxAnswerRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+    itemId: _need(json, 'itemId', _asString),
+    action: _need(json, 'action', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+    'itemId': itemId,
+    'action': action,
+  };
+
+  final Object? id;
+  final String op;
+
+  /// The inbox item's id.
+  final String itemId;
+
+  /// An action id the item offers; open is refused.
+  final String action;
 }
 
 /// The connection is authenticated.
@@ -2897,6 +3089,111 @@ class UnsubscribeResponseData {
   final bool subscribed;
 }
 
+/// The inbox as the Mac keeps it.
+class InboxListResponse {
+  const InboxListResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory InboxListResponse.fromJson(JsonMap json) => InboxListResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => InboxListResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final InboxListResponseData data;
+}
+
+/// The answer.
+class InboxListResponseData {
+  const InboxListResponseData({
+    required this.items,
+    required this.unread,
+  });
+
+  factory InboxListResponseData.fromJson(JsonMap json) => InboxListResponseData(
+    items: _need(json, 'items', (Object? v) => _asList<InboxItem>(v, (Object? e) => InboxItem.fromJson(_asMap(e)))),
+    unread: _need(json, 'unread', _asInt),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'items': <Object?>[for (final InboxItem e in items) e.toJson()],
+    'unread': unread,
+  };
+
+  final List<InboxItem> items;
+
+  /// Open items not seen yet.
+  final int unread;
+}
+
+/// Whether this answer was the one taken.
+class InboxAnswerResponse {
+  const InboxAnswerResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory InboxAnswerResponse.fromJson(JsonMap json) => InboxAnswerResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => InboxAnswerResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final InboxAnswerResponseData data;
+}
+
+/// The answer.
+class InboxAnswerResponseData {
+  const InboxAnswerResponseData({
+    required this.answered,
+    required this.state,
+    this.answer,
+  });
+
+  factory InboxAnswerResponseData.fromJson(JsonMap json) => InboxAnswerResponseData(
+    answered: _need(json, 'answered', _asBool),
+    state: _need(json, 'state', _asString),
+    answer: _maybe(json, 'answer', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'answered': answered,
+    'state': state,
+    if (answer != null) 'answer': answer,
+  };
+
+  /// False when the item was already answered, expired or withdrawn.
+  final bool answered;
+  final String state;
+
+  /// The action that answered the item, when one did.
+  final String? answer;
+}
+
 /// The Mac refused a request, or could not read the frame (then there is no id).
 class ErrorResponse {
   const ErrorResponse({
@@ -3060,6 +3357,50 @@ class OpenEvent {
   final String event;
 }
 
+/// An inbox item was raised or changed. Sent only to a connection that subscribed with inbox: true.
+class InboxEvent {
+  const InboxEvent({
+    this.event = 'inbox',
+    required this.item,
+  });
+
+  factory InboxEvent.fromJson(JsonMap json) => InboxEvent(
+    event: _need(json, 'event', _asString),
+    item: _need(json, 'item', (Object? v) => InboxItem.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'event': event,
+    'item': item.toJson(),
+  };
+
+  final String event;
+  final InboxItem item;
+}
+
+/// An inbox item was removed from the Mac's inbox.
+class InboxRemovedEvent {
+  const InboxRemovedEvent({
+    this.event = 'inbox',
+    required this.removed,
+  });
+
+  factory InboxRemovedEvent.fromJson(JsonMap json) => InboxRemovedEvent(
+    event: _need(json, 'event', _asString),
+    removed: _need(json, 'removed', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'event': event,
+    'removed': removed,
+  };
+
+  final String event;
+
+  /// The removed item's id.
+  final String removed;
+}
+
 /// Parses a map as the type named by the key and writes it back.
 final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Function(JsonMap)>{
   'Subagent': (JsonMap json) => Subagent.fromJson(json).toJson(),
@@ -3092,6 +3433,8 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'ModelCount': (JsonMap json) => ModelCount.fromJson(json).toJson(),
   'ChartSpec': (JsonMap json) => ChartSpec.fromJson(json).toJson(),
   'VizSpec': (JsonMap json) => VizSpec.fromJson(json).toJson(),
+  'InboxAction': (JsonMap json) => InboxAction.fromJson(json).toJson(),
+  'InboxItem': (JsonMap json) => InboxItem.fromJson(json).toJson(),
   'HelloRequest': (JsonMap json) => HelloRequest.fromJson(json).toJson(),
   'PairRequest': (JsonMap json) => PairRequest.fromJson(json).toJson(),
   'PingRequest': (JsonMap json) => PingRequest.fromJson(json).toJson(),
@@ -3112,6 +3455,8 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'ProjectsRecentRequest': (JsonMap json) => ProjectsRecentRequest.fromJson(json).toJson(),
   'SubscribeRequest': (JsonMap json) => SubscribeRequest.fromJson(json).toJson(),
   'UnsubscribeRequest': (JsonMap json) => UnsubscribeRequest.fromJson(json).toJson(),
+  'InboxListRequest': (JsonMap json) => InboxListRequest.fromJson(json).toJson(),
+  'InboxAnswerRequest': (JsonMap json) => InboxAnswerRequest.fromJson(json).toJson(),
   'HelloResponse': (JsonMap json) => HelloResponse.fromJson(json).toJson(),
   'PairResponse': (JsonMap json) => PairResponse.fromJson(json).toJson(),
   'PingResponse': (JsonMap json) => PingResponse.fromJson(json).toJson(),
@@ -3133,10 +3478,14 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'ProjectsRecentResponse': (JsonMap json) => ProjectsRecentResponse.fromJson(json).toJson(),
   'SubscribeResponse': (JsonMap json) => SubscribeResponse.fromJson(json).toJson(),
   'UnsubscribeResponse': (JsonMap json) => UnsubscribeResponse.fromJson(json).toJson(),
+  'InboxListResponse': (JsonMap json) => InboxListResponse.fromJson(json).toJson(),
+  'InboxAnswerResponse': (JsonMap json) => InboxAnswerResponse.fromJson(json).toJson(),
   'ErrorResponse': (JsonMap json) => ErrorResponse.fromJson(json).toJson(),
   'SessionsEvent': (JsonMap json) => SessionsEvent.fromJson(json).toJson(),
   'PromptEvent': (JsonMap json) => PromptEvent.fromJson(json).toJson(),
   'PromptResolvedEvent': (JsonMap json) => PromptResolvedEvent.fromJson(json).toJson(),
   'ChatEvent': (JsonMap json) => ChatEvent.fromJson(json).toJson(),
   'OpenEvent': (JsonMap json) => OpenEvent.fromJson(json).toJson(),
+  'InboxEvent': (JsonMap json) => InboxEvent.fromJson(json).toJson(),
+  'InboxRemovedEvent': (JsonMap json) => InboxRemovedEvent.fromJson(json).toJson(),
 };

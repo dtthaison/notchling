@@ -9,6 +9,7 @@
 
 use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_backend::{Approvals, DaemonActing, DaemonSources};
+use crate::inbox_ops::InboxOps;
 use notchling_engine::bridge::live::LiveBackend;
 use notchling_engine::bridge::net::{fetch, files, Bridge, BridgeConfig};
 use notchling_local_api::{ops, topics, ApiError, OpSpec};
@@ -58,6 +59,7 @@ impl BridgeOps {
         sessions: Arc<Mutex<Value>>,
         acting: Arc<ActingOps>,
         room: Arc<dyn Room>,
+        inbox: Arc<InboxOps>,
     ) -> BridgeOps {
         let approvals = Arc::new(Approvals::new(room.clone(), setup.approval_wait));
         let backend = LiveBackend::new(
@@ -65,6 +67,7 @@ impl BridgeOps {
                 sessions: sessions.clone(),
                 acting: acting.clone(),
                 approvals: approvals.clone(),
+                inbox,
                 projects_dir: setup.projects_dir.clone(),
             },
             DaemonActing {

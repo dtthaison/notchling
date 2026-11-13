@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_FILE = ROOT / "protocol/agentconsole.v1.schema.json"
 FIXTURES = ROOT / "protocol/fixtures"
 ROUTER = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeRouter.swift"
+RUST_ROUTER = ROOT / "crates/engine/src/bridge/router.rs"
 HUB = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeHub.swift"
 
 SCHEMA = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
@@ -125,6 +126,8 @@ class RouterCoverageTests(unittest.TestCase):
         text = ROUTER.read_text(encoding="utf-8")
         ops = set(re.findall(r'^\s*case "([a-z][A-Za-z.]*)":', text, re.M))
         ops |= {"hello", "pair"}
+        rust = RUST_ROUTER.read_text(encoding="utf-8")
+        ops |= set(re.findall(r'^\s*"([a-z][A-Za-z.]*)" => ', rust, re.M))
         self.assertGreater(len(ops), 18)
         in_schema = set()
         for ref in DEFS["Request"]["oneOf"]:

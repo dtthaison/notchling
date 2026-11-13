@@ -292,6 +292,8 @@ impl Router {
             "session.new" => self.session_new(body, connection),
             "chat.image" => self.chat_image(body, id, connection),
             "session.takeover" => self.session_takeover(body, connection),
+            "inbox.list" => Ok(self.inbox_list()),
+            "inbox.answer" => self.inbox_answer(body, connection),
             "projects.recent" => Ok(json!({"projects": self.backend.recent_projects()})),
             "subscribe" => self.subscribe(body, connection),
             "unsubscribe" => {

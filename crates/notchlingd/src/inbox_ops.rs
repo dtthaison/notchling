@@ -1,5 +1,6 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::op_group::OpGroup;
+use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::inbox::{self, ActionId, Book, Change, Item, State};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -265,14 +266,11 @@ impl InboxOps {
         Ok(json!({"unread": inner.book.unread()}))
     }
 
-    fn answer(&self, args: &Value) -> Result<Value, ApiError> {
-        let id = args
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| bad("id is required"))?;
-        let action: ActionId =
-            serde_json::from_value(args.get("action").cloned().unwrap_or(Value::Null))
-                .map_err(|_| bad("action is not one the inbox knows"))?;
+    pub fn items(&self) -> Vec<Item> {
+        lock(&self.inner).book.items()
+    }
+
+    pub fn decide(&self, id: &str, action: ActionId, by: &str) -> Result<InboxOutcome, ApiError> {
         let now = (self.clock)();
         let mut inner = lock(&self.inner);
         let current = inner
@@ -292,21 +290,43 @@ impl InboxOps {
                 return Ok(refused(&current));
             }
         }
-        match inner.book.answer(id, action, ANSWERED_BY, now) {
+        match inner.book.answer(id, action, by, now) {
             Ok(change) => {
                 inner.send(vec![change]);
                 inner.responders.remove(id);
-                Ok(
-                    json!({"answered": true, "state": state_name(State::Answered), "answer": answer_json(Some(action))}),
-                )
+                Ok(InboxOutcome {
+                    answered: true,
+                    state: State::Answered,
+                    answer: Some(action),
+                })
             }
             Err(_) => Ok(refused(&current)),
         }
     }
+
+    fn answer(&self, args: &Value) -> Result<Value, ApiError> {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("id is required"))?;
+        let action: ActionId =
+            serde_json::from_value(args.get("action").cloned().unwrap_or(Value::Null))
+                .map_err(|_| bad("action is not one the inbox knows"))?;
+        let outcome = self.decide(id, action, ANSWERED_BY)?;
+        Ok(json!({
+            "answered": outcome.answered,
+            "state": state_name(outcome.state),
+            "answer": answer_json(outcome.answer),
+        }))
+    }
 }
 
-fn refused(item: &Item) -> Value {
-    json!({"answered": false, "state": state_name(item.state), "answer": answer_json(item.answer)})
+fn refused(item: &Item) -> InboxOutcome {
+    InboxOutcome {
+        answered: false,
+        state: item.state,
+        answer: item.answer,
+    }
 }
 
 impl OpGroup for InboxOps {

@@ -121,6 +121,78 @@ abstract class AppL10n {
   /// **'Visualize'**
   String get tabVisualize;
 
+  /// No description provided for @tabInbox.
+  ///
+  /// In vi, this message translates to:
+  /// **'Hộp thư'**
+  String get tabInbox;
+
+  /// No description provided for @inboxNeedsYou.
+  ///
+  /// In vi, this message translates to:
+  /// **'Cần bạn'**
+  String get inboxNeedsYou;
+
+  /// No description provided for @inboxDone.
+  ///
+  /// In vi, this message translates to:
+  /// **'Xong'**
+  String get inboxDone;
+
+  /// No description provided for @inboxEmptyTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Không có gì cần bạn'**
+  String get inboxEmptyTitle;
+
+  /// No description provided for @inboxEmptyBody.
+  ///
+  /// In vi, this message translates to:
+  /// **'Yêu cầu từ Mac sẽ hiện ở đây.'**
+  String get inboxEmptyBody;
+
+  /// No description provided for @inboxUnsupported.
+  ///
+  /// In vi, this message translates to:
+  /// **'Notchling trên Mac này chưa có hộp thư.'**
+  String get inboxUnsupported;
+
+  /// No description provided for @inboxOpenOnMac.
+  ///
+  /// In vi, this message translates to:
+  /// **'Mở trên Mac'**
+  String get inboxOpenOnMac;
+
+  /// No description provided for @inboxAnsweredOnMac.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã trả lời trên Mac: {action}'**
+  String inboxAnsweredOnMac(String action);
+
+  /// No description provided for @inboxAnsweredHere.
+  ///
+  /// In vi, this message translates to:
+  /// **'Bạn đã trả lời: {action}'**
+  String inboxAnsweredHere(String action);
+
+  /// No description provided for @inboxExpired.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã hết hạn'**
+  String get inboxExpired;
+
+  /// No description provided for @inboxWithdrawn.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đã rút lại'**
+  String get inboxWithdrawn;
+
+  /// No description provided for @inboxOpenCount.
+  ///
+  /// In vi, this message translates to:
+  /// **'{count} chưa xử lý'**
+  String inboxOpenCount(int count);
+
   /// No description provided for @connecting.
   ///
   /// In vi, this message translates to:

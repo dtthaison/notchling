@@ -3,6 +3,7 @@
 
 use super::backend::BridgeBackend;
 use super::connection::{lock, Connection, ConnectionIo};
+use super::inbox::wire_item;
 use super::model::Session;
 use super::wire;
 use serde_json::{Map, Value};
@@ -77,12 +78,51 @@ impl Hub {
             .filter(|c| {
                 c.is_authenticated() && {
                     let sub = c.subscription();
-                    sub.wants_sessions || sub.chat_session_id.is_some()
+                    sub.wants_sessions || sub.wants_inbox || sub.chat_session_id.is_some()
                 }
             })
             .collect();
         if subscribers.is_empty() {
             return;
+        }
+
+        if subscribers.iter().any(|c| c.wants_inbox()) {
+            let items = backend.inbox_items();
+            let current: Vec<(String, String, Value)> = items
+                .iter()
+                .map(|item| {
+                    let wire = wire::object(&wire_item(item));
+                    (item.id.clone(), wire::text(&wire), wire)
+                })
+                .collect();
+            for connection in subscribers.iter().filter(|c| c.wants_inbox()) {
+                let mut out = Vec::new();
+                {
+                    let mut sub = connection.subscription();
+                    for (id, text, item) in &current {
+                        if sub.known_inbox.get(id) != Some(text) {
+                            sub.known_inbox.insert(id.clone(), text.clone());
+                            let mut fields = Map::new();
+                            fields.insert("item".into(), item.clone());
+                            out.push(wire::event("inbox", fields));
+                        }
+                    }
+                    let mut gone: Vec<String> = sub
+                        .known_inbox
+                        .keys()
+                        .filter(|id| !current.iter().any(|(now, _, _)| now == *id))
+                        .cloned()
+                        .collect();
+                    gone.sort();
+                    for id in gone {
+                        sub.known_inbox.remove(&id);
+                        let mut fields = Map::new();
+                        fields.insert("removed".into(), Value::from(id));
+                        out.push(wire::event("inbox", fields));
+                    }
+                }
+                out.into_iter().for_each(|text| connection.send_text(text));
+            }
         }
 
         if subscribers.iter().any(|c| c.wants_sessions()) {

@@ -6,9 +6,11 @@ use super::backend::{
 };
 use super::connection::{lock, Connection, ConnectionIo};
 use super::hub::Hub;
+use super::inbox::InboxOutcome;
 use super::model::*;
 use super::router::{Router, RouterParts};
 use super::wire::BridgeFailure;
+use crate::inbox::{Action, ActionId, Item, Kind, Source, State};
 use crate::sessions::testutil::TempDir;
 use notchling_protocol::generated as wire;
 use serde_json::Value;
@@ -108,6 +110,8 @@ pub struct FakeState {
     pub takeovers: Vec<(String, bool)>,
     pub approval_calls: usize,
     pub session_calls: usize,
+    pub inbox: Vec<Item>,
+    pub inbox_answers: Vec<(String, ActionId)>,
 }
 
 #[derive(Default)]
@@ -228,6 +232,39 @@ impl BridgeBackend for FakeBackend {
         })
     }
     fn stop_phone(&self, _: &Arc<Connection>) {}
+    fn inbox_items(&self) -> Vec<Item> {
+        self.with(|s| s.inbox.clone())
+    }
+    fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
+        self.with(|s| {
+            let item = s
+                .inbox
+                .iter_mut()
+                .find(|i| i.id == item_id)
+                .ok_or_else(|| BridgeFailure::not_found("No such inbox item."))?;
+            if item.state != State::Open {
+                return Ok(InboxOutcome {
+                    answered: false,
+                    state: item.state,
+                    answer: item.answer,
+                });
+            }
+            if !item.actions.iter().any(|a| a.id == action) {
+                return Err(BridgeFailure::invalid(
+                    "The item doesn't offer that action.",
+                ));
+            }
+            item.state = State::Answered;
+            item.answer = Some(action);
+            item.answered_by = Some("phone".into());
+            s.inbox_answers.push((item_id.to_string(), action));
+            Ok(InboxOutcome {
+                answered: true,
+                state: State::Answered,
+                answer: Some(action),
+            })
+        })
+    }
 }
 
 /// Devices in memory; tokens are `tok-<n>`.
@@ -450,5 +487,45 @@ pub fn permission(id: &str, session_id: &str) -> PendingPrompt {
         tool_name: "Bash".into(),
         summary: "ls".into(),
         created_ms: NOW_MS,
+    }
+}
+
+pub fn inbox_item(id: &str, kind: Kind) -> Item {
+    let action = |id: ActionId, label: &str, primary: bool| Action {
+        id,
+        label: label.into(),
+        primary,
+    };
+    let actions = match kind {
+        Kind::SecretApproval => vec![
+            action(ActionId::AllowOnce, "Allow Once", true),
+            action(ActionId::AllowAlways, "Always Allow", false),
+            action(ActionId::Deny, "Deny", false),
+        ],
+        Kind::SecretRequest => vec![
+            action(ActionId::Open, "Open Form", true),
+            action(ActionId::Cancel, "Cancel", false),
+        ],
+        _ => vec![action(ActionId::Done, "Done", true)],
+    };
+    Item {
+        id: id.into(),
+        kind,
+        title: "Allow Secret".into(),
+        detail: "claude wants the npm token".into(),
+        source: Source {
+            node: None,
+            session: Some("5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11".into()),
+            job: None,
+        },
+        created_ms: NOW_MS as i64,
+        expires_ms: Some(NOW_MS as i64 + 300_000),
+        actions,
+        state: State::Open,
+        answer: None,
+        answered_by: None,
+        seen: false,
+        open: None,
+        closed_ms: None,
     }
 }

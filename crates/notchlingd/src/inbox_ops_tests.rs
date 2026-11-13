@@ -523,3 +523,44 @@ fn a_refusing_responder_leaves_the_item_open() {
     assert_eq!(out["state"], "answered");
     assert_eq!(out["answer"], "deny");
 }
+
+#[test]
+fn a_phone_answer_is_recorded_as_the_phone_and_runs_the_responder() {
+    let r = rig();
+    let calls = Arc::new(Calls::default());
+    r.ops.raise(item("a"), Some(calls.clone()));
+    let out = r.ops.decide("a", ActionId::Deny, "phone").unwrap();
+    assert!(out.answered);
+    assert_eq!(out.state, State::Answered);
+    assert_eq!(out.answer, Some(ActionId::Deny));
+    assert_eq!(
+        *calls.0.lock().unwrap(),
+        vec![("a".to_string(), ActionId::Deny)]
+    );
+    let stored = r.ops.items();
+    assert_eq!(stored[0].answered_by.as_deref(), Some("phone"));
+}
+
+#[test]
+fn the_phone_loses_when_the_mac_answered_first() {
+    let r = rig();
+    let calls = Arc::new(Calls::default());
+    r.ops.raise(item("a"), Some(calls.clone()));
+    answer(&r.ops, "a", "allow");
+    let out = r.ops.decide("a", ActionId::Deny, "phone").unwrap();
+    assert!(!out.answered);
+    assert_eq!(out.state, State::Answered);
+    assert_eq!(out.answer, Some(ActionId::Allow));
+    assert_eq!(calls.0.lock().unwrap().len(), 1);
+    assert_eq!(r.ops.items()[0].answered_by.as_deref(), Some("mac"));
+}
+
+#[test]
+fn a_phone_answer_the_responder_refuses_leaves_the_item_open() {
+    let r = rig();
+    r.ops.raise(item("a"), Some(Arc::new(Refuses)));
+    let out = r.ops.decide("a", ActionId::Allow, "phone").unwrap();
+    assert!(!out.answered);
+    assert_eq!(out.state, State::Open);
+    assert!(r.ops.decide("zzz", ActionId::Allow, "phone").is_err());
+}

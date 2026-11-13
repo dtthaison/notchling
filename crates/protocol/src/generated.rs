@@ -509,6 +509,58 @@ pub struct VizSpec {
     pub chart: Option<ChartSpec>,
 }
 
+/// One button an inbox item offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxAction {
+    /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it.
+    pub id: String,
+    pub label: String,
+    /// The main button of the item.
+    pub primary: bool,
+}
+
+/// One notification the Mac's inbox holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItem {
+    pub id: String,
+    /// secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice.
+    pub kind: String,
+    pub title: String,
+    pub detail: String,
+    /// Where the item came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<InboxItemSource>,
+    pub created_ms: i64,
+    /// When an open item stops waiting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_ms: Option<i64>,
+    /// When the item was answered, expired or withdrawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_ms: Option<i64>,
+    pub actions: Vec<InboxAction>,
+    /// open, answered, expired or withdrawn.
+    pub state: String,
+    /// The action id that answered it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// mac or phone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_by: Option<String>,
+    pub seen: bool,
+}
+
+/// Where the item came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxItemSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
+}
+
 /// First message on a connection from a paired phone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HelloRequest {
@@ -778,6 +830,9 @@ pub struct SubscribeRequest {
     /// Stream the Mac's device window as PHN1 frames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone: Option<SubscribeRequestPhone>,
+    /// Push the inbox's items, and each one raised, changed or removed after. Absent means no inbox pushes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<bool>,
 }
 
 /// Stream the Mac's device window as PHN1 frames.
@@ -800,6 +855,27 @@ pub struct UnsubscribeRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     pub op: String,
+}
+
+/// The Mac's notification inbox.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxListRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+}
+
+/// Presses one action of an open inbox item. The first answer wins, from the Mac or a phone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxAnswerRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub op: String,
+    /// The inbox item's id.
+    pub item_id: String,
+    /// An action id the item offers; open is refused.
+    pub action: String,
 }
 
 /// The connection is authenticated.
@@ -1161,6 +1237,45 @@ pub struct UnsubscribeResponseData {
     pub subscribed: bool,
 }
 
+/// The inbox as the Mac keeps it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxListResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: InboxListResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxListResponseData {
+    pub items: Vec<InboxItem>,
+    /// Open items not seen yet.
+    pub unread: i64,
+}
+
+/// Whether this answer was the one taken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxAnswerResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    pub ok: bool,
+    /// The answer.
+    pub data: InboxAnswerResponseData,
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxAnswerResponseData {
+    /// False when the item was already answered, expired or withdrawn.
+    pub answered: bool,
+    pub state: String,
+    /// The action that answered the item, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+}
+
 /// The Mac refused a request, or could not read the frame (then there is no id).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorResponse {
@@ -1219,6 +1334,21 @@ pub struct OpenEvent {
     pub event: String,
 }
 
+/// An inbox item was raised or changed. Sent only to a connection that subscribed with inbox: true.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxEvent {
+    pub event: String,
+    pub item: InboxItem,
+}
+
+/// An inbox item was removed from the Mac's inbox.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxRemovedEvent {
+    pub event: String,
+    /// The removed item's id.
+    pub removed: String,
+}
+
 fn round<T: DeserializeOwned + Serialize>(value: &Value) -> Result<Value, serde_json::Error> {
     let typed: T = serde_json::from_value(value.clone())?;
     serde_json::to_value(typed)
@@ -1257,6 +1387,8 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "ModelCount" => round::<ModelCount>(value),
         "ChartSpec" => round::<ChartSpec>(value),
         "VizSpec" => round::<VizSpec>(value),
+        "InboxAction" => round::<InboxAction>(value),
+        "InboxItem" => round::<InboxItem>(value),
         "HelloRequest" => round::<HelloRequest>(value),
         "PairRequest" => round::<PairRequest>(value),
         "PingRequest" => round::<PingRequest>(value),
@@ -1277,6 +1409,8 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "ProjectsRecentRequest" => round::<ProjectsRecentRequest>(value),
         "SubscribeRequest" => round::<SubscribeRequest>(value),
         "UnsubscribeRequest" => round::<UnsubscribeRequest>(value),
+        "InboxListRequest" => round::<InboxListRequest>(value),
+        "InboxAnswerRequest" => round::<InboxAnswerRequest>(value),
         "HelloResponse" => round::<HelloResponse>(value),
         "PairResponse" => round::<PairResponse>(value),
         "PingResponse" => round::<PingResponse>(value),
@@ -1298,12 +1432,16 @@ pub fn roundtrip(name: &str, value: &Value) -> Option<Result<Value, serde_json::
         "ProjectsRecentResponse" => round::<ProjectsRecentResponse>(value),
         "SubscribeResponse" => round::<SubscribeResponse>(value),
         "UnsubscribeResponse" => round::<UnsubscribeResponse>(value),
+        "InboxListResponse" => round::<InboxListResponse>(value),
+        "InboxAnswerResponse" => round::<InboxAnswerResponse>(value),
         "ErrorResponse" => round::<ErrorResponse>(value),
         "SessionsEvent" => round::<SessionsEvent>(value),
         "PromptEvent" => round::<PromptEvent>(value),
         "PromptResolvedEvent" => round::<PromptResolvedEvent>(value),
         "ChatEvent" => round::<ChatEvent>(value),
         "OpenEvent" => round::<OpenEvent>(value),
+        "InboxEvent" => round::<InboxEvent>(value),
+        "InboxRemovedEvent" => round::<InboxRemovedEvent>(value),
         _ => return None,
     })
 }

@@ -1,0 +1,33 @@
+{
+  "event": "inbox",
+  "item": {
+    "actions": [
+      {
+        "id": "allow_once",
+        "label": "Allow Once",
+        "primary": true
+      },
+      {
+        "id": "allow_always",
+        "label": "Always Allow",
+        "primary": false
+      },
+      {
+        "id": "deny",
+        "label": "Deny",
+        "primary": false
+      }
+    ],
+    "createdMs": 1793541465000,
+    "detail": "claude wants the npm token",
+    "expiresMs": 1793541765000,
+    "id": "vault-approval-1",
+    "kind": "secret_approval",
+    "seen": false,
+    "source": {
+      "session": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"
+    },
+    "state": "open",
+    "title": "Allow Secret"
+  }
+}

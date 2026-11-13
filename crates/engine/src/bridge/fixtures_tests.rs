@@ -3,8 +3,9 @@
 //! only the phone sends must be accepted. The Swift test writes the fixtures; this one only reads.
 
 use super::fixtures_data::*;
-use super::test_support::{is_ok, RecordingIo, Rig, NOW_MS};
+use super::test_support::{inbox_item, is_ok, RecordingIo, Rig, NOW_MS};
 use super::wire::{self, BridgeFailure};
+use crate::inbox::{ActionId, Kind};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -130,6 +131,7 @@ fn every_fixture_is_captured_or_accepted() {
     actions(&mut run);
     uploads(&mut run);
     subscriptions(&mut run);
+    inbox(&mut run);
     errors(&mut run);
     binary_frames();
 
@@ -501,6 +503,43 @@ fn subscriptions(run: &mut Run) {
             width: 400
         }]
     );
+}
+
+fn inbox(run: &mut Run) {
+    let phone = connect();
+    phone
+        .rig
+        .backend
+        .with(|s| s.inbox = vec![inbox_item("vault-approval-1", Kind::SecretApproval)]);
+    run.round_trip(
+        &phone,
+        "InboxListRequest",
+        json!({}),
+        Some("InboxListResponse"),
+    );
+    run.round_trip(&phone, "SubscribeRequest.inbox", json!({}), None);
+    phone.rig.hub.tick(phone.rig.backend.as_ref());
+    let pushed = phone.io.texts().last().cloned().expect("inbox event");
+    run.capture("InboxEvent", &pushed, |_| {});
+    run.round_trip(
+        &phone,
+        "InboxAnswerRequest",
+        json!({}),
+        Some("InboxAnswerResponse"),
+    );
+    phone.rig.backend.with(|s| {
+        s.inbox[0].answer = Some(ActionId::Deny);
+    });
+    let taken = run.round_trip(&phone, "InboxAnswerRequest", json!({}), None);
+    run.capture(
+        "InboxAnswerResponse.mac-first",
+        taken.last().expect("reply"),
+        |_| {},
+    );
+    phone.rig.backend.with(|s| s.inbox.clear());
+    phone.rig.hub.tick(phone.rig.backend.as_ref());
+    let removed = phone.io.texts().last().cloned().expect("removed event");
+    run.capture("InboxRemovedEvent", &removed, |_| {});
 }
 
 fn errors(run: &mut Run) {
