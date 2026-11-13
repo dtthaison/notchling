@@ -24,6 +24,7 @@ use gpui::{
 };
 use notchling_engine::transcript::model::Conversation;
 use notchling_kit::metric::SIDE_PADDING;
+use notchling_kit::render_map::Region;
 use notchling_kit::ui::{scrollable_list, window_appearance};
 
 use super::conversation::{live_group_of, render_row, COLUMN_PADDING_VERTICAL, ROW_GAP};
@@ -481,6 +482,7 @@ impl ConversationView {
         let Some(row) = row_at(input, i) else {
             return div().into_any_element();
         };
+        let _region = super::render_map::scope(Region::Conversation, cx);
         let a = window_appearance(window);
         let live = live_group_of(input) == Some(i);
         let built_at = super::scroll_probe::enabled().then(std::time::Instant::now);

@@ -70,6 +70,13 @@ impl Region {
     }
 }
 
+pub fn label_inks(region: Option<Region>) -> (Ink, Ink) {
+    match region {
+        Some(r) => (r.ink(), r.on_ink()),
+        None => (Region::Window.ink(), Region::Window.on_ink()),
+    }
+}
+
 /// "1 draw", "2 draws", "0 draws".
 pub fn plural(n: u64, word: &str) -> String {
     if n == 1 {
@@ -212,6 +219,28 @@ mod tests {
         }
         assert!(Region::Sidebar.is_part() && Region::Conversation.is_part());
         assert!(Region::Details.is_part() && !Region::Window.is_part());
+    }
+
+    #[test]
+    fn a_label_takes_the_ink_of_its_region() {
+        assert_eq!(
+            label_inks(Some(Region::Sidebar)),
+            (Ink::Done, Ink::OnAccent)
+        );
+        assert_eq!(
+            label_inks(Some(Region::Conversation)),
+            (Ink::Accent, Ink::OnAccent)
+        );
+        assert_eq!(
+            label_inks(Some(Region::Details)),
+            (Ink::Shell, Ink::OnShell)
+        );
+        assert_eq!(label_inks(Some(Region::Window)), (Ink::Guide, Ink::OnGuide));
+    }
+
+    #[test]
+    fn a_label_outside_any_region_or_with_the_map_off_is_guide() {
+        assert_eq!(label_inks(None), (Ink::Guide, Ink::OnGuide));
     }
 
     #[test]
