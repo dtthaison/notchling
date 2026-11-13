@@ -241,7 +241,7 @@ impl NotchView {
 
     /// The housing's own height. Active sessions are counted at its right while the shape is open
     /// on something else; the list says it in its tabs.
-    fn top_bar(&self, cx: &gpui::App) -> Div {
+    fn top_bar(&self, cx: &mut Context<Self>) -> Div {
         let m = &self.model;
         let active = m.count(AgentGroup::NeedsInput) + m.count(AgentGroup::Working);
         let counted = matches!(m.state, NotchState::Peek(_) | NotchState::Detail(_)) && active > 0;
@@ -265,7 +265,17 @@ impl NotchView {
                         .map(|note| text(note, TypeRole::Meta, Ink::TextFaint)),
                 ),
             )
-            .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .children(
+                        self.inbox_badge(cx)
+                            .filter(|_| m.state != NotchState::Collapsed),
+                    )
+                    .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink))),
+            )
             // Inside: the housing's top is the screen's edge.
             .part_inside("Notch Bar", Corner::TopTrailing, A, cx)
     }

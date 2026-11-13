@@ -23,6 +23,7 @@ pub struct Drawn {
     daemon_note: Option<&'static str>,
     answered: Vec<String>,
     card_height: Option<f64>,
+    inbox_unread: usize,
     ages: Vec<String>,
 }
 
@@ -55,6 +56,7 @@ impl NotchModel {
             daemon_note: self.daemon_note,
             answered,
             card_height: self.card_height,
+            inbox_unread: self.inbox_unread,
             ages: self
                 .agents
                 .iter()

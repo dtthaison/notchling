@@ -365,6 +365,13 @@ pub fn open_chat_session(cx: &mut App, target: SessionRef) {
     }
 }
 
+pub fn open_chat_inbox(cx: &mut App) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        handle.update(cx, |view, _, cx| view.show_inbox(cx)).ok();
+    }
+}
+
 /// Opens Chat with the Settings sheet (⌘, and the menu bar's Settings…).
 pub fn open_chat_settings(cx: &mut App) {
     open_chat(cx);

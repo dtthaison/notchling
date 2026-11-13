@@ -130,6 +130,10 @@ impl InboxModel {
             .collect()
     }
 
+    pub fn items(&self) -> &[Item] {
+        &self.items
+    }
+
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }

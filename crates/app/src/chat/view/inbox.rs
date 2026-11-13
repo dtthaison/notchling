@@ -26,6 +26,12 @@ impl ChatView {
         cx.notify();
     }
 
+    pub fn show_inbox(&mut self, cx: &mut Context<Self>) {
+        if self.inbox_panel.is_none() {
+            self.toggle_inbox(cx);
+        }
+    }
+
     fn close_inbox(&mut self, cx: &mut Context<Self>) {
         self.inbox_panel = None;
         cx.notify();

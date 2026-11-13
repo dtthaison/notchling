@@ -1,24 +1,38 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use notchling_engine::inbox::ActionId;
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event};
+use notchling_platform::notify::{system_notifier, Notifier, Unsupported};
 use serde_json::{json, Value};
 
 use super::model::{answer_args, seen_args, InboxModel};
+use super::system::{notify_new, remember, Detached};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 use crate::switches::feed::{config_for, FeedConfig};
 
-#[derive(Default)]
 struct Shared {
     model: Mutex<InboxModel>,
+    notified: Mutex<HashSet<String>>,
+    notifier: Arc<dyn Notifier>,
     generation: AtomicU64,
     stop: AtomicBool,
 }
 
 impl Shared {
+    fn new(notifier: Arc<dyn Notifier>) -> Shared {
+        Shared {
+            model: Mutex::default(),
+            notified: Mutex::default(),
+            notifier,
+            generation: AtomicU64::new(0),
+            stop: AtomicBool::new(false),
+        }
+    }
+
     fn model(&self) -> MutexGuard<'_, InboxModel> {
         self.model.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -27,14 +41,29 @@ impl Shared {
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
+    fn notified(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.notified.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn seed(&self, reply: &Value) {
-        self.model().load(reply);
+        let mut model = self.model();
+        model.load(reply);
+        remember(&model, &mut self.notified());
+        drop(model);
         self.bump();
     }
 
     fn apply(&self, event: &Event) {
         let wire = json!({"event": event.event, "data": event.data});
-        self.model().apply(&wire);
+        let (before, after) = {
+            let mut model = self.model();
+            let before = model.clone();
+            model.apply(&wire);
+            (before, model.clone())
+        };
+        if event.event == topics::INBOX_CHANGED {
+            notify_new(&before, &after, &mut self.notified(), &*self.notifier);
+        }
         self.bump();
     }
 
@@ -56,7 +85,7 @@ pub struct InboxFeed {
 impl InboxFeed {
     pub fn none() -> InboxFeed {
         InboxFeed {
-            shared: Arc::default(),
+            shared: Arc::new(Shared::new(Arc::new(Unsupported))),
             transport: None,
         }
     }
@@ -74,14 +103,20 @@ impl InboxFeed {
                     socket: config.socket.clone(),
                     version: config.version.clone(),
                 };
-                InboxFeed::start(config, Arc::new(transport))
+                let banners = Detached::new(Arc::from(system_notifier()));
+                InboxFeed::start(config, Arc::new(transport), Arc::new(banners))
             }
             None => InboxFeed::none(),
         }
     }
 
-    pub fn start(config: FeedConfig, transport: Arc<dyn Transport>) -> InboxFeed {
+    pub fn start(
+        config: FeedConfig,
+        transport: Arc<dyn Transport>,
+        notifier: Arc<dyn Notifier>,
+    ) -> InboxFeed {
         let mut feed = InboxFeed::none();
+        feed.shared = Arc::new(Shared::new(notifier));
         feed.transport = Some(transport);
         let shared = feed.shared.clone();
         let spawned = std::thread::Builder::new()

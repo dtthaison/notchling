@@ -19,6 +19,9 @@ pub mod backdrop;
 #[cfg(target_os = "macos")]
 pub mod cards;
 pub mod drawn;
+pub mod inbox;
+#[cfg(target_os = "macos")]
+pub mod inbox_view;
 pub mod layout;
 pub mod model;
 #[cfg(target_os = "macos")]
