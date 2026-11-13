@@ -231,19 +231,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               child: Column(
                 children: <Widget>[
                   const ConnectionBanner(),
+                  // Flow is its own tab here too: a third column squeezed the chat and was rarely wanted.
                   Expanded(
-                    child: Row(
-                      children: <Widget>[
-                        SizedBox(
-                          width: 360,
-                          child: const SessionsScreen(),
-                        ),
-                        const VerticalDivider(),
-                        const Expanded(child: ChatScreen()),
-                        const VerticalDivider(),
-                        const Expanded(child: VisualizeScreen()),
-                      ],
-                    ),
+                    child: tab == 1
+                        ? const VisualizeScreen()
+                        : const Row(
+                            children: <Widget>[
+                              SizedBox(width: 360, child: SessionsScreen()),
+                              VerticalDivider(),
+                              Expanded(child: ChatScreen()),
+                            ],
+                          ),
                   ),
                 ],
               ),
@@ -409,16 +407,13 @@ class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
   }
 }
 
-/// The tab bar. Hidden only on wide layouts. It stays laid out while the keyboard is up (the keyboard covers
-/// it), so nothing on the page moves when the keyboard starts to slide.
+/// The tab bar, on every width since Flow is a tab on wide layouts too. It stays laid out while the keyboard is up
+/// (the keyboard covers it), so nothing on the page moves when the keyboard starts to slide.
 class _BottomNav extends ConsumerWidget {
   const _BottomNav();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint) {
-      return const SizedBox.shrink();
-    }
     return GlassNav(
       selected: ref.watch(activeTabProvider),
       onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
