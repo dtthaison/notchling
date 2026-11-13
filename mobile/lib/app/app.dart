@@ -4,7 +4,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../features/settings/app_settings.dart';
 import '../l10n/app_localizations.dart';
+import 'nav_state.dart';
 import 'shell.dart';
+import 'widgets/alert_banner.dart';
 import 'theme/tokens.dart';
 
 class AgentConsoleApp extends ConsumerWidget {
@@ -36,6 +38,19 @@ class AgentConsoleApp extends ConsumerWidget {
           locale?.languageCode == 'en'
           ? const Locale('en')
           : const Locale('vi'),
+      navigatorKey: appNavigatorKey,
+      // Above the Navigator, so neither the app bar nor a pushed chat (with its own header) draws over the alert.
+      builder: (BuildContext context, Widget? child) => Stack(
+        children: <Widget>[
+          ?child,
+          Positioned(
+            top: MediaQuery.paddingOf(context).top,
+            left: 0,
+            right: 0,
+            child: const Material(type: MaterialType.transparency, child: InAppAlertBanner()),
+          ),
+        ],
+      ),
       home: const AppRoot(),
     );
   }

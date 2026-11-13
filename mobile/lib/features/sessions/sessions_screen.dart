@@ -37,8 +37,8 @@ class ExpandedSessionsNotifier extends Notifier<Set<String>> {
 class SessionsScreen extends ConsumerStatefulWidget {
   const SessionsScreen({super.key, this.onOpenChat});
 
-  /// Called after a session is picked; on a phone it switches to the Chat tab.
-  final VoidCallback? onOpenChat;
+  /// Called with the picked session's id; on a phone it pushes that chat over the list.
+  final void Function(String id)? onOpenChat;
 
   @override
   ConsumerState<SessionsScreen> createState() => _SessionsScreenState();
@@ -50,7 +50,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
 
   void _select(Session session) {
     ref.read(selectedSessionIdProvider.notifier).select(session.id);
-    widget.onOpenChat?.call();
+    widget.onOpenChat?.call(session.id);
   }
 
   @override
