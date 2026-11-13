@@ -4,6 +4,10 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Added
+
+- A notifications inbox: a bell in Chat (and a badge in the open notch) collects what needs you, such as a vault approval, a secret an agent asked for, or a limit notice. Answer from Chat or from the phone, and get a system notification when something new arrives.
+
 ### Fixed
 
 - The Artifact pages library saves again. Since the Rust app replaced the Swift one, published pages were no longer copied to `~/Library/Application Support/Notchling/pages`, reads of a saved link no longer came from the local copy, and a failed read no longer pointed at it. `notchling hook` now handles the Artifact tool's events itself, with or without the app running.
