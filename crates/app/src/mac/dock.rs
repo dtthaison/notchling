@@ -8,6 +8,7 @@ actions!(
     notchling,
     [
         OpenSettings,
+        OpenSearch,
         Quit,
         Minimize,
         CloseWindow,
@@ -68,6 +69,7 @@ fn menu_item(item: MainItem) -> MenuItem {
 pub fn register(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &OpenSettings, cx| super::shell::open_chat_settings(cx));
+    cx.on_action(|_: &OpenSearch, cx| crate::search::panel::toggle(cx));
     cx.on_action(|_: &Minimize, cx| {
         if let Some(window) = cx.active_window() {
             window
@@ -92,6 +94,11 @@ pub fn bind_keys(cx: &mut App) {
         .filter_map(|item| item.key().map(|key| binding(key, item)))
         .collect::<Vec<_>>();
     cx.bind_keys(bindings);
+    cx.bind_keys([KeyBinding::new(
+        crate::search::shortcut::IN_WINDOW_KEY,
+        OpenSearch,
+        None,
+    )]);
 }
 
 fn binding(key: &str, item: MainItem) -> KeyBinding {

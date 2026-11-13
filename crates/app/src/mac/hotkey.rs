@@ -7,6 +7,7 @@ use std::rc::Rc;
 use objc2::MainThreadMarker;
 
 use crate::search::hotkey::{HotKey, Registration};
+use crate::search::shortcut::Shortcut;
 
 type OSStatus = i32;
 type EventHotKeyRef = *mut c_void;
@@ -69,9 +70,6 @@ const K_EVENT_HOT_KEY_PRESSED: u32 = 5;
 const K_EVENT_PARAM_DIRECT_OBJECT: u32 = four(b"----");
 const TYPE_EVENT_HOT_KEY_ID: u32 = four(b"hkid");
 const SIGNATURE: u32 = four(b"NTCL");
-const K_VK_ANSI_P: u32 = 0x23;
-const CMD_KEY: u32 = 1 << 8;
-const SHIFT_KEY: u32 = 1 << 9;
 const NO_ERR: OSStatus = 0;
 const EVENT_NOT_HANDLED_ERR: OSStatus = -9874;
 
@@ -155,22 +153,25 @@ fn install_handler() -> Result<(), String> {
 pub struct CarbonHotKey {
     key_code: u32,
     modifiers: u32,
-    label: &'static str,
+    label: String,
 }
 
 impl CarbonHotKey {
-    pub fn command_shift_p() -> CarbonHotKey {
-        CarbonHotKey {
-            key_code: K_VK_ANSI_P,
-            modifiers: CMD_KEY | SHIFT_KEY,
-            label: "⌘⇧P",
-        }
+    pub fn new(shortcut: Shortcut) -> Result<CarbonHotKey, String> {
+        let (key_code, modifiers) = shortcut
+            .carbon()
+            .ok_or_else(|| format!("{} is not a key a hot key can use", shortcut.label()))?;
+        Ok(CarbonHotKey {
+            key_code,
+            modifiers,
+            label: shortcut.label(),
+        })
     }
 }
 
 impl HotKey for CarbonHotKey {
-    fn label(&self) -> &'static str {
-        self.label
+    fn label(&self) -> String {
+        self.label.clone()
     }
 
     fn register(&self, on_press: Box<dyn Fn()>) -> Result<Box<dyn Registration>, String> {
@@ -197,8 +198,9 @@ impl HotKey for CarbonHotKey {
             )
         };
         if status != NO_ERR || hot_key.is_null() {
+            eprintln!("hot key {}: Carbon status {status}", self.label);
             return Err(format!(
-                "another app holds {} (Carbon status {status})",
+                "{} is already used by another app or by macOS.",
                 self.label
             ));
         }
@@ -232,9 +234,9 @@ mod tests {
         assert_eq!(TYPE_EVENT_HOT_KEY_ID, 0x686B_6964);
         assert_eq!(K_EVENT_PARAM_DIRECT_OBJECT, 0x2D2D_2D2D);
         assert_eq!(SIGNATURE, 0x4E54_434C);
-        let key = CarbonHotKey::command_shift_p();
-        assert_eq!(key.label(), "⌘⇧P");
-        assert_eq!((key.key_code, key.modifiers), (0x23, 0x300));
+        let key = CarbonHotKey::new(crate::search::shortcut::DEFAULT).expect("a Carbon key");
+        assert_eq!(key.label(), "⌃⌥P");
+        assert_eq!((key.key_code, key.modifiers), (0x23, 0x1800));
         assert_eq!(std::mem::size_of::<EventHotKeyID>(), 8);
         assert_eq!(EVENT_NOT_HANDLED_ERR, -9874);
     }

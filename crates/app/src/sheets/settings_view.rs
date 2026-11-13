@@ -19,6 +19,7 @@ use super::banner::Banners;
 use super::hook_rows::HooksShown;
 use super::settings::{change, sections, Daemon, Field, Row};
 use super::view::{sheet_header, Acts, Dismiss};
+mod shortcut;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
@@ -33,6 +34,7 @@ pub struct SettingsView {
     hooks: HooksShown,
     page: Page,
     tool: Tool,
+    shortcut: shortcut::ShortcutState,
 }
 
 pub struct SettingChanged {
@@ -60,6 +62,7 @@ impl SettingsView {
             hooks: HooksShown::Checking,
             page: Page::General,
             tool: Tool::ClaudeCode,
+            shortcut: shortcut::ShortcutState::default(),
         }
     }
 
@@ -271,6 +274,7 @@ impl SettingsView {
                     None => div().opacity(0.4).child(switch(id("daemon"), false, a)),
                 }
             }
+            Field::Shortcut(setting) => self.shortcut_field(*setting, a, cx),
             Field::ReadOnly { value, .. } => div()
                 .px(px(8.0))
                 .h(px(20.0))
@@ -335,6 +339,7 @@ impl Render for SettingsView {
                     Field::ReadOnly {
                         note: Some(note), ..
                     } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
+                    Field::Shortcut(_) => self.shortcut_note(a, cx),
                     _ => None,
                 };
                 rows = rows.child(

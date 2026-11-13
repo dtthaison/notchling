@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use crate::acting::Acting;
 use crate::appearance;
 use crate::chat::history;
+use crate::search::shortcut;
 use crate::switches::restart::Area;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -29,6 +30,7 @@ pub enum Field {
         area: Area,
         on: Option<bool>,
     },
+    Shortcut(shortcut::Setting),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +260,22 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
                  more memory. It applies the next time a session loads.",
             ),
         },
+        Section {
+            title: "Search",
+            rows: vec![Row {
+                key: shortcut::KEY,
+                title: "Search Shortcut",
+                field: Field::Shortcut(
+                    value(read, shortcut::KEY)
+                        .map(|v| shortcut::Setting::from_value(&v))
+                        .unwrap_or(shortcut::Setting::DEFAULT),
+                ),
+            }],
+            footer: Some(
+                "Opens Search from any app, so no other app can use this key. Inside \
+                 Notchling, ⌘⇧P always opens Search.",
+            ),
+        },
     ]
 }
 
@@ -279,7 +297,7 @@ pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
             };
             Some((row.key, json!((value + step).clamp(*min, *max))))
         }
-        Field::ReadOnly { .. } | Field::Daemon { .. } => None,
+        Field::ReadOnly { .. } | Field::Daemon { .. } | Field::Shortcut(_) => None,
     }
 }
 
@@ -442,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_section_is_last_and_nothing_before_it_moves() {
+    fn the_chat_and_search_sections_are_last_and_nothing_before_them_moves() {
         let titles: Vec<&str> = sections(&|_| None, &with(Acting::Off))
             .iter()
             .map(|s| s.title)
@@ -457,7 +475,8 @@ mod tests {
                 "Claude Code",
                 "When the Account in Use Nears Its Limit",
                 "Codex",
-                "Chat"
+                "Chat",
+                "Search"
             ]
         );
         let rows = rows_of(&|_| None, Acting::Off);
@@ -474,6 +493,27 @@ mod tests {
             Some(("chatHistory", json!("16mb")))
         );
         assert_eq!(change(&history, "1gb"), None);
+    }
+
+    #[test]
+    fn the_search_shortcut_shows_control_option_p_until_chosen() {
+        let rows = rows_of(&|_| None, Acting::Off);
+        let shown = row(&rows, "searchShortcut");
+        assert_eq!(shown.title, "Search Shortcut");
+        assert_eq!(shown.field, Field::Shortcut(shortcut::Setting::DEFAULT));
+        assert_eq!(change(&shown, "alt+space"), None, "the recorder writes it");
+        let store: HashMap<&str, Value> = [("searchShortcut", json!("off"))].into_iter().collect();
+        let read = |k: &str| store.get(k).cloned();
+        let off = row(&rows_of(&read, Acting::Off), "searchShortcut");
+        assert_eq!(off.field, Field::Shortcut(shortcut::Setting::Off));
+        let store: HashMap<&str, Value> = [("searchShortcut", json!("alt+space"))]
+            .into_iter()
+            .collect();
+        let read = |k: &str| store.get(k).cloned();
+        let Field::Shortcut(set) = row(&rows_of(&read, Acting::Off), "searchShortcut").field else {
+            panic!()
+        };
+        assert_eq!(set.label(), "⌥Space");
     }
 
     #[test]
