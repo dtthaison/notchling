@@ -151,6 +151,10 @@ pub mod ops {
     /// The model catalog, agent tier, read only (`notchlingd`'s `catalog_ops` module docs):
     /// `{tool: "claude" | "codex" | "antigravity"}` → `{tool, models: [ModelInfo], fetchedAt}`.
     pub const CATALOG_GET: &str = "catalog.get";
+
+    pub const INBOX_LIST: &str = "inbox.list";
+    pub const INBOX_ANSWER: &str = "inbox.answer";
+    pub const INBOX_SEEN: &str = "inbox.seen";
 }
 
 /// Event topics and the events they carry.
@@ -222,6 +226,10 @@ pub mod topics {
     pub const VAULT_REQUEST_RESOLVED: &str = "vault.request.resolved";
     /// `{names, value_changed}`: the list changed (a save, a remove, Always Allow).
     pub const VAULT_CHANGED: &str = "vault.changed";
+
+    pub const INBOX: &str = "inbox";
+    pub const INBOX_CHANGED: &str = "inbox.changed";
+    pub const INBOX_REMOVED: &str = "inbox.removed";
 }
 
 /// Who the caller says it is. Self-reported, so it never decides the tier.

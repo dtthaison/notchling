@@ -94,11 +94,12 @@ fn the_server_serves_every_area_and_the_vault_skill_is_offered_to_install() {
         "cost.summary",
         ops::CATALOG_GET,
         ops::VAULT_LIST,
+        ops::INBOX_LIST,
         ops::INSTALL_PLAN,
     ] {
         assert!(ops.spec(op).is_some(), "{op}");
     }
-    for topic in ["accounts", "providers", "limits", "vault"] {
+    for topic in ["accounts", "providers", "limits", "vault", "inbox"] {
         assert!(ops.topics().contains(&topic), "{topic}");
         assert_eq!(ops.topic_tier(topic), Tier::App, "{topic}");
     }

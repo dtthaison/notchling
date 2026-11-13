@@ -53,6 +53,7 @@ pub mod hook;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
+pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_reply;
 pub mod layout;
@@ -99,6 +100,8 @@ mod hook_ops_tests;
 mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod inbox_ops_tests;
 #[cfg(test)]
 mod install_ops_tests;
 #[cfg(test)]

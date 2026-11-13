@@ -16,6 +16,7 @@ use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
 use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
@@ -273,6 +274,7 @@ pub struct Wired {
     pub limits: Arc<LimitsOps>,
     /// The one catalog: `catalog.get`, and the prices cost reads.
     pub catalog: Arc<CatalogService>,
+    pub inbox: Arc<InboxOps>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
 }
@@ -400,6 +402,7 @@ impl Wired {
             Box::new(move || agy_on.is_on() && agy_idle.idle_for_auto_switch()),
         );
 
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone());
         let vault = Arc::new(VaultOps::for_daemon(
             layout,
             switches.vault.clone(),
@@ -423,6 +426,7 @@ impl Wired {
             providers,
             limits,
             catalog,
+            inbox,
             vault,
             install: Arc::new(install),
         }
@@ -452,6 +456,7 @@ impl Wired {
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
             .with_group(self.catalog.clone())
+            .with_group(self.inbox.clone())
             .with_group(self.vault.clone())
             .with_first_scan(first_scan, first_wait)
     }
@@ -459,6 +464,7 @@ impl Wired {
     /// The server answers: the limits loop starts (a flag check per tick while `accounts` is off).
     pub fn start(&self) {
         self.limits.spawn_loop();
+        self.inbox.spawn_loop();
     }
 
     /// The daemon stops: held hooks pass, turns and waits end, the bridge's ports close.
@@ -467,6 +473,7 @@ impl Wired {
         self.codex.close();
         self.agy.close();
         self.providers.close();
+        self.inbox.close();
         self.vault.close();
         self.bridge.close();
         self.limits.close();
