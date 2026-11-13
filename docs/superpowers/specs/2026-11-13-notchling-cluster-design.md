@@ -158,6 +158,7 @@ Write a new record superseding 0012's "Nothing is replicated" paragraph and ARCH
 
 ## Suggested order
 
+0. The notifications inbox (works on one Mac too).
 1. Node identity, joining and the cluster view (no failover yet); run a session or a job on a picked Worker and see it in Chat and on the phone.
 2. Vault delivery to Workers and the single refresher.
 3. Standby replication and planned handoff.
@@ -182,3 +183,17 @@ These were open after an independent read; each is the author's call, for the ma
 ## Maintainer's answers (2026-11-13)
 
 - **Secrets for Workers:** a Worker's job may ask for any vault entry by name; there is no per-node allowlist. An entry marked **Always ask** (the vault's Ask me first) is released only after the maintainer allows it: the request goes to the leader, which shows it in Chat and on the phone, and nothing is delivered until Allow.
+- **Token renewal: option (a).** Notchling takes renewal over completely. Every tool on every node, the leader included, gets access-only credentials, and the leader's daemon alone holds and renews refresh tokens (Claude Code, Codex, Antigravity CLI logins and lanes). This replaces today's "never renew a token in use" rule: no tool renews any more, so Notchling's renewal can't race one. Claude Desktop's cookies and the Antigravity app's own login stay outside the cluster for now.
+- **Signing (author's call, not yet confirmed):** the design does not assume Developer ID signing. Without it the Mac keeps the vault's unlock key in the Keychain as today, and unlocking a Standby is approved mainly from the phone (Face ID). Secure Enclave behind Touch ID comes when the app is signed.
+
+## Notifications (in-app inbox)
+
+Asked for by the maintainer on 2026-11-13. One place that collects what needs the maintainer, where each item can be acted on directly.
+
+- **Where:** a bell with an unread count in Chat (bottom of the Sidebar, next to Machines and Vault), a badge in the notch, a Notifications tab on the phone, and a macOS notification for items that need an answer (with the in-app banner as the fallback when macOS refuses).
+- **Item:** title, one line of detail, where it comes from (node, session or job), time, and its actions. Newest first; answered or expired items move to a "Done" section and are pruned after a while.
+- **Actions on the item itself:** the buttons the kind needs, e.g. **Allow / Deny** (vault "Always ask", a permission), **Continue / Cancel** (a paused outward step after failover), **Done** (acknowledge). Clicking the item body opens the detail as a popup or sheet: the vault form, the sign-in sheet, the conflict-copy viewer, the session.
+- **One state everywhere:** items live in the leader's daemon (stored, and replicated to Standbys) and are pushed to every client; answering on one surface clears it on all, the way a question card answered in the notch clears in Chat. The first answer wins.
+- **Requests wait, then expire:** an item that holds work (a secret request, a paused step) keeps that work waiting until answered, and turns into a refusal after its timeout (the requester gets a clear "not allowed in time").
+- **Kinds at first:** secret request (Always ask), login needed on a node, failover happened, paused outward step, no leader / not enough voters, Standby locked (Unlock with Face ID), conflict copies to review, limit switch, a failed action, a job finished (optional, per kind on/off).
+- **Order:** the inbox is useful before the cluster exists (vault Ask First, errors, limit switches today), so it can be built first, as step 0.
