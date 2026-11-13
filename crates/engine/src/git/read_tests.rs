@@ -340,9 +340,10 @@ mod real {
     fn launcher() -> Box<dyn Launcher> {
         let real = RealLauncher::with_claude(PathBuf::from("/nonexistent/claude"));
         #[cfg(target_os = "macos")]
-        return Box::new(crate::git::SandboxedLauncher::new(std::sync::Arc::new(
-            real,
-        )));
+        return Box::new(crate::git::SandboxedLauncher::waiting(
+            std::sync::Arc::new(real),
+            std::time::Duration::from_secs(60),
+        ));
         #[cfg(not(target_os = "macos"))]
         Box::new(real)
     }

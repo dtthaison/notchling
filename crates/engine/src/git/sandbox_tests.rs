@@ -1,4 +1,6 @@
-use super::sandbox::{profile, SandboxedLauncher};
+use super::sandbox::{profile, root_owned_chain, Owner, SandboxedLauncher};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn the_profile_denies_every_exec_and_allows_only_the_named_programs() {
@@ -16,6 +18,77 @@ fn the_profile_denies_every_exec_and_allows_only_the_named_programs() {
     let deny = text.find("(deny process-exec*)").unwrap();
     let allow = text.find("(allow process-exec").unwrap();
     assert!(deny < allow, "the allow comes after the deny, so it wins");
+}
+
+fn tree(entries: &[(&str, u32, u32)]) -> HashMap<PathBuf, Owner> {
+    entries
+        .iter()
+        .map(|(path, uid, mode)| {
+            (
+                PathBuf::from(path),
+                Owner {
+                    uid: *uid,
+                    mode: *mode,
+                },
+            )
+        })
+        .collect()
+}
+
+fn passes(map: &HashMap<PathBuf, Owner>, path: &str) -> bool {
+    root_owned_chain(Path::new(path), &|p| map.get(p).copied())
+}
+
+#[test]
+fn a_path_passes_only_when_it_and_every_parent_is_root_owned_and_not_writable_by_others() {
+    let good = tree(&[
+        ("/", 0, 0o40755),
+        ("/usr", 0, 0o40755),
+        ("/usr/bin", 0, 0o40755),
+        ("/usr/bin/git", 0, 0o100755),
+    ]);
+    assert!(passes(&good, "/usr/bin/git"));
+
+    let user_file = tree(&[
+        ("/", 0, 0o40755),
+        ("/opt", 0, 0o40755),
+        ("/opt/git", 501, 0o100755),
+    ]);
+    assert!(!passes(&user_file, "/opt/git"));
+
+    let user_parent = tree(&[
+        ("/", 0, 0o40755),
+        ("/opt", 501, 0o40755),
+        ("/opt/git", 0, 0o100755),
+    ]);
+    assert!(!passes(&user_parent, "/opt/git"));
+
+    let admin_parent = tree(&[
+        ("/", 0, 0o40755),
+        ("/Applications", 0, 0o40775),
+        ("/Applications/git", 0, 0o100755),
+    ]);
+    assert!(!passes(&admin_parent, "/Applications/git"));
+
+    let world_file = tree(&[("/", 0, 0o40755), ("/git", 0, 0o100757)]);
+    assert!(!passes(&world_file, "/git"));
+
+    let sticky_tmp = tree(&[
+        ("/", 0, 0o40755),
+        ("/tmp", 0, 0o41777),
+        ("/tmp/git", 0, 0o100755),
+    ]);
+    assert!(!passes(&sticky_tmp, "/tmp/git"));
+}
+
+#[test]
+fn a_missing_entry_a_user_owned_root_or_a_relative_path_is_refused() {
+    let hole = tree(&[("/", 0, 0o40755), ("/usr/bin/git", 0, 0o100755)]);
+    assert!(!passes(&hole, "/usr/bin/git"));
+    let user_root = tree(&[("/", 501, 0o40755), ("/git", 0, 0o100755)]);
+    assert!(!passes(&user_root, "/git"));
+    let good = tree(&[("/", 0, 0o40755), ("git", 0, 0o100755)]);
+    assert!(!passes(&good, "git"));
 }
 
 #[test]
@@ -74,9 +147,12 @@ mod real {
     }
 
     fn sandboxed() -> SandboxedLauncher {
-        SandboxedLauncher::new(Arc::new(RealLauncher::with_claude(PathBuf::from(
-            "/nonexistent/claude",
-        ))))
+        SandboxedLauncher::waiting(
+            Arc::new(RealLauncher::with_claude(PathBuf::from(
+                "/nonexistent/claude",
+            ))),
+            Duration::from_secs(60),
+        )
     }
 
     struct Rig {
@@ -269,6 +345,43 @@ mod real {
         );
         match got {
             Err(LaunchError::Spawn(why)) => assert!(why.starts_with("can't read this repo safely")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_real_system_git_and_the_tools_git_pass_the_ownership_check() {
+        let system = Path::new("/usr/bin/git");
+        assert!(system.is_file());
+        assert!(crate::git::sandbox::trusted(system).is_some());
+        let tools = Path::new("/Library/Developer/CommandLineTools/usr/bin/git");
+        if tools.is_file() {
+            assert!(crate::git::sandbox::trusted(tools).is_some());
+        }
+    }
+
+    #[test]
+    fn a_copy_of_git_in_a_user_owned_folder_is_not_trusted() {
+        let t = TempDir::new("sb-copy");
+        std::fs::create_dir_all(t.path("bin")).unwrap();
+        let copy = t.path("bin/git");
+        std::fs::copy("/usr/bin/git", &copy).unwrap();
+        std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(crate::git::sandbox::trusted(&copy).is_none());
+    }
+
+    #[test]
+    fn a_call_that_comes_before_resolution_ends_waits_a_moment_then_says_still_starting() {
+        let slow = Arc::new(crate::control::launcher::FakeLauncher::new());
+        slow.set_delay(Duration::from_secs(3));
+        let launcher = SandboxedLauncher::waiting(slow, Duration::from_millis(100));
+        let started = std::time::Instant::now();
+        let got = launcher.run(&Command::new(&["git", "--version"]), Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        match got {
+            Err(LaunchError::Spawn(why)) => {
+                assert_eq!(why, "can't read this repo safely: still starting")
+            }
             other => panic!("{other:?}"),
         }
     }

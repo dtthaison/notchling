@@ -2,7 +2,7 @@ use crate::control::plan::PtyScript;
 use crate::control::{Command, LaunchError, LaunchOutput, Launcher};
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub const SAFE_ERROR: &str = "can't read this repo safely";
@@ -10,22 +10,31 @@ pub const SAFE_ERROR: &str = "can't read this repo safely";
 #[cfg(target_os = "macos")]
 const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 #[cfg(target_os = "macos")]
-const SYSTEM_GIT: &str = "/usr/bin/git";
-#[cfg(target_os = "macos")]
 const TOOLS_GIT: &str = "/Library/Developer/CommandLineTools/usr/bin/git";
 #[cfg(target_os = "macos")]
 const SANDBOX_USAGE_ERROR: i32 = 71;
+const FIRST_CALL_WAITS: Duration = Duration::from_secs(1);
+#[cfg(target_os = "macos")]
+const RETRY_EVERY: Duration = Duration::from_secs(60);
+#[cfg(target_os = "macos")]
+const XCRUN_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-struct Resolved {
-    profile: String,
-    program: String,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Owner {
+    pub uid: u32,
+    pub mode: u32,
 }
 
-pub struct SandboxedLauncher {
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    inner: Arc<dyn Launcher>,
-    resolved: OnceLock<Result<Resolved, String>>,
+#[cfg(any(target_os = "macos", test))]
+pub fn root_owned_chain(
+    path: &std::path::Path,
+    stat: &dyn Fn(&std::path::Path) -> Option<Owner>,
+) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    path.ancestors()
+        .all(|folder| stat(folder).is_some_and(|owner| owner.uid == 0 && owner.mode & 0o022 == 0))
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -59,89 +68,181 @@ pub fn profile(programs: &[String], folders: &[String]) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn usable(path: &str) -> bool {
-    !path.is_empty() && !path.contains(['\0', '\n'])
-}
+pub use mac::trusted;
 
 #[cfg(target_os = "macos")]
-fn allow(programs: &mut Vec<String>, folders: &mut Vec<String>, path: &Path) {
-    let mut forms = vec![path.to_path_buf()];
-    if let Ok(real) = std::fs::canonicalize(path) {
-        forms.push(real);
+mod mac {
+    use super::*;
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::{Condvar, Mutex, MutexGuard};
+    use std::time::Instant;
+
+    pub struct Resolved {
+        pub profile: String,
+        pub program: String,
     }
-    for form in forms {
-        if let Some(text) = form.to_str().filter(|t| usable(t)) {
+
+    enum State {
+        Resolving,
+        Ready(Arc<Resolved>),
+        Failed { at: Instant, why: String },
+    }
+
+    struct Shared {
+        state: Mutex<State>,
+        changed: Condvar,
+    }
+
+    pub struct Resolver {
+        shared: Arc<Shared>,
+        inner: Arc<dyn Launcher>,
+    }
+
+    fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
+        m.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn real_owner(path: &Path) -> Option<Owner> {
+        let meta = std::fs::metadata(path).ok()?;
+        Some(Owner {
+            uid: meta.uid(),
+            mode: meta.mode(),
+        })
+    }
+
+    pub fn trusted(path: &Path) -> Option<PathBuf> {
+        let real = std::fs::canonicalize(path).ok()?;
+        let text = real.to_str()?;
+        if text.contains(['\0', '\n']) {
+            return None;
+        }
+        root_owned_chain(&real, &real_owner).then_some(real)
+    }
+
+    fn resolve(inner: &dyn Launcher) -> Result<Resolved, String> {
+        if !Path::new(SANDBOX_EXEC).is_file() {
+            return Err("sandbox-exec is missing".to_owned());
+        }
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(out) = inner.run(
+            &Command::new(&["/usr/bin/xcrun", "--find", "git"]),
+            XCRUN_TIMEOUT,
+        ) {
+            let target = out.output.trim();
+            if out.code == 0 && !target.is_empty() {
+                candidates.push(PathBuf::from(target));
+            }
+        }
+        candidates.push(PathBuf::from(TOOLS_GIT));
+        let (mut programs, mut folders) = (Vec::<String>::new(), Vec::<String>::new());
+        for candidate in &candidates {
+            let Some(real) = trusted(candidate) else {
+                continue;
+            };
+            let Some(text) = real.to_str() else {
+                continue;
+            };
             if !programs.iter().any(|p| p == text) {
                 programs.push(text.to_owned());
             }
+            let core = real
+                .parent()
+                .and_then(Path::parent)
+                .map(|prefix| prefix.join("libexec").join("git-core"));
+            if let Some(core) = core.and_then(|c| trusted(&c)) {
+                if let Some(text) = core.to_str().filter(|_| core.is_dir()) {
+                    if !folders.iter().any(|f| f == text) {
+                        folders.push(text.to_owned());
+                    }
+                }
+            }
         }
-        let core = form
-            .parent()
-            .and_then(Path::parent)
-            .map(|prefix| prefix.join("libexec").join("git-core"));
-        if let Some(core) = core.filter(|c| c.is_dir()) {
-            if let Some(text) = core.to_str().filter(|t| usable(t)) {
-                if !folders.iter().any(|f| f == text) {
-                    folders.push(text.to_owned());
+        let Some(program) = programs.first().cloned() else {
+            return Err("no git binary that only root can change was found".to_owned());
+        };
+        Ok(Resolved {
+            profile: profile(&programs, &folders),
+            program,
+        })
+    }
+
+    fn spawn_resolution(shared: &Arc<Shared>, inner: &Arc<dyn Launcher>) {
+        let (shared, inner) = (shared.clone(), inner.clone());
+        std::thread::spawn(move || {
+            let result = resolve(inner.as_ref());
+            let mut state = lock(&shared.state);
+            *state = match result {
+                Ok(resolved) => State::Ready(Arc::new(resolved)),
+                Err(why) => State::Failed {
+                    at: Instant::now(),
+                    why,
+                },
+            };
+            shared.changed.notify_all();
+        });
+    }
+
+    impl Resolver {
+        pub fn start(inner: Arc<dyn Launcher>) -> Resolver {
+            let shared = Arc::new(Shared {
+                state: Mutex::new(State::Resolving),
+                changed: Condvar::new(),
+            });
+            spawn_resolution(&shared, &inner);
+            Resolver { shared, inner }
+        }
+
+        pub fn current(&self, wait: Duration) -> Result<Arc<Resolved>, String> {
+            let deadline = Instant::now() + wait;
+            let mut state = lock(&self.shared.state);
+            if let State::Failed { at, .. } = &*state {
+                if at.elapsed() >= RETRY_EVERY {
+                    *state = State::Resolving;
+                    spawn_resolution(&self.shared, &self.inner);
+                }
+            }
+            loop {
+                match &*state {
+                    State::Ready(resolved) => return Ok(resolved.clone()),
+                    State::Failed { why, .. } => return Err(why.clone()),
+                    State::Resolving => {
+                        let left = deadline.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Err("still starting".to_owned());
+                        }
+                        state = self
+                            .shared
+                            .changed
+                            .wait_timeout(state, left)
+                            .unwrap_or_else(|e| e.into_inner())
+                            .0;
+                    }
                 }
             }
         }
     }
 }
 
-#[cfg(target_os = "macos")]
-fn homebrew_git() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join("git");
-        if !candidate.is_file() {
-            continue;
-        }
-        let real = std::fs::canonicalize(&candidate).ok()?;
-        let text = real.to_str()?;
-        return (text.starts_with("/opt/homebrew/") || text.starts_with("/usr/local/Cellar/"))
-            .then_some(real);
-    }
-    None
-}
-
-#[cfg(target_os = "macos")]
-fn resolve(inner: &dyn Launcher) -> Result<Resolved, String> {
-    if !Path::new(SANDBOX_EXEC).is_file() {
-        return Err("sandbox-exec is missing".to_owned());
-    }
-    if !Path::new(SYSTEM_GIT).is_file() {
-        return Err("there is no /usr/bin/git".to_owned());
-    }
-    let (mut programs, mut folders) = (Vec::new(), Vec::new());
-    allow(&mut programs, &mut folders, Path::new(SYSTEM_GIT));
-    let found = inner.run(
-        &Command::new(&["/usr/bin/xcrun", "--find", "git"]),
-        Duration::from_secs(5),
-    );
-    if let Ok(out) = found {
-        let target = out.output.trim();
-        if out.code == 0 && usable(target) && Path::new(target).is_file() {
-            allow(&mut programs, &mut folders, Path::new(target));
-        }
-    }
-    if Path::new(TOOLS_GIT).is_file() {
-        allow(&mut programs, &mut folders, Path::new(TOOLS_GIT));
-    }
-    if let Some(brew) = homebrew_git() {
-        allow(&mut programs, &mut folders, &brew);
-    }
-    Ok(Resolved {
-        profile: profile(&programs, &folders),
-        program: SYSTEM_GIT.to_owned(),
-    })
+pub struct SandboxedLauncher {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    inner: Arc<dyn Launcher>,
+    #[cfg(target_os = "macos")]
+    resolver: mac::Resolver,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    wait: Duration,
 }
 
 impl SandboxedLauncher {
     pub fn new(inner: Arc<dyn Launcher>) -> SandboxedLauncher {
+        SandboxedLauncher::waiting(inner, FIRST_CALL_WAITS)
+    }
+
+    pub fn waiting(inner: Arc<dyn Launcher>, wait: Duration) -> SandboxedLauncher {
         SandboxedLauncher {
+            #[cfg(target_os = "macos")]
+            resolver: mac::Resolver::start(inner.clone()),
             inner,
-            resolved: OnceLock::new(),
+            wait,
         }
     }
 
@@ -153,9 +254,8 @@ impl SandboxedLauncher {
             )));
         }
         let resolved = self
-            .resolved
-            .get_or_init(|| resolve(self.inner.as_ref()))
-            .as_ref()
+            .resolver
+            .current(self.wait)
             .map_err(|why| LaunchError::Spawn(format!("{SAFE_ERROR}: {why}")))?;
         let mut argv = vec![
             SANDBOX_EXEC.to_owned(),
@@ -173,7 +273,6 @@ impl SandboxedLauncher {
 
     #[cfg(not(target_os = "macos"))]
     fn wrapped(&self, _command: &Command) -> Result<Command, LaunchError> {
-        let _ = &self.resolved;
         Err(LaunchError::Unsupported)
     }
 }

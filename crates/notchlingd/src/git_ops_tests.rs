@@ -12,6 +12,8 @@ use notchling_local_api::{ops, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 fn z(records: &[&str]) -> String {
     let mut text = records.join("\0");
@@ -303,7 +305,10 @@ fn a_real_repository_in_a_session_folder_reads_through_the_ops() {
     t.write("proj/new.txt", "fresh\n");
     let real = RealLauncher::with_claude(PathBuf::from("/nonexistent"));
     #[cfg(target_os = "macos")]
-    let launcher: Arc<dyn Launcher> = Arc::new(SandboxedLauncher::new(Arc::new(real)));
+    let launcher: Arc<dyn Launcher> = Arc::new(SandboxedLauncher::waiting(
+        Arc::new(real),
+        Duration::from_secs(60),
+    ));
     #[cfg(not(target_os = "macos"))]
     let launcher: Arc<dyn Launcher> = Arc::new(real);
     let ops_ = GitOps::new(launcher, folders_of(vec![proj.clone()]));
