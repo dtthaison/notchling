@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, AnyElement, AnyView, Context, StyleRefinement, Window};
 use notchling_kit::labels::Corner;
-use notchling_kit::metric::SIDEBAR_WIDTH;
 use notchling_kit::ui::{hsla, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink};
 
@@ -207,11 +206,7 @@ pub(super) fn render(
     if !view.changes_visible() {
         return None;
     }
-    let sidebar = if view.sidebar_hidden {
-        0.0
-    } else {
-        SIDEBAR_WIDTH
-    };
+    let sidebar = view.sidebar_width();
     let available = f32::from(window.viewport_size().width) - sidebar;
     let width = panel_width(view.page.width, available);
     view.page.set_shown_width(width);
