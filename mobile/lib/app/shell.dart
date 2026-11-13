@@ -473,7 +473,7 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
   static final bool _decoupled = defaultTargetPlatform == TargetPlatform.android;
 
   /// How long the inset must stay put before the keyboard counts as fully up.
-  static const Duration keyboardStill = Duration(milliseconds: 60);
+  static const Duration keyboardStill = Duration(milliseconds: 40);
   static const Duration slide = Duration(milliseconds: 220);
 
   double _below = 0;
@@ -501,17 +501,28 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
   }
 
   /// Android only: follow [lift] on the page's own schedule (see [_decoupled]).
-  void _follow(double lift) {
+  /// The keyboard's full height from the last time it settled, so the last step of the next opening is recognised.
+  double _keyboardHeight = 0;
+  double _lastInset = 0;
+
+  /// Called on every change of the keyboard's inset (not of the lift: going down the lift reaches 0 before the
+  /// keyboard has gone).
+  void _follow(double lift, double inset) {
     _still?.cancel();
-    // Both ways the page holds still while the keyboard moves and slides once it has: while the keyboard animates,
-    // Android paces the app's frames to the window's (about 30 fps on a 120 Hz Redmi; 8 ms frames before and after),
-    // so anything the page moves then stutters. Measured: sliding down with the keyboard ran at 30-40 ms per frame.
-    // Xiaomi's keyboard ends on a long tail of 1-2 px steps; waiting for it to stop held the page back for most of a
-    // second, so once the steps are that small the keyboard counts as done.
-    // Going down the keyboard starts slowly too, so small steps mean nothing then: the page waits for it to be gone.
-    final bool opening = lift > _lastLift;
-    if ((opening && lift - _lastLift < 3) || lift == 0) _slideTowards(lift);
-    _still = Timer(keyboardStill, () => _slideTowards(_lastLift));
+    // Both ways the page holds still while the keyboard moves and slides once it has: until the keyboard's own
+    // animation has ended, Android paces the app's frames to the window's (about 30 fps on a 120 Hz Redmi; 8 ms
+    // frames before and after), so anything the page moves before then stutters. Starting on Xiaomi's tail of 1-2 px
+    // steps was still inside that animation. The end is known at once when the inset reaches the height the keyboard
+    // stopped at last time, or 0 going down; otherwise once it has not moved for [keyboardStill].
+    final bool done = inset == 0 || (_keyboardHeight > 0 && (inset - _keyboardHeight).abs() < 0.5);
+    if (done) {
+      _slideTowards(lift);
+      return;
+    }
+    _still = Timer(keyboardStill, () {
+      _keyboardHeight = _lastInset;
+      _slideTowards(_lastLift);
+    });
   }
 
   @override
@@ -565,8 +576,9 @@ class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderSt
     final double lift = math.max(0, inset - reserved);
     if (!_decoupled) {
       _shown.value = lift;
-    } else if (lift != _lastLift) {
-      _follow(lift);
+    } else if (inset != _lastInset) {
+      _lastInset = inset;
+      _follow(lift, inset);
     }
     if (inset == 0) {
       WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
