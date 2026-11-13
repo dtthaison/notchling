@@ -635,42 +635,47 @@ class PendingBubble extends StatelessWidget {
       child: FractionallySizedBox(
         widthFactor: 0.82,
         alignment: Alignment.centerRight,
-        child: AnimatedOpacity(
-          duration: motionDuration(context),
-          opacity: failed ? 1 : 0.75,
-          child: Surface(
-            level: 0,
-            fill: shell ? kit.shellWash : kit.accentWash,
-            radius: BorderRadius.only(topLeft: Radius.circular(Radii.bubble), topRight: Radius.circular(Radii.bubble), bottomLeft: Radius.circular(Radii.bubble), bottomRight: Radius.circular(Radii.bubbleTail)),
-            outline: failed ? kit.danger : null,
-            padding: const EdgeInsets.all(Space.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                shell ? Text(text, style: kit.mono) : MarkdownText(text),
-                const SizedBox(height: Space.xs),
-                if (!failed)
-                  Text(l10n.chatSending, style: kit.meta)
-                else
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Flexible(
-                        child: Text(
-                          reason ?? l10n.chatSendFailed,
-                          style: kit.meta.copyWith(color: kit.danger),
+        // Loosens the 82% box so the bubble hugs its text like UserBubble; without it the bubble filled the box
+        // while sending and shrank once the transcript had the message.
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: AnimatedOpacity(
+            duration: motionDuration(context),
+            opacity: failed ? 1 : 0.75,
+            child: Surface(
+              level: 0,
+              fill: shell ? kit.shellWash : kit.accentWash,
+              radius: BorderRadius.only(topLeft: Radius.circular(Radii.bubble), topRight: Radius.circular(Radii.bubble), bottomLeft: Radius.circular(Radii.bubble), bottomRight: Radius.circular(Radii.bubbleTail)),
+              outline: failed ? kit.danger : null,
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  shell ? Text(text, style: kit.mono) : MarkdownText(text),
+                  const SizedBox(height: Space.xs),
+                  if (!failed)
+                    Text(l10n.chatSending, style: kit.meta)
+                  else
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Flexible(
+                          child: Text(
+                            reason ?? l10n.chatSendFailed,
+                            style: kit.meta.copyWith(color: kit.danger),
+                          ),
                         ),
-                      ),
-                      TextButton(onPressed: onRetry, child: Text(l10n.retry)),
-                      IconButton(
-                        onPressed: onDiscard,
-                        tooltip: l10n.close,
-                        icon: Icon(Icons.close, size: 18, color: kit.textMuted),
-                      ),
-                    ],
-                  ),
-              ],
+                        TextButton(onPressed: onRetry, child: Text(l10n.retry)),
+                        IconButton(
+                          onPressed: onDiscard,
+                          tooltip: l10n.close,
+                          icon: Icon(Icons.close, size: 18, color: kit.textMuted),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
         ),
