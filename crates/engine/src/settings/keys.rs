@@ -160,6 +160,7 @@ pub const KEYS: &[KeySpec] = &[
     key("chatOpen", K::Bool, D::Bool(false), false, "The Chat window was open at quit"),
     key("chatSelection", K::String, D::None, false, "The session selected in Chat"),
     key("chatPageWidth", K::Double, D::Double(520.0), false, "Width of the page/file panel beside a conversation"),
+    choice("chatHistory", "4mb", &["2mb", "4mb", "8mb", "16mb"], false, "How much of a conversation Chat loads: the newest 2, 4, 8 or 16 MB of its file"),
     key("vaultReminderSent", K::Dict, D::Empty, false, "Vault expiry reminders already sent: secret to days"),
     key("bridgeEnabled", K::Bool, D::Bool(false), false, "The phone bridge switch"),
     key("debugAccessCertsFile", K::String, D::None, false, "Debug builds: a file of Cloudflare Access certs (`-debugAccessCertsFile`)"),

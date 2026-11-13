@@ -10,7 +10,10 @@ use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Origin, Subagent};
 
 use super::data::{DataRoot, Session, Tool};
+use super::inspector::SubagentRow;
 use super::log::{self, Change};
+use super::paging::{Counts, Page};
+use super::subagent_rows::SubagentRows;
 use crate::notch::requests::{self, HookRequest};
 use crate::tools::foreign::AgyList;
 use crate::tools::live::ToolLive;
@@ -23,6 +26,8 @@ pub struct Loaded {
     pub conversation: Arc<Conversation>,
     pub change: Option<(Arc<Conversation>, Change)>,
     pub subagents: Vec<Subagent>,
+    pub subagent_rows: Vec<SubagentRow>,
+    pub subagent_counts: Counts,
     pub delegated: HashSet<String>,
     pub subagent: Option<(String, Arc<Conversation>)>,
     pub question: Option<PendingQuestion>,
@@ -38,6 +43,9 @@ pub struct Loader {
     pub files_prompts: bool,
     pub subagent_path: Option<String>,
     pub subagent_origin: Origin,
+    pub more_subagents: usize,
+    page: Page,
+    peeked: SubagentRows,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
 }
@@ -51,6 +59,9 @@ impl Loader {
             files_prompts: false,
             subagent_path: None,
             subagent_origin: Origin::Claude,
+            more_subagents: 0,
+            page: Page::default(),
+            peeked: SubagentRows::default(),
             agy_log: None,
             last: None,
             root,
@@ -129,6 +140,12 @@ impl Loader {
             }
             None => (Arc::default(), Vec::new()),
         };
+        let shown = self.page.show(
+            selected.as_deref(),
+            &subagents,
+            std::mem::take(&mut self.more_subagents),
+        );
+        let subagent_rows = self.peeked.rows(&subagents, &shown.indexes);
         let question = session
             .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
             .and_then(|_| conversation.pending_question.clone());
@@ -156,6 +173,8 @@ impl Loader {
             conversation,
             change,
             subagents,
+            subagent_rows,
+            subagent_counts: shown.counts,
             delegated,
             subagent,
             question,

@@ -8,20 +8,22 @@ use gpui::{
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI as MINI;
-use notchling_kit::metric::{METER_BAR, RADIUS_SM, SIDE_PADDING, TOOL_ICON};
+use notchling_kit::metric::{METER_BAR, SIDE_PADDING};
 use notchling_kit::ui::{
-    hsla, icon, label, scrollable, spinner as kit_spinner, tool_icon, KitPart, KitStyled,
+    hsla, icon, label, scrollable, spinner as kit_spinner, KitPart, KitStyled,
 };
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
+use super::paged_rows::{more_row, subagent_row, More};
 use super::{repo_section, ChatView};
 use crate::chat::format::short_path;
 use crate::chat::git::GitModel;
 use crate::chat::inspector::{
-    fact_icon, fact_text, inspector, Fold, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
+    fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
+use crate::chat::paging::Counts;
+use crate::chat::shell_list::Listing;
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::subagents::Subagent;
 
 pub(super) const WIDTH: f32 = 260.0;
 pub(super) const MARK_BOX: f32 = 14.0;
@@ -30,7 +32,6 @@ pub(super) const ROW_LINE: f32 = 16.0;
 #[derive(Default)]
 struct Folds {
     folded: HashMap<WindowId, HashSet<&'static str>>,
-    all_subagents: HashSet<WindowId>,
 }
 
 impl Global for Folds {}
@@ -52,21 +53,21 @@ fn toggle_folded(cx: &mut App, window: WindowId, section: &'static str) {
 pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
-    pub agent_ids: Vec<String>,
     pub git: Option<Arc<GitModel>>,
 }
 
 fn model_of(
     conversation: &Conversation,
-    subagents: &[Subagent],
+    subagents: &[SubagentRow],
+    subagent_counts: Counts,
+    shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
     git: Option<Arc<GitModel>>,
 ) -> DetailsModel {
     DetailsModel {
-        i: inspector(conversation, subagents, writers),
+        i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
         folder,
-        agent_ids: subagents.iter().map(|s| s.id.clone()).collect(),
         git,
     }
 }
@@ -78,7 +79,9 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     });
     model_of(
         &view.conversation,
-        &view.subagents,
+        &view.subagent_rows,
+        view.subagent_counts,
+        Some(&view.shells),
         &|p: &str| view.shell_probe.writers(p),
         folder,
         view.git_for_details(),
@@ -91,7 +94,6 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
         folder: m.folder.clone(),
         a,
         chat: cx.entity().downgrade(),
-        agent_ids: m.agent_ids.clone(),
         git: m.git.clone(),
     }
     .into_any_element()
@@ -103,7 +105,6 @@ struct Panel {
     folder: Option<(String, String)>,
     a: Appearance,
     chat: WeakEntity<ChatView>,
-    agent_ids: Vec<String>,
     git: Option<Arc<GitModel>>,
 }
 
@@ -142,37 +143,21 @@ impl RenderOnce for Panel {
             }
         };
 
-        let all = cx
-            .try_global::<Folds>()
-            .is_some_and(|f| f.all_subagents.contains(&id));
-        let listing = i.subagent_listing(all);
         let subagents = if i.subagents.is_empty() {
             empty("None started", a)
         } else {
             let mut list = div().flex().flex_col().gap(px(6.0));
-            for index in &listing.rows {
-                list = list.child(subagent_row(
-                    *index,
-                    &i.subagents[*index],
-                    a,
-                    &self.chat,
-                    &self.agent_ids,
-                ));
+            for s in &i.subagents {
+                list = list.child(subagent_row(s, a, &self.chat));
             }
-            match listing.fold {
-                Fold::More(n) => {
-                    list = list.child(fold_row(
-                        id,
-                        "subagents-more",
-                        &format!("Show {n} more"),
-                        true,
-                        a,
-                    ));
-                }
-                Fold::Less => {
-                    list = list.child(fold_row(id, "subagents-less", "Show less", false, a));
-                }
-                Fold::None => {}
+            let next = i.subagent_counts.next_page();
+            if next > 0 {
+                list = list.child(more_row(
+                    More::Subagents,
+                    &format!("Load {next} More"),
+                    &self.chat,
+                    a,
+                ));
             }
             list
         };
@@ -180,12 +165,22 @@ impl RenderOnce for Panel {
         let shells = if i.shells.is_empty() {
             empty("None running", a)
         } else {
-            div().flex().flex_col().gap(px(6.0)).children(
+            let mut list = div().flex().flex_col().gap(px(6.0)).children(
                 i.shells
                     .iter()
                     .enumerate()
                     .map(|(n, s)| shell_row(n, s, a, &self.chat)),
-            )
+            );
+            let next = i.shell_counts.next_page();
+            if next > 0 {
+                list = list.child(more_row(
+                    More::Shells,
+                    &format!("Load {next} More"),
+                    &self.chat,
+                    a,
+                ));
+            }
+            list
         };
 
         let mut sections = vec![
@@ -367,63 +362,6 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         )
 }
 
-fn subagent_row(
-    index: usize,
-    s: &SubagentRow,
-    a: Appearance,
-    chat: &WeakEntity<ChatView>,
-    ids: &[String],
-) -> Stateful<Div> {
-    let (chat, agent) = (chat.clone(), ids.get(index).cloned());
-    div()
-        .id(SharedString::from(format!("subagent-{index}")))
-        .mx(px(-4.0))
-        .px(px(4.0))
-        .py(px(2.0))
-        .rounded(px(RADIUS_SM))
-        .cursor_pointer()
-        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
-        .on_click(move |_, _, cx| {
-            if let Some(agent) = &agent {
-                chat.update(cx, |this, cx| this.open_subagent(agent, cx))
-                    .ok();
-            }
-        })
-        .flex()
-        .items_start()
-        .gap(px(7.0))
-        .child(
-            div()
-                .w(px(MARK_BOX))
-                .h(px(ROW_LINE))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(tool_icon(s.tool, TOOL_ICON, a)),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    label(&s.description, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE)),
-                )
-                .child(
-                    label(&s.detail, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
-                )
-                .children(s.doing.as_ref().map(|doing| {
-                    label(doing, TypeRole::Meta, Ink::TextMuted, a)
-                        .line_height(px(ROW_LINE))
-                        .w_full()
-                        .elide()
-                })),
-        )
-}
-
 fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Div {
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
@@ -478,24 +416,6 @@ fn output_link(
         })
 }
 
-fn fold_row(window: WindowId, key: &'static str, text: &str, expand: bool, a: Appearance) -> Div {
-    div().child(
-        div()
-            .id(key)
-            .cursor_pointer()
-            .child(label(text, TypeRole::Meta, Ink::AccentText, a))
-            .on_click(move |_, window_ref, cx| {
-                let folds = cx.default_global::<Folds>();
-                if expand {
-                    folds.all_subagents.insert(window);
-                } else {
-                    folds.all_subagents.remove(&window);
-                }
-                window_ref.refresh();
-            }),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use notchling_engine::transcript::model::{BackgroundShell, TaskEntry, TaskStatus};
@@ -521,29 +441,72 @@ mod tests {
     #[test]
     fn the_details_model_is_equal_for_the_same_inputs() {
         let c = with_task("Port");
-        let a = model_of(&c, &[], &no_writers, folder(), None);
-        let b = model_of(&with_task("Port"), &[], &no_writers, folder(), None);
+        let a = model_of(
+            &c,
+            &[],
+            Counts::default(),
+            None,
+            &no_writers,
+            folder(),
+            None,
+        );
+        let b = model_of(
+            &with_task("Port"),
+            &[],
+            Counts::default(),
+            None,
+            &no_writers,
+            folder(),
+            None,
+        );
         assert_eq!(a, b);
         assert_ne!(
             a,
-            model_of(&c, &[], &no_writers, None, None),
+            model_of(&c, &[], Counts::default(), None, &no_writers, None, None),
             "the folder line"
         );
     }
 
     #[test]
     fn a_new_task_changes_the_details_model() {
-        let before = model_of(&with_task("Port"), &[], &no_writers, folder(), None);
+        let before = model_of(
+            &with_task("Port"),
+            &[],
+            Counts::default(),
+            None,
+            &no_writers,
+            folder(),
+            None,
+        );
         let mut more = with_task("Port");
         more.tasks.push(TaskEntry {
             id: "2".into(),
             subject: "Test".into(),
             status: TaskStatus::Pending,
         });
-        assert_ne!(before, model_of(&more, &[], &no_writers, folder(), None));
         assert_ne!(
             before,
-            model_of(&with_task("Port it"), &[], &no_writers, folder(), None)
+            model_of(
+                &more,
+                &[],
+                Counts::default(),
+                None,
+                &no_writers,
+                folder(),
+                None
+            )
+        );
+        assert_ne!(
+            before,
+            model_of(
+                &with_task("Port it"),
+                &[],
+                Counts::default(),
+                None,
+                &no_writers,
+                folder(),
+                None
+            )
         );
     }
 
@@ -559,10 +522,12 @@ mod tests {
             }],
             ..Conversation::default()
         };
-        let idle = model_of(&c, &[], &no_writers, None, None);
+        let idle = model_of(&c, &[], Counts::default(), None, &no_writers, None, None);
         let writing = model_of(
             &c,
             &[],
+            Counts::default(),
+            None,
             &|p: &str| {
                 if p == "/tmp/b1.output" {
                     vec![4242]

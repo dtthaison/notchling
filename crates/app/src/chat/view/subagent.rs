@@ -10,7 +10,7 @@ use crate::chat::subagent_view::header_text;
 
 pub fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let open = view.open_subagent.as_ref()?;
-    let (title, detail) = header_text(&open.agent);
+    let (title, detail) = header_text(&open.agent, open.conversation.as_deref());
     let back = button_with(
         "subagent-back",
         div()
@@ -59,6 +59,11 @@ impl ChatView {
         self.scroll_to_end_now(cx);
         self.reload_now(cx);
         cx.notify();
+    }
+
+    pub(super) fn load_more_subagents(&mut self, cx: &mut Context<Self>) {
+        self.more_subagents += 1;
+        self.reload_now(cx);
     }
 
     pub(super) fn close_subagent(&mut self, cx: &mut Context<Self>) {

@@ -79,6 +79,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
     let data_root_is_real =
         data_root.is_none() && std::env::var_os("NOTCHLING_DATA_ROOT").is_none();
     let root = DataRoot::for_run(data_root.as_deref());
+    if let Some(root) = root.as_ref() {
+        crate::chat::history::apply(&root.data_dir);
+    }
     let notch = root.as_ref().map(DataRoot::notch_source);
     let app = Application::new().with_assets(notchling_kit::ui::KitAssets);
     app.on_reopen(|cx| {

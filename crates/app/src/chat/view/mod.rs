@@ -19,6 +19,7 @@ mod message_actions;
 mod native_spin;
 mod opinions;
 mod page_panel;
+mod paged_rows;
 pub mod pane;
 mod phone;
 mod prompts;
@@ -115,6 +116,11 @@ pub struct ChatView {
     selected: Option<String>,
     conversation: Arc<Conversation>,
     subagents: Vec<Subagent>,
+    subagent_rows: Vec<crate::chat::inspector::SubagentRow>,
+    subagent_counts: crate::chat::paging::Counts,
+    more_subagents: usize,
+    shells: crate::chat::shell_list::Listing,
+    shell_page: crate::chat::shell_list::ShellPage,
     open_subagent: Option<crate::chat::subagent_view::Open>,
     now_ms: i64,
     loader: Option<Loader>,
@@ -355,6 +361,11 @@ impl ChatView {
             selected: None,
             conversation: Arc::default(),
             subagents: Vec::new(),
+            subagent_rows: Vec::new(),
+            subagent_counts: Default::default(),
+            more_subagents: 0,
+            shells: Default::default(),
+            shell_page: Default::default(),
             open_subagent: None,
             now_ms: 0,
             load_again: false,

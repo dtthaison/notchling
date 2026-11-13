@@ -40,6 +40,7 @@ impl ChatView {
         let view = self.source.view();
         let (claude, live) = (view.agents, view.tools);
         loader.files_prompts = view.prompts.is_none();
+        loader.more_subagents = std::mem::take(&mut self.more_subagents);
         loader.subagent_path = self.open_subagent.as_ref().map(|o| o.agent.path.clone());
         loader.subagent_origin = self
             .open_subagent
@@ -169,6 +170,9 @@ impl ChatView {
             conversation_changed |= others;
             layout_changed |= others;
             self.subagents = loaded.subagents;
+            self.subagent_rows = loaded.subagent_rows;
+            self.subagent_counts = loaded.subagent_counts;
+            self.refresh_shells(0);
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply_shared(&self.subagents, loaded.subagent);
             }
@@ -212,6 +216,10 @@ impl ChatView {
         self.mark_used(id);
         self.conversation = Arc::default();
         self.subagents.clear();
+        self.subagent_rows.clear();
+        self.subagent_counts = Default::default();
+        self.more_subagents = 0;
+        self.shells = Default::default();
         self.open_subagent = None;
         self.prompt.transcript = None;
         self.loading = true;

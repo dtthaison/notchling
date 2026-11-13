@@ -38,6 +38,53 @@ pub fn files_shaped(turns: usize, now_ms: i64, shape: Shape) -> Vec<(String, Str
     out
 }
 
+pub const SUBAGENTS_FOLDER: &str = "claude/projects/-Users-me-work-bench/bench-working/subagents";
+
+pub fn subagent_id(n: usize) -> String {
+    format!("bs{n:03}")
+}
+
+pub fn subagent_files(count: usize, bytes: usize) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for n in 0..count {
+        let id = subagent_id(n);
+        out.push((
+            format!("{SUBAGENTS_FOLDER}/agent-{id}.meta.json"),
+            json!({"description": format!("Check crate {n}"), "agentType": "Explore", "model": "sonnet"})
+                .to_string(),
+        ));
+        out.push((
+            format!("{SUBAGENTS_FOLDER}/agent-{id}.jsonl"),
+            subagent_transcript(&id, bytes),
+        ));
+    }
+    out
+}
+
+fn subagent_transcript(id: &str, bytes: usize) -> String {
+    let filler = "w".repeat(700);
+    let mut out = String::with_capacity(bytes + 2048);
+    let mut n = 0;
+    while out.len() < bytes {
+        n += 1;
+        let line = json!({
+            "isSidechain": true,
+            "type": "assistant",
+            "timestamp": "2026-11-08T08:00:05.000Z",
+            "message": {
+                "id": format!("{id}-m{n}"),
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": [{"type": "text", "text": filler}],
+                "usage": {"input_tokens": 10, "cache_read_input_tokens": 1000 + n, "output_tokens": 20},
+            },
+        });
+        out.push_str(&line.to_string());
+        out.push('\n');
+    }
+    out
+}
+
 fn job(id: &str, session: &str, state: &str, at_ms: i64) -> (String, String) {
     let state = json!({
         "state": state,

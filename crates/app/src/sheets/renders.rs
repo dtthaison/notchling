@@ -29,22 +29,22 @@ pub const VIEWS: [ViewSpec; 7] = [
     },
     ViewSpec {
         name: "settings",
-        size: (620.0, 1200.0),
-        about: "the Settings sheet with acting shown read-only (defaults), and Notchling's five hooks (fixture reply)",
+        size: (620.0, 1460.0),
+        about: "the Settings sheet with acting shown read-only (defaults), the Chat section, and Notchling's five hooks (fixture reply)",
     },
     ViewSpec {
         name: "settings-hooks",
-        size: (620.0, 1700.0),
+        size: (620.0, 1960.0),
         about: "the Settings sheet tall enough to show the Hooks section with Notchling's five hooks (fixture reply)",
     },
     ViewSpec {
         name: "settings-hooks-swift",
-        size: (620.0, 1700.0),
+        size: (620.0, 1960.0),
         about: "the Settings sheet's Hooks section with a Swift app entry and an unmanaged one (fixture reply)",
     },
     ViewSpec {
         name: "settings-hooks-empty",
-        size: (620.0, 1700.0),
+        size: (620.0, 1960.0),
         about: "the Settings sheet's Hooks section with none installed (fixture reply)",
     },
 ];

@@ -1,10 +1,12 @@
 mod calls;
+mod glance;
 mod stamped;
 
 pub use calls::{call, diff, exit_code, output_text, patch_files};
+pub use glance::{context_tokens, peek, recent};
 
 use super::model::*;
-use super::tail::{Cursors, LineParser, CHAT_TAIL_BYTES};
+use super::tail::{Cursors, LineParser};
 use super::text::prefix_chars;
 use super::util::{count_of, date_field, now_secs, parse_object, str_of};
 use serde_json::Value;
@@ -427,8 +429,7 @@ impl LineParser for Parser {
 fn cursors() -> &'static Cursors<Parser, Arc<Conversation>> {
     static CURSORS: OnceLock<Cursors<Parser, Arc<Conversation>>> = OnceLock::new();
     CURSORS.get_or_init(|| {
-        Cursors::new(CHAT_TAIL_BYTES, 30, |p: &Parser| Arc::new(p.conversation()))
-            .long_lines_free(64_000_000)
+        Cursors::chat(30, |p: &Parser| Arc::new(p.conversation())).long_lines_free(64_000_000)
     })
 }
 

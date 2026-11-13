@@ -2,6 +2,7 @@ use notchling_engine::settings::spec;
 use serde_json::{json, Value};
 
 use crate::acting::Acting;
+use crate::chat::history;
 use crate::switches::restart::Area;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -233,6 +234,19 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             rows: vec![toggle(read, "codexNetwork", "Allow network in Codex turns")],
             footer: None,
         },
+        Section {
+            title: "Chat",
+            rows: vec![choice(
+                read,
+                history::KEY,
+                "Conversation history to load",
+                &history::CHOICES,
+            )],
+            footer: Some(
+                "Chat shows the newest part of a long session. More shows earlier turns and uses \
+                 more memory. It applies the next time a session loads.",
+            ),
+        },
     ]
 }
 
@@ -397,6 +411,40 @@ mod tests {
             .rows
             .iter()
             .all(|r| matches!(r.field, Field::Daemon { on: None, .. })));
+    }
+
+    #[test]
+    fn the_chat_section_is_last_and_nothing_before_it_moves() {
+        let titles: Vec<&str> = sections(&|_| None, &with(Acting::Off))
+            .iter()
+            .map(|s| s.title)
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "Daemon",
+                "Keep Mac Awake",
+                "Notch",
+                "Claude Code",
+                "When the Account in Use Nears Its Limit",
+                "Codex",
+                "Chat"
+            ]
+        );
+        let rows = rows_of(&|_| None, Acting::Off);
+        let history = row(&rows, "chatHistory");
+        assert_eq!(history.title, "Conversation history to load");
+        let Field::Choice { selected, options } = history.field.clone() else {
+            panic!()
+        };
+        assert_eq!(selected, "4mb", "four megabytes until chosen");
+        let values: Vec<&str> = options.iter().map(|(v, _)| *v).collect();
+        assert_eq!(values, ["2mb", "4mb", "8mb", "16mb"]);
+        assert_eq!(
+            change(&history, "16mb"),
+            Some(("chatHistory", json!("16mb")))
+        );
+        assert_eq!(change(&history, "1gb"), None);
     }
 
     #[test]

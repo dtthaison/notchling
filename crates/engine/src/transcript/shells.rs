@@ -79,6 +79,78 @@ pub fn parse_writers(text: &str) -> Vec<i32> {
     result
 }
 
+const NOT_WRITERS: [&str; 3] = ["claude", "node", "Notchling"];
+
+pub fn lsof_args(paths: &[String]) -> Vec<String> {
+    ["-w", "-F", "pcan", "--"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(paths.iter().cloned())
+        .collect()
+}
+
+pub fn parse_writers_by_name(
+    text: &str,
+    wanted: &[(String, Vec<String>)],
+) -> HashMap<String, Vec<i32>> {
+    let mut found: HashMap<String, Vec<i32>> = wanted
+        .iter()
+        .map(|(path, _)| (path.clone(), Vec::new()))
+        .collect();
+    let (mut pid, mut command, mut access) = (None, String::new(), String::new());
+    for line in text.split('\n') {
+        let Some(tag) = line.chars().next() else {
+            continue;
+        };
+        let value = &line[tag.len_utf8()..];
+        match tag {
+            'p' => {
+                pid = value.parse::<i32>().ok();
+                command.clear();
+                access.clear();
+            }
+            'c' => command = value.to_string(),
+            'f' => access.clear(),
+            'a' => access = value.to_string(),
+            'n' => {
+                let writing = access == "w" || access == "u";
+                access.clear();
+                let Some(pid) = pid else { continue };
+                if !writing || NOT_WRITERS.contains(&command.as_str()) {
+                    continue;
+                }
+                let path = match wanted {
+                    [(only, _)] => Some(only.clone()),
+                    _ => which(value, wanted),
+                };
+                if let Some(path) = path {
+                    let pids = found.entry(path).or_default();
+                    if !pids.contains(&pid) {
+                        pids.push(pid);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+fn which(name: &str, wanted: &[(String, Vec<String>)]) -> Option<String> {
+    if let Some((path, _)) = wanted
+        .iter()
+        .find(|(path, names)| path == name || names.iter().any(|n| n == name))
+    {
+        return Some(path.clone());
+    }
+    let base = |p: &str| p.rsplit('/').next().map(str::to_owned);
+    let mut same = wanted.iter().filter(|(path, _)| base(path) == base(name));
+    match (same.next(), same.next()) {
+        (Some((path, _)), None) => Some(path.clone()),
+        _ => None,
+    }
+}
+
 pub fn output_tail(path: &str, bytes: u64) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let size = file.seek(SeekFrom::End(0)).ok()?;

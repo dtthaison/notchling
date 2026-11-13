@@ -3,7 +3,7 @@ use std::sync::Arc;
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 
-use super::inspector::subagent_row;
+use super::subagent_rows::{subagent_row, Facts};
 
 #[derive(Clone, Debug)]
 pub struct Open {
@@ -68,8 +68,12 @@ pub fn link_for_step<'a>(
         .map(|(_, id)| id.as_str())
 }
 
-pub fn header_text(agent: &Subagent) -> (String, String) {
-    (agent.description.clone(), subagent_row(agent).detail)
+pub fn header_text(agent: &Subagent, opened: Option<&Conversation>) -> (String, String) {
+    let facts = opened.map(Facts::of_conversation);
+    (
+        agent.description.clone(),
+        subagent_row(agent, facts.as_ref()).detail,
+    )
 }
 
 #[cfg(test)]
@@ -116,7 +120,7 @@ mod tests {
 
     #[test]
     fn the_header_names_the_subagent_and_says_how_it_is_going() {
-        let (title, detail) = header_text(&agent("a", None));
+        let (title, detail) = header_text(&agent("a", None), None);
         assert_eq!(title, "job a");
         assert_eq!(detail, "Running · sonnet high · Explore");
     }

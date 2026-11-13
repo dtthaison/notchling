@@ -19,7 +19,7 @@ use crate::chat::data::Tool;
 use crate::mac::shell::{AppActions, AppVault};
 use crate::sheets::new_session::{accounts, draft_session, folders, NewSession};
 use crate::sheets::second_opinion_view::SecondOpinionView;
-use crate::sheets::settings_view::SettingsView;
+use crate::sheets::settings_view::{SettingChanged, SettingsView};
 use crate::sheets::view::{AccountsHandle, Acts, Dismiss, NewSessionView, StartDraft, StartedJob};
 use crate::tools::second_opinion::SecondOpinionSheet;
 use crate::vault::store::Vault;
@@ -200,6 +200,12 @@ impl ChatView {
         let acts = self.acts(cx);
         let hooks = Arc::new(Hooks::for_run(Some(&self.root)));
         let entity = cx.new(|_| SettingsView::new(data_dir.as_deref(), acts));
+        cx.subscribe(&entity, |this, _, e: &SettingChanged, cx| {
+            if crate::chat::history::on_change(&e.key, &e.value) {
+                this.reload_now(cx);
+            }
+        })
+        .detach();
         entity.update(cx, |view, cx| view.ask_hooks(hooks, cx));
         self.show(entity, cx);
     }
