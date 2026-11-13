@@ -10,13 +10,13 @@ pub const VIEWS: [ViewSpec; 2] = [
     ViewSpec {
         name: "search-panel",
         size: (680.0, 458.0),
-        about: "the ⌘⇧P panel just opened: the newest pages and conversations (made-up data)",
+        about: "the Search panel just opened: the newest pages and conversations (made-up data)",
     },
     ViewSpec {
         name: "search-panel-results",
         size: (680.0, 308.0),
         about:
-            "the ⌘⇧P panel with words typed, a session selected and the words bold (made-up data)",
+            "the Search panel with words typed, a session selected and the words bold (made-up data)",
     },
 ];
 

@@ -20,6 +20,7 @@ use crate::phone::pairing::PairingFeed;
 use crate::search::hotkey::{self, Registration};
 use crate::search::library::Library;
 use crate::search::panel::AppSearch;
+use crate::search::shortcut::{self, Setting};
 use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
 use crate::switches::restart::{LiveTurnOn, RestartNotice};
@@ -34,7 +35,9 @@ struct Shell {
     chat: Option<WindowHandle<ChatView>>,
     root: Option<DataRoot>,
     sessions: Arc<SessionSource>,
-    _hot_key: Option<Box<dyn Registration>>,
+    hot_key: Option<Box<dyn Registration>>,
+    search: Setting,
+    search_failure: Option<String>,
 }
 
 impl Global for Shell {}
@@ -179,14 +182,19 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
             })
             .detach();
         }
-        let hot_key = {
-            let async_cx = cx.to_async();
-            hotkey::for_system()
-                .register(Box::new(move || {
-                    async_cx.update(crate::search::panel::toggle).ok();
-                }))
-                .map_err(|e| eprintln!("no ⌘⇧P: {e}"))
-                .ok()
+        let wanted = root
+            .as_ref()
+            .map(|r| shortcut::read(&r.data_dir))
+            .unwrap_or(Setting::DEFAULT);
+        let (hot_key, search, search_failure) = match wanted {
+            Setting::Off => (None, Setting::Off, None),
+            Setting::On(key) => match register_search(cx, key) {
+                Ok(registration) => (Some(registration), wanted, None),
+                Err(e) => {
+                    eprintln!("no {}: {e}", key.label());
+                    (None, Setting::Off, Some(e))
+                }
+            },
         };
         cx.set_global(Shell {
             state,
@@ -195,7 +203,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
             chat: None,
             root,
             sessions,
-            _hot_key: hot_key,
+            hot_key,
+            search,
+            search_failure,
         });
         cx.on_window_closed(update_dock).detach();
         if let Some(source) = notch {
@@ -208,6 +218,41 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         }
     });
     0
+}
+
+fn register_search(cx: &App, key: shortcut::Shortcut) -> Result<Box<dyn Registration>, String> {
+    let async_cx = cx.to_async();
+    hotkey::for_system(key)?.register(Box::new(move || {
+        async_cx.update(crate::search::panel::toggle).ok();
+    }))
+}
+
+pub fn set_search_shortcut(cx: &mut App, setting: Setting) -> Result<(), String> {
+    if !cx.has_global::<Shell>() {
+        return Err("The shortcut can't change in this window.".to_owned());
+    }
+    if cx.global::<Shell>().search == setting {
+        return Ok(());
+    }
+    let registration = match setting {
+        Setting::Off => None,
+        Setting::On(key) => Some(register_search(cx, key)?),
+    };
+    let shell = cx.global_mut::<Shell>();
+    shell.hot_key = registration;
+    shell.search = setting;
+    shell.search_failure = None;
+    Ok(())
+}
+
+pub fn active_search(cx: &App) -> Setting {
+    cx.try_global::<Shell>()
+        .map(|s| s.search)
+        .unwrap_or(Setting::Off)
+}
+
+pub fn search_failure(cx: &App) -> Option<String> {
+    cx.try_global::<Shell>()?.search_failure.clone()
 }
 
 fn send_limit_settings(accounts: Arc<crate::accounts::store::Accounts>, file: PathBuf) {
