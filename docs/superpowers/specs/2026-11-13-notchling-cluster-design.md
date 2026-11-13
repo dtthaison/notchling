@@ -197,3 +197,84 @@ Asked for by the maintainer on 2026-11-13. One place that collects what needs th
 - **Requests wait, then expire:** an item that holds work (a secret request, a paused step) keeps that work waiting until answered, and turns into a refusal after its timeout (the requester gets a clear "not allowed in time").
 - **Kinds at first:** secret request (Always ask), login needed on a node, failover happened, paused outward step, no leader / not enough voters, Standby locked (Unlock with Face ID), conflict copies to review, limit switch, a failed action, a job finished (optional, per kind on/off).
 - **Order:** the inbox is useful before the cluster exists (vault Ask First, errors, limit switches today), so it can be built first, as step 0.
+
+## Software architecture
+
+### Principles
+
+1. **Functional core, imperative shell**, as the repo already does: every cluster decision (who leads, who owns a session, what to replicate, which notification to raise, what a job's next state is) is a pure function in the engine, tested on every system; the daemon only performs effects.
+2. **Control plane apart from data plane.** Small, strongly consistent metadata (members, roles, the leader, ownership, jobs, notifications, vault item versions) goes through consensus. Bulk bytes (worktrees, transcripts, databases) go through a separate replication stream and never through the consensus log.
+3. **One owner per resource, now per cluster** (0011 generalised): every session, job, login refresh and replica stream has exactly one owning node at a time, named by an **epoch** (the leader's term). Any effect made under an old epoch is refused.
+4. **Ports and adapters:** the cluster core sees the world through traits (`Transport`, `Clock`, `Store`, `Blobs`, `ProcessRunner`, `SecretBox`, `Notifier`). Production adapters are per OS; tests use deterministic fakes. Nothing in a test opens a socket, starts ssh or touches Keychain (the repo's rule).
+5. **Additive, versioned wire.** Node-to-node messages are versioned like `agentconsole.v1`: additive only, with a feature list exchanged at connect, so nodes on different builds keep working during an upgrade.
+
+### Layers
+
+```
+┌───────────────────────── clients ─────────────────────────┐
+│ GPUI app (Chat, notch)   phone (agentconsole.v1)   CLI    │
+└───────────────┬──────────────────────────────────┬────────┘
+                │ local API (tiers, 0007)          │ bridge (any node; non-leader redirects)
+┌───────────────▼──────────────────────────────────▼────────┐
+│ notchlingd on every node                                  │
+│  Gateway ─ Cluster service ─ Executor ─ Broker ─ Inbox    │
+│     │            │              │         │        │      │
+│     │      consensus log   tool providers  vault    outbox│
+│     │      (control plane)  (0016)       + tokens         │
+│     └──── Node link (mTLS, QUIC or ssh tunnel) ───────────┤
+│           Replicator (data plane, leader → Standbys)      │
+└───────────────────────────────────────────────────────────┘
+```
+
+| Component | Job | Where it lives |
+| --- | --- | --- |
+| **Membership** | Nodes, certificates, roles (Primary/Standby/Worker/Witness), join and removal | `engine::cluster::members` (pure) |
+| **Consensus and lease** | A replicated log of control-plane commands; leader election with priority and freshness; the lease and its epoch | `engine::cluster::consensus` over a library such as `openraft` (MIT/Apache-2.0, fits `deny.toml`); the builder may choose a smaller lease protocol if the rules hold |
+| **Control state machine** | Applies commands to the cluster state: placement, session ownership, job states, notifications, vault versions, login versions | `engine::cluster::state` (pure) |
+| **Executor** | Runs a job on this node through the tool's provider (0016) and reports its state | `notchlingd`, using `engine::providers` |
+| **Replicator** | Watches the leader's replicated folders, sends content-addressed chunks to Standbys, applies them atomically there | new `crates/replica` (data plane), adapters per OS for file events |
+| **Broker** | The vault (key hierarchy, unlock, per-job delivery) and the single OAuth refresher | `engine::vault`, `engine::accounts` + `notchlingd` |
+| **Inbox** | Actionable notifications with one state everywhere | `engine::cluster::inbox` (pure) + an op group in `notchlingd` |
+| **Gateway** | Bridge and node API on every node; a non-leader answers with a redirect to the leader | `engine::bridge` + `notchlingd` |
+| **Node link** | Mutually authenticated TLS between nodes; LAN, Tailscale, or an outbound ssh tunnel | new `crates/cluster-net` (`rustls`, `quinn`) |
+
+### Design patterns, and where each applies
+
+| Pattern | Applied to | Why |
+| --- | --- | --- |
+| **Replicated state machine** | The control plane | Every node agrees on who owns what, in the same order |
+| **Leader lease + fencing token** | Leader duties, every side effect | A node acting under an old epoch is refused by the others (job start, token refresh, replica write, bridge answers), so split brain can't produce effects |
+| **Leadership transfer (preferred leader)** | The Primary's return | Failback at a quiet point, not by a new election race |
+| **Event sourcing with projections** | The control log | The audit trail comes for free; the app reads projections (sessions, jobs, inbox) instead of polling nodes |
+| **Saga / process manager with a journal** | Session move, planned handoff, failover resume, joining a node | Each step is journalled; before the switch point every step has a compensation, after it the saga only goes forward (OpenMausBot's move) |
+| **Transactional outbox** | Notifications, job events, replies to the phone | An event is stored with the state change and delivered at least once; receivers dedupe |
+| **Idempotency keys** | Notification answers, job dispatch, replies (steered / refused / indeterminate) | A retry over a flaky link never acts twice; "indeterminate" is never resent |
+| **Strategy (provider registry)** | Per tool (Claude Code, Codex, Antigravity, shell) and per OS | Already the repo's shape (0016, `ProviderRegistry`); the cluster adds no `match tool` |
+| **Capability tokens** | Node-to-node calls | A short-lived, scoped grant per call kind (run job, deliver secret, replicate) replaces the local socket's tiers for remote callers; least privilege for a compromised node |
+| **Envelope encryption / key hierarchy** | Vault and replicas | Unlock key → vault key → item and replica keys; rotating one level doesn't re-encrypt everything |
+| **Lease (resource leases with TTL)** | Secrets and access tokens on Workers, the sessions' ownership | Everything handed out expires on its own |
+| **Circuit breaker + backoff, bulkheads** | Node links; per-node job slots | A dead node doesn't stall the leader; one node's flood doesn't starve others |
+| **Content-addressed chunking** | Replicator | Only changed chunks travel (BLAKE3 hashes); a replica can be verified and resumed |
+| **Deterministic simulation testing** | Consensus, failover, handoff, replication | Run thousands of seeded scenarios with a fake clock, fake network partitions and node crashes, checking invariants after each (no two owners per epoch, no lost acknowledged answer, no effect under a stale epoch), the way OpenMausBot checks its runtime invariants |
+
+### Invariants (checked after every simulated step and asserted in production logs)
+
+- I1. At most one node holds the lease for an epoch, and epochs only grow.
+- I2. A session or job has one owner per epoch; no effect is accepted from a non-owner.
+- I3. Only the lease holder renews refresh tokens; no refresh token exists on a Worker.
+- I4. A Standby's replica never runs ahead of the leader's acknowledged state.
+- I5. A notification is answered at most once; the first answer wins and is the one applied.
+- I6. A secret value never reaches a log, argv, env or replicated folder in clear.
+- I7. An outward step cut by a failover is never re-run without an answer.
+
+### Data ownership
+
+| Data | Owner | Replicated to | Encrypted at rest |
+| --- | --- | --- | --- |
+| Control log (members, ownership, jobs, inbox, versions) | Consensus | All voters | Yes, on non-Mac nodes |
+| Main sessions' repos, transcripts, tool state | Leader | Standbys | Yes |
+| Vault items | Leader writes, Standbys may write when leading | Standbys | Always |
+| Refresh tokens | Leader | Standbys | Always |
+| Access tokens, delivered secrets | Leader | The Worker running the job, with TTL | Mode-600 file, deleted at job end |
+| Worker sessions' repos and transcripts | That Worker | Nobody (code returns by git) | Node's choice |
+| Notchling app data (`notchling.db`, pages) | Leader | Standbys | Yes |
