@@ -24,6 +24,19 @@ pub const WINDOW_DEFAULT: (f32, f32) = (1040.0, 720.0);
 pub const WINDOW_MIN: (f32, f32) = (720.0, 460.0);
 pub const BUTTON_PADDING: f32 = 12.0;
 
+pub const MENU_PADDING: f32 = 4.0;
+pub const MENU_ROW_X: f32 = 8.0;
+pub const MENU_ROW_Y: f32 = 3.0;
+pub const MENU_ROW_GAP: f32 = 8.0;
+pub const MENU_MIN_WIDTH: f32 = 112.0;
+pub const MENU_MAX_WIDTH: f32 = 260.0;
+pub const MENU_MAX_HEIGHT: f32 = 420.0;
+pub const MENU_MARK: f32 = 12.0;
+pub const MENU_ICON: f32 = 11.0;
+pub const MENU_GAP: f32 = 6.0;
+pub const MENU_RULE_Y: f32 = 2.0;
+pub const MENU_RADIUS: f32 = RADIUS_CARD;
+
 pub const SPACE: [f32; 6] = [4.0, 8.0, 12.0, 16.0, 20.0, 24.0];
 
 pub fn space(steps: usize) -> f32 {
@@ -51,6 +64,7 @@ mod tests {
             (RADIUS_SM, RADIUS_MD, RADIUS_CARD, RADIUS_COMPOSER),
             (6.0, 10.0, 14.0, 18.0)
         );
+        assert_eq!((MENU_PADDING, MENU_ROW_X, MENU_ROW_Y), (4.0, 8.0, 3.0));
         assert!(WINDOW_MIN.0 <= WINDOW_DEFAULT.0 && WINDOW_MIN.1 <= WINDOW_DEFAULT.1);
     }
 }

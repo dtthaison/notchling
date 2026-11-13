@@ -3,10 +3,11 @@ use notchling_engine::settings::Settings;
 
 use gpui::{
     div, prelude::*, px, ClipboardItem, Context, Div, MouseButton, MouseDownEvent, Pixels, Point,
-    SharedString, Stateful,
+    Stateful,
 };
-use notchling_kit::metric::RADIUS_MD;
-use notchling_kit::ui::{card, label};
+use notchling_kit::metric::MENU_RADIUS;
+use notchling_kit::metric::{MENU_ROW_X, MENU_ROW_Y};
+use notchling_kit::ui::{label, menu_note, menu_panel, menu_panel_wide, menu_rule};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::accounts::{held_item, menu_item};
@@ -25,8 +26,6 @@ pub struct RowMenu {
     pub at: Point<Pixels>,
     pub confirm_remove: bool,
 }
-
-const WIDTH: f32 = 200.0;
 
 pub(super) fn on_right_click(
     row: Stateful<Div>,
@@ -57,29 +56,17 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     if removable && menu.confirm_remove {
         return Some(layer(menu, confirm_card(view, a, cx), cx));
     }
-    let mut items = card(a)
-        .w(px(WIDTH))
-        .p(px(6.0))
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .shadow_lg();
+    let mut items = menu_panel(a);
     items = match id {
-        Some(id) => items.child(
-            menu_item(
-                SharedString::from("row-copy-id"),
-                "Copy Session ID",
-                false,
-                a,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
+        Some(id) => items.child(menu_item("row-copy-id", "Copy Session ID", a).on_click(
+            cx.listener(move |this, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(id.clone()));
                 this.row_menu = None;
                 cx.notify();
-            })),
-        ),
+            }),
+        )),
         None => items.child(held_item(
-            SharedString::from("row-copy-id"),
+            "row-copy-id",
             "Copy Session ID",
             Control {
                 enabled: false,
@@ -96,43 +83,30 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         };
         items = items
             .child(
-                menu_item(SharedString::from("row-close"), "Close Session", false, a).on_click(
-                    cx.listener(move |this, _, _, cx| {
+                menu_item("row-close", "Close Session", a).on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.close_rows(vec![row.clone()], cx);
-                    }),
-                ),
+                    },
+                )),
             )
-            .child(
-                menu_item(SharedString::from("row-close-all"), all, false, a).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        let ids = closed::ids_of(&this.sessions, tool);
-                        this.close_rows(ids, cx);
-                    }),
-                ),
-            );
+            .child(menu_item("row-close-all", all, a).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    let ids = closed::ids_of(&this.sessions, tool);
+                    this.close_rows(ids, cx);
+                },
+            )));
     }
     if removable {
         let control = view.acting_control(cx);
         items = items.child(if control.enabled {
-            menu_item(
-                SharedString::from("row-remove"),
-                "Remove Session…",
-                false,
-                a,
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
+            menu_item("row-remove", "Remove Session…", a).on_click(cx.listener(|this, _, _, cx| {
                 if let Some(menu) = this.row_menu.as_mut() {
                     menu.confirm_remove = true;
                 }
                 cx.notify();
             }))
         } else {
-            held_item(
-                SharedString::from("row-remove"),
-                "Remove Session…",
-                control,
-                a,
-            )
+            held_item("row-remove", "Remove Session…", control, a)
         });
     }
     Some(layer(menu, items, cx))
@@ -145,41 +119,29 @@ fn confirm_card(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> D
         .and_then(|m| view.sessions.iter().find(|s| s.agent.id == m.row_id))
         .map(|s| s.agent.name.clone())
         .unwrap_or_default();
-    card(a)
-        .w(px(WIDTH + 40.0))
-        .p(px(10.0))
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
-        .shadow_lg()
-        .child(label(
-            &format!("Remove “{title}”?"),
-            TypeRole::Label,
-            Ink::Text,
-            a,
-        ))
-        .child(label(
-            "Claude Code stops it and removes it from its list. This can't be undone.",
-            TypeRole::Meta,
-            Ink::TextMuted,
-            a,
-        ))
+    menu_panel_wide(a)
         .child(
-            menu_item(SharedString::from("row-remove-confirm"), "Remove", false, a).on_click(
-                cx.listener(|this, _, _, cx| {
-                    if let Some(menu) = this.row_menu.take() {
-                        this.remove_row(menu.row_id, cx);
-                    }
-                }),
-            ),
+            label(&format!("Remove “{title}”?"), TypeRole::Meta, Ink::Text, a)
+                .px(px(MENU_ROW_X))
+                .py(px(MENU_ROW_Y)),
+        )
+        .child(menu_note(
+            "Claude Code stops it and removes it from its list. This can't be undone.",
+            a,
+        ))
+        .child(menu_rule(a))
+        .child(
+            menu_item("row-remove-confirm", "Remove", a).on_click(cx.listener(|this, _, _, cx| {
+                if let Some(menu) = this.row_menu.take() {
+                    this.remove_row(menu.row_id, cx);
+                }
+            })),
         )
         .child(
-            menu_item(SharedString::from("row-remove-cancel"), "Cancel", false, a).on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.row_menu = None;
-                    cx.notify();
-                }),
-            ),
+            menu_item("row-remove-cancel", "Cancel", a).on_click(cx.listener(|this, _, _, cx| {
+                this.row_menu = None;
+                cx.notify();
+            })),
         )
 }
 
@@ -223,7 +185,7 @@ pub(super) fn popup(
                 .left(at.x)
                 .top(at.y)
                 .occlude()
-                .rounded(px(RADIUS_MD))
+                .rounded(px(MENU_RADIUS))
                 .child(items),
         )
 }

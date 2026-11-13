@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-use gpui::{div, prelude::*, px, svg, Context, Div, SharedString, Stateful};
-use notchling_kit::icon::svg_box;
-use notchling_kit::metric::{RADIUS_MD, RADIUS_SM, SIDE_PADDING};
+use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
+use notchling_kit::metric::{MENU_RADIUS, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button_with, card, hsla, icon, label, KitStyled};
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::ui::{
+    button_with, icon, menu_note, menu_panel_wide, menu_rule, menu_section, KitStyled, MenuItem,
+};
+use notchling_kit::{Appearance, Icon, Ink};
 
 use super::ChatView;
 use crate::accounts::menu::{
@@ -214,82 +215,32 @@ pub(super) fn account_control(
     Some(b.on_click(cx.listener(move |this, _, _, cx| tool.account_click(this, cx))))
 }
 
-pub(super) fn menu_item(
-    id: SharedString,
+pub(super) fn menu_item(id: impl Into<SharedString>, title: &str, a: Appearance) -> Stateful<Div> {
+    MenuItem::new(id, title.to_owned()).build(a)
+}
+
+pub(super) fn check_item(
+    id: impl Into<SharedString>,
     title: &str,
     checked: bool,
     a: Appearance,
 ) -> Stateful<Div> {
-    let group = SharedString::from(format!("{id}-hot"));
-    let on = Ink::OnAccent.color(a);
-    let row = div()
-        .id(id)
-        .group(group.clone())
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hsla(Ink::Accent.color(a))));
-    let tick = svg_tick(checked, group.clone(), a);
-    row.child(tick).child(
-        label(title, TypeRole::Label, Ink::Text, a)
-            .group_hover(group, move |s| s.text_color(hsla(on))),
-    )
-}
-
-fn svg_tick(checked: bool, group: SharedString, a: Appearance) -> Div {
-    let size = TypeRole::Label.spec().size;
-    let slot = div().w(px(14.0)).flex_shrink_0();
-    if !checked {
-        return slot;
-    }
-    let on = Ink::OnAccent.color(a);
-    match Icon::Check.svg() {
-        Some(path) => slot.child(
-            svg()
-                .path(path)
-                .size(px(svg_box(size)))
-                .text_color(hsla(Ink::Text.color(a)))
-                .group_hover(group, move |s| s.text_color(hsla(on))),
-        ),
-        None => slot.child(icon(Icon::Check, size, Ink::Text, a)),
-    }
+    MenuItem::new(id, title.to_owned())
+        .checked(checked)
+        .build(a)
 }
 
 pub(super) fn held_item(
-    id: SharedString,
+    id: impl Into<SharedString>,
     title: &str,
     control: Control,
     a: Appearance,
 ) -> Stateful<Div> {
-    gate::tip(menu_row(id, title, false, Ink::TextFaint, a), control, a)
-}
-
-fn menu_row(
-    id: SharedString,
-    title: &str,
-    checked: bool,
-    ink: Ink,
-    a: Appearance,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded(px(RADIUS_SM))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .child(
-            div()
-                .w(px(14.0))
-                .flex_shrink_0()
-                .children(checked.then(|| icon(Icon::Check, TypeRole::Label.spec().size, ink, a))),
-        )
-        .child(label(title, TypeRole::Label, ink, a))
+    gate::tip(
+        MenuItem::new(id, title.to_owned()).held(true).build(a),
+        control,
+        a,
+    )
 }
 
 pub(super) fn render_menu(
@@ -301,23 +252,13 @@ pub(super) fn render_menu(
         return None;
     }
     let menu = view.menu()?;
-    let mut items = card(a)
-        .w(px(320.0))
-        .p(px(6.0))
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .shadow_lg();
+    let mut items = menu_panel_wide(a);
     let mut move_all = Vec::new();
     let accounts = view.switches.switches().control(Switch::Accounts);
     for (i, entry) in menu.entries.iter().enumerate() {
         match entry {
             Entry::Header(text) => {
-                items = items.child(
-                    label(text, TypeRole::Section, Ink::TextFaint, a)
-                        .px(px(10.0))
-                        .pt(px(4.0)),
-                );
+                items = items.child(menu_section(text, a));
             }
             Entry::Target { index, current } => {
                 let target = &menu.targets[*index];
@@ -327,28 +268,20 @@ pub(super) fn render_menu(
                     continue;
                 }
                 let (entry, menu_clone) = (entry.clone(), menu.clone());
-                items = items.child(menu_item(id, &target.title, *current, a).on_click(
+                items = items.child(check_item(id, &target.title, *current, a).on_click(
                     cx.listener(move |this, _, _, cx| {
                         this.menu_entry(entry.clone(), &menu_clone, cx)
                     }),
                 ));
             }
             Entry::Note(text) => {
-                items = items.child(
-                    label(text, TypeRole::Meta, Ink::TextFaint, a)
-                        .px(px(10.0))
-                        .pb(px(4.0)),
-                );
+                items = items.child(menu_note(text, a));
             }
             Entry::Separator => {
-                items = items.child(div().h(px(1.0)).my(px(4.0)).fill(Ink::Hairline, a));
+                items = items.child(menu_rule(a));
             }
             Entry::MoveAll => {
-                items = items.child(
-                    label("Move All Sessions To", TypeRole::Section, Ink::TextFaint, a)
-                        .px(px(10.0))
-                        .pt(px(4.0)),
-                );
+                items = items.child(menu_section("Move All Sessions To", a));
                 for (t, target) in menu.targets.iter().enumerate() {
                     let target = target.clone();
                     if !accounts.enabled {
@@ -357,13 +290,7 @@ pub(super) fn render_menu(
                         continue;
                     }
                     move_all.push(
-                        menu_item(
-                            SharedString::from(format!("move-all-{t}")),
-                            &target.title,
-                            false,
-                            a,
-                        )
-                        .on_click(
+                        menu_item(format!("move-all-{t}"), &target.title, a).on_click(
                             cx.listener(move |this, _, _, cx| this.move_all_to(target.clone(), cx)),
                         ),
                     );
@@ -377,26 +304,16 @@ pub(super) fn render_menu(
                     "Codex Accounts…"
                 };
                 let (entry, menu_clone) = (entry.clone(), menu.clone());
-                items = items.child(
-                    menu_item(
-                        SharedString::from(format!("account-entry-{i}")),
-                        title,
-                        false,
-                        a,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                items = items.child(menu_item(format!("account-entry-{i}"), title, a).on_click(
+                    cx.listener(move |this, _, _, cx| {
                         this.menu_entry(entry.clone(), &menu_clone, cx)
-                    })),
-                );
+                    }),
+                ));
             }
         }
     }
     if let Some(off) = view.switches.switches().message(Switch::Accounts) {
-        items = items.child(
-            label(off, TypeRole::Meta, Ink::TextMuted, a)
-                .px(px(10.0))
-                .pt(px(4.0)),
-        );
+        items = items.child(menu_note(off, a));
     }
     Some(
         div()
@@ -416,7 +333,7 @@ pub(super) fn render_menu(
                     .bottom(px(MENU_BOTTOM))
                     .right(px(menu_right(view)))
                     .occlude()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(px(MENU_RADIUS))
                     .child(items),
             ),
     )
